@@ -1,0 +1,99 @@
+/* Import Google Fonts - must be at top */
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=IM+Fell+English:ital@0;1&display=swap');
+
+/* LOTR Game Theme - Parchment/Medieval */
+
+:root {
+  /* Unified tan/brown palette (used everywhere: header, sidebar, modals, body) */
+  --parchment-light: #e2d6b8;
+  --parchment: #d4c4a0;
+  --parchment-dark: #c4b48a;
+  --parchment-darker: #b09f72;
+  /* Body/key font (parchment style) */
+  --font-parchment: 'IM Fell English', Georgia, serif;
+
+  /* Ink / brown */
+  --ink: #3d2914;
+  --ink-light: #5a4230;
+  --ink-faded: #8b7355;
+
+  /* Accent colors */
+  --gold: #c9a227;
+  --gold-light: #ddb83d;
+  --gold-dark: #a07d1c;
+  --shadow: rgba(61, 41, 20, 0.3);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'IM Fell English', Georgia, serif;
+  background: var(--parchment);
+  color: var(--ink);
+  min-height: 100vh;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: 'Cinzel', serif;
+}
+
+button {
+  font-family: 'Cinzel', serif;
+  font-size: 0.9rem;
+  padding: 0.6rem 1rem;
+  background: linear-gradient(180deg, var(--parchment) 0%, var(--parchment-dark) 100%);
+  border: 2px solid var(--ink-faded);
+  border-radius: 3px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+button:hover:not(:disabled) {
+  background: linear-gradient(180deg, var(--parchment-dark) 0%, var(--parchment) 100%);
+  border-color: var(--ink);
+  box-shadow: 2px 2px 5px var(--shadow);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: linear-gradient(180deg, var(--gold) 0%, var(--gold-dark) 100%);
+  border-color: var(--gold-dark);
+}
+
+button.primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, var(--gold-dark) 0%, var(--gold) 100%);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--parchment-dark);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--ink-faded);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-light);
+}

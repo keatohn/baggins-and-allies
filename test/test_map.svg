@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   version="1.1"
+   id="svg1"
+   width="1226.6667"
+   height="1013.3333"
+   viewBox="0 0 1226.6667 1013.3333"
+   sodipodi:docname="test_map.svg"
+   inkscape:version="1.4.3 (0d15f75, 2025-12-25)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs1" />
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="0.40031398"
+     inkscape:cx="545.82155"
+     inkscape:cy="519.59214"
+     inkscape:window-width="932"
+     inkscape:window-height="849"
+     inkscape:window-x="0"
+     inkscape:window-y="33"
+     inkscape:window-maximized="0"
+     inkscape:current-layer="layer1" />
+  <g
+     inkscape:groupmode="layer"
+     id="layer1"
+     inkscape:label="Territories">
+    <path
+       style="fill:none"
+       d="m -5.4288849,-2.7144425 c 1235.0712849,5.428885 1229.6423849,0 1229.6423849,0 L 1226.928,1009.7726 -2.7144425,1012.487 Z"
+       id="path1"
+       inkscape:label="middle_earth" />
+    <path
+       style="fill:none"
+       d="m 689.44116,585.4698 c 61.57527,-2.01886 60.56584,-3.02829 60.56584,-3.02829 l 14.13203,24.22633 -25.23577,7.06602 -7.06601,36.3395 9.08488,24.22634 6.05658,2.01886 -37.34894,-14.13203 -27.25462,-22.20747 -9.08488,-20.18862 28.26406,-17.16032 z"
+       id="path2"
+       inkscape:label="minas_tirith" />
+    <path
+       style="fill:none"
+       d="m 808.55398,631.90361 72.67901,7.06602 14.13203,18.16975 3.02829,14.13203 -2.01886,18.16975 -7.06601,4.03772 -67.63186,-15.14146 -19.17918,-24.22633 z"
+       id="path3"
+       inkscape:label="minas_morgul" />
+    <path
+       style="fill:none"
+       d="m 888.29901,634.9319 24.22633,-1.00943 9.08488,-19.17918 -5.04715,-19.17918 70.66014,-4.03773 v 12.11317 l -36.3395,20.18862 -9.08488,23.2169 -14.13203,11.10374 -20.18861,-3.02829 h -11.10374 l -11.10374,-8.07545 z"
+       id="path4"
+       inkscape:label="mount_doom" />
+    <path
+       style="fill:none"
+       d="m 747.98814,719.72408 14.13203,-24.22633 -5.04715,-23.21691 16.15089,-9.08488 18.16975,16.15089 22.20748,3.0283 10.0943,32.30178 4.03773,23.2169 -19.17919,2.01887 -13.1226,-14.13203 -37.34893,1.00943 z"
+       id="path5"
+       inkscape:label="ithilien" />
+    <path
+       style="fill:none"
+       d="m 747.98814,674.2997 -19.17918,-21.19804 7.06601,-37.34894 16.15089,-9.08488 6.05659,-4.03772 V 585.4698 l 20.18861,-7.06601 17.16032,5.04715 26.2452,37.34893 -17.16032,17.16033 2.01886,24.22633 15.14146,10.09431 2.01886,11.10374 -21.19804,-3.0283 -17.16032,-4.03772 -13.1226,-12.11317 z"
+       id="path6"
+       inkscape:label="osgiliath" />
+    <path
+       style="fill:none"
+       d="m 836.81804,697.51661 19.17918,-6.05659 52.4904,10.09431 45.42438,-2.01886 6.05659,21.19804 6.05658,7.06602 27.25463,-18.16976 32.3018,-3.02829 17.1603,-10.0943 2.0189,58.54698 -21.1981,14.13203 -129.20711,-3.0283 -44.41495,-27.25463 z"
+       id="path7"
+       inkscape:label="gorgoroth" />
+    <path
+       style="fill:none"
+       d="m 679.34685,620.79987 8.07545,27.25463 28.26406,17.16032 31.29235,14.13203 -1.00943,33.31122 -35.33007,30.28292 -23.21691,7.06601 3.02829,-36.3395 -16.15089,-31.29235 -17.16032,-27.25463 1.00943,-34.32065 z"
+       id="path8"
+       inkscape:label="lebennin" />
+    <path
+       style="fill:none"
+       d="m 663.19596,664.20539 -48.45267,57.53755 1.00943,18.16976 14.13203,-8.07545 12.11317,24.22634 43.40552,-10.09431 4.03772,-38.35837 z"
+       id="path9"
+       inkscape:label="pelargir" />
+    <path
+       style="fill:none"
+       d="m 928.67623,656.12995 16.1509,-14.13203 4.03772,-18.16975 36.3395,-20.18862 3.02829,-10.0943 h 41.38666 l 10.0943,8.07544 -14.132,8.07545 -64.60358,53.49982 z"
+       id="path10"
+       inkscape:label="barad_dur" />
+    <path
+       style="fill:none"
+       d="m 888.29901,693.47888 13.1226,-37.34893 55.51868,5.04715 -2.01886,39.3678 z"
+       id="path11"
+       inkscape:label="nurn" />
+    <path
+       style="display:inline;mix-blend-mode:normal;fill:none"
+       d="m 810.57284,570.32834 44.41495,-5.04715 30.28292,8.07544 27.25463,20.18862 15.14146,24.22633 -9.08487,14.13203 -36.33951,4.03772 -57.53755,-27.25462 z"
+       id="path12"
+       inkscape:label="black_gate" />
+  </g>
+</svg>

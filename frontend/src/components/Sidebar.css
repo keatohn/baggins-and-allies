@@ -1,0 +1,538 @@
+.sidebar {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.panel {
+  background: var(--parchment);
+  border: 1px solid var(--ink-faded);
+  border-radius: 4px;
+  padding: 0.75rem;
+}
+
+.panel h2 {
+  font-family: 'Cinzel', serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Actions Panel */
+.actions-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.phase-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.phase-actions:empty {
+  display: none;
+}
+
+/* Move Confirmation Controls */
+.move-confirm {
+  background: var(--parchment-light);
+  border: 2px solid var(--ink);
+  border-radius: 4px;
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.move-confirm h3 {
+  font-family: 'Cinzel', serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+}
+
+.move-details {
+  font-size: 0.85rem;
+  color: var(--ink);
+  margin-bottom: 0.5rem;
+  line-height: 1.4;
+}
+
+.move-details .unit-name {
+  font-weight: 600;
+}
+
+.move-details .move-route {
+  color: var(--ink-faded);
+  font-size: 0.8rem;
+}
+
+.count-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin: 0.75rem 0;
+}
+
+.count-btn {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--ink-faded);
+  border-radius: 4px;
+  background: var(--parchment);
+  color: var(--ink);
+  font-size: 1.2rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.count-btn:hover:not(:disabled) {
+  background: var(--parchment-light);
+  border-color: var(--ink);
+}
+
+.count-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.count-value {
+  font-size: 1.5rem;
+  font-weight: 600;
+  font-family: 'Cinzel', serif;
+  color: var(--ink);
+  min-width: 2rem;
+  text-align: center;
+}
+
+.max-hint {
+  font-size: 0.75rem;
+  color: var(--ink-faded);
+  text-align: center;
+  margin-bottom: 0.5rem;
+}
+
+.move-confirm-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.confirm-move-btn {
+  flex: 1;
+  background: #2e7d32;
+  color: white;
+  border: 1px solid #1b5e20;
+  padding: 0.5rem;
+}
+
+.attack-btn {
+  flex: 1;
+  background: #c62828;
+  color: white;
+  border: 1px solid #8b1c1c;
+  padding: 0.5rem;
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: 'Cinzel', serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.attack-btn:hover {
+  background: #d32f2f;
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: 'Cinzel', serif;
+  font-size: 0.85rem;
+}
+
+.confirm-move-btn:hover {
+  background: #388e3c;
+}
+
+.cancel-move-btn {
+  flex: 1;
+  background: var(--parchment);
+  color: var(--ink);
+  border: 1px solid var(--ink-faded);
+  padding: 0.5rem;
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: 'Cinzel', serif;
+  font-size: 0.85rem;
+}
+
+.cancel-move-btn:hover {
+  background: var(--parchment-light);
+}
+
+/* Pending Moves List */
+.pending-moves {
+  margin-top: 0.5rem;
+  border-top: 1px solid var(--ink-faded);
+  padding-top: 0.5rem;
+}
+
+.pending-moves h3 {
+  font-family: 'Cinzel', serif;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.move-group {
+  margin-bottom: 0.5rem;
+}
+
+.move-group-header {
+  font-family: 'Cinzel', serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  background: var(--parchment-light);
+  border-radius: 3px;
+}
+
+.pending-move-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+  color: var(--ink);
+  border-bottom: 1px dotted var(--ink-faded);
+}
+
+.pending-move-item:last-child {
+  border-bottom: none;
+}
+
+.move-info {
+  flex: 1;
+}
+
+.cancel-move-x {
+  background: none;
+  border: none;
+  color: #8b0000;
+  font-size: 1rem;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 0 0.25rem;
+  line-height: 1;
+}
+
+.cancel-move-x:hover {
+  color: #a00000;
+}
+
+/* Pending Battles */
+.pending-battles {
+  margin-top: 0.5rem;
+  border-top: 1px solid var(--ink-faded);
+  padding-top: 0.5rem;
+}
+
+.pending-battles h3 {
+  font-family: 'Cinzel', serif;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.battle-btn {
+  width: 100%;
+  background: #8b0000;
+  color: white;
+  border: 1px solid #5a0000;
+  padding: 0.5rem;
+  font-family: 'Cinzel', serif;
+  cursor: pointer;
+  margin-bottom: 0.25rem;
+  border-radius: 3px;
+}
+
+.battle-btn:hover {
+  background: #a00000;
+}
+
+/* Confirmation Dialog */
+.confirm-dialog {
+  background: var(--parchment-light);
+  border: 2px solid var(--ink);
+  border-radius: 4px;
+  padding: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.confirm-dialog p {
+  font-size: 0.85rem;
+  color: var(--ink);
+  margin-bottom: 0.75rem;
+  line-height: 1.4;
+}
+
+.confirm-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.confirm-yes {
+  flex: 1;
+  background: #8b0000;
+  color: white;
+  border: 1px solid #5a0000;
+  padding: 0.5rem;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 0.8rem;
+}
+
+.confirm-yes:hover {
+  background: #a00000;
+}
+
+.confirm-no {
+  flex: 1;
+  background: var(--parchment);
+  color: var(--ink);
+  border: 1px solid var(--ink-faded);
+  padding: 0.5rem;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 0.8rem;
+}
+
+.confirm-no:hover {
+  background: var(--parchment-light);
+}
+
+/* Territory Panel */
+.territory-panel h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  margin: -0.75rem -0.75rem 0.5rem -0.75rem;
+  border-radius: 3px 3px 0 0;
+}
+
+.territory-panel h2 .faction-icon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+/* Faction background colors are now applied dynamically via inline styles using faction.color */
+
+.territory-title-content {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.territory-name {
+  font-size: 0.95rem;
+}
+
+.power-production {
+  font-weight: 400;
+  font-size: 0.8rem;
+  color: var(--ink-light);
+}
+
+.terrain-type {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--ink-light);
+  font-style: italic;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.stronghold-badge {
+  font-family: 'Cinzel', serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--gold-dark);
+  margin-bottom: 0.25rem;
+}
+
+.territory-info {
+  font-size: 0.9rem;
+  color: var(--ink-light);
+  line-height: 1.5;
+}
+
+.units-inline {
+  font-size: 0.85rem;
+  color: var(--ink);
+  line-height: 1.6;
+}
+
+.units-by-movement {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.unit-movement-row {
+  font-size: 0.85rem;
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+/* Legacy unit-list styles (can be removed if not used elsewhere) */
+.unit-list {
+  margin-top: 0.5rem;
+  border-top: 1px solid var(--ink-faded);
+  padding-top: 0.5rem;
+}
+
+.unit-entry {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.25rem 0;
+  font-size: 0.9rem;
+}
+
+/* Event Log */
+.event-log {
+  flex: 1;
+  min-height: 150px;
+  display: flex;
+  flex-direction: column;
+}
+
+.event-log h2 {
+  flex-shrink: 0;
+}
+
+.log-entries {
+  flex: 1;
+  overflow-y: auto;
+  font-size: 0.8rem;
+  max-height: 200px;
+}
+
+.log-entry {
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--ink-faded);
+  color: var(--ink-light);
+}
+
+.log-entry:last-child {
+  border-bottom: none;
+}
+
+.log-entry.combat {
+  color: #c62828;
+}
+
+.log-entry.move {
+  color: #2e7d32;
+}
+
+.empty-state {
+  color: var(--ink-faded);
+  font-style: italic;
+  text-align: center;
+  padding: 1rem;
+}
+
+.phase-instruction {
+  font-family: var(--font-parchment);
+  color: var(--ink-faded);
+  font-size: 0.9rem;
+  margin: 0 0 0.5rem 0;
+  line-height: 1.3;
+}
+
+/* Retreat Selection */
+.retreat-selection {
+  background: var(--parchment-light);
+  border: 2px solid var(--gold-dark);
+  border-radius: 6px;
+  padding: 1rem;
+  margin-top: 0.5rem;
+}
+
+.retreat-selection h3 {
+  font-family: 'Cinzel', serif;
+  font-size: 0.9rem;
+  margin: 0 0 0.5rem 0;
+  color: var(--ink);
+}
+
+.retreat-from {
+  font-size: 0.85rem;
+  color: var(--ink-light);
+  margin-bottom: 0.75rem;
+}
+
+.retreat-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.retreat-option {
+  padding: 0.5rem 0.75rem;
+  background: var(--parchment);
+  border: 2px solid var(--ink-faded);
+  border-radius: 4px;
+  font-family: 'IM Fell English', serif;
+  font-size: 0.9rem;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s;
+}
+
+.retreat-option:hover {
+  background: var(--gold-light);
+  border-color: var(--gold-dark);
+}
+
+.no-retreat {
+  font-style: italic;
+  color: #c62828;
+  font-size: 0.85rem;
+}
+
+.cancel-retreat {
+  width: 100%;
+  padding: 0.5rem;
+  background: transparent;
+  border: 1px solid var(--ink-faded);
+  color: var(--ink-light);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.cancel-retreat:hover {
+  background: var(--parchment);
+}

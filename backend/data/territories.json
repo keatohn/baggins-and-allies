@@ -1,0 +1,101 @@
+{
+  "minas_tirith": {
+    "id": "minas_tirith",
+    "display_name": "Minas Tirith",
+    "terrain_type": "city",
+    "adjacent": ["lebennin", "osgiliath"],
+    "produces": {"power": 10},
+    "is_stronghold": true,
+    "ownable": true
+  },
+  "lebennin": {
+    "id": "lebennin",
+    "display_name": "Lebennin",
+    "terrain_type": "plains",
+    "adjacent": ["minas_tirith", "pelargir", "ithilien"],
+    "produces": {"power": 3},
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "pelargir": {
+    "id": "pelargir",
+    "display_name": "Pelargir",
+    "terrain_type": "city",
+    "adjacent": ["lebennin"],
+    "produces": {"power": 4},
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "osgiliath": {
+    "id": "osgiliath",
+    "display_name": "Osgiliath",
+    "terrain_type": "ruins",
+    "adjacent": ["minas_tirith", "ithilien", "black_gate", "minas_morgul"],
+    "produces": {"power": 2},
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "ithilien": {
+    "id": "ithilien",
+    "display_name": "Ithilien",
+    "terrain_type": "forest",
+    "adjacent": ["lebennin", "osgiliath", "minas_morgul", "gorgoroth"],
+    "produces": {"power": 2},
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "black_gate": {
+    "id": "black_gate",
+    "display_name": "Black Gate",
+    "terrain_type": "fortress",
+    "adjacent": ["osgiliath", "mount_doom"],
+    "produces": {"power": 3},
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "minas_morgul": {
+    "id": "minas_morgul",
+    "display_name": "Minas Morgul",
+    "terrain_type": "city",
+    "adjacent": ["osgiliath", "ithilien", "gorgoroth", "nurn", "mount_doom"],
+    "produces": {"power": 4},
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "gorgoroth": {
+    "id": "gorgoroth",
+    "display_name": "Gorgoroth",
+    "terrain_type": "wasteland",
+    "adjacent": ["ithilien", "minas_morgul"],
+    "produces": {"power": 2},
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "mount_doom": {
+    "id": "mount_doom",
+    "display_name": "Mount Doom",
+    "terrain_type": "volcanic",
+    "adjacent": ["black_gate", "minas_morgul", "barad_dur", "nurn"],
+    "produces": {"power": 2},
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "barad_dur": {
+    "id": "barad_dur",
+    "display_name": "Barad-dur",
+    "terrain_type": "fortress",
+    "adjacent": ["mount_doom", "nurn"],
+    "produces": {"power": 10},
+    "is_stronghold": true,
+    "ownable": true
+  },
+  "nurn": {
+    "id": "nurn",
+    "display_name": "Nurn",
+    "terrain_type": "farmland",
+    "adjacent": ["minas_morgul", "mount_doom", "barad_dur"],
+    "produces": {"power": 5},
+    "is_stronghold": false,
+    "ownable": true
+  }
+}

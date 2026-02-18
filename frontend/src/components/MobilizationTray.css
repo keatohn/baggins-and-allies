@@ -1,0 +1,94 @@
+.mobilization-tray {
+  flex-shrink: 0;
+  background: var(--parchment);
+  border-top: 3px solid;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tray-empty {
+  font-family: 'IM Fell English', serif;
+  font-style: italic;
+  color: var(--ink-light);
+}
+
+.tray-header {
+  font-family: 'Cinzel', serif;
+  font-size: 0.85rem;
+  color: var(--ink);
+  text-align: center;
+}
+
+.tray-units {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: center;
+}
+
+.purchase-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem;
+  background: var(--parchment-light);
+  border: 3px solid var(--ink-faded);
+  border-radius: 6px;
+  cursor: grab;
+  min-width: 80px;
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.purchase-stack.dragging-source {
+  transition: none;
+  pointer-events: none;
+}
+
+.purchase-stack-overlay {
+  cursor: grabbing;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.25);
+}
+
+.purchase-stack:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  border-color: var(--ink);
+}
+
+.purchase-stack.selected {
+  border-color: #2e7d32;
+  background: #e8f5e9;
+  box-shadow: 0 0 0 2px #2e7d32;
+}
+
+.purchase-icon {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+}
+
+.purchase-count {
+  font-family: 'Cinzel', serif;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--parchment);
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: -14px;
+  border: 1px solid var(--ink-faded);
+}
+
+.purchase-name {
+  font-size: 0.75rem;
+  color: var(--ink);
+  text-align: center;
+  white-space: nowrap;
+}

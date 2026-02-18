@@ -1,0 +1,1364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>War of the Ring</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=IM+Fell+English:ital@0;1&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --parchment: #f4e4c1;
+            --parchment-dark: #e8d4a8;
+            --ink: #3d2914;
+            --ink-light: #5c4033;
+            --ink-faded: #8b7355;
+            --gold: #c9a227;
+            --gold-dark: #a67c00;
+            --shadow: rgba(61, 41, 20, 0.3);
+            
+            /* Faction colors with transparency */
+            --gondor-color: rgba(58, 110, 165, 0.35);
+            --mordor-color: rgba(139, 37, 0, 0.35);
+            --neutral-color: rgba(128, 128, 128, 0.2);
+        }
+
+        body {
+            font-family: 'IM Fell English', serif;
+            background: 
+                url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect fill="%23f4e4c1" width="100" height="100"/><circle fill="%23e8d4a8" cx="25" cy="25" r="1" opacity="0.3"/><circle fill="%23d4c4a8" cx="75" cy="75" r="1.5" opacity="0.2"/><circle fill="%23e0d0b0" cx="50" cy="10" r="0.8" opacity="0.4"/></svg>'),
+                linear-gradient(135deg, var(--parchment) 0%, var(--parchment-dark) 50%, var(--parchment) 100%);
+            color: var(--ink);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Parchment texture overlay */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: 
+                repeating-linear-gradient(
+                    0deg,
+                    transparent,
+                    transparent 2px,
+                    rgba(139, 115, 85, 0.03) 2px,
+                    rgba(139, 115, 85, 0.03) 4px
+                );
+            pointer-events: none;
+            z-index: 1000;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem 1.5rem;
+            background: linear-gradient(180deg, rgba(61, 41, 20, 0.1) 0%, transparent 100%);
+            border-bottom: 2px solid var(--ink-faded);
+            position: relative;
+        }
+
+        header::after {
+            content: '';
+            position: absolute;
+            bottom: -3px;
+            left: 5%;
+            right: 5%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--gold), transparent);
+        }
+
+        .faction-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .faction-icon {
+            width: 40px;
+            height: 40px;
+            object-fit: contain;
+        }
+
+        .faction-title {
+            font-family: 'Cinzel', serif;
+            font-size: 1.8rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--ink);
+            text-shadow: 1px 1px 2px var(--shadow);
+        }
+
+        .turn-status {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            font-family: 'Cinzel', serif;
+        }
+
+        .turn-status .turn-num {
+            font-size: 1.1rem;
+            color: var(--ink);
+        }
+
+        .turn-status .phase {
+            font-size: 1rem;
+            color: var(--ink-light);
+            font-style: italic;
+        }
+
+        .turn-status .power {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+            font-size: 1.1rem;
+            color: var(--ink);
+        }
+
+        .turn-status .power-icon {
+            width: 22px;
+            height: 22px;
+            background: var(--gold);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: bold;
+        }
+
+        main {
+            display: flex;
+            gap: 1rem;
+            padding: 1rem;
+            height: calc(100vh - 70px);
+        }
+
+        .map-container {
+            flex: 1;
+            border: 3px solid var(--ink-faded);
+            border-radius: 4px;
+            box-shadow: 
+                inset 0 0 30px rgba(61, 41, 20, 0.15),
+                4px 4px 15px var(--shadow);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .map-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            border: 8px solid transparent;
+            border-image: linear-gradient(135deg, var(--gold) 0%, var(--ink-faded) 50%, var(--gold) 100%) 1;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .map-wrapper {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            position: relative;
+            background: #1a1a1a;
+        }
+
+        .map-inner {
+            position: relative;
+            transform-origin: 0 0;
+            transition: none;
+            width: fit-content;
+        }
+
+        .map-background {
+            display: block;
+            max-width: none;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+
+        #game-map {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        #game-map path {
+            pointer-events: auto;
+        }
+
+        #unit-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        #unit-layer .unit-token {
+            pointer-events: auto;
+        }
+
+        .map-controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            z-index: 20;
+        }
+
+        .map-controls button {
+            width: 36px;
+            height: 36px;
+            padding: 0;
+            font-size: 1.2rem;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--parchment);
+            opacity: 0.9;
+        }
+
+        .map-controls button:hover {
+            opacity: 1;
+        }
+
+        #game-map path {
+            cursor: pointer;
+            stroke: transparent;
+            stroke-width: 0;
+            fill-opacity: 0.35;
+            transition: all 0.2s ease;
+        }
+
+        #game-map path:hover {
+            fill-opacity: 0.45;
+        }
+
+        #game-map path.selected {
+            stroke: var(--gold);
+            stroke-width: 3;
+            stroke-opacity: 1;
+            fill-opacity: 0.45;
+            filter: drop-shadow(0 0 4px var(--gold));
+        }
+
+        #game-map path.highlight {
+            stroke: var(--gold);
+            stroke-width: 2;
+            stroke-opacity: 0.8;
+            fill-opacity: 0.45;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { fill-opacity: 0.35; }
+            50% { fill-opacity: 0.5; }
+        }
+
+        .sidebar {
+            width: 280px;
+            min-width: 280px;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            overflow-y: auto;
+        }
+
+        .panel {
+            background: linear-gradient(145deg, var(--parchment) 0%, var(--parchment-dark) 100%);
+            border: 2px solid var(--ink-faded);
+            border-radius: 4px;
+            padding: 0.75rem;
+            box-shadow: 3px 3px 10px var(--shadow);
+        }
+
+        .panel h2 {
+            font-family: 'Cinzel', serif;
+            font-size: 1rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--ink);
+            margin-bottom: 0.5rem;
+        }
+
+        .panel h2 .power-production {
+            font-weight: 400;
+            font-size: 0.85rem;
+            color: var(--ink-light);
+        }
+
+        #territory-panel h2 {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.6rem;
+            margin: -0.75rem -0.75rem 0.5rem -0.75rem;
+            border-radius: 2px 2px 0 0;
+        }
+
+        #territory-panel h2 .faction-icon {
+            width: 24px;
+            height: 24px;
+            object-fit: contain;
+        }
+
+        #territory-panel h2.faction-gondor {
+            background: rgba(58, 110, 165, 0.25);
+        }
+
+        #territory-panel h2.faction-mordor {
+            background: rgba(139, 37, 0, 0.25);
+        }
+
+        .stronghold-badge {
+            font-family: 'Cinzel', serif;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--gold-dark);
+            margin-bottom: 0.5rem;
+        }
+
+        .territory-info {
+            font-size: 0.9rem;
+            color: var(--ink-light);
+            line-height: 1.5;
+        }
+
+        .unit-list {
+            margin-top: 0.5rem;
+            border-top: 1px solid var(--ink-faded);
+            padding-top: 0.5rem;
+        }
+
+        .unit-entry {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.25rem 0;
+            font-size: 0.9rem;
+        }
+
+        .actions-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        #phase-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        #phase-actions:empty {
+            display: none;
+        }
+
+        button {
+            font-family: 'Cinzel', serif;
+            font-size: 0.9rem;
+            padding: 0.6rem 1rem;
+            background: linear-gradient(180deg, var(--parchment) 0%, var(--parchment-dark) 100%);
+            border: 2px solid var(--ink-faded);
+            border-radius: 3px;
+            color: var(--ink);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        button:hover:not(:disabled) {
+            background: linear-gradient(180deg, var(--parchment-dark) 0%, var(--parchment) 100%);
+            border-color: var(--ink);
+            box-shadow: 2px 2px 5px var(--shadow);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        button.primary {
+            background: linear-gradient(180deg, var(--gold) 0%, var(--gold-dark) 100%);
+            border-color: var(--gold-dark);
+            color: var(--ink);
+        }
+
+        button.primary:hover:not(:disabled) {
+            box-shadow: 0 0 10px var(--gold);
+        }
+
+        .event-log {
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 0.85rem;
+        }
+
+        .event-log::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .event-log::-webkit-scrollbar-track {
+            background: var(--parchment-dark);
+        }
+
+        .event-log::-webkit-scrollbar-thumb {
+            background: var(--ink-faded);
+            border-radius: 4px;
+        }
+
+        .log-entry {
+            padding: 0.4rem 0;
+            border-bottom: 1px dotted var(--ink-faded);
+            color: var(--ink-light);
+        }
+
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+
+        .log-entry.combat {
+            color: var(--ink);
+            font-weight: 500;
+        }
+
+        .empty-state {
+            color: var(--ink-faded);
+            font-style: italic;
+            text-align: center;
+            padding: 1rem;
+        }
+
+        /* Unit tokens on map */
+        .territory-units {
+            position: absolute;
+            display: flex;
+            gap: 2px;
+            transform: translate(-50%, -50%);
+            z-index: 5;
+        }
+
+        .unit-token {
+            position: relative;
+            width: 28px;
+            height: 28px;
+            background: var(--parchment);
+            border: 2px solid var(--ink-faded);
+            border-radius: 4px;
+            box-shadow: 1px 1px 4px var(--shadow);
+            overflow: visible;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .unit-token:hover {
+            transform: scale(1.15);
+            border-color: var(--ink);
+            box-shadow: 2px 2px 6px var(--shadow);
+            z-index: 10;
+        }
+
+        .unit-token.selected {
+            transform: scale(1.2);
+            border-color: var(--gold);
+            box-shadow: 0 0 8px var(--gold);
+            z-index: 10;
+        }
+
+        .unit-token img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .unit-token .count {
+            position: absolute;
+            bottom: -4px;
+            right: -4px;
+            min-width: 14px;
+            height: 14px;
+            background: var(--ink);
+            color: var(--parchment);
+            font-family: 'Cinzel', serif;
+            font-size: 0.6rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 7px;
+            padding: 0 3px;
+        }
+
+        .unit-token .count.single {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="faction-header">
+            <img src="assets/factions/gondor.png" alt="" class="faction-icon" id="faction-icon">
+            <h1 class="faction-title" id="faction-title">Gondor</h1>
+        </div>
+        <div class="turn-status">
+            <span class="turn-num">Turn <span id="turn-number">1</span></span>
+            <span class="phase" id="current-phase">Purchase</span>
+            <span class="power">
+                <span class="power-icon">P</span>
+                <span id="current-power">21</span>
+            </span>
+        </div>
+    </header>
+
+    <main>
+        <div class="map-container">
+            <div class="map-wrapper">
+                <div class="map-inner">
+                    <img src="../test/test_map.png" alt="Middle-earth Map" class="map-background" id="map-bg">
+                    <svg id="game-map" viewBox="0 0 1226.6667 1013.3333" preserveAspectRatio="xMidYMid meet">
+                        <!-- Territory overlays will be loaded here -->
+                    </svg>
+                    <div id="unit-layer">
+                        <!-- Unit tokens will be rendered here -->
+                    </div>
+                </div>
+            </div>
+            <div class="map-controls">
+                <button onclick="zoomIn()" title="Zoom In">+</button>
+                <button onclick="zoomOut()" title="Zoom Out">−</button>
+                <button onclick="resetMapView()" title="Reset View">⌂</button>
+            </div>
+        </div>
+
+        <aside class="sidebar">
+            <div class="panel actions-panel">
+                <h2>Actions</h2>
+                <div id="phase-actions">
+                    <!-- Phase-specific buttons will be rendered here -->
+                </div>
+                <button id="btn-end-phase" class="primary">End Phase</button>
+            </div>
+
+            <div class="panel" id="territory-panel">
+                <h2 id="territory-title">Select Territory</h2>
+                <div id="territory-info">
+                    <!-- Territory details will be rendered here -->
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2>Event Log</h2>
+                <div class="event-log" id="event-log">
+                    <p class="empty-state">No events yet</p>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <script>
+        // Territory ID mapping (SVG label -> game ID)
+        const TERRITORY_ID_MAP = {
+            'pelagir': 'pelargir',  // Fix typo in SVG
+        };
+
+        // Phase configuration - which buttons show in each phase
+        const PHASE_CONFIG = {
+            'purchase': {
+                buttons: [
+                    { id: 'btn-purchase', label: 'Purchase Units', action: 'openPurchaseModal' }
+                ],
+                nextPhase: 'combat_move'
+            },
+            'combat_move': {
+                buttons: [
+                    { id: 'btn-move', label: 'Move Units', action: 'startMove' }
+                ],
+                nextPhase: 'combat'
+            },
+            'combat': {
+                buttons: [],
+                nextPhase: 'non_combat_move'
+            },
+            'non_combat_move': {
+                buttons: [
+                    { id: 'btn-move', label: 'Move Units', action: 'startMove' }
+                ],
+                nextPhase: 'mobilization'
+            },
+            'mobilization': {
+                buttons: [
+                    { id: 'btn-mobilize', label: 'Mobilize Units', action: 'openMobilizeModal' }
+                ],
+                nextPhase: 'purchase'  // Next faction's turn
+            }
+        };
+
+        // Game state (will be loaded from backend)
+        let gameState = {
+            turn_number: 1,
+            current_faction: 'gondor',
+            phase: 'purchase',
+            faction_resources: {
+                gondor: { power: 21 },
+                mordor: { power: 26 }
+            },
+            territories: {}
+        };
+
+        // Faction colors (solid colors, transparency handled by CSS)
+        const FACTION_COLORS = {
+            gondor: '#3a6ea5',  // Blue
+            mordor: '#8b2500'   // Dark red
+        };
+
+        // Unit definitions with icons (will come from backend)
+        const UNIT_DEFS = {
+            gondor_infantry: { icon: 'assets/units/gondor_infantry.png', name: 'Gondor Infantry' },
+            gondor_knight: { icon: 'assets/units/gondor_knight.png', name: 'Knight of Gondor' },
+            mordor_orc: { icon: 'assets/units/mordor_orc.png', name: 'Orc' },
+            mordor_troll: { icon: 'assets/units/mordor_troll.png', name: 'Troll' }
+        };
+
+        // Territory unit data (will come from backend)
+        const TERRITORY_UNITS = {
+            'minas_tirith': [{ unit_id: 'gondor_infantry', count: 3 }, { unit_id: 'gondor_knight', count: 1 }],
+            'osgiliath': [{ unit_id: 'gondor_infantry', count: 2 }],
+            'barad_dur': [{ unit_id: 'mordor_orc', count: 4 }, { unit_id: 'mordor_troll', count: 1 }],
+            'minas_morgul': [{ unit_id: 'mordor_orc', count: 2 }],
+            'black_gate': [{ unit_id: 'mordor_orc', count: 2 }]
+        };
+
+        // Territory centroids (calculated from SVG paths)
+        let territoryCentroids = {};
+
+        let selectedTerritory = null;
+        let selectedUnit = null;  // { territory, unitId, count, element }
+
+        // Pan and zoom state
+        let mapTransform = { x: 0, y: 0, scale: 1 };
+        let isDragging = false;
+        let dragStart = { x: 0, y: 0 };
+
+        // Initialize the map
+        async function initMap() {
+            const mapContainer = document.getElementById('game-map');
+            const mapWrapper = document.querySelector('.map-wrapper');
+            
+            // Load SVG content
+            try {
+                const response = await fetch('../test/test_map.svg');
+                const svgText = await response.text();
+                
+                // Parse and extract paths
+                const parser = new DOMParser();
+                const svgDoc = parser.parseFromString(svgText, 'image/svg+xml');
+                
+                // Get all paths and filter by inkscape:label attribute
+                const allPaths = svgDoc.querySelectorAll('path');
+                
+                allPaths.forEach(path => {
+                    // Check for inkscape:label attribute (namespace attributes need getAttributeNS)
+                    const label = path.getAttributeNS('http://www.inkscape.org/namespaces/inkscape', 'label') 
+                               || path.getAttribute('inkscape:label');
+                    
+                    if (label && label !== 'middle_earth') {
+                        const gameId = TERRITORY_ID_MAP[label] || label;
+                        const newPath = path.cloneNode(true);
+                        newPath.setAttribute('id', `territory-${gameId}`);
+                        newPath.setAttribute('data-territory', gameId);
+                        // Remove inline style, we'll set fill via JS
+                        newPath.removeAttribute('style');
+                        mapContainer.appendChild(newPath);
+                    }
+                });
+
+                // Add click handlers
+                mapContainer.querySelectorAll('path[data-territory]').forEach(path => {
+                    path.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        selectTerritory(path.dataset.territory);
+                    });
+                });
+
+                // Initial color update
+                updateTerritoryColors();
+                
+                // Calculate territory centroids for unit placement
+                calculateTerritoryCentroids();
+                
+                console.log('Map loaded with', mapContainer.querySelectorAll('path[data-territory]').length, 'territories');
+                
+                // Initialize pan/zoom and fit map to view
+                initPanZoom(mapWrapper);
+                
+                // Wait for image to load to get proper dimensions and render units
+                const mapImg = document.getElementById('map-bg');
+                if (mapImg.complete) {
+                    mapDimensions = { width: mapImg.naturalWidth, height: mapImg.naturalHeight };
+                    fitMapToView();
+                    renderUnits();
+                } else {
+                    mapImg.onload = () => {
+                        mapDimensions = { width: mapImg.naturalWidth, height: mapImg.naturalHeight };
+                        fitMapToView();
+                        renderUnits();
+                    };
+                }
+                
+            } catch (error) {
+                console.error('Failed to load map:', error);
+            }
+        }
+
+        // Pan and zoom functionality
+        function initPanZoom(wrapper) {
+            const MAX_SCALE = 3;
+            const ZOOM_SENSITIVITY = 0.001;
+
+            function getMinScale() {
+                const rect = wrapper.getBoundingClientRect();
+                return Math.min(rect.width / mapDimensions.width, rect.height / mapDimensions.height, 1);
+            }
+
+            // Mouse wheel zoom
+            wrapper.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                
+                const rect = wrapper.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                
+                const minScale = getMinScale();
+                const delta = -e.deltaY * ZOOM_SENSITIVITY;
+                const newScale = Math.min(MAX_SCALE, Math.max(minScale, mapTransform.scale * (1 + delta)));
+                
+                // Zoom toward mouse position
+                const scaleChange = newScale / mapTransform.scale;
+                mapTransform.x = mouseX - (mouseX - mapTransform.x) * scaleChange;
+                mapTransform.y = mouseY - (mouseY - mapTransform.y) * scaleChange;
+                mapTransform.scale = newScale;
+                
+                applyTransform(wrapper);
+            });
+
+            // Mouse drag pan
+            wrapper.addEventListener('mousedown', (e) => {
+                if (e.target.closest('path[data-territory]')) return; // Don't drag when clicking territory
+                isDragging = true;
+                dragStart.x = e.clientX - mapTransform.x;
+                dragStart.y = e.clientY - mapTransform.y;
+                wrapper.style.cursor = 'grabbing';
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                mapTransform.x = e.clientX - dragStart.x;
+                mapTransform.y = e.clientY - dragStart.y;
+                applyTransform(wrapper);
+            });
+
+            window.addEventListener('mouseup', () => {
+                isDragging = false;
+                wrapper.style.cursor = 'grab';
+            });
+
+            // Touch support
+            let lastTouchDistance = 0;
+            let lastTouchCenter = { x: 0, y: 0 };
+
+            wrapper.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) {
+                    isDragging = true;
+                    dragStart.x = e.touches[0].clientX - mapTransform.x;
+                    dragStart.y = e.touches[0].clientY - mapTransform.y;
+                } else if (e.touches.length === 2) {
+                    lastTouchDistance = getTouchDistance(e.touches);
+                    lastTouchCenter = getTouchCenter(e.touches, wrapper);
+                }
+            });
+
+            wrapper.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (e.touches.length === 1 && isDragging) {
+                    mapTransform.x = e.touches[0].clientX - dragStart.x;
+                    mapTransform.y = e.touches[0].clientY - dragStart.y;
+                    applyTransform(wrapper);
+                } else if (e.touches.length === 2) {
+                    // Pinch zoom
+                    const newDistance = getTouchDistance(e.touches);
+                    const newCenter = getTouchCenter(e.touches, wrapper);
+                    const scaleChange = newDistance / lastTouchDistance;
+                    const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, mapTransform.scale * scaleChange));
+                    
+                    mapTransform.x = newCenter.x - (lastTouchCenter.x - mapTransform.x) * (newScale / mapTransform.scale);
+                    mapTransform.y = newCenter.y - (lastTouchCenter.y - mapTransform.y) * (newScale / mapTransform.scale);
+                    mapTransform.scale = newScale;
+                    
+                    lastTouchDistance = newDistance;
+                    lastTouchCenter = newCenter;
+                    applyTransform(wrapper);
+                }
+            });
+
+            wrapper.addEventListener('touchend', () => {
+                isDragging = false;
+            });
+
+            wrapper.style.cursor = 'grab';
+        }
+
+        function getTouchDistance(touches) {
+            const dx = touches[0].clientX - touches[1].clientX;
+            const dy = touches[0].clientY - touches[1].clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        function getTouchCenter(touches, wrapper) {
+            const rect = wrapper.getBoundingClientRect();
+            return {
+                x: (touches[0].clientX + touches[1].clientX) / 2 - rect.left,
+                y: (touches[0].clientY + touches[1].clientY) / 2 - rect.top
+            };
+        }
+
+        // Map dimensions (from PNG)
+        let mapDimensions = { width: 1840, height: 1520 };
+
+        function applyTransform(wrapper) {
+            // Constrain pan to keep map visible
+            const rect = wrapper.getBoundingClientRect();
+            const scaledWidth = mapDimensions.width * mapTransform.scale;
+            const scaledHeight = mapDimensions.height * mapTransform.scale;
+            
+            // Calculate boundaries
+            const minX = Math.min(0, rect.width - scaledWidth);
+            const minY = Math.min(0, rect.height - scaledHeight);
+            const maxX = Math.max(0, rect.width - scaledWidth);
+            const maxY = Math.max(0, rect.height - scaledHeight);
+            
+            // Clamp position
+            mapTransform.x = Math.max(minX, Math.min(maxX, mapTransform.x));
+            mapTransform.y = Math.max(minY, Math.min(maxY, mapTransform.y));
+            
+            const inner = wrapper.querySelector('.map-inner');
+            inner.style.transform = `translate(${mapTransform.x}px, ${mapTransform.y}px) scale(${mapTransform.scale})`;
+        }
+
+        function fitMapToView() {
+            const wrapper = document.querySelector('.map-wrapper');
+            const rect = wrapper.getBoundingClientRect();
+            
+            // Calculate scale to fit entire map
+            const scaleX = rect.width / mapDimensions.width;
+            const scaleY = rect.height / mapDimensions.height;
+            const fitScale = Math.min(scaleX, scaleY, 1); // Don't scale up beyond 1
+            
+            // Center the map
+            const scaledWidth = mapDimensions.width * fitScale;
+            const scaledHeight = mapDimensions.height * fitScale;
+            const offsetX = (rect.width - scaledWidth) / 2;
+            const offsetY = (rect.height - scaledHeight) / 2;
+            
+            mapTransform = { 
+                x: offsetX, 
+                y: offsetY, 
+                scale: fitScale 
+            };
+            applyTransform(wrapper);
+        }
+
+        function resetMapView() {
+            fitMapToView();
+        }
+
+        function zoomIn() {
+            const wrapper = document.querySelector('.map-wrapper');
+            const rect = wrapper.getBoundingClientRect();
+            const centerX = rect.width / 2;
+            const centerY = rect.height / 2;
+            
+            const newScale = Math.min(3, mapTransform.scale * 1.25);
+            const scaleChange = newScale / mapTransform.scale;
+            
+            mapTransform.x = centerX - (centerX - mapTransform.x) * scaleChange;
+            mapTransform.y = centerY - (centerY - mapTransform.y) * scaleChange;
+            mapTransform.scale = newScale;
+            
+            applyTransform(wrapper);
+        }
+
+        function zoomOut() {
+            const wrapper = document.querySelector('.map-wrapper');
+            const rect = wrapper.getBoundingClientRect();
+            const centerX = rect.width / 2;
+            const centerY = rect.height / 2;
+            
+            // Don't zoom out beyond fit-to-view scale
+            const minScale = Math.min(rect.width / mapDimensions.width, rect.height / mapDimensions.height, 1);
+            const newScale = Math.max(minScale, mapTransform.scale / 1.25);
+            const scaleChange = newScale / mapTransform.scale;
+            
+            mapTransform.x = centerX - (centerX - mapTransform.x) * scaleChange;
+            mapTransform.y = centerY - (centerY - mapTransform.y) * scaleChange;
+            mapTransform.scale = newScale;
+            
+            applyTransform(wrapper);
+        }
+
+        // Update territory colors based on ownership
+        function updateTerritoryColors() {
+            // Mock territory ownership for now
+            const ownership = {
+                'minas_tirith': 'gondor',
+                'lebennin': 'gondor',
+                'pelargir': 'gondor',
+                'osgiliath': 'gondor',
+                'ithilien': 'gondor',
+                'black_gate': 'mordor',
+                'minas_morgul': 'mordor',
+                'gorgoroth': 'mordor',
+                'mount_doom': 'mordor',
+                'barad_dur': 'mordor',
+                'nurn': 'mordor'
+            };
+
+            Object.entries(ownership).forEach(([territoryId, faction]) => {
+                const path = document.querySelector(`#territory-${territoryId}`);
+                if (path) {
+                    path.style.fill = FACTION_COLORS[faction] || 'rgba(128, 128, 128, 0.2)';
+                }
+            });
+        }
+
+        // Calculate centroid of an SVG path
+        function getPathCentroid(path) {
+            try {
+                const bbox = path.getBBox();
+                return {
+                    x: bbox.x + bbox.width / 2,
+                    y: bbox.y + bbox.height / 2
+                };
+            } catch (e) {
+                return null;
+            }
+        }
+
+        // Calculate all territory centroids
+        function calculateTerritoryCentroids() {
+            const paths = document.querySelectorAll('#game-map path[data-territory]');
+            paths.forEach(path => {
+                const territoryId = path.dataset.territory;
+                const centroid = getPathCentroid(path);
+                if (centroid) {
+                    territoryCentroids[territoryId] = centroid;
+                }
+            });
+        }
+
+        // Render unit tokens on the map
+        function renderUnits() {
+            const unitLayer = document.getElementById('unit-layer');
+            const mapImg = document.getElementById('map-bg');
+            
+            // Clear existing tokens
+            unitLayer.innerHTML = '';
+            
+            // Get SVG viewBox dimensions for coordinate conversion
+            const svgViewBox = { width: 1226.6667, height: 1013.3333 };
+            const imgWidth = mapImg.naturalWidth || 1840;
+            const imgHeight = mapImg.naturalHeight || 1520;
+            
+            // Scale factor from SVG coords to image coords
+            const scaleX = imgWidth / svgViewBox.width;
+            const scaleY = imgHeight / svgViewBox.height;
+            
+            Object.entries(TERRITORY_UNITS).forEach(([territoryId, units]) => {
+                const centroid = territoryCentroids[territoryId];
+                if (!centroid || units.length === 0) return;
+                
+                // Convert SVG coordinates to image coordinates
+                const x = centroid.x * scaleX;
+                const y = centroid.y * scaleY;
+                
+                // Create container for this territory's units
+                const container = document.createElement('div');
+                container.className = 'territory-units';
+                container.style.left = `${x}px`;
+                container.style.top = `${y}px`;
+                
+                // Add unit tokens
+                units.forEach(({ unit_id, count }) => {
+                    const unitDef = UNIT_DEFS[unit_id];
+                    if (!unitDef) return;
+                    
+                    const token = document.createElement('div');
+                    token.className = 'unit-token';
+                    token.title = `${unitDef.name} ×${count}`;
+                    token.dataset.territory = territoryId;
+                    token.dataset.unitId = unit_id;
+                    token.dataset.count = count;
+                    
+                    const img = document.createElement('img');
+                    img.src = unitDef.icon;
+                    img.alt = unitDef.name;
+                    token.appendChild(img);
+                    
+                    const countBadge = document.createElement('span');
+                    countBadge.className = count === 1 ? 'count single' : 'count';
+                    countBadge.textContent = count;
+                    token.appendChild(countBadge);
+                    
+                    // Click handler for unit selection
+                    token.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        selectUnit(territoryId, unit_id, count, token);
+                    });
+                    
+                    container.appendChild(token);
+                });
+                
+                unitLayer.appendChild(container);
+            });
+        }
+
+        // Select a territory
+        function selectTerritory(territoryId) {
+            // Check if we're trying to move a unit to this territory
+            if (selectedUnit && selectedUnit.territory !== territoryId) {
+                const path = document.querySelector(`#territory-${territoryId}`);
+                if (path && path.classList.contains('highlight')) {
+                    // This is a valid move destination
+                    const unitDef = UNIT_DEFS[selectedUnit.unitId];
+                    addLogEntry(`Moved ${unitDef?.name || selectedUnit.unitId} from ${selectedUnit.territory} to ${territoryId}`);
+                    
+                    // Clear selections
+                    clearUnitSelection();
+                    
+                    // Select the destination territory
+                    document.querySelectorAll('#game-map path.selected').forEach(p => {
+                        p.classList.remove('selected');
+                    });
+                    path.classList.add('selected');
+                    selectedTerritory = territoryId;
+                    updateTerritoryPanel(territoryId);
+                    return;
+                }
+            }
+            
+            // Normal territory selection
+            // Remove previous selection
+            document.querySelectorAll('#game-map path.selected').forEach(p => {
+                p.classList.remove('selected');
+            });
+
+            // Add new selection
+            const path = document.querySelector(`#territory-${territoryId}`);
+            if (path) {
+                path.classList.add('selected');
+                selectedTerritory = territoryId;
+                updateTerritoryPanel(territoryId);
+            }
+            
+            // Clear unit selection when clicking territory
+            clearUnitSelection();
+        }
+
+        // Select a unit for movement
+        function selectUnit(territoryId, unitId, count, element) {
+            // Clear previous unit selection
+            clearUnitSelection();
+            
+            // Check if we're in a movement phase
+            const isMovementPhase = gameState.phase === 'combat_move' || gameState.phase === 'non_combat_move';
+            
+            if (!isMovementPhase) {
+                // Just select the territory if not in movement phase
+                selectTerritory(territoryId);
+                return;
+            }
+            
+            // Select this unit
+            selectedUnit = { territory: territoryId, unitId, count, element };
+            element.classList.add('selected');
+            
+            // Also select the territory
+            selectTerritory(territoryId);
+            
+            // Highlight valid move destinations
+            highlightValidDestinations(territoryId, unitId);
+            
+            const unitDef = UNIT_DEFS[unitId];
+            addLogEntry(`Selected ${unitDef?.name || unitId} (×${count}) in ${territoryId}`);
+        }
+
+        // Clear unit selection
+        function clearUnitSelection() {
+            if (selectedUnit && selectedUnit.element) {
+                selectedUnit.element.classList.remove('selected');
+            }
+            selectedUnit = null;
+            
+            // Clear destination highlights
+            document.querySelectorAll('#game-map path.highlight').forEach(p => {
+                p.classList.remove('highlight');
+            });
+        }
+
+        // Highlight valid move destinations (placeholder - will use engine queries)
+        function highlightValidDestinations(fromTerritory, unitId) {
+            // For now, just highlight adjacent territories as a placeholder
+            // This will be replaced with actual movement validation from the engine
+            const adjacencies = {
+                'minas_tirith': ['lebennin', 'osgiliath'],
+                'lebennin': ['minas_tirith', 'pelargir', 'ithilien'],
+                'pelargir': ['lebennin'],
+                'osgiliath': ['minas_tirith', 'ithilien', 'black_gate', 'minas_morgul'],
+                'ithilien': ['lebennin', 'osgiliath', 'minas_morgul', 'gorgoroth'],
+                'black_gate': ['osgiliath', 'mount_doom'],
+                'minas_morgul': ['osgiliath', 'ithilien', 'gorgoroth', 'nurn', 'mount_doom'],
+                'gorgoroth': ['ithilien', 'minas_morgul'],
+                'mount_doom': ['black_gate', 'minas_morgul', 'barad_dur', 'nurn'],
+                'barad_dur': ['mount_doom', 'nurn'],
+                'nurn': ['minas_morgul', 'mount_doom', 'barad_dur']
+            };
+            
+            const validDestinations = adjacencies[fromTerritory] || [];
+            validDestinations.forEach(destId => {
+                const path = document.querySelector(`#territory-${destId}`);
+                if (path) {
+                    path.classList.add('highlight');
+                }
+            });
+        }
+
+        // Update territory info panel
+        function updateTerritoryPanel(territoryId) {
+            const titleEl = document.getElementById('territory-title');
+            const infoDiv = document.getElementById('territory-info');
+            
+            // Mock territory data (will come from backend)
+            const territoryData = {
+                'minas_tirith': { name: 'Minas Tirith', owner: 'gondor', terrain: 'City', stronghold: true, produces: 10, units: [{name: 'Gondor Infantry', count: 3}, {name: 'Knight of Gondor', count: 1}] },
+                'lebennin': { name: 'Lebennin', owner: 'gondor', terrain: 'Plains', stronghold: false, produces: 3, units: [] },
+                'pelargir': { name: 'Pelargir', owner: 'gondor', terrain: 'City', stronghold: false, produces: 4, units: [] },
+                'osgiliath': { name: 'Osgiliath', owner: 'gondor', terrain: 'Ruins', stronghold: false, produces: 2, units: [{name: 'Gondor Infantry', count: 2}] },
+                'ithilien': { name: 'Ithilien', owner: 'gondor', terrain: 'Forest', stronghold: false, produces: 2, units: [] },
+                'black_gate': { name: 'Black Gate', owner: 'mordor', terrain: 'Fortress', stronghold: false, produces: 3, units: [{name: 'Orc', count: 2}] },
+                'minas_morgul': { name: 'Minas Morgul', owner: 'mordor', terrain: 'City', stronghold: false, produces: 4, units: [{name: 'Orc', count: 2}] },
+                'gorgoroth': { name: 'Gorgoroth', owner: 'mordor', terrain: 'Wasteland', stronghold: false, produces: 2, units: [] },
+                'mount_doom': { name: 'Mount Doom', owner: 'mordor', terrain: 'Volcanic', stronghold: false, produces: 2, units: [] },
+                'barad_dur': { name: 'Barad-dûr', owner: 'mordor', terrain: 'Fortress', stronghold: true, produces: 10, units: [{name: 'Orc', count: 4}, {name: 'Troll', count: 1}] },
+                'nurn': { name: 'Nurn', owner: 'mordor', terrain: 'Farmland', stronghold: false, produces: 5, units: [] }
+            };
+
+            const data = territoryData[territoryId];
+            if (!data) {
+                titleEl.textContent = 'Unknown';
+                titleEl.className = '';
+                infoDiv.innerHTML = '';
+                return;
+            }
+
+            // Update title with faction icon, name and power production
+            const factionData = data.owner ? FACTION_DATA[data.owner] : null;
+            const iconHtml = factionData ? `<img class="faction-icon" src="${factionData.icon}" alt="${data.owner}">` : '';
+            titleEl.innerHTML = `${iconHtml}<span>${data.name} <span class="power-production">(${data.produces}P)</span></span>`;
+            
+            // Set faction class for background color
+            titleEl.className = data.owner ? `faction-${data.owner}` : '';
+
+            let html = '';
+            
+            // Stronghold badge if applicable
+            if (data.stronghold) {
+                html += '<div class="stronghold-badge">Stronghold</div>';
+            }
+
+            html += `<div class="territory-info">
+                <div>${data.terrain}</div>
+            </div>`;
+
+            if (data.units.length > 0) {
+                html += '<div class="unit-list">';
+                data.units.forEach(u => {
+                    html += `<div class="unit-entry"><span>${u.name}</span><span>×${u.count}</span></div>`;
+                });
+                html += '</div>';
+            }
+
+            infoDiv.innerHTML = html;
+        }
+
+        // Clear territory panel
+        function clearTerritoryPanel() {
+            const titleEl = document.getElementById('territory-title');
+            titleEl.textContent = 'Select Territory';
+            titleEl.className = '';
+            document.getElementById('territory-info').innerHTML = '';
+        }
+
+        // Update phase-specific action buttons
+        function updatePhaseActions() {
+            const container = document.getElementById('phase-actions');
+            const config = PHASE_CONFIG[gameState.phase];
+            
+            if (!config) {
+                container.innerHTML = '';
+                return;
+            }
+
+            container.innerHTML = config.buttons.map(btn => 
+                `<button id="${btn.id}" onclick="${btn.action}()">${btn.label}</button>`
+            ).join('');
+        }
+
+        // Faction data (will come from backend)
+        const FACTION_DATA = {
+            gondor: { icon: 'assets/factions/gondor.png', color: '#3a6ea5' },
+            mordor: { icon: 'assets/factions/mordor.png', color: '#8b2500' }
+        };
+
+        // Update turn display
+        function updateTurnDisplay() {
+            // Update faction title and icon
+            const faction = gameState.current_faction;
+            document.getElementById('faction-title').textContent = capitalize(faction);
+            
+            const factionData = FACTION_DATA[faction];
+            if (factionData) {
+                document.getElementById('faction-icon').src = factionData.icon;
+            }
+            
+            // Update turn number
+            document.getElementById('turn-number').textContent = gameState.turn_number;
+            
+            // Update phase
+            document.getElementById('current-phase').textContent = formatPhase(gameState.phase);
+            
+            // Update power
+            const resources = gameState.faction_resources[gameState.current_faction] || {};
+            document.getElementById('current-power').textContent = resources.power || 0;
+
+            // Update phase-specific buttons
+            updatePhaseActions();
+        }
+
+        // End current phase
+        function endPhase() {
+            const config = PHASE_CONFIG[gameState.phase];
+            const oldPhase = gameState.phase;
+            
+            addLogEntry(`${capitalize(gameState.current_faction)} ended ${formatPhase(oldPhase)} phase`);
+            
+            if (config) {
+                gameState.phase = config.nextPhase;
+                
+                // If we wrapped back to purchase, it's the next faction's turn
+                if (oldPhase === 'mobilization') {
+                    // Switch factions (simple 2-player toggle for now)
+                    if (gameState.current_faction === 'gondor') {
+                        gameState.current_faction = 'mordor';
+                    } else {
+                        gameState.current_faction = 'gondor';
+                        gameState.turn_number++;
+                    }
+                    addLogEntry(`Turn ${gameState.turn_number}: ${capitalize(gameState.current_faction)}'s turn begins`);
+                }
+            }
+            
+            updateTurnDisplay();
+        }
+
+        // Helper functions
+        function capitalize(str) {
+            return str.charAt(0).toUpperCase() + str.slice(1);
+        }
+
+        function formatPhase(phase) {
+            return phase.split('_').map(capitalize).join(' ');
+        }
+
+        // Action placeholders
+        function openPurchaseModal() {
+            addLogEntry('Purchase modal not yet implemented');
+        }
+
+        function startMove() {
+            addLogEntry('Select a unit to move');
+        }
+
+        function openMobilizeModal() {
+            addLogEntry('Mobilize modal not yet implemented');
+        }
+
+        // Add log entry
+        function addLogEntry(message, type = '') {
+            const log = document.getElementById('event-log');
+            const empty = log.querySelector('.empty-state');
+            if (empty) empty.remove();
+
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = message;
+            log.insertBefore(entry, log.firstChild);
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            initMap();
+            updateTurnDisplay();
+            
+            // End phase button
+            document.getElementById('btn-end-phase').addEventListener('click', endPhase);
+            
+            // Clear unit selection when clicking on map background
+            document.getElementById('map-wrapper').addEventListener('click', (e) => {
+                // Only if clicking directly on the wrapper/background, not a territory or unit
+                if (e.target.id === 'map-wrapper' || 
+                    e.target.id === 'map-bg' || 
+                    e.target.classList.contains('map-inner') ||
+                    e.target.id === 'game-map') {
+                    clearUnitSelection();
+                    clearTerritoryPanel();
+                    document.querySelectorAll('#game-map path.selected').forEach(p => {
+                        p.classList.remove('selected');
+                    });
+                    selectedTerritory = null;
+                }
+            });
+            
+            // Re-fit map on window resize
+            let resizeTimeout;
+            window.addEventListener('resize', () => {
+                clearTimeout(resizeTimeout);
+                resizeTimeout = setTimeout(fitMapToView, 150);
+            });
+        });
+    </script>
+</body>
+</html>

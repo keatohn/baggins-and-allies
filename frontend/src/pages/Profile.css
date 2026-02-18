@@ -1,0 +1,37 @@
+.profile-page {
+  min-height: 100vh;
+  padding: 2rem;
+  background: var(--parchment);
+}
+
+.profile-page__title {
+  font-family: 'Cinzel', serif;
+  font-size: 1.75rem;
+  color: var(--ink);
+  margin-bottom: 1.5rem;
+}
+
+.profile-page__card {
+  max-width: 360px;
+  padding: 1.25rem;
+  background: var(--parchment-light);
+  border: 2px solid var(--ink-faded);
+  border-radius: 8px;
+  font-family: var(--font-parchment);
+}
+
+.profile-page__card p {
+  margin: 0 0 0.75rem 0;
+}
+
+.profile-page__logout {
+  margin-top: 1rem;
+}
+
+.profile-page__footer {
+  margin-top: 1.5rem;
+}
+
+.profile-page__footer a {
+  color: var(--gold-dark);
+}

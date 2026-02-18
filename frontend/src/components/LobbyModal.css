@@ -1,0 +1,25 @@
+.lobby-modal {
+  min-width: 360px;
+}
+
+.lobby-modal-body {
+  padding: 1.5rem 1.75rem;
+  font-family: var(--font-parchment);
+}
+
+.lobby-modal-code {
+  margin: 0 0 1rem 0;
+  font-size: 1rem;
+}
+
+.lobby-modal-placeholder {
+  margin: 0 0 0.5rem 0;
+  color: var(--ink-faded);
+  font-style: italic;
+}
+
+.lobby-modal-note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-faded);
+}

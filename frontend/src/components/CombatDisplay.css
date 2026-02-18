@@ -1,0 +1,581 @@
+/* Combat Modal */
+.combat-modal {
+  width: 900px;
+  max-width: 95vw;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.combat-modal .modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.round-indicator {
+  font-family: 'IM Fell English', serif;
+  font-size: 1rem;
+  color: var(--ink-light);
+  font-style: italic;
+}
+
+/* Combat Arena */
+.combat-arena {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem;
+  flex: 1;
+  min-height: 350px;
+  overflow-y: auto;
+}
+
+.combat-side {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: var(--parchment-light);
+  border: 3px solid var(--ink-faded);
+  border-radius: 6px;
+}
+
+.side-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--ink-faded);
+}
+
+.side-role-badge {
+  margin-left: auto;
+  font-family: 'Cinzel', serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--ink-light);
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--parchment);
+  border: 1px solid var(--ink-faded);
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.side-header .faction-icon {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+}
+
+.side-title {
+  font-family: 'Cinzel', serif;
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+/* VS Divider */
+.vs-divider {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.5rem;
+  gap: 1rem;
+  min-width: 100px;
+}
+
+.vs-divider > span {
+  font-family: 'Cinzel', serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--ink-faded);
+}
+
+/* Centered Roll Button */
+.center-roll {
+  font-size: 1rem;
+  padding: 0.6rem 1.5rem;
+  white-space: nowrap;
+}
+
+.rolling-indicator {
+  font-family: 'IM Fell English', serif;
+  font-style: italic;
+  color: var(--ink-light);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+/* Units Shelves - rows grouped by stat value */
+.units-shelves {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow-y: auto;
+}
+
+.unit-row-shelf {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem;
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 4px;
+  min-height: 48px;
+  opacity: 0.5;
+  transition: opacity 0.3s ease;
+}
+
+.unit-row-shelf.revealed {
+  opacity: 1;
+}
+
+.stat-label {
+  font-family: 'Cinzel', serif;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--ink);
+  min-width: 28px;
+  width: 28px;
+  height: 28px;
+  text-align: center;
+  line-height: 28px;
+  background: var(--parchment);
+  border: 2px solid var(--ink-faded);
+  border-radius: 4px;
+}
+
+.unit-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  min-width: 80px;
+}
+
+.dice-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+/* Combat Unit Group (grouped by unit type) */
+.combat-unit-group {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  background: var(--parchment);
+  border: 3px solid var(--ink-faded);
+  border-radius: 4px;
+  overflow: visible;
+  transition: all 0.3s ease;
+}
+
+.combat-unit-group img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.unit-count {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  background: var(--ink);
+  color: var(--parchment);
+  font-family: 'Cinzel', serif;
+  font-size: 0.7rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  padding: 0 4px;
+}
+
+/* Small red badge on top-right of icon: number of hits that stack received */
+.hits-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 14px;
+  height: 14px;
+  background: #c62828;
+  color: white;
+  font-family: 'Cinzel', serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+/* Legacy combat unit (keeping for backwards compatibility) */
+.combat-unit {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  background: var(--parchment);
+  border: 2px solid var(--ink-faded);
+  border-radius: 4px;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.combat-unit img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.combat-unit.casualty {
+  opacity: 0.3;
+  filter: grayscale(100%);
+  border-color: #c62828;
+}
+
+.combat-unit.casualty::after {
+  content: '×';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #c62828;
+}
+
+.health-badge {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  min-width: 14px;
+  height: 14px;
+  background: #c62828;
+  color: white;
+  font-family: 'Cinzel', serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  padding: 0 3px;
+}
+
+/* Dice Display */
+.die {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  background: var(--parchment);
+  border: 2px solid var(--ink-faded);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  transition: all 0.2s ease;
+}
+
+.die.placeholder {
+  background: transparent;
+  border-color: transparent;
+}
+
+.die-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 1px;
+  width: 100%;
+  height: 100%;
+}
+
+.die .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: transparent;
+  justify-self: center;
+  align-self: center;
+}
+
+.die .dot.visible {
+  background: var(--ink-light);
+}
+
+.die .tenth-dot {
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ink-light);
+}
+
+.die.hit {
+  background: #c62828;
+  border-color: #8b1c1c;
+  box-shadow: 0 0 8px rgba(198, 40, 40, 0.5);
+}
+
+.die.hit .dot.visible,
+.die.hit .tenth-dot {
+  background: white;
+}
+
+.die.miss {
+  background: #f5f5f5;
+  border-color: #ccc;
+}
+
+.die.miss .dot.visible,
+.die.miss .tenth-dot {
+  background: #999;
+}
+
+/* Dice landing animation - impact/slam effect */
+.die.landing {
+  animation: diceLand 0.3s ease-out;
+}
+
+@keyframes diceLand {
+  0% {
+    transform: scale(0) translateY(-30px);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.3) translateY(0);
+    opacity: 1;
+  }
+  70% {
+    transform: scale(0.9);
+  }
+  85% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Hits Display */
+.hits-display {
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--ink-faded);
+  text-align: center;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+.hits-display.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.hits-count {
+  font-family: 'Cinzel', serif;
+  font-weight: 700;
+  font-size: 1.2rem;
+  color: var(--gold-dark);
+}
+
+/* Combat Result */
+.combat-result {
+  padding: 1rem;
+  text-align: center;
+  border-top: 2px solid var(--ink-faded);
+  animation: resultReveal 0.5s ease-out;
+}
+
+@keyframes resultReveal {
+  0% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.result-text {
+  font-family: 'Cinzel', serif;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* Combat Actions - buttons bottom left */
+.combat-actions {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.combat-actions > .confirm-buttons,
+.combat-actions > .retreat-confirm,
+.combat-actions > .retreat-selection {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Tan/parchment (Close, Continue) */
+.combat-btn-close,
+.combat-btn-continue {
+  min-width: 100px;
+  font-size: 1rem;
+  padding: 0.5rem 1.25rem;
+  background: linear-gradient(180deg, var(--parchment) 0%, var(--parchment-dark) 100%);
+  border: 2px solid var(--ink-faded);
+  color: var(--ink);
+}
+
+.combat-btn-close:hover,
+.combat-btn-continue:hover {
+  background: linear-gradient(180deg, var(--parchment-dark) 0%, var(--parchment) 100%);
+}
+
+/* Red (Start, Retreat) */
+.combat-btn-start,
+.combat-btn-retreat {
+  min-width: 100px;
+  font-size: 1rem;
+  padding: 0.5rem 1.25rem;
+  background: #c62828;
+  border: 2px solid #8b1c1c;
+  color: white;
+}
+
+.combat-btn-start:hover,
+.combat-btn-retreat:hover {
+  background: #d32f2f;
+}
+
+/* Legacy - keep for confirm/retreat flows */
+.retreat-btn {
+  background: #8b4513;
+  border-color: #5d2e0d;
+  color: var(--parchment);
+}
+
+.retreat-btn:hover {
+  background: #a0522d;
+}
+
+/* Retreat Confirmation */
+.retreat-confirm {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+}
+
+.confirm-message {
+  font-family: 'IM Fell English', serif;
+  font-size: 1rem;
+  color: var(--ink);
+  text-align: center;
+  margin: 0;
+}
+
+.confirm-buttons {
+  display: flex;
+  gap: 0.75rem;
+}
+
+button.danger {
+  background: #c62828;
+  border-color: #8b1c1c;
+  color: white;
+}
+
+button.danger:hover {
+  background: #d32f2f;
+}
+
+/* Retreat Territory Selection */
+.retreat-selection {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+}
+
+.selection-message {
+  font-family: 'IM Fell English', serif;
+  font-size: 1rem;
+  color: var(--ink);
+  text-align: center;
+  margin: 0;
+}
+
+.retreat-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+  max-width: 100%;
+}
+
+.retreat-option {
+  background: var(--parchment);
+  border: 2px solid var(--gold-dark);
+  color: var(--ink);
+  padding: 0.5rem 1rem;
+  font-family: 'IM Fell English', serif;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.retreat-option:hover {
+  background: var(--gold-light);
+  border-color: var(--gold-dark);
+  transform: translateY(-2px);
+}
+
+.cancel-retreat {
+  font-size: 0.85rem;
+  padding: 0.4rem 1rem;
+  opacity: 0.8;
+}
+
+.cancel-retreat:hover {
+  opacity: 1;
+}
+
+/* Close button */
+.close-btn {
+  font-size: 1.1rem;
+  padding: 0.75rem 2rem;
+}
+

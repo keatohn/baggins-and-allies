@@ -1,0 +1,91 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.main-content {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.map-and-tray {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sidebar-wrapper {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--parchment-light);
+  border-left: 2px solid var(--ink-faded);
+  position: relative;
+  transition: width 0.2s ease;
+}
+
+.sidebar-wrapper.collapsed {
+  width: 0;
+  min-width: 0;
+  overflow: visible;
+  border-left: none;
+}
+
+.sidebar-resize-handle {
+  flex-shrink: 0;
+  width: 6px;
+  cursor: col-resize;
+  background: var(--ink-faded);
+  transition: background 0.15s;
+}
+
+.sidebar-resize-handle:hover {
+  background: var(--gold-dark);
+}
+
+.sidebar-resize-handle:active {
+  background: var(--gold-dark);
+}
+
+.sidebar-toggle {
+  position: absolute;
+  left: -32px;
+  top: 8px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid var(--ink-faded);
+  border-right: none;
+  border-radius: 6px 0 0 6px;
+  background: var(--parchment-light);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  z-index: 10;
+  box-shadow: -2px 0 4px rgba(0,0,0,0.1);
+}
+
+.sidebar-wrapper.collapsed .sidebar-toggle {
+  left: auto;
+  right: 0;
+  border-right: 2px solid var(--ink-faded);
+  border-radius: 6px;
+  box-shadow: 2px 0 4px rgba(0,0,0,0.1);
+}
+
+.sidebar-toggle:hover {
+  background: var(--parchment);
+}
+
+.map-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}

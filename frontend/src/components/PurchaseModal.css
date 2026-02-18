@@ -1,0 +1,252 @@
+/* Modal overlay */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: var(--parchment);
+  border: 3px solid var(--ink-faded);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  max-width: 90vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Purchase modal specific */
+.purchase-modal {
+  width: 500px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  border-bottom: 2px solid var(--ink-faded);
+  background: linear-gradient(180deg, var(--parchment-light) 0%, var(--parchment) 100%);
+  border-radius: 5px 5px 0 0;
+}
+
+.modal-header h2 {
+  font-family: 'Cinzel', serif;
+  font-size: 1.3rem;
+  color: var(--ink);
+  margin: 0;
+}
+
+.mobilization-capacity {
+  margin: 0.5rem 0 0.75rem;
+  font-size: 1.05rem;
+  color: var(--ink-light);
+  text-align: center;
+}
+
+.mobilization-capacity strong {
+  color: var(--ink);
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: var(--ink-faded);
+  cursor: pointer;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close-btn:hover {
+  color: var(--ink);
+  background: none;
+  box-shadow: none;
+}
+
+/* Resources display */
+.resources-display {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+  background: var(--parchment-dark);
+  border-bottom: 1px solid var(--ink-faded);
+}
+
+.resource-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.resource-label {
+  font-family: 'Cinzel', serif;
+  color: var(--ink-light);
+  min-width: 60px;
+  text-align: right;
+}
+
+.resource-value {
+  font-family: 'Cinzel', serif;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--gold-dark);
+  min-width: 40px;
+  text-align: center;
+}
+
+.resource-separator {
+  color: var(--ink-faded);
+}
+
+.resource-remaining {
+  font-family: 'Cinzel', serif;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--gold-dark);
+  min-width: 40px;
+  text-align: center;
+}
+
+.resource-remaining.negative {
+  color: #c62828;
+}
+
+/* Unit list */
+.purchase-modal .unit-list {
+  padding: 1rem;
+  overflow-y: auto;
+  max-height: 400px;
+  border: none;
+  margin: 0;
+}
+
+.unit-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--ink-faded);
+}
+
+.unit-row:last-child {
+  border-bottom: none;
+}
+
+.unit-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+}
+
+.unit-icon {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  background: var(--parchment-light);
+  border: 2px solid var(--ink-faded);
+  border-radius: 4px;
+  padding: 2px;
+}
+
+.unit-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.unit-name {
+  font-family: 'Cinzel', serif;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.unit-stats {
+  font-size: 0.75rem;
+  color: var(--ink-faded);
+  font-family: monospace;
+}
+
+.unit-cost {
+  width: 50px;
+  text-align: center;
+}
+
+.cost-value {
+  font-family: 'Cinzel', serif;
+  font-weight: 700;
+  color: var(--gold-dark);
+}
+
+/* Quantity controls */
+.quantity-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.quantity-controls button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.quantity {
+  width: 30px;
+  text-align: center;
+  font-family: 'Cinzel', serif;
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+/* Key for unit stats (above footer) */
+.unit-stats-key {
+  margin: 0;
+  padding: 0.5rem 1rem;
+  font-size: 0.7rem;
+  font-family: var(--font-parchment);
+  color: var(--ink-faded);
+  text-align: center;
+  border-top: 1px solid var(--ink-faded);
+}
+
+/* Modal footer */
+.modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  border-top: 2px solid var(--ink-faded);
+  background: linear-gradient(180deg, var(--parchment) 0%, var(--parchment-dark) 100%);
+  border-radius: 0 0 5px 5px;
+}
+
+.purchase-summary {
+  font-family: 'Cinzel', serif;
+  font-size: 0.9rem;
+  color: var(--ink-light);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+}

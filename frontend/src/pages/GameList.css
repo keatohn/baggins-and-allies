@@ -1,0 +1,54 @@
+.game-list-page {
+  min-height: 100vh;
+  padding: 2rem;
+  background: var(--parchment);
+}
+
+.game-list-page__title {
+  font-family: 'Cinzel', serif;
+  font-size: 1.75rem;
+  color: var(--ink);
+  margin-bottom: 1rem;
+}
+
+.game-list-page__back {
+  display: inline-block;
+  margin-bottom: 1.5rem;
+  color: var(--gold-dark);
+}
+
+.game-list__error {
+  color: #c62828;
+}
+
+.game-list__empty {
+  font-family: var(--font-parchment);
+  color: var(--ink-faded);
+}
+
+.game-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-width: 400px;
+}
+
+.game-list__item {
+  margin-bottom: 0.5rem;
+}
+
+.game-list__btn {
+  width: 100%;
+  text-align: left;
+  padding: 0.75rem 1rem;
+}
+
+.game-list__name {
+  font-weight: 600;
+  display: block;
+}
+
+.game-list__meta {
+  font-size: 0.85rem;
+  color: var(--ink-faded);
+}
