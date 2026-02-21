@@ -1,16 +1,68 @@
 .header {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0.75rem 1.5rem;
   background-color: var(--parchment);
   background-image:
-    linear-gradient(180deg, rgba(255,255,255,0.06) 0%, transparent 50%, rgba(0,0,0,0.04) 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, transparent 50%, rgba(0, 0, 0, 0.04) 100%),
     url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
   border-bottom: 2px solid var(--ink-faded);
   box-shadow: 0 2px 8px var(--shadow);
   z-index: 100;
   gap: 1rem;
+}
+
+/* Centered title: game brand + this game's name */
+.header-center-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  pointer-events: none;
+}
+
+.header-center-title-brand {
+  font-family: 'Cinzel', serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+}
+
+.header-center-title-game {
+  font-family: var(--font-parchment);
+  font-size: 0.95rem;
+  color: var(--ink-light);
+  font-style: italic;
+  line-height: 1.2;
+}
+
+/* Extra horizontal breathing room between header sections */
+.header-stats-btn {
+  margin-right: 0.25rem;
+}
+
+.header-stronghold-bar-wrap {
+  margin-left: 1rem;
+  margin-right: 1.25rem;
+}
+
+.header-turn-ticker {
+  margin-left: 0.5rem;
+}
+
+.faction-header {
+  margin-left: 1rem;
+}
+
+.turn-status {
+  margin-left: 1rem;
 }
 
 /* Main menu link - left of stats button */
@@ -34,6 +86,36 @@
 .header-menu-btn:hover {
   border-color: var(--ink);
   background: var(--parchment);
+}
+
+/* Unit Stats button - warrior icon (blacked-out gondor_infantry), same size as stats btn */
+.header-unit-stats-btn {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--parchment-dark);
+  border: 2px solid var(--ink-faded);
+  border-radius: 4px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.header-unit-stats-btn:hover {
+  border-color: var(--ink);
+  background: var(--parchment);
+  box-shadow: 0 1px 4px var(--shadow);
+}
+
+/* Blacked-out unit icon so it reads as a single-color silhouette on the button */
+.header-unit-stats-icon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  filter: brightness(0);
 }
 
 /* Stats button - top left, bar chart icon */
@@ -70,30 +152,24 @@
   min-width: 1rem;
 }
 
-/* Faction name and logo - on the right */
+/* Faction name only (logo is in turn ticker) */
 .faction-header {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.35rem 0.75rem;
+  padding: 0.25rem 0.6rem;
   border-radius: 4px;
   border: 2px solid var(--ink-faded);
   background: rgba(255, 255, 255, 0.2);
 }
 
-.faction-header .faction-icon {
-  width: 40px;
-  height: 40px;
-  object-fit: contain;
-}
-
 .faction-header .faction-title {
   font-family: 'Cinzel', serif;
-  font-size: 1.5rem;
+  font-size: 1.35rem;
   font-weight: 600;
   color: var(--ink);
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
 }
 
 .turn-status {
@@ -122,51 +198,59 @@
   color: var(--gold-dark);
 }
 
-/* Stats modal (same pattern as purchase/combat modals) */
-.stats-modal .modal-header {
+/* Stats modal (same pattern as purchase/combat modals) - larger size and font */
+.stats-modal .modal-header,
+.unit-stats-modal .modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem 1.5rem;
+  padding: 1.25rem 1.75rem;
   border-bottom: 2px solid var(--ink-faded);
   background: linear-gradient(180deg, var(--parchment-light) 0%, var(--parchment) 100%);
   border-radius: 5px 5px 0 0;
 }
 
-.stats-modal .modal-header h2 {
+.stats-modal .modal-header h2,
+.unit-stats-modal .modal-header h2 {
   font-family: 'Cinzel', serif;
-  font-size: 1.3rem;
+  font-size: 1.55rem;
   color: var(--ink);
   margin: 0;
 }
 
-.stats-modal .close-btn {
+.stats-modal .close-btn,
+.unit-stats-modal .close-btn {
   background: none;
   border: none;
-  font-size: 1.5rem;
+  font-size: 1.6rem;
   color: var(--ink-faded);
   cursor: pointer;
   padding: 0;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.stats-modal .close-btn:hover {
+.stats-modal .close-btn:hover,
+.unit-stats-modal .close-btn:hover {
   color: var(--ink);
 }
 
-.stats-modal-body {
-  padding: 1.5rem 1.75rem;
+.stats-modal-body,
+.unit-stats-modal-body {
+  padding: 1.75rem 2rem;
   background: var(--parchment-dark);
+  max-height: min(60vh, 500px);
+  overflow-y: auto;
 }
 
-.stats-modal-key {
+.stats-modal-key,
+.unit-stats-modal-key {
   margin: 0;
-  padding: 0.5rem 1rem;
-  font-size: 0.7rem;
+  padding: 0.6rem 1rem;
+  font-size: 0.85rem;
   font-family: var(--font-parchment);
   color: var(--ink-faded);
   text-align: center;
@@ -175,38 +259,44 @@
   background: var(--parchment);
 }
 
-.stats-modal .header-stats-table {
+.stats-modal .header-stats-table,
+.unit-stats-modal .header-stats-table {
   border-collapse: collapse;
   font-family: var(--font-parchment);
-  font-size: 1.05rem;
+  font-size: 1.2rem;
 }
 
 .stats-modal .header-stats-table th,
-.stats-modal .header-stats-table td {
-  padding: 0.4rem 0.85rem;
+.stats-modal .header-stats-table td,
+.unit-stats-modal .header-stats-table th,
+.unit-stats-modal .header-stats-table td {
+  padding: 0.5rem 1rem;
   text-align: left;
 }
 
-.stats-modal .header-stats-table th {
+.stats-modal .header-stats-table th,
+.unit-stats-modal .header-stats-table th {
   font-weight: 700;
   color: var(--ink);
   border-bottom: 1px solid var(--ink-faded);
 }
 
-.stats-modal .header-stats-table th.stats-col-faction {
-  min-width: 5rem;
+.stats-modal .header-stats-table th.stats-col-faction,
+.unit-stats-modal .header-stats-table th.stats-col-unit {
+  min-width: 6rem;
 }
 
-.stats-modal .header-stats-table th.stats-col-num {
+.stats-modal .header-stats-table th.stats-col-num,
+.unit-stats-modal .header-stats-table th.stats-col-num {
   text-align: right;
-  min-width: 2.5rem;
+  min-width: 2.75rem;
 }
 
 .stats-modal .stats-alliance-row td {
   font-weight: 700;
-  font-size: 1.1rem;
+  font-size: 1.25rem;
   color: var(--ink);
-  padding-top: 0.5rem;
+  padding-top: 0.6rem;
 }
 
 .stats-modal .stats-alliance-cell {
@@ -215,11 +305,26 @@
 
 .stats-modal .stats-faction-row td {
   color: var(--ink-light);
-  font-size: 0.98rem;
+  font-size: 1.12rem;
 }
 
 .stats-modal .stats-faction-row .stats-col-faction {
   font-style: italic;
+  padding-left: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.unit-stats-modal .unit-stats-faction-row td {
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: var(--ink);
+  padding-top: 0.5rem;
+  border-bottom: 1px solid var(--ink-faded);
+}
+
+.unit-stats-modal .unit-stats-faction-row .stats-col-unit {
   padding-left: 0.75rem;
   display: flex;
   align-items: center;
@@ -233,13 +338,45 @@
   flex-shrink: 0;
 }
 
-.stats-modal .stats-col-num {
+.unit-stats-modal .unit-stats-faction-icon {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.unit-stats-modal .unit-stats-unit-row td {
+  color: var(--ink-light);
+  font-size: 1.1rem;
+  padding-left: 2rem;
+}
+
+.unit-stats-modal .unit-stats-unit-row .stats-col-unit .unit-name-text {
+  font-size: 0.95rem;
+}
+
+.unit-stats-modal .unit-stats-unit-row .stats-col-unit {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-left: 2rem;
+}
+
+.unit-stats-modal .unit-stats-unit-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.stats-modal .stats-col-num,
+.unit-stats-modal .stats-col-num {
   text-align: right;
 }
 
 .stats-modal .stats-placeholder {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: 1.05rem;
   color: var(--ink-faded);
 }
 
@@ -249,27 +386,36 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.2rem;
-  min-width: 120px;
-  max-width: 200px;
+  gap: 0.25rem;
+  min-width: 240px;
+  max-width: 340px;
 }
+
 .header-stronghold-bar {
   display: flex;
   width: 100%;
-  height: 1rem;
-  border-radius: 4px;
+  height: 1.35rem;
+  border-radius: 5px;
   overflow: hidden;
   border: 1px solid var(--ink-faded);
   background: var(--parchment-dark);
 }
+
 .header-stronghold-bar-good {
   background: #f5f5f0;
   min-width: 0;
 }
+
+.header-stronghold-bar-neutral {
+  background: #888;
+  min-width: 0;
+}
+
 .header-stronghold-bar-evil {
   background: #2a2a2a;
   min-width: 0;
 }
+
 .header-stronghold-bar-label {
   font-family: var(--font-parchment);
   font-size: 0.7rem;
@@ -277,14 +423,84 @@
   white-space: nowrap;
 }
 
+/* Turn order ticker: faction-colored border like name box; solid gold ring with orange glow on current */
+.header-turn-ticker {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 50px;
+  padding: 0 0.5rem;
+  border: 2px solid var(--ink-faded);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.header-turn-ticker-slot {
+  width: 35px;
+  height: 35px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  padding: 2px;
+  border: 2px solid var(--ink-faded);
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Solid gold ring (thick band) with orange glow that pulses around it */
+.header-turn-ticker-slot--current {
+  border: none;
+  box-shadow:
+    0 0 0 3px #d4a017,
+    0 0 0 4px #b8860b,
+    0 0 14px 3px rgba(232, 126, 34, 0.75),
+    0 0 24px 6px rgba(230, 126, 34, 0.5);
+  animation: turn-ticker-ring-glow 2s ease-in-out infinite;
+}
+
+@keyframes turn-ticker-ring-glow {
+
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 3px #d4a017,
+      0 0 0 4px #b8860b,
+      0 0 14px 3px rgba(232, 126, 34, 0.75),
+      0 0 24px 6px rgba(230, 126, 34, 0.5);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 3px #d4a017,
+      0 0 0 4px #b8860b,
+      0 0 20px 5px rgba(232, 126, 34, 0.9),
+      0 0 32px 10px rgba(230, 126, 34, 0.6);
+  }
+}
+
+.header-turn-ticker-icon {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  display: block;
+}
+
 /* Stats modal - overlay uses .modal-overlay (same as PurchaseModal) for centering */
-.stats-modal {
+.stats-modal,
+.unit-stats-modal {
   background: var(--parchment);
   border: 3px solid var(--ink-faded);
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-  min-width: 420px;
-  max-width: 90vw;
+  min-width: 520px;
+  max-width: 92vw;
+  max-height: 90vh;
   display: flex;
   flex-direction: column;
 }

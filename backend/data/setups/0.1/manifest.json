@@ -1,0 +1,12 @@
+{
+    "id": "0.1",
+    "display_name": "0.1",
+    "map_asset": "baggins_and_allies_map_0.1",
+    "victory_criteria": {
+        "strongholds": {
+            "good": 2,
+            "evil": 2
+        }
+    },
+    "camp_cost": 10
+}

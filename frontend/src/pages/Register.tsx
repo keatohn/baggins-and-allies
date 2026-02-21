@@ -24,7 +24,11 @@ export default function Register() {
       setAuthToken(res.access_token);
       navigate('/', { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Registration failed');
+      const msg = err instanceof Error ? err.message : 'Registration failed';
+      const isGeneric = /^(Failed to fetch|Load failed|NetworkError|Network request failed)$/i.test(msg.trim());
+      setError(isGeneric
+        ? 'Registration failed. This email or username may already be in use.'
+        : msg);
     } finally {
       setLoading(false);
     }

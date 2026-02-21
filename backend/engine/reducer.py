@@ -7,9 +7,21 @@ Returns (new_state, events) where events describe what happened.
 from copy import deepcopy
 from backend.engine.state import GameState, UnitStack, TerritoryState, Unit, ActiveCombat, CombatRoundResult, PendingMove, PendingMobilization
 from backend.engine.actions import Action
-from backend.engine.definitions import UnitDefinition, TerritoryDefinition, FactionDefinition
-from backend.engine.combat import resolve_combat_round, RoundResult, group_dice_by_stat
+from backend.engine.definitions import UnitDefinition, TerritoryDefinition, FactionDefinition, CampDefinition
+from backend.engine.combat import (
+    resolve_combat_round,
+    resolve_archer_prefire,
+    RoundResult,
+    group_dice_by_stat,
+    ARCHETYPE_ARCHER,
+    calculate_required_dice,
+    compute_terrain_stat_modifiers,
+    compute_anti_cavalry_stat_modifiers,
+    compute_captain_stat_modifiers,
+    merge_stat_modifiers,
+)
 from backend.engine.movement import get_reachable_territories_for_unit, calculate_movement_cost
+from backend.engine.queries import _territory_is_friendly_for_retreat
 from backend.engine.utils import unitstack_to_units
 from backend.engine.events import (
     GameEvent,
@@ -30,7 +42,21 @@ from backend.engine.events import (
     units_mobilized,
     victory,
 )
-from backend.engine import STRONGHOLDS_FOR_VICTORY
+
+
+def _territory_has_standing_camp(
+    state: GameState,
+    territory_id: str,
+    camp_defs: dict[str, CampDefinition],
+) -> bool:
+    """True if the territory has a camp that is still standing (not destroyed by capture)."""
+    for camp_id in state.camps_standing:
+        if state.dynamic_camps.get(camp_id) == territory_id:
+            return True
+        camp = camp_defs.get(camp_id)
+        if camp and camp.territory_id == territory_id:
+            return True
+    return False
 
 
 def _faction_owns_capital(
@@ -52,11 +78,11 @@ def _faction_owns_capital(
 # Phase rules: which action types are allowed in which phases
 # Note: During active combat, only continue_combat and retreat are allowed
 PHASE_ALLOWED_ACTIONS = {
-    "purchase": ["purchase_units", "end_phase"],
+    "purchase": ["purchase_units", "purchase_camp", "end_phase"],
     "combat_move": ["move_units", "cancel_move", "end_phase"],
     "combat": ["initiate_combat", "continue_combat", "retreat", "end_phase"],
     "non_combat_move": ["move_units", "cancel_move", "end_phase"],
-    "mobilization": ["mobilize_units", "cancel_mobilization", "end_phase", "end_turn"],
+    "mobilization": ["mobilize_units", "place_camp", "cancel_mobilization", "end_phase", "end_turn"],
 }
 
 
@@ -100,6 +126,7 @@ def apply_action(
     unit_defs: dict[str, UnitDefinition],
     territory_defs: dict[str, TerritoryDefinition],
     faction_defs: dict[str, FactionDefinition],
+    camp_defs: dict[str, CampDefinition] | None = None,
 ) -> tuple[GameState, list[GameEvent]]:
     """
     Apply a single action to the current state, returning new state and events.
@@ -114,10 +141,13 @@ def apply_action(
         unit_defs: Unit definitions
         territory_defs: Territory definitions
         faction_defs: Faction definitions
+        camp_defs: Camp definitions (mobilization points); used for standing camps and mobilization
 
     Returns:
         Tuple of (new_state, events) where events describe what happened
     """
+    if camp_defs is None:
+        camp_defs = {}
     # Check if game is already won
     if state.winner is not None:
         raise ValueError(f"Game is over. {state.winner} alliance has won.")
@@ -133,7 +163,16 @@ def apply_action(
     new_state = state.copy()
     events: list[GameEvent] = []
 
-    if action.type == "purchase_units":
+    if action.type == "purchase_camp":
+        new_state, evts = _handle_purchase_camp(
+            new_state, action, camp_defs or {})
+        events.extend(evts)
+
+    elif action.type == "place_camp":
+        new_state, evts = _handle_place_camp(new_state, action, camp_defs or {})
+        events.extend(evts)
+
+    elif action.type == "purchase_units":
         new_state, evts = _handle_purchase_units(
             new_state, action, unit_defs, faction_defs)
         events.extend(evts)
@@ -154,12 +193,12 @@ def apply_action(
         events.extend(evts)
 
     elif action.type == "retreat":
-        new_state, evts = _handle_retreat(new_state, action, territory_defs)
+        new_state, evts = _handle_retreat(new_state, action, territory_defs, faction_defs)
         events.extend(evts)
 
     elif action.type == "mobilize_units":
         new_state, evts = _handle_mobilize_units(
-            new_state, action, unit_defs, territory_defs, faction_defs)
+            new_state, action, unit_defs, territory_defs, faction_defs, camp_defs)
         events.extend(evts)
 
     elif action.type == "cancel_move":
@@ -171,11 +210,13 @@ def apply_action(
         events.extend(evts)
 
     elif action.type == "end_phase":
-        new_state, evts = _handle_end_phase(new_state, unit_defs, territory_defs, faction_defs)
+        new_state, evts = _handle_end_phase(
+            new_state, unit_defs, territory_defs, faction_defs, camp_defs)
         events.extend(evts)
 
     elif action.type == "end_turn":
-        new_state, evts = _handle_end_turn(new_state, territory_defs, faction_defs)
+        new_state, evts = _handle_end_turn(
+            new_state, territory_defs, faction_defs, camp_defs)
         events.extend(evts)
 
     else:
@@ -273,6 +314,93 @@ def _handle_purchase_units(
     return state, events
 
 
+def _handle_purchase_camp(
+    state: GameState,
+    action: Action,
+    camp_defs: dict[str, CampDefinition],
+) -> tuple[GameState, list[GameEvent]]:
+    """Purchase a camp. Deduct camp_cost (power); add to pending_camps with territory_options."""
+    events: list[GameEvent] = []
+    faction_id = action.faction
+
+    if state.phase != "purchase":
+        raise ValueError("Can only purchase a camp during purchase phase")
+    if state.current_faction != faction_id:
+        raise ValueError("Not this faction's turn")
+
+    cost = getattr(state, "camp_cost", 10)
+    resources = state.faction_resources.get(faction_id, {})
+    power = resources.get("power", 0)
+    if power < cost:
+        raise ValueError(f"Insufficient power for camp: have {power}, need {cost}")
+
+    # Territories owned at turn start that don't have a camp (and not already chosen by a pending camp)
+    owned_at_start = state.faction_territories_at_turn_start.get(faction_id, [])
+    already_placed = [
+        p.get("placed_territory_id") for p in state.pending_camps
+        if p.get("placed_territory_id")
+    ]
+    territory_options = [
+        tid for tid in owned_at_start
+        if not _territory_has_standing_camp(state, tid, camp_defs)
+        and tid not in already_placed
+    ]
+
+    if not territory_options:
+        raise ValueError("No valid territory to place a camp (all owned territories already have a camp or were used)")
+
+    # Deduct cost
+    state.faction_resources[faction_id]["power"] = power - cost
+    events.append(resources_changed(faction_id, "power", power, power - cost, "purchase_camp"))
+
+    state.pending_camps.append({
+        "territory_options": territory_options,
+        "placed_territory_id": None,
+    })
+
+    return state, events
+
+
+def _handle_place_camp(
+    state: GameState,
+    action: Action,
+    camp_defs: dict[str, CampDefinition],
+) -> tuple[GameState, list[GameEvent]]:
+    """Place a purchased camp on a territory. Valid in mobilization phase."""
+    events: list[GameEvent] = []
+    faction_id = action.faction
+    camp_index = action.payload.get("camp_index", -1)
+    territory_id = action.payload.get("territory_id", "")
+
+    if state.phase != "mobilization":
+        raise ValueError("Can only place a camp during mobilization phase")
+    if state.current_faction != faction_id:
+        raise ValueError("Not this faction's turn")
+    if camp_index < 0 or camp_index >= len(state.pending_camps):
+        raise ValueError(f"Invalid camp_index {camp_index}; have {len(state.pending_camps)} pending camps")
+
+    pending = state.pending_camps[camp_index]
+    if pending.get("placed_territory_id"):
+        raise ValueError("This camp has already been placed")
+
+    options = pending.get("territory_options") or []
+    if territory_id not in options:
+        raise ValueError(
+            f"Territory {territory_id} is not a valid placement (options: {options})"
+        )
+    if _territory_has_standing_camp(state, territory_id, camp_defs):
+        raise ValueError(f"Territory {territory_id} already has a camp")
+
+    # Place: create dynamic camp and add to camps_standing
+    camp_id = f"purchased_camp_{territory_id}"
+    state.dynamic_camps[camp_id] = territory_id
+    state.camps_standing.append(camp_id)
+    state.pending_camps[camp_index]["placed_territory_id"] = territory_id
+
+    # mobilization_camps is fixed at turn start; newly placed camp only counts next turn
+    return state, events
+
+
 def _handle_move_units(
     state: GameState,
     action: Action,
@@ -324,9 +452,14 @@ def _handle_move_units(
             raise ValueError(f"Unit {instance_id} does not belong to {faction_id}")
         units_to_move.append(unit)
 
-    # Validate each unit can reach the destination
+    charge_through = action.payload.get("charge_through")
+    if charge_through is not None and not isinstance(charge_through, list):
+        charge_through = []
+    charge_through = [str(t) for t in charge_through] if charge_through else []
+
+    first_unit_charge_routes: dict[str, list[list[str]]] = {}
     for unit in units_to_move:
-        reachable = get_reachable_territories_for_unit(
+        reachable, charge_routes = get_reachable_territories_for_unit(
             unit,
             from_id,
             state,
@@ -335,6 +468,8 @@ def _handle_move_units(
             faction_defs,
             state.phase,
         )
+        if not first_unit_charge_routes:
+            first_unit_charge_routes = charge_routes
 
         if to_id not in reachable:
             raise ValueError(
@@ -342,12 +477,19 @@ def _handle_move_units(
                 f"(remaining_movement={unit.remaining_movement}, phase={state.phase})"
             )
 
-    # Add to pending moves (actual movement happens at phase end)
+    if charge_through:
+        valid_routes = first_unit_charge_routes.get(to_id, [])
+        if charge_through not in valid_routes:
+            raise ValueError(
+                f"Invalid charge_through for {to_id}: must be one of the valid charging routes"
+            )
+
     pending_move = PendingMove(
         from_territory=from_id,
         to_territory=to_id,
         unit_instance_ids=unit_instance_ids,
         phase=state.phase,
+        charge_through=charge_through,
     )
     state.pending_moves.append(pending_move)
 
@@ -379,13 +521,23 @@ def _apply_pending_moves(
         from_id = pending_move.from_territory
         to_id = pending_move.to_territory
         unit_instance_ids = pending_move.unit_instance_ids
-        
+        charge_through = getattr(pending_move, "charge_through", None) or []
+
         from_territory = state.territories.get(from_id)
         to_territory = state.territories.get(to_id)
-        
+
         if not from_territory or not to_territory:
             continue  # Skip invalid moves
-        
+
+        # Cavalry charging: conquer empty enemy territories we passed through (before moving units)
+        if unit_instance_ids:
+            faction_id = unit_instance_ids[0].split("_")[0]
+            for tid in charge_through:
+                t = state.territories.get(tid)
+                tdef = territory_defs.get(tid)
+                if t and tdef and getattr(tdef, "ownable", True) and t.owner and t.owner != faction_id:
+                    state.pending_captures[tid] = faction_id
+
         # Calculate the movement cost (distance) to destination
         distance = calculate_movement_cost(from_id, to_id, territory_defs)
         if distance is None:
@@ -471,10 +623,12 @@ def _handle_mobilize_units(
     unit_defs: dict[str, UnitDefinition],
     territory_defs: dict[str, TerritoryDefinition],
     faction_defs: dict[str, FactionDefinition],
+    camp_defs: dict[str, CampDefinition],
 ) -> tuple[GameState, list[GameEvent]]:
     """
     Queue a mobilization: add to pending_mobilizations and deduct from faction_purchased_units.
     Actual deployment to territory happens at end of mobilization phase.
+    Destination must be an owned territory with a standing camp (in mobilization_camps).
     """
     events: list[GameEvent] = []
     faction_id = action.faction
@@ -488,17 +642,17 @@ def _handle_mobilize_units(
     if not _faction_owns_capital(state, faction_id, faction_defs):
         raise ValueError(f"Cannot mobilize units: {faction_id}'s capital has been captured")
 
-    if destination_id not in state.mobilization_strongholds:
+    if destination_id not in state.mobilization_camps:
         raise ValueError(
-            f"Cannot mobilize to {destination_id}: stronghold must be owned at start of turn"
+            f"Cannot mobilize to {destination_id}: must be an owned camp at start of turn"
         )
 
     dest_territory = state.territories.get(destination_id)
     dest_def = territory_defs.get(destination_id)
     if not dest_territory or not dest_def:
         raise ValueError(f"Territory {destination_id} does not exist")
-    if not dest_def.is_stronghold:
-        raise ValueError(f"Territory {destination_id} is not a stronghold")
+    if not _territory_has_standing_camp(state, destination_id, camp_defs):
+        raise ValueError(f"Territory {destination_id} has no standing camp (camp was destroyed)")
 
     purchased_units = state.faction_purchased_units.get(faction_id, [])
 
@@ -671,20 +825,116 @@ def _handle_initiate_combat(
         defender_faction, defender_instance_ids
     ))
 
-    # Compute grouped dice BEFORE combat (units get modified during resolution)
+    # Terrain + anti-cavalry + captain bonuses (merged; recomputed every round)
+    territory_def = territory_defs.get(territory_id)
+    terrain_att, terrain_def = compute_terrain_stat_modifiers(
+        territory_def, attacker_units, defender_units, unit_defs
+    )
+    anticav_att, anticav_def = compute_anti_cavalry_stat_modifiers(
+        attacker_units, defender_units, unit_defs
+    )
+    captain_att, captain_def = compute_captain_stat_modifiers(
+        attacker_units, defender_units, unit_defs
+    )
+    attacker_mods = merge_stat_modifiers(terrain_att, anticav_att, captain_att)
+    defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
+
+    # Check if defender has archers -> run prefire before round 1
+    defender_archer_units = [
+        u for u in defender_units
+        if unit_defs.get(u.unit_id) and getattr(unit_defs[u.unit_id], "archetype", "") == ARCHETYPE_ARCHER
+    ]
+    if defender_archer_units:
+        # Prefire: only defender archers roll (at defense-1); hits applied to attackers only
+        prefire_defender_rolls = dice_rolls.get("defender", [])
+        round_result = resolve_archer_prefire(
+            attacker_units, defender_archer_units, unit_defs, prefire_defender_rolls,
+            stat_modifiers_defender_extra=defender_mods,
+        )
+        # Group defender dice for UI (archers at defense-1, merged with terrain)
+        archer_stat_modifiers = {
+            u.instance_id: -1 + defender_mods.get(u.instance_id, 0)
+            for u in defender_archer_units
+        }
+        defender_dice_grouped = group_dice_by_stat(
+            defender_archer_units, prefire_defender_rolls, unit_defs, is_attacker=False,
+            stat_modifiers=archer_stat_modifiers,
+        )
+        prefire_log_entry = CombatRoundResult(
+            round_number=0,
+            attacker_rolls=[],
+            defender_rolls=prefire_defender_rolls,
+            attacker_hits=0,
+            defender_hits=round_result.defender_hits,
+            attacker_casualties=round_result.attacker_casualties,
+            defender_casualties=[],
+            attackers_remaining=len(round_result.surviving_attacker_ids),
+            defenders_remaining=len(defender_units),  # no defender casualties in prefire
+            is_archer_prefire=True,
+        )
+        events.append(combat_round_resolved(
+            territory_id, 0,
+            {}, defender_dice_grouped,
+            0, round_result.defender_hits,
+            round_result.attacker_casualties, [],
+            round_result.attacker_wounded, [],
+            len(round_result.surviving_attacker_ids), len(defender_units),
+            is_archer_prefire=True,
+        ))
+        for casualty_id in round_result.attacker_casualties:
+            unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
+            events.append(unit_destroyed(casualty_id, unit_type, attacker_faction, territory_id, "combat"))
+        _remove_casualties(territory, round_result.attacker_casualties)
+        _sync_survivor_health(territory, attacker_units, defender_units)
+
+        if round_result.attackers_eliminated:
+            # All attackers dead from prefire; defender wins, no round 1
+            end_round_result = RoundResult(
+                attacker_hits=0,
+                defender_hits=round_result.defender_hits,
+                attacker_casualties=round_result.attacker_casualties,
+                defender_casualties=[],
+                attacker_wounded=[],
+                defender_wounded=[],
+                surviving_attacker_ids=[],
+                surviving_defender_ids=defender_instance_ids,
+                attackers_eliminated=True,
+                defenders_eliminated=False,
+            )
+            state, end_events = _resolve_combat_end(
+                state, attacker_faction, territory_id,
+                end_round_result, [prefire_log_entry], territory_defs,
+            )
+            events.extend(end_events)
+            return state, events
+
+        # Combat continues; create active combat with round 0 (round 1 not yet run)
+        state.active_combat = ActiveCombat(
+            attacker_faction=attacker_faction,
+            territory_id=territory_id,
+            attacker_instance_ids=round_result.surviving_attacker_ids,
+            round_number=0,
+            combat_log=[prefire_log_entry],
+            attackers_have_rolled=False,
+        )
+        return state, events
+
+    # No archers: run round 1 as usual (with terrain modifiers)
     attacker_dice_grouped = group_dice_by_stat(
-        attacker_units, dice_rolls.get("attacker", []), unit_defs, is_attacker=True
+        attacker_units, dice_rolls.get("attacker", []), unit_defs, is_attacker=True,
+        stat_modifiers=attacker_mods or None,
     )
     defender_dice_grouped = group_dice_by_stat(
-        defender_units, dice_rolls.get("defender", []), unit_defs, is_attacker=False
+        defender_units, dice_rolls.get("defender", []), unit_defs, is_attacker=False,
+        stat_modifiers=defender_mods or None,
     )
 
-    # Fight round 1
     round_result = resolve_combat_round(
-        attacker_units, defender_units, unit_defs, dice_rolls
+        attacker_units, defender_units, unit_defs, dice_rolls,
+        stat_modifiers_attacker=attacker_mods or None,
+        stat_modifiers_defender=defender_mods or None,
     )
 
-    # Create combat log entry
     combat_log_entry = CombatRoundResult(
         round_number=1,
         attacker_rolls=dice_rolls.get("attacker", []),
@@ -697,7 +947,6 @@ def _handle_initiate_combat(
         defenders_remaining=len(round_result.surviving_defender_ids),
     )
 
-    # Emit round resolved event with grouped dice for UI
     events.append(combat_round_resolved(
         territory_id, 1,
         attacker_dice_grouped, defender_dice_grouped,
@@ -707,7 +956,6 @@ def _handle_initiate_combat(
         len(round_result.surviving_attacker_ids), len(round_result.surviving_defender_ids),
     ))
 
-    # Emit unit destroyed events for casualties
     for casualty_id in round_result.attacker_casualties:
         unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
         events.append(unit_destroyed(casualty_id, unit_type, attacker_faction, territory_id, "combat"))
@@ -715,25 +963,18 @@ def _handle_initiate_combat(
         unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
         events.append(unit_destroyed(casualty_id, unit_type, defender_faction, territory_id, "combat"))
 
-    # Remove casualties from the territory (both attackers and defenders are here)
     _remove_casualties(territory, round_result.attacker_casualties)
     _remove_casualties(territory, round_result.defender_casualties)
+    _sync_survivor_health(territory, attacker_units, defender_units)
 
-    # Check for combat end conditions
     if round_result.attackers_eliminated or round_result.defenders_eliminated:
-        # Combat ended in round 1
         state, end_events = _resolve_combat_end(
-            state,
-            attacker_faction,
-            territory_id,
-            round_result,
-            [combat_log_entry],
-            territory_defs,
+            state, attacker_faction, territory_id,
+            round_result, [combat_log_entry], territory_defs,
         )
         events.extend(end_events)
         return state, events
 
-    # Both sides have survivors - create active combat for continuation
     state.active_combat = ActiveCombat(
         attacker_faction=attacker_faction,
         territory_id=territory_id,
@@ -741,7 +982,6 @@ def _handle_initiate_combat(
         round_number=1,
         combat_log=[combat_log_entry],
     )
-
     return state, events
 
 
@@ -779,21 +1019,39 @@ def _handle_continue_combat(
             # Must be a defender (owned by territory owner)
             defender_units.append(deepcopy(unit))
 
+    # Terrain + anti-cavalry + captain bonuses (merged; recomputed every round)
+    territory_def = territory_defs.get(combat.territory_id)
+    terrain_att, terrain_def = compute_terrain_stat_modifiers(
+        territory_def, attacker_units, defender_units, unit_defs
+    )
+    anticav_att, anticav_def = compute_anti_cavalry_stat_modifiers(
+        attacker_units, defender_units, unit_defs
+    )
+    captain_att, captain_def = compute_captain_stat_modifiers(
+        attacker_units, defender_units, unit_defs
+    )
+    attacker_mods = merge_stat_modifiers(terrain_att, anticav_att, captain_att)
+    defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
+
     # Compute grouped dice BEFORE combat (units get modified during resolution)
     attacker_dice_grouped = group_dice_by_stat(
-        attacker_units, dice_rolls.get("attacker", []), unit_defs, is_attacker=True
+        attacker_units, dice_rolls.get("attacker", []), unit_defs, is_attacker=True,
+        stat_modifiers=attacker_mods or None,
     )
     defender_dice_grouped = group_dice_by_stat(
-        defender_units, dice_rolls.get("defender", []), unit_defs, is_attacker=False
+        defender_units, dice_rolls.get("defender", []), unit_defs, is_attacker=False,
+        stat_modifiers=defender_mods or None,
     )
 
     # Build instance_id -> (unit_id, base_health) before combat modifies units
     attacker_id_to_type_health = {u.instance_id: (u.unit_id, u.base_health) for u in attacker_units}
     defender_id_to_type_health = {u.instance_id: (u.unit_id, u.base_health) for u in defender_units}
 
-    # Fight this round
+    # Fight this round (with terrain modifiers)
     round_result = resolve_combat_round(
-        attacker_units, defender_units, unit_defs, dice_rolls
+        attacker_units, defender_units, unit_defs, dice_rolls,
+        stat_modifiers_attacker=attacker_mods or None,
+        stat_modifiers_defender=defender_mods or None,
     )
 
     # Hits per unit type this round (for UI hit badges): casualties add base_health each, wounded add 1
@@ -855,11 +1113,14 @@ def _handle_continue_combat(
     # Remove casualties from the territory (both attackers and defenders are here)
     _remove_casualties(territory, round_result.attacker_casualties)
     _remove_casualties(territory, round_result.defender_casualties)
+    # Sync surviving units' remaining_health so multi-HP units carry damage across rounds
+    _sync_survivor_health(territory, attacker_units, defender_units)
 
     # Update combat log
     combat.combat_log.append(combat_log_entry)
     combat.round_number = new_round_number
     combat.attacker_instance_ids = round_result.surviving_attacker_ids
+    combat.attackers_have_rolled = True  # round 1 (or later) has been run
 
     # Check for combat end conditions
     if round_result.attackers_eliminated or round_result.defenders_eliminated:
@@ -884,31 +1145,32 @@ def _handle_retreat(
     state: GameState,
     action: Action,
     territory_defs: dict[str, TerritoryDefinition],
+    faction_defs: dict[str, FactionDefinition],
 ) -> tuple[GameState, list[GameEvent]]:
     """
     Retreat from an active combat.
-    Surviving attackers move from the contested territory to the specified retreat_to territory.
+    Surviving attackers move to an adjacent allied or friendly neutral (no enemy units) territory.
     """
     events: list[GameEvent] = []
 
     if state.active_combat is None:
         raise ValueError("No active combat to retreat from")
 
+    combat = state.active_combat
+    if not combat.attackers_have_rolled:
+        raise ValueError("Cannot retreat until attackers have rolled (after archer prefire, click Continue first)")
+
     retreat_to = action.payload.get("retreat_to")
     if not retreat_to:
         raise ValueError("Must specify retreat_to territory")
 
-    combat = state.active_combat
-
-    # Validate retreat_to territory exists
     retreat_territory = state.territories.get(retreat_to)
     if not retreat_territory:
         raise ValueError(f"Invalid retreat territory: {retreat_to}")
 
-    # Must be friendly (owned by attacker)
-    if retreat_territory.owner != combat.attacker_faction:
+    if not _territory_is_friendly_for_retreat(retreat_territory, combat.attacker_faction, faction_defs):
         raise ValueError(
-            f"Cannot retreat to {retreat_to} - not owned by {combat.attacker_faction}")
+            f"Cannot retreat to {retreat_to} - must be allied or friendly neutral (no enemy units)")
 
     # Must be adjacent to the contested territory
     combat_territory_def = territory_defs.get(combat.territory_id)
@@ -965,6 +1227,22 @@ def _remove_casualties(territory: TerritoryState, casualty_ids: list[str]) -> No
     """Remove units with the given instance_ids from a territory."""
     casualty_set = set(casualty_ids)
     territory.units = [u for u in territory.units if u.instance_id not in casualty_set]
+
+
+def _sync_survivor_health(
+    territory: TerritoryState,
+    attacker_units: list[Unit],
+    defender_units: list[Unit],
+) -> None:
+    """
+    Sync remaining_health from combat-round copies back to territory.units.
+    Combat modifies deepcopies; survivors' remaining_health must be written back
+    so multi-HP units (e.g. trolls) carry damage across rounds.
+    """
+    survivor_health = {u.instance_id: u.remaining_health for u in attacker_units + defender_units}
+    for unit in territory.units:
+        if unit.instance_id in survivor_health:
+            unit.remaining_health = survivor_health[unit.instance_id]
 
 
 def _resolve_combat_end(
@@ -1027,6 +1305,7 @@ def _handle_end_phase(
     unit_defs: dict[str, UnitDefinition],
     territory_defs: dict[str, TerritoryDefinition],
     faction_defs: dict[str, FactionDefinition],
+    camp_defs: dict[str, CampDefinition] | None = None,
 ) -> tuple[GameState, list[GameEvent]]:
     """
     End the current phase and advance to the next.
@@ -1086,6 +1365,16 @@ def _handle_end_phase(
                         new_owner = original_owner
             
             territory.owner = new_owner
+
+            # Destroy any camp in this territory (camps are destroyed when territory is captured/liberated)
+            def _camp_in_territory(cid: str) -> bool:
+                if state.dynamic_camps.get(cid) == territory_id:
+                    return True
+                camp = camp_defs.get(cid) if camp_defs else None
+                return camp is not None and camp.territory_id == territory_id
+
+            state.camps_standing = [cid for cid in state.camps_standing if not _camp_in_territory(cid)]
+            state.dynamic_camps = {cid: tid for cid, tid in state.dynamic_camps.items() if tid != territory_id}
             
             # Get surviving attacker unit IDs in this territory
             surviving_attacker_ids = [
@@ -1124,7 +1413,9 @@ def _handle_end_phase(
         )
         events.extend(mobilize_events)
         events.append(phase_changed(old_phase, "turn_end", state.current_faction))
-        state, turn_events = _handle_end_turn(state, territory_defs, faction_defs)
+        state, turn_events = _handle_end_turn(
+            state, territory_defs, faction_defs, camp_defs or {}
+        )
         events.extend(turn_events)
         return state, events
     
@@ -1185,9 +1476,13 @@ def _check_victory(
             controlled_by_alliance[alliance] = []
         controlled_by_alliance[alliance].append(territory_id)
 
-    # Check if any alliance meets victory threshold
+    # Check if any alliance meets victory threshold (from victory_criteria.strongholds)
+    strongholds_criteria = state.victory_criteria.get("strongholds") or {}
     for alliance, count in stronghold_counts.items():
-        if count >= STRONGHOLDS_FOR_VICTORY:
+        required = int(strongholds_criteria.get(alliance, 0)) if isinstance(
+            strongholds_criteria, dict
+        ) else 0
+        if required > 0 and count >= required:
             return (alliance, stronghold_counts, controlled_by_alliance[alliance])
 
     return None
@@ -1197,6 +1492,7 @@ def _handle_end_turn(
     state: GameState,
     territory_defs: dict[str, TerritoryDefinition],
     faction_defs: dict[str, FactionDefinition],
+    camp_defs: dict[str, CampDefinition] | None = None,
 ) -> tuple[GameState, list[GameEvent]]:
     """
     End the current turn and advance to the next faction.
@@ -1266,10 +1562,14 @@ def _handle_end_turn(
         if victory_result:
             winner_alliance, stronghold_counts, controlled = victory_result
             state.winner = winner_alliance
+            strongholds_criteria = state.victory_criteria.get("strongholds") or {}
+            strongholds_required = int(strongholds_criteria.get(winner_alliance, 0)) if isinstance(
+                strongholds_criteria, dict
+            ) else 0
             events.append(victory(
                 winner_alliance,
                 stronghold_counts,
-                STRONGHOLDS_FOR_VICTORY,
+                strongholds_required,
                 controlled,
             ))
 
@@ -1297,10 +1597,17 @@ def _handle_end_turn(
         # Clear the pending income (it's been collected)
         state.faction_pending_income[new_faction] = {}
 
-    # Calculate mobilization strongholds for the new faction (strongholds owned at turn start)
-    state.mobilization_strongholds = [
+    # Snapshot territories owned by new faction at turn start (for camp placement options this turn)
+    state.faction_territories_at_turn_start[new_faction] = [
+        tid for tid, ts in state.territories.items() if ts.owner == new_faction
+    ]
+    state.pending_camps = []
+
+    # Calculate mobilization territories for the new faction (owned territories with a standing camp at turn start)
+    camp_defs = camp_defs or {}
+    state.mobilization_camps = [
         tid for tid, ts in state.territories.items()
-        if ts.owner == new_faction and territory_defs.get(tid) and territory_defs[tid].is_stronghold
+        if ts.owner == new_faction and _territory_has_standing_camp(state, tid, camp_defs)
     ]
 
     # Emit turn started event
@@ -1315,6 +1622,7 @@ def replay_from_actions(
     unit_defs: dict[str, UnitDefinition],
     territory_defs: dict[str, TerritoryDefinition],
     faction_defs: dict[str, FactionDefinition],
+    camp_defs: dict[str, CampDefinition] | None = None,
 ) -> tuple[GameState, list[GameEvent]]:
     """
     Replay a series of actions from an initial state.
@@ -1326,10 +1634,12 @@ def replay_from_actions(
         unit_defs: Unit definitions
         territory_defs: Territory definitions
         faction_defs: Faction definitions
+        camp_defs: Camp definitions (optional)
 
     Returns:
         Tuple of (final_state, all_events) after all actions applied
     """
+    camp_defs = camp_defs or {}
     current_state = initial_state.copy()
     all_events: list[GameEvent] = []
 
@@ -1340,6 +1650,7 @@ def replay_from_actions(
             unit_defs,
             territory_defs,
             faction_defs,
+            camp_defs,
         )
         all_events.extend(events)
 

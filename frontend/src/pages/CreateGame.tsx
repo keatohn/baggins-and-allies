@@ -39,21 +39,30 @@ export default function CreateGame() {
             placeholder="My game"
           />
         </label>
-        <label className="create-game-form__label create-game-form__label--row">
-          <input
-            type="checkbox"
-            checked={isMultiplayer}
-            onChange={(e) => setIsMultiplayer(e.target.checked)}
-          />
-          Multiplayer (4-character code for others to join)
-        </label>
+        <div className="create-game-form__field">
+          <span className="create-game-form__field-label">Mode</span>
+          <div className="create-game-form__picker" role="group" aria-label="Single or multiplayer">
+            <button
+              type="button"
+              className={`create-game-form__picker-option ${!isMultiplayer ? 'create-game-form__picker-option--active' : ''}`}
+              onClick={() => setIsMultiplayer(false)}
+            >
+              Single Player
+            </button>
+            <button
+              type="button"
+              className={`create-game-form__picker-option ${isMultiplayer ? 'create-game-form__picker-option--active' : ''}`}
+              onClick={() => setIsMultiplayer(true)}
+            >
+              Multiplayer
+            </button>
+          </div>
+        </div>
         <button type="submit" className="create-game-form__submit primary" disabled={loading}>
           {loading ? 'Creating…' : 'Create game'}
         </button>
       </form>
-      <p className="create-game-page__footer">
-        <Link to="/">Back to menu</Link>
-      </p>
+      <Link to="/" className="create-game-page__menu-btn">Menu</Link>
     </div>
   );
 }

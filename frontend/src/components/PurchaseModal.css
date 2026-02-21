@@ -28,6 +28,55 @@
   width: 500px;
 }
 
+.purchase-modal-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 1rem;
+  border-bottom: 2px solid var(--ink-faded);
+  background: var(--parchment-dark);
+}
+
+.purchase-tab {
+  padding: 0.6rem 1.2rem;
+  font-family: 'Cinzel', serif;
+  font-size: 0.95rem;
+  color: var(--ink-light);
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+  margin-bottom: -2px;
+}
+
+.purchase-tab:hover {
+  color: var(--ink);
+}
+
+.purchase-tab.active {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom-color: var(--gold-dark);
+}
+
+.purchase-modal-camp-icon {
+  font-size: 1.75rem;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--parchment-light);
+  border: 2px solid var(--ink-faded);
+  border-radius: 4px;
+}
+
+.purchase-other-empty {
+  padding: 1.5rem 1rem;
+  color: var(--ink-faded);
+  font-style: italic;
+  margin: 0;
+}
+
 .modal-header {
   display: flex;
   justify-content: space-between;

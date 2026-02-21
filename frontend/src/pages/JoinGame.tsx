@@ -49,9 +49,7 @@ export default function JoinGame() {
           {loading ? 'Joining…' : 'Join game'}
         </button>
       </form>
-      <p className="join-game-page__footer">
-        <Link to="/">Back to menu</Link>
-      </p>
+      <Link to="/" className="join-game-page__menu-btn">Menu</Link>
     </div>
   );
 }

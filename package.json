@@ -1,0 +1,14 @@
+{
+  "name": "baggins-and-allies",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k -n backend,frontend -c blue,green \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": ".venv/bin/python -m backend.api.main",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "kill-ports": "node scripts/kill-ports.js",
+    "restart": "npm run kill-ports && npm run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

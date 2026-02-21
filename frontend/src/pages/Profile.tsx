@@ -35,9 +35,7 @@ export default function Profile() {
           Log out
         </button>
       </div>
-      <p className="profile-page__footer">
-        <Link to="/">Back to menu</Link>
-      </p>
+      <Link to="/" className="profile-page__menu-btn">Menu</Link>
     </div>
   );
 }

@@ -20,6 +20,10 @@ export function setAuthToken(token: string | null): void {
 export interface GameStateResponse {
   game_id: string;
   state: ApiGameState;
+  /** This game's definitions snapshot (when loaded from DB). Use instead of /definitions when present. */
+  definitions?: Definitions;
+  /** True if the authenticated player is assigned to the current faction (can perform actions). */
+  can_act?: boolean;
 }
 
 export interface ApiPendingMove {
@@ -46,6 +50,8 @@ export interface FactionStatEntry {
 export interface ApiFactionStats {
   factions: Record<string, FactionStatEntry>;
   alliances: Record<string, FactionStatEntry>;
+  /** Strongholds with no owner (e.g. Moria). Shown as gray segment in header bar. */
+  neutral_strongholds?: number;
 }
 
 export interface ApiGameState {
@@ -60,6 +66,10 @@ export interface ApiGameState {
   active_combat: ApiActiveCombat | null;
   winner: string | null;
   faction_stats?: ApiFactionStats;
+  /** Camp definition IDs that are still standing (destroyed when territory is captured). */
+  camps_standing?: string[];
+  /** Map asset filename for this game (e.g. "test_map.svg"). Omitted/null = legacy default. */
+  map_asset?: string | null;
 }
 
 export interface ApiTerritory {
@@ -88,6 +98,8 @@ export interface ApiActiveCombat {
   attacker_instance_ids: string[];
   round_number: number;
   combat_log: ApiCombatRound[];
+  /** False only after defender archer prefire until round 1 is run; retreat disallowed until then. */
+  attackers_have_rolled?: boolean;
 }
 
 export interface ApiCombatRound {
@@ -110,6 +122,8 @@ export interface ApiEvent {
 export interface ActionResponse {
   state: ApiGameState;
   events: ApiEvent[];
+  /** True if the authenticated player can still perform actions (their faction's turn). */
+  can_act?: boolean;
   dice_rolls?: {
     attacker: number[];
     defender: number[];
@@ -126,6 +140,8 @@ export interface AvailableActionsResponse {
   mobilization_capacity?: number;
   /** Units already purchased this turn (purchase phase). */
   purchased_units_count?: number;
+  /** Power cost to purchase one camp (0 = camps not purchasable). */
+  camp_cost?: number;
   moveable_units?: ApiMoveableUnit[];
   combat_territories?: ApiCombatTerritory[];
   active_combat?: ApiActiveCombat;
@@ -149,9 +165,11 @@ export interface ApiMoveableUnit {
   territory: string;
   unit: ApiUnit;
   destinations: {
-    max_reach: number;
-    by_distance: Record<number, string[]>;
-  };
+    max_reach?: number;
+    by_distance?: Record<number, string[]>;
+  } | Record<string, number>;
+  /** Cavalry charging: destination_id -> list of charge_through paths (empty enemy territory IDs). */
+  charge_routes?: Record<string, string[][]>;
 }
 
 export interface ApiCombatTerritory {
@@ -166,7 +184,7 @@ export interface ApiRetreatOptions {
 }
 
 export interface ApiMobilizeOptions {
-  /** Territory IDs where faction can mobilize (strongholds they own). Backend sends "territories". */
+  /** Territory IDs where faction can mobilize (owned territories with a camp). Backend sends "territories". */
   territories?: string[];
   available_strongholds?: string[];
   pending_units: ApiUnitStack[];
@@ -174,10 +192,16 @@ export interface ApiMobilizeOptions {
   total_capacity?: number;
 }
 
+export interface ApiCampDefinition {
+  id: string;
+  territory_id: string;
+}
+
 export interface Definitions {
   units: Record<string, ApiUnitDefinition>;
   territories: Record<string, ApiTerritoryDefinition>;
   factions: Record<string, ApiFactionDefinition>;
+  camps?: Record<string, ApiCampDefinition>;
 }
 
 export interface ApiUnitDefinition {
@@ -220,6 +244,30 @@ export interface ApiFactionDefinition {
 }
 
 // ===== API Functions =====
+const AUTH_REQUEST_TIMEOUT_MS = 15000;
+
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit & { timeoutMs?: number }
+): Promise<Response> {
+  const { timeoutMs, ...fetchOptions } = options;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(fetchOptions.headers as Record<string, string>),
+  };
+  if (getAuthToken()) headers['Authorization'] = `Bearer ${getAuthToken()}`;
+
+  if (!timeoutMs) {
+    return fetch(`${API_BASE}${url}`, { ...fetchOptions, headers });
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(`${API_BASE}${url}`, { ...fetchOptions, headers, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
@@ -234,8 +282,21 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(error.detail || 'API request failed');
+    const text = await response.text();
+    let message = response.statusText;
+    try {
+      const error = text ? JSON.parse(text) : {};
+      const detail = error?.detail;
+      message =
+        typeof detail === 'string'
+          ? detail
+          : Array.isArray(detail)
+            ? (detail as { msg?: string }[]).map((d) => d.msg).filter(Boolean).join('; ') || message
+            : message;
+    } catch {
+      if (text && text.length < 200) message = text;
+    }
+    throw new Error(message || 'API request failed');
   }
 
   return response.json();
@@ -268,29 +329,70 @@ export interface GameListItem {
   game_code: string | null;
   status: string;
   created_at: string | null;
+  turn_number?: number | null;
+  phase?: string | null;
+  current_faction?: string | null;
+  current_faction_display_name?: string | null;
+  current_faction_icon?: string | null;
+  current_player_username?: string | null;
+  /** Same as in-game header: alliances + neutral_strongholds for the list stronghold bar. */
+  faction_stats?: ApiFactionStats | null;
+}
+
+async function authFetchJson<T>(url: string, body: object): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(url, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      timeoutMs: AUTH_REQUEST_TIMEOUT_MS,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error(`Request timed out. Is the backend running at ${API_BASE}?`);
+    }
+    throw err;
+  }
+  if (!response.ok) {
+    const text = await response.text();
+    let message = response.statusText;
+    try {
+      const error = text ? JSON.parse(text) : {};
+      const detail = error?.detail;
+      message =
+        typeof detail === 'string'
+          ? detail
+          : Array.isArray(detail)
+            ? (detail as { msg?: string }[]).map((d) => d.msg).filter(Boolean).join('; ') || message
+            : message;
+    } catch {
+      if (text && text.length < 200) message = text;
+    }
+    throw new Error(message || 'API request failed');
+  }
+  return response.json();
 }
 
 export const api = {
-  // Auth
+  // Auth (with timeout so we don't hang if backend is down)
   register: (email: string, username: string, password: string) =>
-    fetchJson<AuthResponse>('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({ email, username, password }),
-    }),
+    authFetchJson<AuthResponse>('/auth/register', { email, username, password }),
   login: (email: string, password: string) =>
-    fetchJson<AuthResponse>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    }),
+    authFetchJson<AuthResponse>('/auth/login', { email, password }),
   authMe: () => fetchJson<AuthPlayer>('/auth/me'),
 
   // Games (create, list, join)
-  createGame: (name: string, isMultiplayer: boolean) =>
+  createGame: (name: string, isMultiplayer: boolean, setupId?: string) =>
     fetchJson<{ game_id: string; game_code: string | null; name: string }>('/games/create', {
       method: 'POST',
-      body: JSON.stringify({ name, is_multiplayer: isMultiplayer }),
+      body: JSON.stringify({
+        name,
+        is_multiplayer: isMultiplayer,
+        ...(setupId != null && { setup_id: setupId }),
+      }),
     }),
-  listGames: () => fetchJson<{ games: GameListItem[] }>('/games'),
+  listGames: () =>
+    fetchJson<{ games: GameListItem[] }>(`/games?_=${Date.now()}`, { cache: 'no-store' }),
   joinGame: (gameCode: string) =>
     fetchJson<{ game_id: string; name: string }>('/games/join', {
       method: 'POST',
@@ -308,9 +410,12 @@ export const api = {
       body: JSON.stringify({ game_id: gameId }),
     }),
 
-  // Get game state
+  // Get game state (no-store so DB updates like map_asset are visible without reload)
   getGame: (gameId: string) =>
-    fetchJson<GameStateResponse>(`/games/${gameId}`),
+    fetchJson<GameStateResponse>(`/games/${gameId}`, { cache: 'no-store' }),
+
+  deleteGame: (gameId: string) =>
+    fetchJson<{ message: string }>(`/games/${gameId}`, { method: 'DELETE' }),
   
   // Get available actions
   getAvailableActions: (gameId: string) =>
@@ -322,9 +427,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ game_id: gameId, purchases }),
     }),
+
+  // Purchase one camp (purchase phase; cost from setup)
+  purchaseCamp: (gameId: string) =>
+    fetchJson<ActionResponse>(`/games/${gameId}/purchase-camp`, {
+      method: 'POST',
+      body: JSON.stringify({ game_id: gameId }),
+    }),
   
-  // Move units (declares a pending move)
-  move: (gameId: string, fromTerritory: string, toTerritory: string, unitInstanceIds: string[]) =>
+  // Move units (declares a pending move). chargeThrough for cavalry charging (empty enemy territories to conquer).
+  move: (gameId: string, fromTerritory: string, toTerritory: string, unitInstanceIds: string[], chargeThrough?: string[]) =>
     fetchJson<ActionResponse>(`/games/${gameId}/move`, {
       method: 'POST',
       body: JSON.stringify({
@@ -332,6 +444,7 @@ export const api = {
         from_territory: fromTerritory,
         to_territory: toTerritory,
         unit_instance_ids: unitInstanceIds,
+        ...(chargeThrough && chargeThrough.length > 0 ? { charge_through: chargeThrough } : {}),
       }),
     }),
   

@@ -62,6 +62,7 @@ function App({ gameId: gameIdProp }: AppProps) {
   const [definitions, setDefinitions] = useState<Definitions | null>(null);
   const [backendState, setBackendState] = useState<ApiGameState | null>(null);
   const [availableActions, setAvailableActions] = useState<AvailableActionsResponse | null>(null);
+  const [canAct, setCanAct] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -86,6 +87,8 @@ function App({ gameId: gameIdProp }: AppProps) {
   );
   /** Purchase phase: cart of units to buy; applied on End phase, not on Confirm */
   const [purchaseCart, setPurchaseCart] = useState<Record<string, number>>({});
+  /** Purchase phase: number of camps to buy; applied on End phase (after units). */
+  const [purchaseCampsCount, setPurchaseCampsCount] = useState(0);
   const resizeStartRef = useRef<{ x: number; width: number } | null>(null);
   /** Game meta for lobby modal (when status is lobby) */
   const [gameMeta, setGameMeta] = useState<GameMeta | null>(null);
@@ -101,6 +104,7 @@ function App({ gameId: gameIdProp }: AppProps) {
   useEffect(() => {
     if (backendState && backendState.phase !== 'purchase') {
       setPurchaseCart({});
+      setPurchaseCampsCount(0);
     }
   }, [backendState?.phase]);
 
@@ -131,16 +135,17 @@ function App({ gameId: gameIdProp }: AppProps) {
     return defs;
   }, [definitions]);
 
-  const factionData: Record<string, { name: string; icon: string; color: string; alliance: string }> = useMemo(() => {
+  const factionData: Record<string, { name: string; icon: string; color: string; alliance: string; capital: string }> = useMemo(() => {
     if (!definitions) return {};
 
-    const data: Record<string, { name: string; icon: string; color: string; alliance: string }> = {};
+    const data: Record<string, { name: string; icon: string; color: string; alliance: string; capital: string }> = {};
     for (const [id, faction] of Object.entries(definitions.factions)) {
       data[id] = {
         name: faction.display_name,
         icon: `/assets/factions/${faction.icon || `${id}.png`}`,
         color: faction.color,
         alliance: faction.alliance,
+        capital: faction.capital ?? '',
       };
     }
     return data;
@@ -167,9 +172,22 @@ function App({ gameId: gameIdProp }: AppProps) {
     return defs;
   }, [definitions]);
 
-  // Build territory data from backend state
+  // Build territory data from backend state (includes hasCamp from standing camps, isCapital from faction definitions)
   const currentTerritoryData = useMemo(() => {
     if (!backendState || !territoryDefs) return {};
+    const camps = definitions?.camps;
+    const campsObj = camps && typeof camps === 'object' && !Array.isArray(camps) ? camps : {};
+    const campsStanding = Array.isArray(backendState.camps_standing) ? backendState.camps_standing : [];
+    const factions = definitions?.factions ?? {};
+    const territoryHasCamp = (tid: string) =>
+      campsStanding.some(
+        (campId) => campsObj[campId] && (campsObj[campId] as { territory_id?: string }).territory_id === tid
+      );
+    const territoryIsCapital = (tid: string) =>
+      Object.values(factions).some(
+        (f) => (f as { capital?: string }).capital === tid
+      );
+
     const result: Record<string, {
       name: string;
       owner?: FactionId;
@@ -177,6 +195,8 @@ function App({ gameId: gameIdProp }: AppProps) {
       stronghold: boolean;
       produces: number;
       adjacent: string[];
+      hasCamp: boolean;
+      isCapital: boolean;
     }> = {};
 
     for (const [id, territory] of Object.entries(backendState.territories)) {
@@ -185,11 +205,13 @@ function App({ gameId: gameIdProp }: AppProps) {
         result[id] = {
           ...def,
           owner: territory.owner as FactionId | undefined,
+          hasCamp: territoryHasCamp(id),
+          isCapital: territoryIsCapital(id),
         };
       }
     }
     return result;
-  }, [backendState, territoryDefs]);
+  }, [backendState, territoryDefs, definitions]);
 
   // Build unit data from backend state
   const currentTerritoryUnits = useMemo(() => {
@@ -246,6 +268,32 @@ function App({ gameId: gameIdProp }: AppProps) {
     return stats;
   }, [definitions]);
 
+  // All units grouped by faction (for Unit Stats modal), ordered by cost ascending
+  const unitsByFaction = useMemo(() => {
+    if (!definitions?.units || !unitDefs) return {};
+    const byFaction: Record<string, Array<{ id: string; name: string; icon: string; cost: number; attack: number; defense: number; dice: number; movement: number; health: number }>> = {};
+    for (const [id, u] of Object.entries(definitions.units)) {
+      const faction = u.faction;
+      if (!byFaction[faction]) byFaction[faction] = [];
+      const cost = typeof u.cost === 'object' && u.cost?.power != null ? u.cost.power : 0;
+      byFaction[faction].push({
+        id,
+        name: u.display_name,
+        icon: unitDefs[id]?.icon ?? `/assets/units/${id}.png`,
+        cost,
+        attack: u.attack,
+        defense: u.defense,
+        dice: u.dice ?? 1,
+        movement: u.movement,
+        health: u.health,
+      });
+    }
+    for (const fid of Object.keys(byFaction)) {
+      byFaction[fid].sort((a, b) => a.cost - b.cost);
+    }
+    return byFaction;
+  }, [definitions, unitDefs]);
+
   // Purchasable units for current faction
   const availableUnits = useMemo(() => {
     if (!availableActions?.purchasable_units) return [];
@@ -300,6 +348,8 @@ function App({ gameId: gameIdProp }: AppProps) {
         api.getAvailableActions(GAME_ID),
       ]);
       setBackendState(stateRes.state);
+      if (stateRes.definitions) setDefinitions(stateRes.definitions);
+      setCanAct(stateRes.can_act ?? true);
       setAvailableActions(actionsRes);
       setError(null);
     } catch (err) {
@@ -311,6 +361,7 @@ function App({ gameId: gameIdProp }: AppProps) {
       try {
         const createRes = await api.createGameLegacy(GAME_ID);
         setBackendState(createRes.state);
+        setCanAct(true);
         const actionsRes = await api.getAvailableActions(GAME_ID);
         setAvailableActions(actionsRes);
         setError(null);
@@ -326,22 +377,28 @@ function App({ gameId: gameIdProp }: AppProps) {
     async function init() {
       setLoading(true);
       try {
-        // Load definitions
-        const defs = await api.getDefinitions();
-        setDefinitions(defs);
-
-        // Try to load existing game, create if not exists
+        let gotDefinitionsFromGame = false;
         try {
           const stateRes = await api.getGame(GAME_ID);
           setBackendState(stateRes.state);
+          setCanAct(stateRes.can_act ?? true);
+          if (stateRes.definitions) {
+            setDefinitions(stateRes.definitions);
+            gotDefinitionsFromGame = true;
+          }
         } catch {
           if (GAME_ID === DEFAULT_GAME_ID) {
             const createRes = await api.createGameLegacy(GAME_ID);
             setBackendState(createRes.state);
+            setCanAct(true);
             addLogEntry('New game created!', 'info');
           } else {
             throw new Error('Game not found');
           }
+        }
+        if (!gotDefinitionsFromGame) {
+          const defs = await api.getDefinitions();
+          setDefinitions(defs);
         }
 
         // Get available actions
@@ -403,6 +460,7 @@ function App({ gameId: gameIdProp }: AppProps) {
         pending_moves: [],
         pending_mobilizations: [],
         declared_battles: [],
+        map_asset: undefined,
       };
     }
 
@@ -464,14 +522,24 @@ function App({ gameId: gameIdProp }: AppProps) {
       pending_moves: pendingMoves,
       pending_mobilizations: pendingMobilizations,
       declared_battles: declaredBattles,
+      map_asset: backendState.map_asset ?? undefined,
     };
   }, [backendState, availableActions]);
 
-  // Backend valid territories for mobilization (strongholds faction owns)
+  // Backend valid territories for mobilization (owned territories with a camp)
   const validMobilizeTerritories = useMemo(
     () => availableActions?.mobilize_options?.territories ?? availableActions?.mobilize_options?.available_strongholds ?? [],
     [availableActions]
   );
+
+  // Per-territory mobilization cap (units ≤ territory's power production)
+  const mobilizationTerritoryPower = useMemo(() => {
+    const list = availableActions?.mobilize_options?.capacity?.territories;
+    if (!Array.isArray(list)) return {} as Record<string, number>;
+    return Object.fromEntries(
+      list.map((t: { territory_id: string; power: number }) => [t.territory_id, t.power ?? 0])
+    );
+  }, [availableActions?.mobilize_options?.capacity?.territories]);
 
   // --- Action Handlers ---
 
@@ -480,13 +548,16 @@ function App({ gameId: gameIdProp }: AppProps) {
       if (validMobilizeTerritories.includes(territoryId)) {
         const purchase = mobilizablePurchases.find(p => p.unitId === selectedMobilizationUnit);
         if (purchase) {
+          const territoryPower = mobilizationTerritoryPower[territoryId] ?? 0;
+          const maxCount = Math.min(purchase.count, territoryPower);
+          if (maxCount <= 0) return;
           setPendingMobilization({
             unitId: selectedMobilizationUnit,
             unitName: purchase.name,
             unitIcon: purchase.icon,
             toTerritory: territoryId,
-            maxCount: purchase.count,
-            count: purchase.count,
+            maxCount,
+            count: Math.min(purchase.count, maxCount),
           });
           setSelectedMobilizationUnit(null);
           return;
@@ -494,13 +565,14 @@ function App({ gameId: gameIdProp }: AppProps) {
       }
     }
     setSelectedTerritory(territoryId);
-  }, [gameState.phase, selectedMobilizationUnit, mobilizablePurchases, validMobilizeTerritories]);
+  }, [gameState.phase, selectedMobilizationUnit, mobilizablePurchases, validMobilizeTerritories, mobilizationTerritoryPower]);
 
   const handleUnitSelect = useCallback((unit: SelectedUnit | null) => {
     setSelectedUnit(unit);
   }, []);
 
-  const hasPurchaseCart = Object.values(purchaseCart).some(qty => qty > 0);
+  const hasPurchaseCart =
+    Object.values(purchaseCart).some(qty => qty > 0) || purchaseCampsCount > 0;
 
   const endPhaseDisabled =
     (gameState.phase === 'combat' && gameState.declared_battles.length > 0) ||
@@ -549,14 +621,23 @@ function App({ gameId: gameIdProp }: AppProps) {
       if (gameState.phase === 'purchase' && hasPurchaseCart) {
         const purchaseResult = await api.purchase(GAME_ID, purchaseCart);
         setBackendState(purchaseResult.state);
+        if (purchaseResult.can_act !== undefined) setCanAct(purchaseResult.can_act);
         if (purchaseResult.events) addBackendEvents(purchaseResult.events);
         setPurchaseCart({});
+        for (let i = 0; i < purchaseCampsCount; i++) {
+          const campResult = await api.purchaseCamp(GAME_ID);
+          setBackendState(campResult.state);
+          if (campResult.can_act !== undefined) setCanAct(campResult.can_act);
+          if (campResult.events) addBackendEvents(campResult.events);
+        }
+        setPurchaseCampsCount(0);
         const actionsRes = await api.getAvailableActions(GAME_ID);
         setAvailableActions(actionsRes);
       }
 
       const result = await api.endPhase(GAME_ID);
       setBackendState(result.state);
+      if (result.can_act !== undefined) setCanAct(result.can_act);
       if (result.events) addBackendEvents(result.events);
 
       const actionsRes = await api.getAvailableActions(GAME_ID);
@@ -571,7 +652,7 @@ function App({ gameId: gameIdProp }: AppProps) {
     } catch (err) {
       addLogEntry(`Failed to end phase: ${err instanceof Error ? err.message : 'Unknown error'}`, 'error');
     }
-  }, [gameState.phase, gameState.declared_battles, hasPurchaseCart, purchaseCart, hasCombatMovedThisPhase, hasNonCombatMovedThisPhase, pendingEndPhaseConfirm, mobilizablePurchases, addLogEntry, addBackendEvents]);
+  }, [gameState.phase, gameState.declared_battles, hasPurchaseCart, purchaseCart, purchaseCampsCount, hasCombatMovedThisPhase, hasNonCombatMovedThisPhase, pendingEndPhaseConfirm, mobilizablePurchases, addLogEntry, addBackendEvents]);
 
   const handleConfirmEndPhase = useCallback(() => {
     setPendingEndPhaseConfirm(null);
@@ -591,8 +672,9 @@ function App({ gameId: gameIdProp }: AppProps) {
   }, []);
 
   /** Confirm = save cart only; resources stay unchanged until End phase */
-  const handlePurchase = useCallback((purchases: Record<string, number>) => {
+  const handlePurchase = useCallback((purchases: Record<string, number>, campsCount: number = 0) => {
     setPurchaseCart(purchases);
+    setPurchaseCampsCount(campsCount);
     setIsPurchaseModalOpen(false);
   }, []);
 
@@ -637,8 +719,15 @@ function App({ gameId: gameIdProp }: AppProps) {
     }
 
     try {
-      const result = await api.move(GAME_ID, fromTerritory, toTerritory, unitInstances);
+      const result = await api.move(
+        GAME_ID,
+        fromTerritory,
+        toTerritory,
+        unitInstances,
+        pendingMoveConfirm.chargeThrough
+      );
       setBackendState(result.state);
+      if (result.can_act !== undefined) setCanAct(result.can_act);
       if (result.events) addBackendEvents(result.events);
 
       // Track that moves were made this phase (for confirmation dialogs)
@@ -670,6 +759,7 @@ function App({ gameId: gameIdProp }: AppProps) {
     try {
       const result = await api.cancelMove(GAME_ID, moveIndex);
       setBackendState(result.state);
+      if (result.can_act !== undefined) setCanAct(result.can_act);
       if (result.events) addBackendEvents(result.events);
       addLogEntry('Move cancelled', 'info');
 
@@ -685,6 +775,7 @@ function App({ gameId: gameIdProp }: AppProps) {
     try {
       const result = await api.cancelMobilization(GAME_ID, mobilizationIndex);
       setBackendState(result.state);
+      if (result.can_act !== undefined) setCanAct(result.can_act);
       if (result.events) addBackendEvents(result.events);
       addLogEntry('Mobilization cancelled', 'info');
       const actionsRes = await api.getAvailableActions(GAME_ID);
@@ -713,7 +804,12 @@ function App({ gameId: gameIdProp }: AppProps) {
         ? await api.initiateCombat(GAME_ID, activeCombat.territory)
         : await api.continueCombat(GAME_ID);
       setBackendState(res.state);
+      if (res.can_act !== undefined) setCanAct(res.can_act);
       if (res.events) addBackendEvents(res.events);
+
+      // Refetch available-actions so retreat_options.valid_destinations is present when user chooses retreat
+      const actionsRes = await api.getAvailableActions(GAME_ID);
+      setAvailableActions(actionsRes);
 
       const roundEvent = res.events?.find((e: { type: string }) => e.type === 'combat_round_resolved');
       const endEvent = res.events?.find((e: { type: string }) => e.type === 'combat_ended');
@@ -731,6 +827,7 @@ function App({ gameId: gameIdProp }: AppProps) {
         defender_wounded?: string[];
         attacker_hits_by_unit_type?: Record<string, number>;
         defender_hits_by_unit_type?: Record<string, number>;
+        is_archer_prefire?: boolean;
       };
 
       const toRolls = (diceByStat: Record<string, { rolls: number[]; hits: number }>) => {
@@ -758,6 +855,7 @@ function App({ gameId: gameIdProp }: AppProps) {
         defenderWounded: Array.isArray(p.defender_wounded) ? p.defender_wounded : [],
         attackerHitsByUnitType: p.attacker_hits_by_unit_type ?? {},
         defenderHitsByUnitType: p.defender_hits_by_unit_type ?? {},
+        isArcherPrefire: p.is_archer_prefire ?? false,
       };
 
       const combatOver = !res.state.active_combat;
@@ -809,6 +907,7 @@ function App({ gameId: gameIdProp }: AppProps) {
     try {
       const result = await api.retreat(GAME_ID, destinationId);
       setBackendState(result.state);
+      if (result.can_act !== undefined) setCanAct(result.can_act);
       if (result.events) addBackendEvents(result.events);
 
       setBattlesCompletedThisPhase(prev => prev + 1);
@@ -842,6 +941,7 @@ function App({ gameId: gameIdProp }: AppProps) {
     try {
       const result = await api.mobilize(GAME_ID, toTerritory, [{ unit_id: unitId, count }]);
       setBackendState(result.state);
+      if (result.can_act !== undefined) setCanAct(result.can_act);
       if (result.events) addBackendEvents(result.events);
 
       setPendingMobilization(null);
@@ -861,15 +961,18 @@ function App({ gameId: gameIdProp }: AppProps) {
   const handleMobilizationDrop = useCallback((territoryId: string, unitId: string, unitName: string, unitIcon: string, count: number) => {
     const purchase = mobilizablePurchases.find(p => p.unitId === unitId);
     if (!purchase) return;
+    const territoryPower = mobilizationTerritoryPower[territoryId] ?? 0;
+    const maxCount = Math.min(purchase.count, territoryPower);
+    if (maxCount <= 0) return;
     setPendingMobilization({
       unitId,
       unitName,
       unitIcon,
       toTerritory: territoryId,
-      maxCount: purchase.count,
-      count: Math.min(count, purchase.count),
+      maxCount,
+      count: Math.min(count, maxCount),
     });
-  }, [mobilizablePurchases]);
+  }, [mobilizablePurchases, mobilizationTerritoryPower]);
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -937,6 +1040,10 @@ function App({ gameId: gameIdProp }: AppProps) {
       territoryName: currentTerritoryData[destId]?.name || destId,
     }));
 
+    const ac = backendState?.active_combat as { attackers_have_rolled?: boolean } | undefined;
+    const canRetreat =
+      (ac ? ac.attackers_have_rolled !== false : true) && retreatOptions.length > 0;
+
     return {
       territoryName: territory?.name || activeCombat.territory,
       attackerFaction,
@@ -944,6 +1051,7 @@ function App({ gameId: gameIdProp }: AppProps) {
       initialAttackerUnits,
       initialDefenderUnits,
       retreatOptions,
+      canRetreat,
     };
   }, [activeCombat, backendState, currentTerritoryData, gameState.current_faction, definitions, unitDefs, validRetreatDestinations]);
 
@@ -952,6 +1060,7 @@ function App({ gameId: gameIdProp }: AppProps) {
     try {
       const result = await api.retreat(GAME_ID, destinationId);
       setBackendState(result.state);
+      if (result.can_act !== undefined) setCanAct(result.can_act);
       if (result.events) addBackendEvents(result.events);
 
       setBattlesCompletedThisPhase(prev => prev + 1);
@@ -1017,6 +1126,8 @@ function App({ gameId: gameIdProp }: AppProps) {
         factionData={factionData}
         effectivePower={currentPower}
         factionStats={backendState?.faction_stats}
+        unitsByFaction={unitsByFaction}
+        gameName={gameMeta?.name ?? null}
       />
 
       <main className="main-content">
@@ -1056,6 +1167,7 @@ function App({ gameId: gameIdProp }: AppProps) {
                 territory: m.territory,
                 unit: m.unit,
                 destinations: normalizeMoveDestinations(m.destinations),
+                charge_routes: m.charge_routes,
               }))}
             />
           </div>
@@ -1083,6 +1195,7 @@ function App({ gameId: gameIdProp }: AppProps) {
           </button>
           {!sidebarCollapsed && (
             <Sidebar
+              canAct={canAct}
               gameState={gameState}
               selectedTerritory={selectedTerritory}
               territoryData={currentTerritoryData}
@@ -1128,8 +1241,10 @@ function App({ gameId: gameIdProp }: AppProps) {
         availableResources={currentResources}
         availableUnits={availableUnits}
         currentPurchases={gameState.phase === 'purchase' ? purchaseCart : gameState.pending_purchases}
+        currentCamps={gameState.phase === 'purchase' ? purchaseCampsCount : 0}
         mobilizationCapacity={availableActions?.mobilization_capacity}
         purchasedUnitsCount={gameState.phase === 'purchase' ? Object.values(purchaseCart).reduce((s, q) => s + q, 0) : (availableActions?.purchased_units_count ?? 0)}
+        campCost={availableActions?.camp_cost}
         onPurchase={handlePurchase}
         onClose={handleClosePurchase}
       />
@@ -1154,6 +1269,7 @@ function App({ gameId: gameIdProp }: AppProps) {
             units: combatDisplayProps.initialDefenderUnits,
           }}
           retreatOptions={combatDisplayProps.retreatOptions}
+          canRetreat={combatDisplayProps.canRetreat}
           onStartRound={handleStartCombatRound}
           onRetreat={handleCombatRetreat}
           onClose={handleCombatClose}
@@ -1162,7 +1278,7 @@ function App({ gameId: gameIdProp }: AppProps) {
         />
       )}
 
-      {gameMeta?.status === 'lobby' && !lobbyDismissed && (
+      {gameMeta?.status === 'lobby' && gameMeta?.game_code != null && !lobbyDismissed && (
         <LobbyModal meta={gameMeta} onClose={() => setLobbyDismissed(true)} />
       )}
     </div>

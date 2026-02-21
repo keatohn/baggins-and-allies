@@ -38,6 +38,10 @@
   max-width: 320px;
 }
 
+.main-menu__quote-attribution {
+  white-space: nowrap;
+}
+
 .main-menu__actions {
   display: flex;
   flex-direction: column;

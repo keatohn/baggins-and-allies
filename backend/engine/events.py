@@ -176,6 +176,7 @@ def combat_round_resolved(
     defenders_remaining: int,
     attacker_hits_by_unit_type: dict[str, int] | None = None,
     defender_hits_by_unit_type: dict[str, int] | None = None,
+    is_archer_prefire: bool = False,
 ) -> GameEvent:
     """
     Emit combat round resolved event.
@@ -194,6 +195,8 @@ def combat_round_resolved(
     attacker_hits_by_unit_type / defender_hits_by_unit_type: hits that each
     unit type (stack) received this round (casualties count as base_health hits
     each, wounded count as 1). For UI hit badges per stack.
+
+    is_archer_prefire: True when this is defender archer prefire (before round 1).
     """
     payload: dict = {
         "territory": territory,
@@ -213,6 +216,8 @@ def combat_round_resolved(
         payload["attacker_hits_by_unit_type"] = attacker_hits_by_unit_type
     if defender_hits_by_unit_type is not None:
         payload["defender_hits_by_unit_type"] = defender_hits_by_unit_type
+    if is_archer_prefire:
+        payload["is_archer_prefire"] = True
     return GameEvent(COMBAT_ROUND_RESOLVED, payload)
 
 

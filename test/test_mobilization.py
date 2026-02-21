@@ -25,10 +25,12 @@ def main():
     print("="*70)
 
     # Load definitions
-    unit_defs, territory_defs, faction_defs = load_static_definitions()
+    unit_defs, territory_defs, faction_defs, camp_defs = load_static_definitions()
 
     # Initialize game
-    state = initialize_game_state(faction_defs, territory_defs)
+    state = initialize_game_state(
+        faction_defs, territory_defs, camp_defs=camp_defs
+    )
     print("\n[INITIAL STATE]")
     print_game_state(state, territory_defs)
 
@@ -42,8 +44,9 @@ def main():
         "gondor",
         {"gondor_infantry": 3, "gondor_knight": 1},
     )
-    state, _ = apply_action(state, purchase_action, unit_defs,
-                         territory_defs, faction_defs)
+    state, _ = apply_action(
+        state, purchase_action, unit_defs, territory_defs, faction_defs, camp_defs
+    )
     print(f"✓ Purchased: 3 infantry + 1 knight")
     print(f"Gondor resources after: {state.faction_resources['gondor']}")
     print(
@@ -64,8 +67,9 @@ def main():
     for i, phase_name in enumerate(phase_names, start=2):
         print(f"\n[Skipping to PHASE {i}: {phase_name}]")
         end_phase_action = end_phase("gondor")
-        state, _ = apply_action(state, end_phase_action, unit_defs,
-                             territory_defs, faction_defs)
+        state, _ = apply_action(
+            state, end_phase_action, unit_defs, territory_defs, faction_defs, camp_defs
+        )
         print(f"✓ Now in phase: {state.phase}")
 
     # Phase 5: MOBILIZATION
@@ -85,8 +89,9 @@ def main():
         ],
     )
     try:
-        state, _ = apply_action(state, mobilize_action, unit_defs,
-                             territory_defs, faction_defs)
+        state, _ = apply_action(
+            state, mobilize_action, unit_defs, territory_defs, faction_defs, camp_defs
+        )
         print(f"✓ Mobilized 2 infantry to Minas Tirith")
     except ValueError as e:
         print(f"✗ Mobilization failed: {e}")
@@ -116,8 +121,9 @@ def main():
     )
     # This should succeed because 2 units = power limit of 2
     try:
-        state, _ = apply_action(state, mobilize_action2, unit_defs,
-                             territory_defs, faction_defs)
+        state, _ = apply_action(
+            state, mobilize_action2, unit_defs, territory_defs, faction_defs, camp_defs
+        )
         print(f"✓ Mobilized 2 more units (1 infantry + 1 knight)")
         print(f"  (Note: Power limit is per-action, not cumulative per turn)")
     except ValueError as e:
@@ -136,8 +142,9 @@ def main():
         [{"unit_id": "gondor_infantry", "count": 3}],
     )
     try:
-        state2, _ = apply_action(state2, mobilize_action3, unit_defs,
-                              territory_defs, faction_defs)
+        state2, _ = apply_action(
+            state2, mobilize_action3, unit_defs, territory_defs, faction_defs, camp_defs
+        )
         print(f"✗ Should have been blocked!")
     except ValueError as e:
         print(f"✓ Mobilization blocked (as expected): {e}")
@@ -145,8 +152,9 @@ def main():
     # End turn
     print("\n[END TURN]")
     end_turn_action = end_turn("gondor")
-    state, _ = apply_action(state, end_turn_action, unit_defs,
-                         territory_defs, faction_defs)
+    state, _ = apply_action(
+        state, end_turn_action, unit_defs, territory_defs, faction_defs, camp_defs
+    )
     print(f"✓ End turn")
     print(f"Current faction: {state.current_faction}")
     print(f"Current phase: {state.phase}")

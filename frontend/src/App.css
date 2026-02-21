@@ -5,6 +5,33 @@
   overflow: hidden;
 }
 
+.app.loading,
+.app.error {
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+.loading-spinner,
+.error-message {
+  font-family: var(--font-parchment);
+  color: var(--ink);
+  text-align: center;
+}
+
+.loading-spinner {
+  font-size: 1.25rem;
+}
+
+.error-message h2 {
+  margin-bottom: 0.5rem;
+}
+
+.error-message p {
+  margin-bottom: 1rem;
+  color: var(--ink-light);
+}
+
 .main-content {
   flex: 1;
   display: flex;

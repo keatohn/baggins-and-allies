@@ -92,6 +92,8 @@ export interface GameState {
   pending_moves: PendingMove[];
   pending_mobilizations: PendingMobilization[];
   declared_battles: DeclaredBattle[];
+  /** Map asset filename for this game (e.g. "test_map.svg"). Omitted/null = legacy default. */
+  map_asset?: string | null;
 }
 
 // UI State types

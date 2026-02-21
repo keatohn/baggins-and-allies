@@ -14,6 +14,15 @@ class Action:
     payload: dict  # Action-specific data
 
 
+def purchase_camp(faction: str) -> Action:
+    """
+    Purchase a camp. Cost from state.camp_cost (power).
+    Camp is added to pending_camps; territory_options are territories owned at turn start without a camp.
+    Placement happens in mobilization phase via place_camp.
+    """
+    return Action(type="purchase_camp", faction=faction, payload={})
+
+
 def purchase_units(
     faction: str,
     purchases: dict[str, int],  # unit_id -> count to purchase
@@ -34,22 +43,24 @@ def move_units(
     territory_from: str,
     territory_to: str,
     unit_instance_ids: list[str],  # List of unit instance_ids to move
+    charge_through: list[str] | None = None,  # Cavalry: empty enemy territory IDs to conquer (order)
 ) -> Action:
     """
     Move units from one territory to another.
     Units are specified by their instance_ids for granular control.
-
-    Example: move_units("gondor", "minas_tirith", "osgiliath",
-                        ["gondor_gondor_infantry_001", "gondor_gondor_knight_002"])
+    charge_through: for cavalry charging, list of empty enemy territory IDs passed through (conquered when move is applied).
     """
+    payload = {
+        "from": territory_from,
+        "to": territory_to,
+        "unit_instance_ids": unit_instance_ids,
+    }
+    if charge_through:
+        payload["charge_through"] = charge_through
     return Action(
         type="move_units",
         faction=faction,
-        payload={
-            "from": territory_from,
-            "to": territory_to,
-            "unit_instance_ids": unit_instance_ids,
-        },
+        payload=payload,
     )
 
 
@@ -170,6 +181,22 @@ def cancel_move(
         type="cancel_move",
         faction=faction,
         payload={"move_index": move_index},
+    )
+
+
+def place_camp(
+    faction: str,
+    camp_index: int,
+    territory_id: str,
+) -> Action:
+    """
+    Place a purchased camp on a territory. Valid in mobilization phase.
+    territory_id must be in that pending camp's territory_options and must not already have a camp.
+    """
+    return Action(
+        type="place_camp",
+        faction=faction,
+        payload={"camp_index": camp_index, "territory_id": territory_id},
     )
 
 

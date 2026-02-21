@@ -14,6 +14,8 @@ export interface PendingMoveConfirm {
   unitDef?: { name: string; icon: string };
   maxCount: number;
   count: number;
+  /** Cavalry charging: empty enemy territory IDs to conquer (order). */
+  chargeThrough?: string[];
 }
 
 // Backend-provided movement data
@@ -25,6 +27,8 @@ interface MoveableUnit {
     remaining_movement: number;
   };
   destinations: string[];
+  /** Cavalry: destination_id -> list of charge_through paths. */
+  charge_routes?: Record<string, string[][]>;
 }
 
 interface GameMapProps {
@@ -38,11 +42,13 @@ interface GameMapProps {
     stronghold: boolean;
     produces: number;
     adjacent: string[];
+    hasCamp?: boolean;
+    isCapital?: boolean;
   }>;
   territoryUnits: Record<string, { unit_id: string; count: number; instances?: string[] }[]>;
   unitDefs: Record<string, { name: string; icon: string }>;
   unitStats: Record<string, { movement: number }>;
-  factionData: Record<string, { name: string; icon: string; color: string; alliance: string }>;
+  factionData: Record<string, { name: string; icon: string; color: string; alliance: string; capital?: string }>;
   onTerritorySelect: (territoryId: string | null) => void;
   onUnitSelect: (unit: SelectedUnit | null) => void;
   onUnitMove: (from: string, to: string, unitType: string, count: number) => void;
@@ -65,10 +71,35 @@ interface GameMapProps {
   availableMoveTargets?: MoveableUnit[];
 }
 
-const SVG_VIEWBOX = { width: 1226.6667, height: 1013.3333 };
-const IMG_DIMENSIONS = { width: 1840, height: 1520 };
 const MIN_SCALE = 0.5;
 const MAX_SCALE = 3;
+
+/**
+ * Map base name (no extension) -> viewBox and display dimensions.
+ * PNG = background image, SVG = territory paths.
+ *
+ * For 50–80 territories with readable unit icons:
+ * - Use a large canvas (e.g. 2500×1900 to 3500×2600) so each territory has enough
+ *   room for unit stacks and markers. Users pan/zoom to their region.
+ * - Keep viewBox and dimensions equal so 1 SVG unit = 1 display pixel at scale 1.
+ * - In Inkscape: set document size to these dimensions, draw paths, set each path's
+ *   label (or id) to the backend territory id so the app can match them.
+ */
+const MAP_CONFIG: Record<string, { viewBox: { width: number; height: number }; dimensions: { width: number; height: number } }> = {
+  'test_map': { viewBox: { width: 1226.6667, height: 1013.3333 }, dimensions: { width: 1840, height: 1520 } },
+  'baggins_and_allies_map_0.1': { viewBox: { width: 1303.07, height: 980.47 }, dimensions: { width: 1303.07, height: 980.47 } },
+};
+const DEFAULT_MAP_BASE = 'test_map';
+
+function toMapBase(name: string | null | undefined): string {
+  if (!name || !name.trim()) return DEFAULT_MAP_BASE;
+  const s = name.trim().replace(/\.(svg|png)$/i, '');
+  return s || DEFAULT_MAP_BASE;
+}
+
+function getMapConfig(mapBase: string) {
+  return MAP_CONFIG[mapBase] ?? MAP_CONFIG[DEFAULT_MAP_BASE];
+}
 
 // Droppable territory component
 function DroppableTerritory({
@@ -136,6 +167,13 @@ function GameMap({
   const [transform, setTransform] = useState<MapTransform>({ x: 0, y: 0, scale: 1 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const panStartPos = useRef({ x: 0, y: 0 });
+  const transformRef = useRef(transform);
+  const PAN_CLICK_THRESHOLD_PX = 5;
+
+  useEffect(() => {
+    transformRef.current = transform;
+  }, [transform]);
   const [territoryCentroids, setTerritoryCentroids] = useState<Record<string, { x: number; y: number }>>({});
   const [validDropTargets, setValidDropTargets] = useState<Set<string>>(new Set());
   const [activeUnit, setActiveUnit] = useState<{
@@ -147,6 +185,23 @@ function GameMap({
   } | null>(null);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
 
+  const mapBase = toMapBase(gameState.map_asset);
+  const mapConfig = getMapConfig(mapBase);
+  const pathsUrl = `/${mapBase}.svg`;
+  const SVG_VIEWBOX = mapConfig.viewBox;
+  const IMG_DIMENSIONS = mapConfig.dimensions;
+
+  // Background: PNG at /<mapBase>.png (same name as SVG in public/). Fallback to SVG if PNG fails.
+  const pngUrl = `/${mapBase}.png`;
+  const [bgImageUrl, setBgImageUrl] = useState(pngUrl);
+  useEffect(() => {
+    setBgImageUrl(pngUrl);
+  }, [mapBase, pngUrl]);
+  const handleBgImageError = useCallback(() => {
+    setBgImageUrl(`/${mapBase}.svg`);
+  }, [mapBase]);
+  const imageUrl = bgImageUrl;
+
   const activeMobilizationItem = useMemo(() => {
     if (!activeDragId || typeof activeDragId !== 'string' || !activeDragId.startsWith('mobilize-')) return null;
     const unitId = activeDragId.replace(/^mobilize-/, '');
@@ -154,31 +209,38 @@ function GameMap({
     return purchase ? { ...purchase, factionColor: mobilizationTray?.factionColor ?? '' } : null;
   }, [activeDragId, mobilizationTray?.purchases, mobilizationTray?.factionColor]);
 
-  // Load SVG paths
+  // Load SVG paths (re-run when this game's map asset changes). Paths must have Inkscape label or non-generic id (e.g. not path18) to match backend territory IDs. Fallback to default map if 404.
   useEffect(() => {
-    fetch('/test_map.svg')
-      .then(res => res.text())
-      .then(svgText => {
-        const parser = new DOMParser();
-        const svgDoc = parser.parseFromString(svgText, 'image/svg+xml');
-        const paths = svgDoc.querySelectorAll('path');
-        const pathMap = new Map<string, string>();
-        
-        paths.forEach(path => {
-          const label = path.getAttributeNS('http://www.inkscape.org/namespaces/inkscape', 'label');
-          const d = path.getAttribute('d');
-          if (label && d) {
-            pathMap.set(label, d);
-          }
+    setSvgPaths(new Map());
+    const loadSvg = (url: string) =>
+      fetch(url, { cache: 'no-store' })
+        .then((res) => (res.ok ? res.text() : Promise.reject(new Error(`${res.status}`))))
+        .then((svgText) => {
+          const parser = new DOMParser();
+          const svgDoc = parser.parseFromString(svgText, 'image/svg+xml');
+          const paths = svgDoc.querySelectorAll('path');
+          const pathMap = new Map<string, string>();
+          paths.forEach((path) => {
+            const d = path.getAttribute('d');
+            if (!d) return;
+            const label = path.getAttributeNS('http://www.inkscape.org/namespaces/inkscape', 'label');
+            const id = path.getAttribute('id')?.trim();
+            const territoryId = label || (id && !/^path\d+$/i.test(id) ? id : null);
+            if (territoryId) pathMap.set(territoryId, d);
+          });
+          setSvgPaths(pathMap);
         });
-        
-        setSvgPaths(pathMap);
-      });
-  }, []);
+    loadSvg(pathsUrl).catch(() => {
+      if (pathsUrl !== `/${DEFAULT_MAP_BASE}.svg`) loadSvg(`/${DEFAULT_MAP_BASE}.svg`);
+    });
+  }, [pathsUrl]);
 
-  // Calculate centroids after paths are loaded
+  // Calculate centroids after paths are loaded; clear when map has no paths (avoid stale positions)
   useEffect(() => {
-    if (svgPaths.size === 0 || !svgRef.current) return;
+    if (svgPaths.size === 0 || !svgRef.current) {
+      setTerritoryCentroids({});
+      return;
+    }
 
     // Small delay to ensure paths are rendered
     const timer = setTimeout(() => {
@@ -251,14 +313,17 @@ function GameMap({
       const dx = toCentroid.x - fromCentroid.x;
       const dy = toCentroid.y - fromCentroid.y;
       const length = Math.sqrt(dx * dx + dy * dy);
-      
-      // Shorten arrow to not overlap with territory centers
+      if (length < 1e-6) return null; // Skip degenerate arrow
+
+      // Shorten arrow so it doesn't overlap territory centers; never shorten more than segment length
       const shortenStart = 30;
       const shortenEnd = 40;
-      const startX = fromCentroid.x + (dx / length) * shortenStart;
-      const startY = fromCentroid.y + (dy / length) * shortenStart;
-      const endX = toCentroid.x - (dx / length) * shortenEnd;
-      const endY = toCentroid.y - (dy / length) * shortenEnd;
+      const totalShorten = Math.min(shortenStart + shortenEnd, length * 0.9);
+      const startRatio = totalShorten > 0 ? shortenStart / (shortenStart + shortenEnd) : 0;
+      const startX = fromCentroid.x + (dx / length) * totalShorten * startRatio;
+      const startY = fromCentroid.y + (dy / length) * totalShorten * startRatio;
+      const endX = toCentroid.x - (dx / length) * totalShorten * (1 - startRatio);
+      const endY = toCentroid.y - (dy / length) * totalShorten * (1 - startRatio);
       
       return {
         ...group,
@@ -270,8 +335,13 @@ function GameMap({
     }).filter(Boolean);
   }, [pendingMoves, territoryCentroids, gameState.phase]);
 
-  // Fit whole map to view on load and when container first gets size (e.g. after layout)
+  // Fit whole map to view on load and when this game's map (dimensions) changes
   const initialFitDoneRef = useRef(false);
+  const lastMapBaseRef = useRef<string>(mapBase);
+  if (lastMapBaseRef.current !== mapBase) {
+    lastMapBaseRef.current = mapBase;
+    initialFitDoneRef.current = false;
+  }
   useEffect(() => {
     const wrapper = wrapperRef.current;
     if (!wrapper) return;
@@ -301,7 +371,7 @@ function GameMap({
     });
     ro.observe(wrapper);
     return () => ro.disconnect();
-  }, []);
+  }, [mapBase, IMG_DIMENSIONS.width, IMG_DIMENSIONS.height]);
 
   // Helper to get alliance of a territory
   const getAlliance = useCallback((owner?: string) => {
@@ -441,6 +511,10 @@ function GameMap({
           setValidDropTargets(new Set());
           return;
         }
+        const match = availableMoveTargets?.find(
+          m => m.territory === activeUnit.territoryId && m.unit.unit_id === activeUnit.unitId && m.destinations.includes(targetTerritory)
+        );
+        const chargeThrough = match?.charge_routes?.[targetTerritory]?.[0] ?? [];
         onSetPendingMove({
           fromTerritory: activeUnit.territoryId,
           toTerritory: targetTerritory,
@@ -448,6 +522,7 @@ function GameMap({
           unitDef: activeUnit.unitDef,
           maxCount: availableCount,
           count: Math.min(activeUnit.count, availableCount),
+          chargeThrough: chargeThrough.length > 0 ? chargeThrough : undefined,
         });
       }
     }
@@ -456,10 +531,12 @@ function GameMap({
     setValidDropTargets(new Set());
   }, [activeUnit, validDropTargets, territoryUnits, pendingMoves, availableMoveTargets, onSetPendingMove, onMobilizationDrop, validMobilizeTerritories]);
 
-  // Handle territory click (toggle selection)
+  // Handle territory click (toggle selection); ignore if user panned (drag > threshold)
   const handleTerritoryClick = useCallback((territoryId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    // Toggle: deselect if already selected, otherwise select
+    const dx = e.clientX - panStartPos.current.x;
+    const dy = e.clientY - panStartPos.current.y;
+    if (dx * dx + dy * dy >= PAN_CLICK_THRESHOLD_PX * PAN_CLICK_THRESHOLD_PX) return; // Was a pan, not a click
     if (selectedTerritory === territoryId) {
       onTerritorySelect(null);
     } else {
@@ -468,30 +545,29 @@ function GameMap({
     onUnitSelect(null);
   }, [selectedTerritory, onTerritorySelect, onUnitSelect]);
 
-  // Handle background click
+  // Handle background click: clear selection when clicking map background; ignore if we just panned
   const handleBackgroundClick = useCallback((e: React.MouseEvent) => {
-    // Don't clear selection if we're dragging the map
-    if (isDragging) return;
-    
-    // Only clear if clicking directly on background elements
     const target = e.target as HTMLElement;
-    if (target.classList.contains('map-wrapper') || 
-        target.classList.contains('map-background') ||
-        target.classList.contains('map-inner')) {
-      onTerritorySelect(null);
-      onUnitSelect(null);
-    }
-  }, [isDragging, onTerritorySelect, onUnitSelect]);
+    const isBackground = target.classList.contains('map-wrapper') ||
+      target.classList.contains('map-background') ||
+      target.classList.contains('map-inner');
+    if (!isBackground) return;
+    const dx = e.clientX - panStartPos.current.x;
+    const dy = e.clientY - panStartPos.current.y;
+    if (dx * dx + dy * dy >= PAN_CLICK_THRESHOLD_PX * PAN_CLICK_THRESHOLD_PX) return; // Was a pan, not a click
+    onTerritorySelect(null);
+    onUnitSelect(null);
+  }, [onTerritorySelect, onUnitSelect]);
 
-  // Pan handlers
+  // Pan handlers: allow pan from anywhere (including territory paths); only treat as territory click if drag was minimal
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
-    // Don't start panning if clicking on a unit or territory
     const target = e.target as HTMLElement;
-    if (target.closest('.unit-token') || target.tagName === 'path') return;
+    if (target.closest('.unit-token')) return; // Don't start pan when pressing on a unit (so unit drag works)
     
     setIsDragging(true);
     setDragStart({ x: e.clientX - transform.x, y: e.clientY - transform.y });
+    panStartPos.current = { x: e.clientX, y: e.clientY };
   }, [transform]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
@@ -517,35 +593,47 @@ function GameMap({
     setIsDragging(false);
   }, []);
 
-  // Zoom handler
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    if (!wrapperRef.current) return;
-    
-    const wrapper = wrapperRef.current;
-    const rect = wrapper.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-    
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, transform.scale * delta));
-    
-    // Zoom toward mouse position
-    const scaleRatio = newScale / transform.scale;
-    let newX = mouseX - (mouseX - transform.x) * scaleRatio;
-    let newY = mouseY - (mouseY - transform.y) * scaleRatio;
-    
-    // Clamp
-    const scaledWidth = IMG_DIMENSIONS.width * newScale;
-    const scaledHeight = IMG_DIMENSIONS.height * newScale;
-    const minX = Math.min(0, wrapper.clientWidth - scaledWidth);
-    const minY = Math.min(0, wrapper.clientHeight - scaledHeight);
-    
-    newX = Math.max(minX, Math.min(0, newX));
-    newY = Math.max(minY, Math.min(0, newY));
-    
-    setTransform({ x: newX, y: newY, scale: newScale });
-  }, [transform]);
+  // Non-passive wheel listener: pinch (ctrlKey) = zoom, 2-finger drag = pan
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      if (!wrapperRef.current) return;
+      const t = transformRef.current;
+      const wrapper = wrapperRef.current;
+
+      if (e.ctrlKey) {
+        // Pinch zoom: zoom toward cursor
+        const rect = wrapper.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        const delta = e.deltaY > 0 ? 0.9 : 1.1;
+        const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, t.scale * delta));
+        const scaleRatio = newScale / t.scale;
+        let newX = mouseX - (mouseX - t.x) * scaleRatio;
+        let newY = mouseY - (mouseY - t.y) * scaleRatio;
+        const scaledWidth = IMG_DIMENSIONS.width * newScale;
+        const scaledHeight = IMG_DIMENSIONS.height * newScale;
+        const minX = Math.min(0, wrapper.clientWidth - scaledWidth);
+        const minY = Math.min(0, wrapper.clientHeight - scaledHeight);
+        newX = Math.max(minX, Math.min(0, newX));
+        newY = Math.max(minY, Math.min(0, newY));
+        setTransform({ x: newX, y: newY, scale: newScale });
+      } else {
+        // 2-finger drag: pan by delta
+        const scaledWidth = IMG_DIMENSIONS.width * t.scale;
+        const scaledHeight = IMG_DIMENSIONS.height * t.scale;
+        const minX = Math.min(0, wrapper.clientWidth - scaledWidth);
+        const minY = Math.min(0, wrapper.clientHeight - scaledHeight);
+        let newX = Math.max(minX, Math.min(0, t.x + e.deltaX));
+        let newY = Math.max(minY, Math.min(0, t.y + e.deltaY));
+        setTransform({ ...t, x: newX, y: newY });
+      }
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, []);
 
   // Clamp position to keep map in view
   const clampPosition = useCallback((x: number, y: number, scale: number) => {
@@ -654,20 +742,22 @@ function GameMap({
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
-          onWheel={handleWheel}
           onClick={handleBackgroundClick}
         >
           <div
             className="map-inner"
             style={{
+              width: IMG_DIMENSIONS.width,
+              height: IMG_DIMENSIONS.height,
               transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
             }}
           >
             <img
               className="map-background"
-              src="/test_map.png"
+              src={`${imageUrl}?v=1`}
               alt="Map"
               draggable={false}
+              onError={handleBgImageError}
             />
             
             <svg
@@ -678,7 +768,7 @@ function GameMap({
               {Array.from(svgPaths.entries()).map(([territoryId, pathData]) => {
                 const territory = territoryData[territoryId];
                 const owner = territory?.owner;
-                const color = owner ? factionData[owner]?.color : 'transparent';
+                const color = owner ? factionData[owner]?.color : '#d4c4a8'; // light tan for neutral (unowned)
                 const isSelected = selectedTerritory === territoryId;
                 const isValidDrop = validDropTargets.has(territoryId);
                 
@@ -754,13 +844,72 @@ function GameMap({
                 />
               ))}
             </svg>
+
+            {/* Territory markers: camp (tent) icon and faction logo on strongholds/capitals */}
+            <div className="territory-markers-layer">
+              {Object.keys(territoryCentroids).map((territoryId) => {
+                const centroid = territoryCentroids[territoryId];
+                const territory = territoryData[territoryId];
+                if (!centroid || !territory) return null;
+                const screenPos = svgToScreen(centroid.x, centroid.y);
+                const hasCamp = territory.hasCamp === true;
+                const showFactionLogo = territory.stronghold && territory.owner && factionData[territory.owner];
+                const showNeutralStronghold = territory.stronghold && !territory.owner;
+                // Never show camp on capitals (minas_tirith, barad_dur): check if this territory is any faction's capital
+                const isCapital =
+                  territory.isCapital === true ||
+                  Object.values(factionData).some((f) => f.capital === territoryId);
+                if (!hasCamp && !showFactionLogo && !showNeutralStronghold) return null;
+                return (
+                  <div
+                    key={territoryId}
+                    className="territory-markers"
+                    style={{
+                      left: screenPos.x,
+                      top: screenPos.y,
+                    }}
+                  >
+                    {hasCamp && !isCapital && (
+                      <div className="territory-marker camp-marker" title="Camp (mobilization point)">
+                        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden className="tent-icon">
+                          <path fill="#8B6914" stroke="#5c4a0f" strokeWidth="1" d="M12 2L2 20h6l2-6h4l2 6h6L12 2z" />
+                          <path fill="none" stroke="#5c4a0f" strokeWidth="1" d="M4 20h16" />
+                        </svg>
+                      </div>
+                    )}
+                    {showFactionLogo && (
+                      <div
+                        className={`territory-marker faction-marker ${isCapital ? 'faction-marker--capital' : ''}`}
+                        title={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
+                      >
+                        <img
+                          src={factionData[territory.owner!].icon}
+                          alt=""
+                          width={isCapital ? 30 : 22}
+                          height={isCapital ? 30 : 22}
+                        />
+                      </div>
+                    )}
+                    {showNeutralStronghold && (
+                      <div
+                        className="territory-marker neutral-stronghold-marker"
+                        title={territory.name + ' (Neutral stronghold)'}
+                        aria-hidden
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
             
             <div className="unit-layer">
               {Object.entries(territoryUnits).map(([territoryId, units]) => {
                 const centroid = territoryCentroids[territoryId];
                 if (!centroid || units.length === 0) return null;
-                
+                const territory = territoryData[territoryId];
+                const hasStrongholdMarker = territory?.stronghold === true;
                 const screenPos = svgToScreen(centroid.x, centroid.y);
+                const unitOffsetY = hasStrongholdMarker ? 20 : 0;
                 const canDrag = isMovementPhase && isOwnedByCurrentFaction(territoryId);
                 
                 // Get the faction that owns this territory to determine unit border color
@@ -773,7 +922,7 @@ function GameMap({
                     className="territory-units"
                     style={{
                       left: screenPos.x,
-                      top: screenPos.y,
+                      top: screenPos.y + unitOffsetY,
                     }}
                   >
                     {units.map(({ unit_id, count }) => {

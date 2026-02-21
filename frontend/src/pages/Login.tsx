@@ -19,7 +19,8 @@ export default function Login() {
       setAuthToken(res.access_token);
       navigate('/', { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      const message = err instanceof Error ? err.message : 'Login failed';
+      setError(message || 'Invalid email or password.');
     } finally {
       setLoading(false);
     }

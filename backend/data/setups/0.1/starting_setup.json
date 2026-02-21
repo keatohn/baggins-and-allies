@@ -1,0 +1,36 @@
+{
+  "turn_order": ["gondor", "mordor"],
+  "territory_owners": {
+    "minas_tirith": "gondor",
+    "pelennor": "gondor",
+    "west_osgiliath": "gondor",
+    "east_osgiliath": "mordor",
+    "south_ithilien": "gondor",
+    "north_ithilien": "gondor",
+    "lebennin": "gondor",
+    "pelargir": "gondor",
+    "minas_morgul": "mordor",
+    "the_black_gate": "mordor",
+    "barad_dur": "mordor",
+    "mount_doom": "mordor",
+    "gorgoroth": "mordor",
+    "nurn": "mordor",
+    "udun": "mordor",
+    "cirith_ungol": "mordor",
+    "dagorlad": "mordor"
+  },
+  "starting_units": {
+    "minas_tirith": [
+      {"unit_id": "gondor_infantry", "count": 3},
+      {"unit_id": "gondor_knight", "count": 1}
+    ],
+    "pelennor": [{"unit_id": "gondor_infantry", "count": 1}],
+    "north_ithilien": [{"unit_id": "gondor_infantry", "count": 2}],
+    "barad_dur": [
+      {"unit_id": "mordor_orc", "count": 4},
+      {"unit_id": "mordor_troll", "count": 1}
+    ],
+    "minas_morgul": [{"unit_id": "mordor_orc", "count": 2}],
+    "the_black_gate": [{"unit_id": "mordor_orc", "count": 2}]
+  }
+}

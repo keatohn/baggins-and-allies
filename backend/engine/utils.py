@@ -4,8 +4,15 @@ Utility functions for the game engine.
 
 import random
 from collections import Counter
+from typing import Any
 from backend.engine.state import GameState, TerritoryState, UnitStack, Unit
-from backend.engine.definitions import FactionDefinition, TerritoryDefinition, UnitDefinition, load_starting_setup
+from backend.engine.definitions import (
+    CampDefinition,
+    FactionDefinition,
+    TerritoryDefinition,
+    UnitDefinition,
+    load_starting_setup,
+)
 from backend.engine import DICE_SIDES
 
 
@@ -51,6 +58,9 @@ def initialize_game_state(
     territory_defs: dict[str, TerritoryDefinition],
     unit_defs: dict[str, UnitDefinition] | None = None,
     starting_setup: dict[str, dict[str, list[dict]]] | None = None,
+    camp_defs: dict[str, CampDefinition] | None = None,
+    victory_criteria: dict[str, Any] | None = None,
+    camp_cost: int | None = None,
 ) -> GameState:
     """
     Create an initial game state with all factions and territories set up.
@@ -68,6 +78,7 @@ def initialize_game_state(
                 }
             }
             If not provided, uses default setup based on faction capitals.
+        camp_defs: Camp definitions; all camps start standing. If None, no camps.
     """
     # Initialize territories
     territories = {}
@@ -110,13 +121,28 @@ def initialize_game_state(
                 faction_resources[owner][resource_id] = 0
             faction_resources[owner][resource_id] += amount
 
-    # Calculate initial mobilization strongholds for first faction
+    # All camps start standing; mobilization = owned territories with a standing camp
+    camps_standing = list(camp_defs.keys()) if camp_defs else []
     first_faction = faction_ids[0]
-    initial_mob_strongholds = [
+
+    def _territory_has_standing_camp(tid: str) -> bool:
+        for cid in camps_standing:
+            camp = camp_defs.get(cid) if camp_defs else None
+            if camp and camp.territory_id == tid:
+                return True
+        return False
+
+    initial_mobilization_camps = [
         tid for tid, ts in territories.items()
-        if ts.owner == first_faction and territory_defs.get(tid) and territory_defs[tid].is_stronghold
+        if ts.owner == first_faction and _territory_has_standing_camp(tid)
     ]
 
+    vc = victory_criteria if victory_criteria else {"strongholds": {"good": 4, "evil": 4}}
+    # Territories owned by first faction at "turn start" (for camp placement options)
+    faction_territories_at_turn_start = {
+        first_faction: [tid for tid, ts in territories.items() if ts.owner == first_faction]
+    }
+    camp_cost_val = camp_cost if camp_cost is not None else 0
     # Create game state (need it for unit ID generation)
     state = GameState(
         turn_number=1,
@@ -127,7 +153,11 @@ def initialize_game_state(
         faction_purchased_units={faction_id: []
                                  for faction_id in faction_defs.keys()},
         unit_id_counters={},
-        mobilization_strongholds=initial_mob_strongholds,
+        camps_standing=camps_standing,
+        mobilization_camps=initial_mobilization_camps,
+        victory_criteria=vc,
+        camp_cost=camp_cost_val,
+        faction_territories_at_turn_start=faction_territories_at_turn_start,
     )
 
     # Add starting units if provided

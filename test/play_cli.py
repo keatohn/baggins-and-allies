@@ -454,10 +454,11 @@ def main_loop():
     print("=" * 60)
 
     # Load definitions and initialize with starting units
-    unit_defs, territory_defs, faction_defs = load_static_definitions()
+    unit_defs, territory_defs, faction_defs, camp_defs = load_static_definitions()
     starting_setup = get_default_starting_setup()
     state = initialize_game_state(
-        faction_defs, territory_defs, unit_defs, starting_setup)
+        faction_defs, territory_defs, unit_defs, starting_setup, camp_defs=camp_defs
+    )
 
     print("\nGame initialized!")
     print(f"Factions: {', '.join(faction_defs.keys())}")
@@ -561,7 +562,8 @@ def main_loop():
         if action:
             # Validate first
             result = validate_action(
-                state, action, unit_defs, territory_defs, faction_defs)
+                state, action, unit_defs, territory_defs, faction_defs, camp_defs
+            )
             if not result.valid:
                 print(f"\nInvalid action: {result.error}")
                 input("Press Enter to continue...")
@@ -569,7 +571,8 @@ def main_loop():
 
             try:
                 state, events = apply_action(
-                    state, action, unit_defs, territory_defs, faction_defs)
+                    state, action, unit_defs, territory_defs, faction_defs, camp_defs
+                )
 
                 # Show events
                 if events:

@@ -373,11 +373,27 @@
   flex-shrink: 0;
 }
 
+.capital-badge {
+  font-family: 'Cinzel', serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--gold);
+  margin-bottom: 0.25rem;
+}
+
 .stronghold-badge {
   font-family: 'Cinzel', serif;
   font-size: 0.8rem;
   font-weight: 700;
   color: var(--gold-dark);
+  margin-bottom: 0.25rem;
+}
+
+.camp-badge {
+  font-family: 'Cinzel', serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #8B6914;
   margin-bottom: 0.25rem;
 }
 
@@ -456,19 +472,19 @@
   color: #2e7d32;
 }
 
-.empty-state {
-  color: var(--ink-faded);
-  font-style: italic;
-  text-align: center;
-  padding: 1rem;
-}
-
+/* Shared style for action box non-button messages (All battles completed, phase instructions, etc.) */
+.empty-state,
 .phase-instruction {
   font-family: var(--font-parchment);
   color: var(--ink-faded);
-  font-size: 0.9rem;
+  font-size: 1.05rem;
+  text-align: center;
+  line-height: 1.35;
   margin: 0 0 0.5rem 0;
-  line-height: 1.3;
+}
+
+.empty-state {
+  padding: 1rem;
 }
 
 /* Retreat Selection */

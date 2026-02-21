@@ -5,5 +5,5 @@ V1 - Core engine without web framework, database, or UI
 
 DICE_SIDES = 10
 
-# Victory condition: alliance must control this many strongholds at end of turn cycle
-STRONGHOLDS_FOR_VICTORY = 4
+# Victory criteria live in GameState.victory_criteria and setup manifests.
+# Shape: {"strongholds": {"good": 2, "evil": 2}, ...} - extensible for future criteria.

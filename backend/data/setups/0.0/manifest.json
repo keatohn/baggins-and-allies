@@ -1,0 +1,12 @@
+{
+    "id": "0.0",
+    "display_name": "0.0",
+    "map_asset": "test_map",
+    "victory_criteria": {
+        "strongholds": {
+            "good": 2,
+            "evil": 2
+        }
+    },
+    "camp_cost": 10
+}

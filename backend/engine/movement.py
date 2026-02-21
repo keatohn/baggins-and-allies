@@ -15,85 +15,76 @@ def get_reachable_territories_for_unit(
     territory_defs: dict[str, TerritoryDefinition],
     faction_defs: dict[str, FactionDefinition],
     phase: str,
-) -> dict[str, int]:
+) -> tuple[dict[str, int], dict[str, list[list[str]]]]:
     """
     Calculate all territories reachable by a specific unit instance from a starting territory.
-    Returns a dict mapping territory_id -> distance (cost to reach).
+    Returns (reachable_dict, charge_routes).
+    - reachable_dict: territory_id -> distance (cost to reach).
+    - charge_routes: for cavalry in combat_move, territory_id -> list of charge_through paths
+      (each path = list of empty enemy territory IDs passed through). Empty dict for non-cavalry.
 
     Rules:
     - BFS up to remaining_movement
-    - Non-combat: cannot pass through or end in enemy territory (allied/friendly/empty neutral only).
-    - Combat: can end in enemy (or neutral-with-enemies) to attack, but cannot pass through
-      enemy territory; each step into enemy/contested is attack-only (no expansion from there).
-    - Aerial units:
-      - Can pass through enemy territory in any phase
-      - Cannot end in enemy territory during non_combat_move
-    - In non_combat_move: can move freely into allied territory (same alliance, different faction)
-
-    Args:
-        unit: The unit instance (uses remaining_movement)
-        start: Starting territory ID
-        state: Current game state
-        unit_defs: Unit definitions (for tags like "aerial")
-        territory_defs: All territory definitions
-        faction_defs: All faction definitions
-        phase: Current game phase ("combat_move", "non_combat_move", etc.)
-
-    Returns:
-        Dict mapping reachable territory_id -> distance to reach it
+    - Cavalry (charging): can pass through empty enemy territory in combat_move; those are conquered.
+    - Aerial: can pass through any enemy/neutral in both phases.
+    - Empty/friendly neutral: enqueued for all units.
     """
     unit_def = unit_defs.get(unit.unit_id)
     if not unit_def:
-        return {}
+        return {}, {}
 
-    is_aerial = "aerial" in unit_def.tags
+    is_aerial = (
+        getattr(unit_def, "archetype", "") == "aerial"
+        or "aerial" in getattr(unit_def, "tags", [])
+    )
+    is_cavalry = (
+        getattr(unit_def, "archetype", "") == "cavalry"
+        or "cavalry" in getattr(unit_def, "tags", [])
+    )
     can_enter_enemy = phase == "combat_move"
     current_faction_def = faction_defs.get(state.current_faction)
 
     reachable = {}  # territory_id -> distance
-    queue = deque([(start, 0)])  # (territory_id, distance)
-    visited = {start: 0}  # territory_id -> best distance
+    charge_routes: dict[str, list[list[str]]] = {}  # territory_id -> list of charge_through paths
+    # For cavalry we track (tid, charge) to allow multiple paths; key = (tid, tuple(charge))
+    visited: dict[tuple[str, tuple[str, ...]], int] = {}  # (tid, tuple(charge)) -> best distance
+    queue: deque[tuple[str, int, list[str]]] = deque([(start, 0, [])])
 
     while queue:
-        territory_id, distance = queue.popleft()
+        territory_id, distance, charge = queue.popleft()
+        charge_key = (territory_id, tuple(charge))
 
-        if distance > 0:  # Don't include start in reachable
-            reachable[territory_id] = distance
+        if distance > 0:
+            reachable[territory_id] = min(reachable.get(territory_id, 999), distance)
+            if is_cavalry and can_enter_enemy:
+                charge_routes.setdefault(territory_id, [])
+                if charge not in charge_routes[territory_id]:
+                    charge_routes[territory_id].append(charge)
 
         if distance >= unit.remaining_movement:
             continue
 
-        # Get adjacent territories
         territory_def = territory_defs.get(territory_id)
         if not territory_def:
             continue
 
         for adjacent_id in territory_def.adjacent:
             new_distance = distance + 1
-
-            # Skip if we've found a better path already
-            if adjacent_id in visited and visited[adjacent_id] <= new_distance:
-                continue
-
             adjacent_territory = state.territories.get(adjacent_id)
             if not adjacent_territory:
                 continue
 
-            # Check if we can move through this territory
             is_neutral = adjacent_territory.owner is None
             is_enemy_territory = (
                 adjacent_territory.owner is not None
                 and adjacent_territory.owner != state.current_faction
             )
-
-            # Check if it's allied territory (same alliance, different faction)
             is_allied_territory = False
             if is_enemy_territory and current_faction_def:
                 owner_faction_def = faction_defs.get(adjacent_territory.owner)
                 if owner_faction_def and owner_faction_def.alliance == current_faction_def.alliance:
                     is_allied_territory = True
 
-            # Check if neutral territory has enemy units (for combat_move restriction)
             neutral_has_enemies = False
             if is_neutral and current_faction_def:
                 for u in adjacent_territory.units:
@@ -103,36 +94,37 @@ def get_reachable_territories_for_unit(
                         neutral_has_enemies = True
                         break
                     elif not unit_faction_def:
-                        # Units without a faction (goblins, neutral monsters) are enemies to all
                         neutral_has_enemies = True
                         break
 
-            # Determine if we can pass through (use as stepping stone in BFS)
-            # Non-combat: cannot pass through enemy territory (allied/friendly/empty neutral only)
-            # Combat: can pass through friendly/allied/empty neutral; enemy (or neutral with enemies)
-            #         is valid as a destination only (attack) — do not expand from it
+            # Cavalry in combat_move: can pass through empty enemy (charging)
+            adjacent_empty_enemy = (
+                is_enemy_territory and not is_allied_territory
+                and len(adjacent_territory.units) == 0
+            )
+            new_charge = charge + [adjacent_id] if (is_cavalry and can_enter_enemy and adjacent_empty_enemy) else charge
+            adj_key = (adjacent_id, tuple(new_charge))
+
             can_pass = True
             if is_enemy_territory and not is_allied_territory and not can_enter_enemy and not is_aerial:
                 can_pass = False
-            if is_enemy_territory and not is_allied_territory and can_enter_enemy and not is_aerial:
-                # Combat move: enemy territory is destination-only; do not pass through
+            if is_enemy_territory and not is_allied_territory and can_enter_enemy and not is_aerial and not (is_cavalry and adjacent_empty_enemy):
                 can_pass = False
             if is_neutral and phase == "combat_move" and neutral_has_enemies and not is_aerial:
-                # Combat move: neutral with enemies is attack-only; do not pass through
-                can_pass = False
-            # Combat_move: cannot pass through empty neutral (must be attacking)
-            if is_neutral and phase == "combat_move" and not neutral_has_enemies:
                 can_pass = False
 
             if can_pass:
-                visited[adjacent_id] = new_distance
-                queue.append((adjacent_id, new_distance))
+                if adj_key not in visited or new_distance < visited[adj_key]:
+                    visited[adj_key] = new_distance
+                    queue.append((adjacent_id, new_distance, new_charge))
             elif phase == "combat_move" and not is_aerial and new_distance <= unit.remaining_movement:
-                # Combat: adjacent is enemy or neutral-with-enemies — valid destination only
                 if (is_enemy_territory and not is_allied_territory) or (is_neutral and neutral_has_enemies):
-                    if adjacent_id not in visited or new_distance < visited[adjacent_id]:
-                        visited[adjacent_id] = new_distance
+                    if adjacent_id not in reachable or new_distance < reachable[adjacent_id]:
                         reachable[adjacent_id] = new_distance
+                    if is_cavalry:
+                        charge_routes.setdefault(adjacent_id, [])
+                        if charge not in charge_routes[adjacent_id]:
+                            charge_routes[adjacent_id].append(charge)
 
     # Filter destinations based on phase and unit type
     filtered_reachable = {}
@@ -187,7 +179,12 @@ def get_reachable_territories_for_unit(
             # Other phases: include all reachable
             filtered_reachable[territory_id] = dist
 
-    return filtered_reachable
+    # Restrict charge_routes to only destinations that are in filtered_reachable
+    charge_routes_filtered = {
+        tid: paths for tid, paths in charge_routes.items()
+        if tid in filtered_reachable
+    }
+    return filtered_reachable, charge_routes_filtered
 
 
 def calculate_movement_cost(
@@ -252,7 +249,7 @@ def get_reachable_territories(
         base_movement=unit_def.movement,
         base_health=unit_def.health,
     )
-    reachable_dict = get_reachable_territories_for_unit(
+    reachable_dict, _ = get_reachable_territories_for_unit(
         temp_unit, start, state, {unit_def.id: unit_def}, territory_defs, faction_defs, phase
     )
     return set(reachable_dict.keys())

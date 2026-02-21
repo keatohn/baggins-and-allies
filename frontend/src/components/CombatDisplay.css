@@ -478,6 +478,18 @@
   background: #d32f2f;
 }
 
+.combat-btn-retreat.disabled,
+.combat-btn-retreat:disabled {
+  background: #6d6d6d;
+  border-color: #4a4a4a;
+  color: #bbb;
+  cursor: not-allowed;
+}
+.combat-btn-retreat.disabled:hover,
+.combat-btn-retreat:disabled:hover {
+  background: #6d6d6d;
+}
+
 /* Legacy - keep for confirm/retreat flows */
 .retreat-btn {
   background: #8b4513;

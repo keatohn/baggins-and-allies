@@ -31,6 +31,8 @@ interface CombatRound {
   /** Hits per unit type this round (from backend); used for after-round hit badges. */
   attackerHitsByUnitType?: Record<string, number>;
   defenderHitsByUnitType?: Record<string, number>;
+  /** True when this round is defender archer prefire (before round 1). */
+  isArcherPrefire?: boolean;
 }
 
 interface RetreatOption {
@@ -56,6 +58,8 @@ interface CombatDisplayProps {
     units: CombatUnit[];
   };
   retreatOptions: RetreatOption[];
+  /** False after archer prefire until round 1 is run; retreat button is disabled. */
+  canRetreat?: boolean;
   onStartRound: () => Promise<{ round: CombatRound; combatOver: boolean; attackerWon: boolean } | null>;
   onRetreat: (territoryId: string) => void;
   onClose: (attackerWon: boolean, survivingAttackers: CombatUnit[]) => void;
@@ -80,17 +84,19 @@ const DICE_PATTERNS: Record<number, number[]> = {
   10: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
 };
 
-// Dice face component with landing animation
+// Dice face component with landing animation. Hits use faction color when hitColor is provided.
 function Die({
   value,
   isHit,
   isLanding,
-  isVisible
+  isVisible,
+  hitColor,
 }: {
   value: number;
   isHit: boolean;
   isLanding: boolean;
   isVisible: boolean;
+  hitColor?: string;
 }) {
   const pattern = DICE_PATTERNS[value] || DICE_PATTERNS[1];
   const hasTenthDot = pattern.includes(9);
@@ -99,8 +105,19 @@ function Die({
     return <div className="die placeholder" />;
   }
 
+  const hitStyle = isHit && hitColor
+    ? {
+        background: hitColor,
+        borderColor: hitColor,
+        boxShadow: `0 0 8px ${hitColor}80`,
+      }
+    : undefined;
+
   return (
-    <div className={`die ${isHit ? 'hit' : 'miss'} ${isLanding ? 'landing' : ''}`}>
+    <div
+      className={`die ${isHit ? 'hit' : 'miss'} ${isLanding ? 'landing' : ''}`}
+      style={hitStyle}
+    >
       {hasTenthDot && <span className="dot tenth-dot" />}
       <div className="die-grid">
         {[0, 1, 2, 3, 4, 5, 6, 7, 8].map(pos => (
@@ -127,6 +144,7 @@ function UnitRow({
   revealedRows,
   currentRowKey,
   isLanding,
+  hitColor,
 }: {
   statValue: number;
   units: CombatUnit[];
@@ -138,6 +156,7 @@ function UnitRow({
   revealedRows: Set<string>;
   currentRowKey: string | null;
   isLanding: boolean;
+  hitColor?: string;
 }) {
   const rowKey = `${isAttacker ? 'attacker' : 'defender'}_${statValue}`;
   const isRevealed = revealedRows.has(rowKey);
@@ -199,6 +218,7 @@ function UnitRow({
             isHit={roll.isHit}
             isLanding={isCurrentlyLanding}
             isVisible={isRevealed}
+            hitColor={hitColor}
           />
         ))}
       </div>
@@ -278,6 +298,7 @@ function CombatSide({
             revealedRows={revealedRows}
             currentRowKey={currentRowKey}
             isLanding={isLanding}
+            hitColor={factionColor}
           />
         ))}
       </div>
@@ -295,6 +316,7 @@ function CombatDisplay({
   attacker,
   defender,
   retreatOptions,
+  canRetreat = true,
   onStartRound,
   onRetreat,
   onClose,
@@ -621,7 +643,10 @@ function CombatDisplay({
       <div className="modal combat-modal">
         <header className="modal-header">
           <h2>Battle for {territoryName}</h2>
-          {roundNumber > 0 && (
+          {currentRound?.isArcherPrefire && (
+            <span className="round-indicator">Archers</span>
+          )}
+          {roundNumber > 0 && !currentRound?.isArcherPrefire && (
             <span className="round-indicator">Round {roundNumber}</span>
           )}
         </header>
@@ -675,9 +700,9 @@ function CombatDisplay({
             className={`combat-result ${attackerWon ? 'victory' : defenderWon ? 'defeat' : 'draw'}`}
             style={{
               backgroundColor: attackerWon
-                ? `${attacker.factionColor}25`
+                ? `${attacker.factionColor}60`
                 : defenderWon
-                  ? `${defender.factionColor}25`
+                  ? `${defender.factionColor}60`
                   : undefined
             }}
           >
@@ -703,10 +728,16 @@ function CombatDisplay({
               </>
             )}
 
-            {/* After round: Retreat (red) + Continue (tan) */}
+            {/* After round: Retreat (red, disabled until attackers have rolled) + Continue (tan) */}
             {showDecisionButtons && (
               <>
-                <button type="button" className="combat-btn-retreat" onClick={handleRetreatClick}>
+                <button
+                  type="button"
+                  className={`combat-btn-retreat${canRetreat ? '' : ' disabled'}`}
+                  onClick={canRetreat ? handleRetreatClick : undefined}
+                  disabled={!canRetreat}
+                  title={!canRetreat ? 'Retreat unavailable (click Continue first after archer prefire, or no adjacent allied/neutral territory)' : undefined}
+                >
                   Retreat
                 </button>
                 <button type="button" className="combat-btn-continue" onClick={handleContinue}>

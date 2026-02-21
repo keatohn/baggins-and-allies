@@ -50,10 +50,12 @@ def main():
     print("="*70)
 
     # Load definitions
-    unit_defs, territory_defs, faction_defs = load_static_definitions()
+    unit_defs, territory_defs, faction_defs, camp_defs = load_static_definitions()
 
     # Initialize game
-    state = initialize_game_state(faction_defs, territory_defs)
+    state = initialize_game_state(
+        faction_defs, territory_defs, camp_defs=camp_defs
+    )
     print("\nInitial game state:")
     print_game_state(state, territory_defs)
 
@@ -150,7 +152,7 @@ def main():
 
     # End combat_move phase
     state, _ = apply_action(state, end_phase("gondor"),
-                         unit_defs, territory_defs, faction_defs)
+                         unit_defs, territory_defs, faction_defs, camp_defs)
     print(f"✓ End phase. New phase: {state.phase}")
 
     # Phase 3: COMBAT
@@ -180,7 +182,7 @@ def main():
 
     # End combat phase
     state, _ = apply_action(state, end_phase("gondor"),
-                         unit_defs, territory_defs, faction_defs)
+                         unit_defs, territory_defs, faction_defs, camp_defs)
     print(f"✓ End phase. New phase: {state.phase}")
 
     # Phase 4: NON_COMBAT_MOVE
@@ -215,7 +217,7 @@ def main():
     # End non_combat_move phase (this triggers movement/health reset!)
     print("\n[ENDING NON_COMBAT_MOVE - Stats will reset]")
     state, _ = apply_action(state, end_phase("gondor"),
-                         unit_defs, territory_defs, faction_defs)
+                         unit_defs, territory_defs, faction_defs, camp_defs)
     print(f"✓ End phase. New phase: {state.phase}")
     print("Movement and health reset for Gondor's units")
 
@@ -240,7 +242,7 @@ def main():
 
     # End mobilization phase (and turn)
     state, _ = apply_action(state, end_turn("gondor"),
-                         unit_defs, territory_defs, faction_defs)
+                         unit_defs, territory_defs, faction_defs, camp_defs)
     print(f"✓ End turn")
     print(
         f"New turn: {state.turn_number}, Current faction: {state.current_faction}, Phase: {state.phase}")

@@ -41,10 +41,12 @@ def main():
     print("=" * 60)
 
     # Load definitions
-    unit_defs, territory_defs, faction_defs = load_static_definitions()
+    unit_defs, territory_defs, faction_defs, camp_defs = load_static_definitions()
 
     # Initialize game state
-    state = initialize_game_state(faction_defs, territory_defs)
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs=None, starting_setup=None, camp_defs=camp_defs
+    )
 
     print("\n[INITIAL STATE]")
     print_game_state(state, territory_defs)
@@ -61,8 +63,9 @@ def main():
     )
 
     try:
-        state, events = apply_action(state, purchase_action,
-                             unit_defs, territory_defs, faction_defs)
+        state, events = apply_action(
+            state, purchase_action, unit_defs, territory_defs, faction_defs, camp_defs
+        )
         print("✓ Purchase successful!")
         print(f"  Events: {[e.type for e in events]}")
         print(f"Gondor resources after: {state.faction_resources['gondor']}")
@@ -73,7 +76,9 @@ def main():
 
     # Skip to mobilization phase
     for _ in range(4):  # purchase -> combat_move -> combat -> non_combat_move -> mobilization
-        state, _ = apply_action(state, end_phase("gondor"), unit_defs, territory_defs, faction_defs)
+        state, _ = apply_action(
+            state, end_phase("gondor"), unit_defs, territory_defs, faction_defs, camp_defs
+        )
 
     print(f"\nNow in phase: {state.phase}")
     print("Mobilizing 2 infantry to Minas Tirith...")
@@ -85,7 +90,9 @@ def main():
     )
 
     try:
-        state, events = apply_action(state, mobilize_action, unit_defs, territory_defs, faction_defs)
+        state, events = apply_action(
+            state, mobilize_action, unit_defs, territory_defs, faction_defs, camp_defs
+        )
         print("✓ Mobilization successful!")
         print(f"  Events: {[e.type for e in events]}")
         print("Units in Minas Tirith:")
@@ -118,7 +125,9 @@ def main():
     )
 
     try:
-        state, events = apply_action(state, move_action, unit_defs, territory_defs, faction_defs)
+        state, events = apply_action(
+            state, move_action, unit_defs, territory_defs, faction_defs, camp_defs
+        )
         # Find the knight in the new location
         knight_moved = next(u for u in state.territories["osgiliath"].units if u.instance_id == knight1.instance_id)
         print(f"✓ Movement successful! Knight now has remaining_movement={knight_moved.remaining_movement}")
@@ -130,7 +139,9 @@ def main():
     print("\n[SCENARIO 3: Combat with Individual Units]")
 
     # Reset for combat scenario
-    state = initialize_game_state(faction_defs, territory_defs)
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs=None, starting_setup=None, camp_defs=camp_defs
+    )
 
     # In A&A model: During combat_move, attackers move INTO enemy territory
     # Both attackers and defenders are now in the same territory (Mordor)
@@ -177,7 +188,9 @@ def main():
         dice_rolls,
     )
 
-    state, events = apply_action(state, combat_action, unit_defs, territory_defs, faction_defs)
+    state, events = apply_action(
+        state, combat_action, unit_defs, territory_defs, faction_defs, camp_defs
+    )
 
     print("\nCombat events:")
     for e in events:
@@ -205,7 +218,9 @@ def main():
     print(f"Before phase end: Knight mv={knight.remaining_movement}, hp={knight.remaining_health}")
 
     # End non_combat_move phase (triggers reset)
-    state, events = apply_action(state, end_phase("gondor"), unit_defs, territory_defs, faction_defs)
+    state, events = apply_action(
+        state, end_phase("gondor"), unit_defs, territory_defs, faction_defs, camp_defs
+    )
 
     # Find the knight again
     knight_reset = state.territories["minas_tirith"].units[0]

@@ -1,14 +1,16 @@
 """
 Auth helpers: password hashing and JWT.
+Bcrypt accepts at most 72 bytes; we truncate manually (e.g. my_password.encode("utf-8")[:72]) before hashing.
+We use bcrypt directly so the truncated bytes are passed through with no extra encoding.
 """
 
+import bcrypt
 import os
 import re
 from datetime import datetime, timedelta
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 from .database import get_db
@@ -21,16 +23,25 @@ SECRET_KEY = os.environ.get("JWT_SECRET", "change-me-in-production-use-env")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+BCRYPT_MAX_BYTES = 72
+# Lower rounds = faster register/login; 10 is still strong and ~instant
+BCRYPT_ROUNDS = int(os.environ.get("BCRYPT_ROUNDS", "10"))
 security = HTTPBearer(auto_error=False)
 
 
+def _truncate_password(password: str) -> bytes:
+    """Truncate to 72 bytes so bcrypt never raises. E.g. my_password[:72] in bytes: password.encode('utf-8')[:72]."""
+    return password.encode("utf-8")[:BCRYPT_MAX_BYTES]
+
+
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    pwd_bytes = _truncate_password(password)
+    return bcrypt.hashpw(pwd_bytes, bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode("ascii")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    pwd_bytes = _truncate_password(plain)
+    return bcrypt.checkpw(pwd_bytes, hashed.encode("ascii"))
 
 
 def create_access_token(player_id: str) -> str:

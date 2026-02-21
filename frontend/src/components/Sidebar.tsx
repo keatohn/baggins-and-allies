@@ -4,6 +4,8 @@ import type { PendingMobilization } from '../App';
 import './Sidebar.css';
 
 interface SidebarProps {
+  /** When false (e.g. not your turn in multiplayer), the Actions panel is hidden; territory select and event log still show. */
+  canAct?: boolean;
   gameState: GameState;
   selectedTerritory: string | null;
   territoryData: Record<string, {
@@ -13,12 +15,14 @@ interface SidebarProps {
     stronghold: boolean;
     produces: number;
     adjacent: string[];
+    hasCamp?: boolean;
+    isCapital?: boolean;
   }>;
   territoryUnits: Record<string, { unit_id: string; count: number }[]>;
   /** When non-combat move and a territory is selected: stacks grouped by (unit_id, remaining_movement) for that territory */
   territoryUnitStacksWithMovement?: { unit_id: string; remaining_movement: number; count: number }[] | null;
   unitDefs: Record<string, { name: string; icon: string }>;
-  factionData: Record<string, { name: string; icon: string; color: string; alliance: string }>;
+  factionData: Record<string, { name: string; icon: string; color: string; alliance: string; capital?: string }>;
   eventLog: GameEvent[];
   onEndPhase: () => void;
   onOpenPurchase: () => void;
@@ -82,6 +86,7 @@ function formatPhase(phase: string): string {
 }
 
 function Sidebar({
+  canAct = true,
   gameState,
   selectedTerritory,
   territoryData,
@@ -124,21 +129,31 @@ function Sidebar({
   const owner = territory?.owner;
   const ownerData = owner ? factionData[owner] : null;
 
+  // Purchase is disabled when current faction's capital is captured
+  const currentFactionCapital = factionData[gameState.current_faction]?.capital;
+  const capitalOwner = currentFactionCapital ? territoryData[currentFactionCapital]?.owner : undefined;
+  const capitalCaptured = !!currentFactionCapital && capitalOwner !== gameState.current_faction;
+
   return (
     <aside className="sidebar">
-      {/* Actions Panel */}
+      {/* Actions Panel — only when it's this player's turn (canAct) */}
+      {canAct && (
       <div className="panel actions-panel">
         <h2>Actions</h2>
         <div className="phase-actions">
-          {phaseConfig.buttons.map(btn => (
-            <button
-              key={btn.id}
-              id={btn.id}
-              onClick={btn.id === 'btn-purchase' ? onOpenPurchase : undefined}
-            >
-              {btn.label}
-            </button>
-          ))}
+          {gameState.phase === 'purchase' && capitalCaptured ? (
+            <p className="phase-instruction">Cannot purchase units until capital is liberated.</p>
+          ) : (
+            phaseConfig.buttons.map(btn => (
+              <button
+                key={btn.id}
+                id={btn.id}
+                onClick={btn.id === 'btn-purchase' ? onOpenPurchase : undefined}
+              >
+                {btn.label}
+              </button>
+            ))
+          )}
 
           {/* Pending move confirmation with +/- controls */}
           {pendingMoveConfirm && (
@@ -431,6 +446,7 @@ function Sidebar({
           </>
         )}
       </div>
+      )}
 
       {/* Territory Panel */}
       <div className="panel territory-panel">
@@ -469,8 +485,14 @@ function Sidebar({
 
         {territory && (
           <div className="territory-info">
-            {territory.stronghold && (
+            {territory.isCapital && (
+              <div className="capital-badge">Capital</div>
+            )}
+            {territory.stronghold && !territory.isCapital && (
               <div className="stronghold-badge">Stronghold</div>
+            )}
+            {territory.hasCamp && !territory.isCapital && !(selectedTerritory && territory.owner && factionData[territory.owner]?.capital === selectedTerritory) && (
+              <div className="camp-badge">Camp</div>
             )}
 
             {gameState.phase === 'non_combat_move' && territoryUnitStacksWithMovement && territoryUnitStacksWithMovement.length > 0 ? (

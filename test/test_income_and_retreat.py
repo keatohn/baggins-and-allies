@@ -40,8 +40,10 @@ def main():
     print("TEST: Income Collection & Retreat Mechanics")
     print("=" * 70)
 
-    unit_defs, territory_defs, faction_defs = load_static_definitions()
-    state = initialize_game_state(faction_defs, territory_defs)
+    unit_defs, territory_defs, faction_defs, camp_defs = load_static_definitions()
+    state = initialize_game_state(
+        faction_defs, territory_defs, camp_defs=camp_defs
+    )
 
     # Show initial resources
     print("\n[INITIAL STATE]")
@@ -61,13 +63,17 @@ def main():
     print("\nSkipping through Gondor's turn phases...")
     phases = ["combat_move", "combat", "non_combat_move", "mobilization"]
     for phase in phases:
-        state, _ = apply_action(state, end_phase("gondor"), unit_defs, territory_defs, faction_defs)
+        state, _ = apply_action(
+            state, end_phase("gondor"), unit_defs, territory_defs, faction_defs, camp_defs
+        )
         print(f"  → Now in phase: {state.phase}")
 
     # End Gondor's turn
     print("\n[ENDING GONDOR'S TURN]")
     print(f"Gondor resources before end_turn: {state.faction_resources['gondor']}")
-    state, events = apply_action(state, end_turn("gondor"), unit_defs, territory_defs, faction_defs)
+    state, events = apply_action(
+        state, end_turn("gondor"), unit_defs, territory_defs, faction_defs, camp_defs
+    )
 
     print("\nEvents emitted:")
     for e in events:
@@ -79,9 +85,13 @@ def main():
     # Skip through Mordor's turn
     print("\n[SKIPPING MORDOR'S TURN]")
     for phase in phases:
-        state, _ = apply_action(state, end_phase("mordor"), unit_defs, territory_defs, faction_defs)
+        state, _ = apply_action(
+            state, end_phase("mordor"), unit_defs, territory_defs, faction_defs, camp_defs
+        )
 
-    state, events = apply_action(state, end_turn("mordor"), unit_defs, territory_defs, faction_defs)
+    state, events = apply_action(
+        state, end_turn("mordor"), unit_defs, territory_defs, faction_defs, camp_defs
+    )
 
     # Now it's Gondor's turn again - income should be collected!
     print("\n[GONDOR'S TURN STARTS - INCOME COLLECTED]")
@@ -98,7 +108,9 @@ def main():
     print("=" * 70)
 
     # Reset for combat test
-    state = initialize_game_state(faction_defs, territory_defs)
+    state = initialize_game_state(
+        faction_defs, territory_defs, camp_defs=camp_defs
+    )
 
     # Setup: Add strong Gondor attackers to Mordor (simulating combat_move)
     # Add multiple units so combat can go multiple rounds
@@ -144,7 +156,7 @@ def main():
     state, events = apply_action(
         state,
         initiate_combat("gondor", "mordor", dice_rolls),
-        unit_defs, territory_defs, faction_defs
+        unit_defs, territory_defs, faction_defs, camp_defs
     )
 
     print("Combat events:")
@@ -171,7 +183,7 @@ def main():
         state, events = apply_action(
             state,
             continue_combat("gondor", dice_rolls2),
-            unit_defs, territory_defs, faction_defs
+            unit_defs, territory_defs, faction_defs, camp_defs
         )
 
         for e in events:
@@ -190,7 +202,7 @@ def main():
         state, events = apply_action(
             state,
             retreat("gondor", "ithilien"),
-            unit_defs, territory_defs, faction_defs
+            unit_defs, territory_defs, faction_defs, camp_defs
         )
 
         print("\nRetreat events:")

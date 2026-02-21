@@ -31,7 +31,7 @@ def main():
     print("="*70)
 
     # Load definitions
-    unit_defs, territory_defs, faction_defs = load_static_definitions()
+    unit_defs, territory_defs, faction_defs, camp_defs = load_static_definitions()
 
     # Counter for unique IDs
     counter = [0]

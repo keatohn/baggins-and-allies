@@ -1,0 +1,246 @@
+{
+  "minas_tirith": {
+    "id": "minas_tirith",
+    "display_name": "Minas Tirith",
+    "terrain_type": "city",
+    "adjacent": [
+      "pelennor"
+    ],
+    "produces": {
+      "power": 10
+    },
+    "is_stronghold": true,
+    "ownable": true
+  },
+  "pelennor": {
+    "id": "pelennor",
+    "display_name": "Pelennor",
+    "terrain_type": "plains",
+    "adjacent": [
+      "minas_tirith",
+      "west_osgiliath",
+      "south_ithilien"
+    ],
+    "produces": {
+      "power": 3
+    },
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "west_osgiliath": {
+    "id": "west_osgiliath",
+    "display_name": "West Osgiliath",
+    "terrain_type": "ruins",
+    "adjacent": [
+      "pelennor",
+      "east_osgiliath"
+    ],
+    "produces": {
+      "power": 2
+    },
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "east_osgiliath": {
+    "id": "east_osgiliath",
+    "display_name": "East Osgiliath",
+    "terrain_type": "ruins",
+    "adjacent": [
+      "west_osgiliath",
+      "north_ithilien"
+    ],
+    "produces": {
+      "power": 2
+    },
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "south_ithilien": {
+    "id": "south_ithilien",
+    "display_name": "South Ithilien",
+    "terrain_type": "forest",
+    "adjacent": [
+      "pelennor",
+      "north_ithilien",
+      "pelargir"
+    ],
+    "produces": {
+      "power": 2
+    },
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "north_ithilien": {
+    "id": "north_ithilien",
+    "display_name": "North Ithilien",
+    "terrain_type": "forest",
+    "adjacent": [
+      "minas_morgul",
+      "south_ithilien",
+      "east_osgiliath",
+      "dagorlad"
+    ],
+    "produces": {
+      "power": 2
+    },
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "lebennin": {
+    "id": "lebennin",
+    "display_name": "Lebennin",
+    "terrain_type": "plains",
+    "adjacent": [
+      "pelargir"
+    ],
+    "produces": {
+      "power": 3
+    },
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "pelargir": {
+    "id": "pelargir",
+    "display_name": "Pelargir",
+    "terrain_type": "city",
+    "adjacent": [
+      "lebennin",
+      "south_ithilien"
+    ],
+    "produces": {
+      "power": 4
+    },
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "minas_morgul": {
+    "id": "minas_morgul",
+    "display_name": "Minas Morgul",
+    "terrain_type": "city",
+    "adjacent": [
+      "north_ithilien",
+      "cirith_ungol"
+    ],
+    "produces": {
+      "power": 4
+    },
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "the_black_gate": {
+    "id": "the_black_gate",
+    "display_name": "The Black Gate",
+    "terrain_type": "fortress",
+    "adjacent": [
+      "dagorlad",
+      "udun"
+    ],
+    "produces": {
+      "power": 3
+    },
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "barad_dur": {
+    "id": "barad_dur",
+    "display_name": "Barad-dur",
+    "terrain_type": "fortress",
+    "adjacent": [
+      "mount_doom",
+      "gorgoroth"
+    ],
+    "produces": {
+      "power": 10
+    },
+    "is_stronghold": true,
+    "ownable": true
+  },
+  "mount_doom": {
+    "id": "mount_doom",
+    "display_name": "Mount Doom",
+    "terrain_type": "volcanic",
+    "adjacent": [
+      "udun",
+      "gorgoroth",
+      "barad_dur"
+    ],
+    "produces": {
+      "power": 2
+    },
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "gorgoroth": {
+    "id": "gorgoroth",
+    "display_name": "Gorgoroth",
+    "terrain_type": "wasteland",
+    "adjacent": [
+      "udun",
+      "cirith_ungol",
+      "mount_doom",
+      "barad_dur",
+      "nurn"
+    ],
+    "produces": {
+      "power": 2
+    },
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "nurn": {
+    "id": "nurn",
+    "display_name": "Nurn",
+    "terrain_type": "farmland",
+    "adjacent": [
+      "gorgoroth"
+    ],
+    "produces": {
+      "power": 5
+    },
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "udun": {
+    "id": "udun",
+    "display_name": "Udun",
+    "terrain_type": "wasteland",
+    "adjacent": [
+      "the_black_gate",
+      "gorgoroth",
+      "mount_doom"
+    ],
+    "produces": {
+      "power": 2
+    },
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "cirith_ungol": {
+    "id": "cirith_ungol",
+    "display_name": "Cirith Ungol",
+    "terrain_type": "fortress",
+    "adjacent": [
+      "minas_morgul",
+      "gorgoroth"
+    ],
+    "produces": {
+      "power": 3
+    },
+    "is_stronghold": false,
+    "ownable": true
+  },
+  "dagorlad": {
+    "id": "dagorlad",
+    "display_name": "Dagorlad",
+    "terrain_type": "plains",
+    "adjacent": [
+      "the_black_gate",
+      "north_ithilien"
+    ],
+    "produces": {
+      "power": 2
+    },
+    "is_stronghold": false,
+    "ownable": true
+  }
+}

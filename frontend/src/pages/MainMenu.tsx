@@ -22,10 +22,9 @@ export default function MainMenu() {
   return (
     <div className="main-menu">
       <h1 className="main-menu__title">Baggins & Allies</h1>
-      <p className="main-menu__subtitle">A game by Keaton Hubbard</p>
       {player ? (
         <>
-          <p className="main-menu__quote">"The board is set. The pieces are moving." —Gandalf</p>
+          <p className="main-menu__quote">"The board is set. The pieces are moving." <span className="main-menu__quote-attribution">—Gandalf</span></p>
           <div className="main-menu__actions">
           <button type="button" className="main-menu__btn primary" onClick={() => navigate('/game/new')}>
             Create new game

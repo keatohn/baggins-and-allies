@@ -17,6 +17,7 @@ else:
     DB_DIR = os.path.dirname(os.path.abspath(__file__))
     DATABASE_URL = f"sqlite:///{os.path.join(DB_DIR, 'game.db')}"
 
+
 # SQLite needs check_same_thread=False; Postgres does not use that arg
 _connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 engine = create_engine(DATABASE_URL, connect_args=_connect_args)
@@ -31,6 +32,17 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def get_db_file_path() -> str | None:
+    """Return the absolute path to the SQLite DB file, or None if not SQLite."""
+    if not DATABASE_URL.startswith("sqlite"):
+        return None
+    # Use engine.url so we get the same path SQLAlchemy uses
+    path_part = engine.url.database
+    if path_part and not os.path.isabs(path_part):
+        path_part = os.path.abspath(path_part)
+    return path_part or None
 
 
 def init_db():
