@@ -34,5 +34,11 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true, // Fail if 5173 is in use so you always use the same URL
+    proxy: {
+      '/games': { target: 'http://localhost:8000', changeOrigin: true },
+      '/auth': { target: 'http://localhost:8000', changeOrigin: true },
+      '/definitions': { target: 'http://localhost:8000', changeOrigin: true },
+      '/setups': { target: 'http://localhost:8000', changeOrigin: true },
+    },
   },
 })

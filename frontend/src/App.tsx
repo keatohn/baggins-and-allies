@@ -4,7 +4,7 @@ import Header from './components/Header';
 import GameMap, { type PendingMoveConfirm } from './components/GameMap';
 import Sidebar from './components/Sidebar';
 import PurchaseModal from './components/PurchaseModal';
-import CombatDisplay from './components/CombatDisplay';
+import CombatDisplay, { type CombatRound } from './components/CombatDisplay';
 import api, {
   type ApiGameState,
   type ApiEvent,
@@ -38,7 +38,7 @@ function normalizeMoveDestinations(
   return Object.keys(destinations);
 }
 
-// Helper type for combat units (remainingMovement used for casualty order)
+// Helper type for combat units (remainingMovement used for casualty order). Must match CombatDisplay CombatUnit.
 type CombatUnit = {
   id: string;
   unitType: string;
@@ -46,21 +46,53 @@ type CombatUnit = {
   icon: string;
   attack: number;
   defense: number;
+  effectiveAttack?: number;
+  effectiveDefense?: number;
+  isArcher?: boolean;
   health: number;
   remainingHealth: number;
   remainingMovement?: number;
+  factionColor?: string;
+  hasTerror?: boolean;
+  terrainMountain?: boolean;
+  terrainForest?: boolean;
+  hasCaptainBonus?: boolean;
+  hasAntiCavalry?: boolean;
+};
+
+// Backend round payload: units at start of round (single source of truth for combat display)
+type BackendCombatUnit = {
+  instance_id: string;
+  unit_id: string;
+  display_name: string;
+  attack: number;
+  defense: number;
+  effective_attack?: number | null;
+  effective_defense?: number | null;
+  health: number;
+  remaining_health: number;
+  remaining_movement?: number;
+  is_archer?: boolean;
+  faction: string;
+  terror?: boolean;
+  terrain_mountain?: boolean;
+  terrain_forest?: boolean;
+  captain_bonus?: boolean;
+  anti_cavalry?: boolean;
 };
 
 interface AppProps {
   /** When provided (e.g. from route /game/:gameId), use this game. */
   gameId?: string;
+  /** When provided (e.g. from Create Game navigation), use as initial backend state so turn_order etc. show immediately. */
+  initialState?: ApiGameState | null;
 }
 
-function App({ gameId: gameIdProp }: AppProps) {
+function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   const GAME_ID = gameIdProp ?? DEFAULT_GAME_ID;
-  // Backend state
+  // Backend state (use initialState from navigation when we just created this game)
   const [definitions, setDefinitions] = useState<Definitions | null>(null);
-  const [backendState, setBackendState] = useState<ApiGameState | null>(null);
+  const [backendState, setBackendState] = useState<ApiGameState | null>(initialStateProp ?? null);
   const [availableActions, setAvailableActions] = useState<AvailableActionsResponse | null>(null);
   const [canAct, setCanAct] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -76,6 +108,10 @@ function App({ gameId: gameIdProp }: AppProps) {
   const [activeCombat, setActiveCombat] = useState<DeclaredBattle | null>(null);
   const [pendingMobilization, setPendingMobilization] = useState<PendingMobilization | null>(null);
   const [selectedMobilizationUnit, setSelectedMobilizationUnit] = useState<string | null>(null);
+  /** Index into pending_camps when placing a camp during mobilization. */
+  const [selectedCampIndex, setSelectedCampIndex] = useState<number | null>(null);
+  /** Pending camp placement (drag or click on territory); confirm/cancel like unit mobilization. */
+  const [pendingCampPlacement, setPendingCampPlacement] = useState<{ campIndex: number; territoryId: string } | null>(null);
   const [pendingRetreat, setPendingRetreat] = useState<DeclaredBattle | null>(null);
   const [highlightedTerritories, setHighlightedTerritories] = useState<string[]>([]);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
@@ -90,9 +126,21 @@ function App({ gameId: gameIdProp }: AppProps) {
   /** Purchase phase: number of camps to buy; applied on End phase (after units). */
   const [purchaseCampsCount, setPurchaseCampsCount] = useState(0);
   const resizeStartRef = useRef<{ x: number; width: number } | null>(null);
+  /** Turn order from create-game navigation so init() doesn't overwrite it with a stale/empty fetch. */
+  const initialTurnOrderRef = useRef<string[] | null>(null);
+  if (initialStateProp?.turn_order?.length) {
+    initialTurnOrderRef.current = initialStateProp.turn_order;
+  } else if (initialStateProp == null) {
+    initialTurnOrderRef.current = null;
+  }
   /** Game meta for lobby modal (when status is lobby) */
   const [gameMeta, setGameMeta] = useState<GameMeta | null>(null);
   const [lobbyDismissed, setLobbyDismissed] = useState(false);
+
+  // When switching games, clear backend state (or use passed initial state for the new game)
+  useEffect(() => {
+    setBackendState(initialStateProp ?? null);
+  }, [GAME_ID, initialStateProp]);
 
   useEffect(() => {
     localStorage.setItem('sidebarWidth', String(sidebarWidth));
@@ -122,14 +170,18 @@ function App({ gameId: gameIdProp }: AppProps) {
   /** Snapshot of how many combat moves were declared when we left combat_move (so we can tell "no battles" vs "all uncontested" in combat). */
   const [combatMovesDeclaredThisPhase, setCombatMovesDeclaredThisPhase] = useState(0);
 
-  // Derived data from backend definitions
+  // Derived data from backend definitions (archetype/tags for aerial return-path rule in combat move)
   const unitDefs = useMemo(() => {
     if (!definitions) return {};
-    const defs: Record<string, { name: string; icon: string }> = {};
+    const defs: Record<string, { name: string; icon: string; faction?: string; archetype?: string; tags?: string[] }> = {};
     for (const [id, unit] of Object.entries(definitions.units)) {
+      const u = unit as { display_name: string; icon?: string; faction?: string; archetype?: string; tags?: string[] };
       defs[id] = {
-        name: unit.display_name,
-        icon: `/assets/units/${unit.icon || `${id}.png`}`
+        name: u.display_name,
+        icon: `/assets/units/${u.icon || `${id}.png`}`,
+        faction: u.faction,
+        archetype: u.archetype,
+        tags: u.tags,
       };
     }
     return defs;
@@ -159,6 +211,7 @@ function App({ gameId: gameIdProp }: AppProps) {
       stronghold: boolean;
       produces: number;
       adjacent: string[];
+      ownable: boolean;
     }> = {};
     for (const [id, territory] of Object.entries(definitions.territories)) {
       defs[id] = {
@@ -167,6 +220,7 @@ function App({ gameId: gameIdProp }: AppProps) {
         stronghold: territory.is_stronghold,
         produces: (territory.produces?.power as number) || 0,
         adjacent: territory.adjacent,
+        ownable: (territory as { ownable?: boolean }).ownable !== false,
       };
     }
     return defs;
@@ -178,8 +232,10 @@ function App({ gameId: gameIdProp }: AppProps) {
     const camps = definitions?.camps;
     const campsObj = camps && typeof camps === 'object' && !Array.isArray(camps) ? camps : {};
     const campsStanding = Array.isArray(backendState.camps_standing) ? backendState.camps_standing : [];
+    const dynamicCamps = backendState.dynamic_camps && typeof backendState.dynamic_camps === 'object' ? backendState.dynamic_camps : {};
     const factions = definitions?.factions ?? {};
     const territoryHasCamp = (tid: string) =>
+      Object.values(dynamicCamps).includes(tid) ||
       campsStanding.some(
         (campId) => campsObj[campId] && (campsObj[campId] as { territory_id?: string }).territory_id === tid
       );
@@ -197,18 +253,29 @@ function App({ gameId: gameIdProp }: AppProps) {
       adjacent: string[];
       hasCamp: boolean;
       isCapital: boolean;
+      ownable?: boolean;
     }> = {};
 
     for (const [id, territory] of Object.entries(backendState.territories)) {
       const def = territoryDefs[id];
-      if (def) {
-        result[id] = {
+      result[id] = def
+        ? {
           ...def,
           owner: territory.owner as FactionId | undefined,
           hasCamp: territoryHasCamp(id),
           isCapital: territoryIsCapital(id),
+        }
+        : {
+          name: id.replace(/_/g, ' '),
+          owner: territory.owner as FactionId | undefined,
+          terrain: 'land',
+          stronghold: false,
+          produces: 0,
+          adjacent: [],
+          hasCamp: territoryHasCamp(id),
+          isCapital: territoryIsCapital(id),
+          ownable: true,
         };
-      }
     }
     return result;
   }, [backendState, territoryDefs, definitions]);
@@ -268,10 +335,26 @@ function App({ gameId: gameIdProp }: AppProps) {
     return stats;
   }, [definitions]);
 
+  /** Unit specials for display: tags that are specials (exclude ground, mounted), plus archetype-derived. "anti cavalry" with dash. Sorted alphabetically. */
+  const getUnitSpecials = useCallback((u: { tags?: string[]; archetype?: string; specials?: string[] }) => {
+    const out = new Set<string>();
+    const exclude = new Set(['ground', 'mounted']);
+    (u.tags || []).filter(t => !exclude.has(t)).forEach(t => out.add(t));
+    if (u.archetype === 'archer') out.add('archer');
+    if (u.archetype === 'cavalry') out.add('charging');
+    (u.specials || []).forEach(s => out.add(s));
+    const format = (s: string) => {
+      const normalized = s.replace(/_/g, ' ').replace(/-/g, ' ').toLowerCase().trim();
+      if (normalized === 'anti cavalry') return 'Anti-Cavalry';
+      return s.replace(/_/g, ' ').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    };
+    return [...out].map(format).sort((a, b) => a.localeCompare(b));
+  }, []);
+
   // All units grouped by faction (for Unit Stats modal), ordered by cost ascending
   const unitsByFaction = useMemo(() => {
     if (!definitions?.units || !unitDefs) return {};
-    const byFaction: Record<string, Array<{ id: string; name: string; icon: string; cost: number; attack: number; defense: number; dice: number; movement: number; health: number }>> = {};
+    const byFaction: Record<string, Array<{ id: string; name: string; icon: string; cost: number; attack: number; defense: number; dice: number; movement: number; health: number; specials: string[] }>> = {};
     for (const [id, u] of Object.entries(definitions.units)) {
       const faction = u.faction;
       if (!byFaction[faction]) byFaction[faction] = [];
@@ -286,13 +369,14 @@ function App({ gameId: gameIdProp }: AppProps) {
         dice: u.dice ?? 1,
         movement: u.movement,
         health: u.health,
+        specials: getUnitSpecials(u),
       });
     }
     for (const fid of Object.keys(byFaction)) {
       byFaction[fid].sort((a, b) => a.cost - b.cost);
     }
     return byFaction;
-  }, [definitions, unitDefs]);
+  }, [definitions, unitDefs, getUnitSpecials]);
 
   // Purchasable units for current faction
   const availableUnits = useMemo(() => {
@@ -325,6 +409,58 @@ function App({ gameId: gameIdProp }: AppProps) {
       }));
   }, [backendState, definitions, unitDefs]);
 
+  // Unplaced camps (purchased this turn); must be placed during mobilization.
+  // Exclude: already placed (placed_territory_id set) or queued (in pending_camp_placements).
+  const unplacedCamps = useMemo(() => {
+    const isMobilize = backendState?.phase === 'mobilization';
+    const raw =
+      backendState?.pending_camps ??
+      (isMobilize ? availableActions?.pending_camps : undefined);
+    const list = Array.isArray(raw) ? (raw as { territory_options?: string[]; placed_territory_id?: string | null }[]) : [];
+    const queuedIndices = new Set(
+      (backendState?.pending_camp_placements ?? []).map((p: { camp_index: number }) => p.camp_index)
+    );
+    return list
+      .map((c, i) => ({
+        campIndex: i,
+        options: c.territory_options ?? [],
+        placed: typeof c.placed_territory_id === 'string' && c.placed_territory_id.length > 0,
+        queued: queuedIndices.has(i),
+      }))
+      .filter(c => !c.placed && !c.queued);
+  }, [backendState?.pending_camps, backendState?.pending_camp_placements, backendState?.phase, availableActions?.pending_camps]);
+
+  // Clear camp selection when the selected camp is no longer unplaced (placed or queued)
+  useEffect(() => {
+    if (selectedCampIndex != null && !unplacedCamps.some(c => c.campIndex === selectedCampIndex)) {
+      setSelectedCampIndex(null);
+    }
+  }, [selectedCampIndex, unplacedCamps]);
+
+  // Territory IDs that already have a pending camp placement (so no second camp can target them)
+  const territoriesWithPendingCampPlacement = useMemo(
+    () =>
+      new Set(
+        (backendState?.pending_camp_placements ?? []).map((p: { territory_id: string }) => p.territory_id)
+      ),
+    [backendState?.pending_camp_placements]
+  );
+
+  // Valid territories for placing the currently selected camp (exclude pending placements and 0-power territories).
+  const validCampTerritories = useMemo(() => {
+    if (selectedCampIndex == null) return [];
+    const isMobilize = backendState?.phase === 'mobilization';
+    const list =
+      backendState?.pending_camps ??
+      (isMobilize ? availableActions?.pending_camps : undefined) ??
+      [];
+    const camp = Array.isArray(list) ? (list as { territory_options?: string[] }[])[selectedCampIndex] : undefined;
+    const options = (camp?.territory_options ?? []) as string[];
+    return options.filter(
+      t => !territoriesWithPendingCampPlacement.has(t) && (currentTerritoryData[t]?.produces ?? 0) > 0
+    );
+  }, [backendState?.pending_camps, backendState?.pending_camp_placements, availableActions?.pending_camps, selectedCampIndex, territoriesWithPendingCampPlacement, currentTerritoryData]);
+
   const addLogEntry = useCallback((message: string, type: string = 'info') => {
     const event: GameEvent = {
       id: `${Date.now()}-${Math.random()}`,
@@ -347,7 +483,10 @@ function App({ gameId: gameIdProp }: AppProps) {
         api.getGame(GAME_ID),
         api.getAvailableActions(GAME_ID),
       ]);
-      setBackendState(stateRes.state);
+      setBackendState({
+        ...stateRes.state,
+        pending_camps: stateRes.pending_camps ?? stateRes.state?.pending_camps ?? [],
+      });
       if (stateRes.definitions) setDefinitions(stateRes.definitions);
       setCanAct(stateRes.can_act ?? true);
       setAvailableActions(actionsRes);
@@ -372,7 +511,7 @@ function App({ gameId: gameIdProp }: AppProps) {
     }
   }, []);
 
-  // Initialize game on mount
+  // Initialize game on mount (or when GAME_ID changes)
   useEffect(() => {
     async function init() {
       setLoading(true);
@@ -380,11 +519,31 @@ function App({ gameId: gameIdProp }: AppProps) {
         let gotDefinitionsFromGame = false;
         try {
           const stateRes = await api.getGame(GAME_ID);
-          setBackendState(stateRes.state);
-          setCanAct(stateRes.can_act ?? true);
-          if (stateRes.definitions) {
-            setDefinitions(stateRes.definitions);
-            gotDefinitionsFromGame = true;
+          const hadInitialState = initialTurnOrderRef.current != null;
+          if (hadInitialState) {
+            // Keep create response as source of truth; only pull definitions and can_act from fetch
+            setCanAct(stateRes.can_act ?? true);
+            if (stateRes.definitions) {
+              setDefinitions(stateRes.definitions);
+              gotDefinitionsFromGame = true;
+            }
+            // Do not overwrite backendState so turn_order from create stays
+          } else {
+            setBackendState((prev) => {
+              const next = stateRes.state;
+              const fromTop = stateRes.turn_order?.length ? stateRes.turn_order : null;
+              const fromState = next?.turn_order?.length ? next.turn_order : null;
+              const fromPrev = prev?.turn_order?.length ? prev.turn_order : null;
+              const order = fromTop ?? fromState ?? fromPrev ?? next?.turn_order;
+              const pendingCamps = stateRes.pending_camps ?? next?.pending_camps ?? [];
+              const base = order ? { ...next, turn_order: order } : next;
+              return { ...base, pending_camps: pendingCamps };
+            });
+            setCanAct(stateRes.can_act ?? true);
+            if (stateRes.definitions) {
+              setDefinitions(stateRes.definitions);
+              gotDefinitionsFromGame = true;
+            }
           }
         } catch {
           if (GAME_ID === DEFAULT_GAME_ID) {
@@ -413,7 +572,7 @@ function App({ gameId: gameIdProp }: AppProps) {
       }
     }
     init();
-  }, [addLogEntry]);
+  }, [addLogEntry, GAME_ID]);
 
   // Clear phase-specific state when phase changes
   useEffect(() => {
@@ -459,8 +618,10 @@ function App({ gameId: gameIdProp }: AppProps) {
         pending_purchases: {},
         pending_moves: [],
         pending_mobilizations: [],
+        pending_camp_placements: [],
         declared_battles: [],
         map_asset: undefined,
+        turn_order: undefined,
       };
     }
 
@@ -512,6 +673,11 @@ function App({ gameId: gameIdProp }: AppProps) {
       units: pm.units,
     }));
 
+    const pendingCampPlacements = (backendState.pending_camp_placements || []).map(p => ({
+      camp_index: p.camp_index,
+      territory_id: p.territory_id,
+    }));
+
     return {
       turn_number: backendState.turn_number,
       current_faction: backendState.current_faction,
@@ -521,16 +687,12 @@ function App({ gameId: gameIdProp }: AppProps) {
       pending_purchases: pendingPurchases,
       pending_moves: pendingMoves,
       pending_mobilizations: pendingMobilizations,
+      pending_camp_placements: pendingCampPlacements,
       declared_battles: declaredBattles,
       map_asset: backendState.map_asset ?? undefined,
+      turn_order: initialTurnOrderRef.current ?? backendState.turn_order ?? undefined,
     };
   }, [backendState, availableActions]);
-
-  // Backend valid territories for mobilization (owned territories with a camp)
-  const validMobilizeTerritories = useMemo(
-    () => availableActions?.mobilize_options?.territories ?? availableActions?.mobilize_options?.available_strongholds ?? [],
-    [availableActions]
-  );
 
   // Per-territory mobilization cap (units ≤ territory's power production)
   const mobilizationTerritoryPower = useMemo(() => {
@@ -541,15 +703,40 @@ function App({ gameId: gameIdProp }: AppProps) {
     );
   }, [availableActions?.mobilize_options?.capacity?.territories]);
 
+  // Backend valid territories for mobilization (owned territories with a camp). From available-actions only.
+  const validMobilizeTerritories = useMemo(
+    () => availableActions?.mobilize_options?.territories ?? availableActions?.mobilize_options?.available_strongholds ?? [],
+    [availableActions]
+  );
+
+  // Remaining capacity per territory (power minus units already pending to that destination)
+  const remainingMobilizationCapacity = useMemo(() => {
+    const power = { ...mobilizationTerritoryPower };
+    const pending = backendState?.pending_mobilizations ?? [];
+    for (const pm of pending) {
+      const dest = pm.destination;
+      if (dest && power[dest] !== undefined) {
+        const sum = (pm.units ?? []).reduce((s: number, u: { count?: number }) => s + (u.count ?? 0), 0);
+        power[dest] = Math.max(0, (power[dest] ?? 0) - sum);
+      }
+    }
+    return power;
+  }, [mobilizationTerritoryPower, backendState?.pending_mobilizations]);
+
   // --- Action Handlers ---
 
   const handleTerritorySelect = useCallback((territoryId: string | null) => {
+    // Camp placement: click a valid territory → set pending (confirm/cancel in sidebar, like units)
+    if (gameState.phase === 'mobilize' && selectedCampIndex !== null && territoryId && validCampTerritories.includes(territoryId)) {
+      setPendingCampPlacement({ campIndex: selectedCampIndex, territoryId });
+      return;
+    }
     if (gameState.phase === 'mobilize' && selectedMobilizationUnit && territoryId) {
       if (validMobilizeTerritories.includes(territoryId)) {
         const purchase = mobilizablePurchases.find(p => p.unitId === selectedMobilizationUnit);
         if (purchase) {
-          const territoryPower = mobilizationTerritoryPower[territoryId] ?? 0;
-          const maxCount = Math.min(purchase.count, territoryPower);
+          const remaining = remainingMobilizationCapacity[territoryId] ?? 0;
+          const maxCount = Math.min(purchase.count, remaining);
           if (maxCount <= 0) return;
           setPendingMobilization({
             unitId: selectedMobilizationUnit,
@@ -565,24 +752,74 @@ function App({ gameId: gameIdProp }: AppProps) {
       }
     }
     setSelectedTerritory(territoryId);
-  }, [gameState.phase, selectedMobilizationUnit, mobilizablePurchases, validMobilizeTerritories, mobilizationTerritoryPower]);
+  }, [gameState.phase, selectedCampIndex, validCampTerritories, selectedMobilizationUnit, mobilizablePurchases, validMobilizeTerritories, remainingMobilizationCapacity, addLogEntry, refreshState]);
+
+  /** Drop camp on territory → set pending; user confirms or cancels in sidebar (like unit mobilization). */
+  const handleCampDrop = useCallback((campIndex: number, territoryId: string) => {
+    setPendingCampPlacement({ campIndex, territoryId });
+  }, []);
+
+  const handleConfirmCampPlacement = useCallback(async () => {
+    if (!pendingCampPlacement) return;
+    const { campIndex, territoryId } = pendingCampPlacement;
+    const territoryName = currentTerritoryData[territoryId]?.name ?? territoryId;
+    try {
+      const result = await api.queueCampPlacement(GAME_ID, campIndex, territoryId);
+      setBackendState(result.state);
+      if (result.can_act !== undefined) setCanAct(result.can_act);
+      if (result.events?.length) addBackendEvents(result.events);
+      else addLogEntry(`Camp planned for ${territoryName}`, 'info');
+      setPendingCampPlacement(null);
+      setSelectedCampIndex(null);
+      const actionsRes = await api.getAvailableActions(GAME_ID);
+      setAvailableActions(actionsRes);
+    } catch (err) {
+      addLogEntry(err instanceof Error ? err.message : 'Camp placement failed', 'error');
+    }
+  }, [pendingCampPlacement, currentTerritoryData, addLogEntry, addBackendEvents]);
+
+  const handleCancelCampPlacement = useCallback(() => {
+    setPendingCampPlacement(null);
+  }, []);
+
+  const handleCancelQueuedCampPlacement = useCallback(async (placementIndex: number) => {
+    try {
+      await api.cancelCampPlacement(GAME_ID, placementIndex);
+      await refreshState();
+    } catch (err) {
+      addLogEntry(err instanceof Error ? err.message : 'Cancel camp placement failed', 'error');
+    }
+  }, [addLogEntry, refreshState]);
 
   const handleUnitSelect = useCallback((unit: SelectedUnit | null) => {
     setSelectedUnit(unit);
   }, []);
 
+  // Max camps = non-camp territories owned by current faction (each camp must be placed on a distinct such territory)
+  const maxCampsPurchasable = useMemo(() => {
+    if (gameState.phase !== 'purchase') return 0;
+    return Object.values(currentTerritoryData).filter(
+      (t) => t.owner === gameState.current_faction && !t.hasCamp
+    ).length;
+  }, [gameState.phase, gameState.current_faction, currentTerritoryData]);
+
   const hasPurchaseCart =
     Object.values(purchaseCart).some(qty => qty > 0) || purchaseCampsCount > 0;
 
+  const aerialMustMove = availableActions?.aerial_units_must_move ?? [];
+
   const endPhaseDisabled =
     (gameState.phase === 'combat' && gameState.declared_battles.length > 0) ||
-    (gameState.phase === 'mobilize' && mobilizablePurchases.length > 0);
+    (gameState.phase === 'mobilize' && mobilizablePurchases.length > 0) ||
+    (gameState.phase === 'non_combat_move' && availableActions?.can_end_phase === false);
   const endPhaseDisabledReason =
     gameState.phase === 'combat'
       ? 'Resolve all battles before ending combat phase'
       : gameState.phase === 'mobilize'
-        ? 'Deploy all purchased units before ending mobilization phase'
-        : undefined;
+        ? (mobilizablePurchases.length > 0 ? 'Deploy all purchased units before ending mobilization phase' : unplacedCamps.length > 0 ? 'Place all camps first (or click End phase to sync)' : undefined)
+        : gameState.phase === 'non_combat_move' && aerialMustMove.length > 0
+          ? 'Move all aerial units to friendly territory before ending phase'
+          : undefined;
 
   const handleEndPhase = useCallback(async () => {
     if (gameState.phase === 'purchase' && !pendingEndPhaseConfirm) {
@@ -602,6 +839,9 @@ function App({ gameId: gameIdProp }: AppProps) {
       return;
     }
 
+    // Aerial check: server uses state-after-pending-moves (can_end_phase). Don't block here on aerialMustMove.length
+    // or we'd block even when pending moves satisfy the requirement.
+
     // Prevent ending combat phase with unresolved battles
     if (gameState.phase === 'combat' && gameState.declared_battles.length > 0) {
       addLogEntry('Cannot end combat phase - unresolved battles remain!', 'error');
@@ -619,11 +859,14 @@ function App({ gameId: gameIdProp }: AppProps) {
 
     try {
       if (gameState.phase === 'purchase' && hasPurchaseCart) {
-        const purchaseResult = await api.purchase(GAME_ID, purchaseCart);
-        setBackendState(purchaseResult.state);
-        if (purchaseResult.can_act !== undefined) setCanAct(purchaseResult.can_act);
-        if (purchaseResult.events) addBackendEvents(purchaseResult.events);
-        setPurchaseCart({});
+        const hasUnitPurchases = Object.values(purchaseCart).some(q => q > 0);
+        if (hasUnitPurchases) {
+          const purchaseResult = await api.purchase(GAME_ID, purchaseCart);
+          setBackendState(purchaseResult.state);
+          if (purchaseResult.can_act !== undefined) setCanAct(purchaseResult.can_act);
+          if (purchaseResult.events) addBackendEvents(purchaseResult.events);
+          setPurchaseCart({});
+        }
         for (let i = 0; i < purchaseCampsCount; i++) {
           const campResult = await api.purchaseCamp(GAME_ID);
           setBackendState(campResult.state);
@@ -631,8 +874,6 @@ function App({ gameId: gameIdProp }: AppProps) {
           if (campResult.events) addBackendEvents(campResult.events);
         }
         setPurchaseCampsCount(0);
-        const actionsRes = await api.getAvailableActions(GAME_ID);
-        setAvailableActions(actionsRes);
       }
 
       const result = await api.endPhase(GAME_ID);
@@ -640,8 +881,8 @@ function App({ gameId: gameIdProp }: AppProps) {
       if (result.can_act !== undefined) setCanAct(result.can_act);
       if (result.events) addBackendEvents(result.events);
 
-      const actionsRes = await api.getAvailableActions(GAME_ID);
-      setAvailableActions(actionsRes);
+      // Refetch full state so pending_camps and faction_purchased_units are authoritative (avoids stuck mobilization)
+      await refreshState();
 
       setHasCombatMovedThisPhase(false);
       setHasNonCombatMovedThisPhase(false);
@@ -651,8 +892,10 @@ function App({ gameId: gameIdProp }: AppProps) {
       setSelectedUnit(null);
     } catch (err) {
       addLogEntry(`Failed to end phase: ${err instanceof Error ? err.message : 'Unknown error'}`, 'error');
+      // Refetch so we sync pending_camps / units; may unstick mobilization if state was missing camps
+      await refreshState();
     }
-  }, [gameState.phase, gameState.declared_battles, hasPurchaseCart, purchaseCart, purchaseCampsCount, hasCombatMovedThisPhase, hasNonCombatMovedThisPhase, pendingEndPhaseConfirm, mobilizablePurchases, addLogEntry, addBackendEvents]);
+  }, [gameState.phase, gameState.declared_battles, hasPurchaseCart, purchaseCart, purchaseCampsCount, hasCombatMovedThisPhase, hasNonCombatMovedThisPhase, pendingEndPhaseConfirm, mobilizablePurchases, aerialMustMove, addLogEntry, addBackendEvents, refreshState]);
 
   const handleConfirmEndPhase = useCallback(() => {
     setPendingEndPhaseConfirm(null);
@@ -664,8 +907,9 @@ function App({ gameId: gameIdProp }: AppProps) {
   }, []);
 
   const handleOpenPurchase = useCallback(() => {
+    if (backendState?.winner) return;
     setIsPurchaseModalOpen(true);
-  }, []);
+  }, [backendState?.winner]);
 
   const handleClosePurchase = useCallback(() => {
     setIsPurchaseModalOpen(false);
@@ -684,6 +928,10 @@ function App({ gameId: gameIdProp }: AppProps) {
 
   const handleCancelMove = useCallback(() => {
     setPendingMoveConfirm(null);
+  }, []);
+
+  const handleChooseChargePath = useCallback((path: string[]) => {
+    setPendingMoveConfirm(prev => prev ? { ...prev, chargeThrough: path, chargePathOptions: undefined } : null);
   }, []);
 
   const handleUnitMove = useCallback((_fromTerritory: string, _toTerritory: string, _unitType: string, _count: number) => {
@@ -796,6 +1044,7 @@ function App({ gameId: gameIdProp }: AppProps) {
     round: { roundNumber: number; attackerRolls: Record<number, { value: number; target: number; isHit: boolean }[]>; defenderRolls: Record<number, { value: number; target: number; isHit: boolean }[]>; attackerHits: number; defenderHits: number; attackerCasualties: string[]; defenderCasualties: string[] };
     combatOver: boolean;
     attackerWon: boolean;
+    terrorReroll?: { applied: boolean; instance_ids?: string[]; initial_rolls_by_instance?: Record<string, number[]>; defender_dice_initial_grouped?: Record<string, { rolls: number[]; hits: number }>; defender_rerolled_indices_by_stat?: Record<string, number[]> };
   } | null> => {
     if (!activeCombat) return null;
     const isFirstRound = !backendState?.active_combat;
@@ -811,10 +1060,16 @@ function App({ gameId: gameIdProp }: AppProps) {
       const actionsRes = await api.getAvailableActions(GAME_ID);
       setAvailableActions(actionsRes);
 
-      const roundEvent = res.events?.find((e: { type: string }) => e.type === 'combat_round_resolved');
+      const roundEvents = (res.events || []).filter((e: { type: string }) => e.type === 'combat_round_resolved');
+      const roundEvent = roundEvents.length === 0
+        ? undefined
+        : roundEvents.length === 1
+          ? roundEvents[0]
+          : roundEvents.find((e: { payload?: { round_number?: number } }) => e.payload?.round_number === 1) ?? roundEvents[roundEvents.length - 1];
       const endEvent = res.events?.find((e: { type: string }) => e.type === 'combat_ended');
       if (!roundEvent?.payload) return null;
 
+      // Backend combat_round_resolved is the full UI contract: dice, hits, casualties, and units at round start.
       const p = roundEvent.payload as {
         round_number: number;
         attacker_dice: Record<string, { rolls: number[]; hits: number }>;
@@ -828,6 +1083,9 @@ function App({ gameId: gameIdProp }: AppProps) {
         attacker_hits_by_unit_type?: Record<string, number>;
         defender_hits_by_unit_type?: Record<string, number>;
         is_archer_prefire?: boolean;
+        terror_applied?: boolean;
+        attacker_units_at_start: BackendCombatUnit[];
+        defender_units_at_start: BackendCombatUnit[];
       };
 
       const toRolls = (diceByStat: Record<string, { rolls: number[]; hits: number }>) => {
@@ -843,7 +1101,28 @@ function App({ gameId: gameIdProp }: AppProps) {
         return out;
       };
 
-      const round = {
+      const backendUnitToCombatUnit = (bu: BackendCombatUnit): CombatUnit => ({
+        id: bu.instance_id,
+        unitType: bu.unit_id,
+        name: bu.display_name,
+        icon: unitDefs[bu.unit_id]?.icon ?? `/assets/units/${bu.unit_id}.png`,
+        attack: bu.attack,
+        defense: bu.defense,
+        ...(bu.effective_attack != null && { effectiveAttack: bu.effective_attack }),
+        ...(bu.effective_defense != null && { effectiveDefense: bu.effective_defense }),
+        isArcher: bu.is_archer ?? false,
+        health: bu.health,
+        remainingHealth: bu.remaining_health,
+        ...(bu.remaining_movement != null && { remainingMovement: bu.remaining_movement }),
+        ...(factionData[bu.faction] && { factionColor: factionData[bu.faction].color }),
+        ...(bu.terror && { hasTerror: true }),
+        ...(bu.terrain_mountain && { terrainMountain: true }),
+        ...(bu.terrain_forest && { terrainForest: true }),
+        ...(bu.captain_bonus && { hasCaptainBonus: true }),
+        ...(bu.anti_cavalry && { hasAntiCavalry: true }),
+      });
+
+      const round: CombatRound = {
         roundNumber: p.round_number,
         attackerRolls: toRolls(p.attacker_dice),
         defenderRolls: toRolls(p.defender_dice),
@@ -856,6 +1135,9 @@ function App({ gameId: gameIdProp }: AppProps) {
         attackerHitsByUnitType: p.attacker_hits_by_unit_type ?? {},
         defenderHitsByUnitType: p.defender_hits_by_unit_type ?? {},
         isArcherPrefire: p.is_archer_prefire ?? false,
+        terrorApplied: p.terror_applied ?? false,
+        attackerUnitsAtStart: (Array.isArray(p.attacker_units_at_start) ? p.attacker_units_at_start : []).map(backendUnitToCombatUnit),
+        defenderUnitsAtStart: (Array.isArray(p.defender_units_at_start) ? p.defender_units_at_start : []).map(backendUnitToCombatUnit),
       };
 
       const combatOver = !res.state.active_combat;
@@ -863,12 +1145,13 @@ function App({ gameId: gameIdProp }: AppProps) {
         ? (endEvent.payload as { winner?: string }).winner === 'attacker'
         : (combatOver && (p as { defenders_remaining?: number }).defenders_remaining === 0);
 
-      return { round, combatOver, attackerWon: !!attackerWon };
+      const terrorReroll = res.terror_reroll ?? undefined;
+      return { round, combatOver, attackerWon: !!attackerWon, terrorReroll };
     } catch (err) {
       addLogEntry(`Combat round failed: ${err instanceof Error ? err.message : 'Unknown error'}`, 'error');
       return null;
     }
-  }, [activeCombat, backendState?.active_combat, addBackendEvents, addLogEntry]);
+  }, [activeCombat, backendState?.active_combat, addBackendEvents, addLogEntry, unitDefs, factionData]);
 
   const handleCombatEnd = useCallback(async (result: 'attacker_wins' | 'defender_wins' | 'retreat') => {
     if (!activeCombat) return;
@@ -961,8 +1244,8 @@ function App({ gameId: gameIdProp }: AppProps) {
   const handleMobilizationDrop = useCallback((territoryId: string, unitId: string, unitName: string, unitIcon: string, count: number) => {
     const purchase = mobilizablePurchases.find(p => p.unitId === unitId);
     if (!purchase) return;
-    const territoryPower = mobilizationTerritoryPower[territoryId] ?? 0;
-    const maxCount = Math.min(purchase.count, territoryPower);
+    const remaining = remainingMobilizationCapacity[territoryId] ?? 0;
+    const maxCount = Math.min(purchase.count, remaining);
     if (maxCount <= 0) return;
     setPendingMobilization({
       unitId,
@@ -972,7 +1255,7 @@ function App({ gameId: gameIdProp }: AppProps) {
       maxCount,
       count: Math.min(count, maxCount),
     });
-  }, [mobilizablePurchases, mobilizationTerritoryPower]);
+  }, [mobilizablePurchases, remainingMobilizationCapacity]);
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -996,25 +1279,41 @@ function App({ gameId: gameIdProp }: AppProps) {
     };
   }, []);
 
-  // Combat display props - memoized to prevent unnecessary re-renders
-  // Must be defined before early returns to maintain hook order
+  // Combat display props: used for ready phase (modal open, no round run yet) and for faction/retreat.
+  // Once a round runs, CombatDisplay uses the round payload (attackerUnitsAtStart/defenderUnitsAtStart) as the single source of truth.
   const combatDisplayProps = useMemo(() => {
     if (!activeCombat || !backendState || !definitions) return null;
 
     const territory = currentTerritoryData[activeCombat.territory];
-    const defenderFaction = territory?.owner || '';
     const attackerFaction = gameState.current_faction;
 
-    // Build combat units from backend state
     const backendTerritory = backendState.territories[activeCombat.territory];
     const initialAttackerUnits: CombatUnit[] = [];
     const initialDefenderUnits: CombatUnit[] = [];
+
+    // Use backend as single source of truth for combat modifiers and specials (no parallel logic)
+    const combatStatModifiers = (backendState as { combat_stat_modifiers?: { attacker?: Record<string, number>; defender?: Record<string, number> } }).combat_stat_modifiers;
+    const combatSpecials = (backendState as { combat_specials?: { attacker?: Record<string, { terror?: boolean; terrainMountain?: boolean; terrainForest?: boolean; captain?: boolean; antiCavalry?: boolean }>; defender?: Record<string, { terror?: boolean; terrainMountain?: boolean; terrainForest?: boolean; captain?: boolean; antiCavalry?: boolean }> } }).combat_specials;
+    const modsAttacker = combatStatModifiers?.attacker ?? {};
+    const modsDefender = combatStatModifiers?.defender ?? {};
+    const specialsAttacker = combatSpecials?.attacker ?? {};
+    const specialsDefender = combatSpecials?.defender ?? {};
 
     if (backendTerritory) {
       for (const unit of backendTerritory.units) {
         const unitDef = definitions.units[unit.unit_id];
         if (!unitDef) continue;
 
+        const tags: string[] = (unitDef as { tags?: string[] }).tags ?? [];
+        const archetype = (unitDef as { archetype?: string }).archetype ?? '';
+        const isArcher = archetype === 'archer' || tags.includes('archer');
+        const isAttackerUnit = unitDef.faction === attackerFaction;
+        const totalMod = isAttackerUnit ? (modsAttacker[unit.instance_id] ?? 0) : (modsDefender[unit.instance_id] ?? 0);
+        const effectiveAttack = isAttackerUnit ? unitDef.attack + totalMod : undefined;
+        const effectiveDefense = !isAttackerUnit ? unitDef.defense + totalMod : undefined;
+        const specials = isAttackerUnit ? specialsAttacker[unit.instance_id] : specialsDefender[unit.instance_id];
+
+        const unitFaction = (unitDef as { faction?: string }).faction;
         const combatUnit: CombatUnit = {
           id: unit.instance_id,
           unitType: unit.unit_id,
@@ -1022,9 +1321,20 @@ function App({ gameId: gameIdProp }: AppProps) {
           icon: unitDefs[unit.unit_id]?.icon || `/assets/units/${unit.unit_id}.png`,
           attack: unitDef.attack,
           defense: unitDef.defense,
+          ...(effectiveAttack !== undefined && { effectiveAttack }),
+          ...(effectiveDefense !== undefined && { effectiveDefense }),
+          isArcher,
           health: unitDef.health,
           remainingHealth: unit.remaining_health,
           remainingMovement: unit.remaining_movement ?? 0,
+          ...(unitFaction && unitDef.faction !== attackerFaction && {
+            factionColor: factionData[unitFaction]?.color ?? undefined,
+          }),
+          ...(specials?.terror && { hasTerror: true }),
+          ...(specials?.terrainMountain && { terrainMountain: true }),
+          ...(specials?.terrainForest && { terrainForest: true }),
+          ...(specials?.captain && { hasCaptainBonus: true }),
+          ...(specials?.antiCavalry && { hasAntiCavalry: true }),
         };
 
         if (unitDef.faction === attackerFaction) {
@@ -1035,10 +1345,17 @@ function App({ gameId: gameIdProp }: AppProps) {
       }
     }
 
+    // Sort by instance_id so order matches backend (dice grouping and shelves align)
+    initialAttackerUnits.sort((a, b) => (a.id || '').localeCompare(b.id || ''));
+    initialDefenderUnits.sort((a, b) => (a.id || '').localeCompare(b.id || ''));
+
     const retreatOptions = validRetreatDestinations.map(destId => ({
       territoryId: destId,
       territoryName: currentTerritoryData[destId]?.name || destId,
     }));
+
+    // Defending territory (header/border) = faction that owns the territory
+    const defendingTerritoryOwnerFaction = (territory?.owner || '') as string;
 
     const ac = backendState?.active_combat as { attackers_have_rolled?: boolean } | undefined;
     const canRetreat =
@@ -1047,13 +1364,13 @@ function App({ gameId: gameIdProp }: AppProps) {
     return {
       territoryName: territory?.name || activeCombat.territory,
       attackerFaction,
-      defenderFaction,
+      defendingTerritoryOwnerFaction,
       initialAttackerUnits,
       initialDefenderUnits,
       retreatOptions,
       canRetreat,
     };
-  }, [activeCombat, backendState, currentTerritoryData, gameState.current_faction, definitions, unitDefs, validRetreatDestinations]);
+  }, [activeCombat, backendState, currentTerritoryData, gameState.current_faction, definitions, unitDefs, validRetreatDestinations, factionData]);
 
   const handleCombatRetreat = useCallback(async (destinationId: string) => {
     if (!combatDisplayProps) return;
@@ -1084,6 +1401,34 @@ function App({ gameId: gameIdProp }: AppProps) {
     setActiveCombat(null);
     setHighlightedTerritories([]);
   }, []);
+
+  // Turn order for ticker – must run before any early return to keep hook count stable
+  const turnOrderForTicker = useMemo(() => {
+    const fromRef = initialTurnOrderRef.current;
+    const fromState = backendState?.turn_order;
+    if (fromRef?.length) return fromRef;
+    if (fromState?.length) return fromState;
+    if (!definitions?.factions) return [];
+    const factions = Object.keys(definitions.factions);
+    const good: string[] = [];
+    const evil: string[] = [];
+    factions.forEach((fid) => {
+      const a = (definitions.factions[fid] as { alliance?: string })?.alliance;
+      if (a === 'good') good.push(fid);
+      else if (a === 'evil') evil.push(fid);
+    });
+    return [...good.sort(), ...evil.sort()];
+  }, [backendState, definitions?.factions]);
+
+  const gameOverWinner = backendState?.winner ?? null;
+  const gameOverDisplay = useMemo(() => {
+    if (!gameOverWinner) return null;
+    const label = gameOverWinner === 'good' ? 'Good' : gameOverWinner === 'evil' ? 'Evil' : gameOverWinner;
+    const color =
+      Object.values(factionData).find((f) => f.alliance === gameOverWinner)?.color ??
+      (gameOverWinner === 'good' ? '#2d5a27' : '#6b2d2d');
+    return { label, color };
+  }, [gameOverWinner, factionData]);
 
   // Loading/error states
   if (loading) {
@@ -1121,8 +1466,25 @@ function App({ gameId: gameIdProp }: AppProps) {
 
   return (
     <div className="app">
+      {gameOverDisplay && (
+        <div
+          className="game-over-overlay"
+          role="alert"
+          aria-live="assertive"
+        >
+          <div
+            className="game-over-banner"
+            style={{ backgroundColor: `${gameOverDisplay.color}40`, borderColor: gameOverDisplay.color }}
+          >
+            <span className="game-over-title">Game Over</span>
+            <span className="game-over-winner">{gameOverDisplay.label} wins!</span>
+          </div>
+        </div>
+      )}
+
       <Header
         gameState={gameState}
+        turnOrderForTicker={turnOrderForTicker}
         factionData={factionData}
         effectivePower={currentPower}
         factionStats={backendState?.faction_stats}
@@ -1150,15 +1512,22 @@ function App({ gameId: gameIdProp }: AppProps) {
               isMobilizePhase={gameState.phase === 'mobilize'}
               hasMobilizationSelected={selectedMobilizationUnit !== null}
               validMobilizeTerritories={validMobilizeTerritories}
+              remainingMobilizationCapacity={remainingMobilizationCapacity}
               onMobilizationDrop={handleMobilizationDrop}
               mobilizationTray={
                 gameState.phase === 'mobilize' ? {
                   purchases: mobilizablePurchases,
+                  pendingCamps: unplacedCamps.map(c => ({ campIndex: c.campIndex, options: c.options })),
                   factionColor: factionData[gameState.current_faction]?.color || '#3a6ea5',
                   selectedUnitId: selectedMobilizationUnit,
+                  selectedCampIndex,
                   onSelectUnit: setSelectedMobilizationUnit,
+                  onSelectCamp: setSelectedCampIndex,
                 } : null
               }
+              onCampDrop={gameState.phase === 'mobilize' ? handleCampDrop : undefined}
+              validCampTerritories={selectedCampIndex !== null ? validCampTerritories : []}
+              territoriesWithPendingCampPlacement={gameState.phase === 'mobilize' ? Array.from(territoriesWithPendingCampPlacement) : []}
               pendingMoveConfirm={pendingMoveConfirm}
               onSetPendingMove={setPendingMoveConfirm}
               pendingMoves={gameState.pending_moves}
@@ -1167,8 +1536,13 @@ function App({ gameId: gameIdProp }: AppProps) {
                 territory: m.territory,
                 unit: m.unit,
                 destinations: normalizeMoveDestinations(m.destinations),
-                charge_routes: m.charge_routes,
+                // Normalize so charge_routes is always a dict (dest id -> list of paths); backend may omit for non-cavalry
+                charge_routes:
+                  m.charge_routes && typeof m.charge_routes === 'object' && !Array.isArray(m.charge_routes)
+                    ? m.charge_routes
+                    : {},
               }))}
+              aerialUnitsMustMove={aerialMustMove}
             />
           </div>
         </div>
@@ -1196,6 +1570,7 @@ function App({ gameId: gameIdProp }: AppProps) {
           {!sidebarCollapsed && (
             <Sidebar
               canAct={canAct}
+              gameOver={!!backendState?.winner}
               gameState={gameState}
               selectedTerritory={selectedTerritory}
               territoryData={currentTerritoryData}
@@ -1217,12 +1592,18 @@ function App({ gameId: gameIdProp }: AppProps) {
               onUpdateMoveCount={handleUpdateMoveCount}
               onConfirmMove={handleConfirmMove}
               onCancelMove={handleCancelMove}
+              onChooseChargePath={handleChooseChargePath}
               onCancelPendingMove={handleCancelPendingMove}
               pendingMobilization={pendingMobilization}
               onUpdateMobilizationCount={handleUpdateMobilizationCount}
               onConfirmMobilization={handleConfirmMobilization}
               onCancelMobilization={handleCloseMobilizationConfirm}
               onCancelPendingMobilization={handleCancelMobilization}
+              pendingCampPlacement={pendingCampPlacement}
+              onConfirmCampPlacement={handleConfirmCampPlacement}
+              onCancelCampPlacement={handleCancelCampPlacement}
+              pendingCampPlacements={gameState.pending_camp_placements}
+              onCancelQueuedCampPlacement={handleCancelQueuedCampPlacement}
               pendingMobilizations={gameState.pending_mobilizations}
               battlesCompletedThisPhase={battlesCompletedThisPhase}
               combatMovesDeclaredThisPhase={combatMovesDeclaredThisPhase}
@@ -1230,7 +1611,8 @@ function App({ gameId: gameIdProp }: AppProps) {
               validRetreatDestinations={validRetreatDestinations}
               onConfirmRetreat={handleConfirmRetreat}
               onCancelRetreat={handleCancelRetreat}
-              hasUnmobilizedPurchases={mobilizablePurchases.length > 0}
+              hasUnmobilizedPurchases={mobilizablePurchases.length > 0 || unplacedCamps.length > 0}
+              aerialUnitsMustMove={aerialMustMove}
             />
           )}
         </div>
@@ -1238,10 +1620,12 @@ function App({ gameId: gameIdProp }: AppProps) {
 
       <PurchaseModal
         isOpen={isPurchaseModalOpen}
+        factionColor={factionData[gameState.current_faction]?.color}
         availableResources={currentResources}
         availableUnits={availableUnits}
         currentPurchases={gameState.phase === 'purchase' ? purchaseCart : gameState.pending_purchases}
         currentCamps={gameState.phase === 'purchase' ? purchaseCampsCount : 0}
+        maxCamps={maxCampsPurchasable}
         mobilizationCapacity={availableActions?.mobilization_capacity}
         purchasedUnitsCount={gameState.phase === 'purchase' ? Object.values(purchaseCart).reduce((s, q) => s + q, 0) : (availableActions?.purchased_units_count ?? 0)}
         campCost={availableActions?.camp_cost}
@@ -1262,10 +1646,10 @@ function App({ gameId: gameIdProp }: AppProps) {
             units: combatDisplayProps.initialAttackerUnits,
           }}
           defender={{
-            faction: combatDisplayProps.defenderFaction,
-            factionName: factionData[combatDisplayProps.defenderFaction]?.name || combatDisplayProps.defenderFaction,
-            factionIcon: factionData[combatDisplayProps.defenderFaction]?.icon || '',
-            factionColor: factionData[combatDisplayProps.defenderFaction]?.color || '#666',
+            faction: combatDisplayProps.defendingTerritoryOwnerFaction,
+            factionName: factionData[combatDisplayProps.defendingTerritoryOwnerFaction]?.name || combatDisplayProps.defendingTerritoryOwnerFaction,
+            factionIcon: factionData[combatDisplayProps.defendingTerritoryOwnerFaction]?.icon || '',
+            factionColor: factionData[combatDisplayProps.defendingTerritoryOwnerFaction]?.color || '#666',
             units: combatDisplayProps.initialDefenderUnits,
           }}
           retreatOptions={combatDisplayProps.retreatOptions}

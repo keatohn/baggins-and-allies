@@ -6,6 +6,8 @@ import './Sidebar.css';
 interface SidebarProps {
   /** When false (e.g. not your turn in multiplayer), the Actions panel is hidden; territory select and event log still show. */
   canAct?: boolean;
+  /** When true, phase action buttons (Purchase Units, End Phase) are hidden. */
+  gameOver?: boolean;
   gameState: GameState;
   selectedTerritory: string | null;
   territoryData: Record<string, {
@@ -21,7 +23,7 @@ interface SidebarProps {
   territoryUnits: Record<string, { unit_id: string; count: number }[]>;
   /** When non-combat move and a territory is selected: stacks grouped by (unit_id, remaining_movement) for that territory */
   territoryUnitStacksWithMovement?: { unit_id: string; remaining_movement: number; count: number }[] | null;
-  unitDefs: Record<string, { name: string; icon: string }>;
+  unitDefs: Record<string, { name: string; icon: string; faction?: string }>;
   factionData: Record<string, { name: string; icon: string; color: string; alliance: string; capital?: string }>;
   eventLog: GameEvent[];
   onEndPhase: () => void;
@@ -38,6 +40,7 @@ interface SidebarProps {
   onUpdateMoveCount?: (count: number) => void;
   onConfirmMove?: () => void;
   onCancelMove?: () => void;
+  onChooseChargePath?: (path: string[]) => void;
   onCancelPendingMove?: (moveId: string) => void;
   pendingMobilization?: PendingMobilization | null;
   onUpdateMobilizationCount?: (count: number) => void;
@@ -55,6 +58,15 @@ interface SidebarProps {
   /** Pending mobilizations this phase; show list with cancel X. */
   pendingMobilizations?: GameState['pending_mobilizations'];
   onCancelPendingMobilization?: (mobilizationIndex: number) => void;
+  /** Pending camp placement (drag or click); confirm adds to queue. */
+  pendingCampPlacement?: { campIndex: number; territoryId: string } | null;
+  onConfirmCampPlacement?: () => void;
+  onCancelCampPlacement?: () => void;
+  /** Queued camp placements (from backend; applied at end of phase). */
+  pendingCampPlacements?: { camp_index: number; territory_id: string }[];
+  onCancelQueuedCampPlacement?: (placementIndex: number) => void;
+  /** Non-combat move: aerial units that must move to friendly territory before phase can end. */
+  aerialUnitsMustMove?: { territory_id: string; unit_id: string; instance_id: string }[];
 }
 
 // Phase-specific action configurations
@@ -87,6 +99,7 @@ function formatPhase(phase: string): string {
 
 function Sidebar({
   canAct = true,
+  gameOver = false,
   gameState,
   selectedTerritory,
   territoryData,
@@ -108,6 +121,7 @@ function Sidebar({
   onUpdateMoveCount,
   onConfirmMove,
   onCancelMove,
+  onChooseChargePath,
   onCancelPendingMove,
   pendingMobilization,
   onUpdateMobilizationCount,
@@ -122,6 +136,12 @@ function Sidebar({
   hasUnmobilizedPurchases = false,
   pendingMobilizations = [],
   onCancelPendingMobilization,
+  pendingCampPlacement = null,
+  onConfirmCampPlacement,
+  onCancelCampPlacement,
+  pendingCampPlacements = [],
+  onCancelQueuedCampPlacement,
+  aerialUnitsMustMove = [],
 }: SidebarProps) {
   const territory = selectedTerritory ? territoryData[selectedTerritory] : null;
   const units = selectedTerritory ? territoryUnits[selectedTerritory] || [] : [];
@@ -141,7 +161,9 @@ function Sidebar({
       <div className="panel actions-panel">
         <h2>Actions</h2>
         <div className="phase-actions">
-          {gameState.phase === 'purchase' && capitalCaptured ? (
+          {gameOver ? (
+            <p className="phase-instruction">Game over.</p>
+          ) : gameState.phase === 'purchase' && capitalCaptured ? (
             <p className="phase-instruction">Cannot purchase units until capital is liberated.</p>
           ) : (
             phaseConfig.buttons.map(btn => (
@@ -158,6 +180,49 @@ function Sidebar({
           {/* Pending move confirmation with +/- controls */}
           {pendingMoveConfirm && (
             <div className="move-confirm">
+              {pendingMoveConfirm.chargePathOptions && pendingMoveConfirm.chargePathOptions.length > 1 ? (
+                <>
+                  <h3>Charge Through</h3>
+                  <p className="move-details">
+                    <span className="unit-name">{pendingMoveConfirm.unitDef?.name || pendingMoveConfirm.unitId}</span>
+                  </p>
+                  <p className="charge-path-prompt">Choose route:</p>
+                  <div className="charge-path-options">
+                    {(() => {
+                      const toId = pendingMoveConfirm!.toTerritory;
+                      const fromId = pendingMoveConfirm!.fromTerritory;
+                      const fromAdjacent = territoryData[fromId]?.adjacent?.includes(toId);
+                      const seen = new Set<string>();
+                      return pendingMoveConfirm.chargePathOptions
+                        .map((path) => path.filter((tid) => tid !== toId))
+                        .filter((path) => {
+                          if (path.length > 0) return true;
+                          return !!fromAdjacent;
+                        })
+                        .filter((path) => {
+                          const key = JSON.stringify(path);
+                          if (seen.has(key)) return false;
+                          seen.add(key);
+                          return true;
+                        })
+                        .map((path, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          className="charge-path-btn"
+                          onClick={() => onChooseChargePath?.(path)}
+                        >
+                          {path.length === 0
+                            ? 'Direct'
+                            : `Via ${path.map(tid => territoryData[tid]?.name || tid).join(', ')}`}
+                        </button>
+                      ));
+                    })()}
+                  </div>
+                  <button className="cancel-move-btn" onClick={onCancelMove}>Cancel</button>
+                </>
+              ) : (
+                <>
               <h3>{gameState.phase === 'combat_move' ? 'Confirm Attack' : 'Confirm Move'}</h3>
               <p className="move-details">
                 <span className="unit-name">{pendingMoveConfirm.unitDef?.name || pendingMoveConfirm.unitId}</span>
@@ -193,6 +258,8 @@ function Sidebar({
                 </button>
                 <button className="cancel-move-btn" onClick={onCancelMove}>Cancel</button>
               </div>
+                </>
+              )}
             </div>
           )}
 
@@ -228,6 +295,24 @@ function Sidebar({
               <div className="move-confirm-buttons">
                 <button className="confirm-move-btn mobilize-btn" onClick={onConfirmMobilization}>Mobilize</button>
                 <button className="cancel-move-btn" onClick={onCancelMobilization}>Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {/* Pending camp placement confirmation (applied at end of phase) */}
+          {gameState.phase === 'mobilize' && pendingCampPlacement && (
+            <div className="move-confirm mobilization-confirm">
+              <p className="move-details">
+                <span className="unit-name">Camp</span>
+                <br />
+                <span className="move-route">
+                  → {territoryData[pendingCampPlacement.territoryId]?.name ?? pendingCampPlacement.territoryId}
+                </span>
+              </p>
+              <p className="max-hint">Placed when you end the mobilization phase.</p>
+              <div className="move-confirm-buttons">
+                <button className="confirm-move-btn mobilize-btn" onClick={onConfirmCampPlacement}>Confirm</button>
+                <button className="cancel-move-btn" onClick={onCancelCampPlacement}>Cancel</button>
               </div>
             </div>
           )}
@@ -318,10 +403,27 @@ function Sidebar({
             );
           })()}
 
-          {/* Show pending mobilizations during mobilize phase */}
-          {gameState.phase === 'mobilize' && pendingMobilizations.length > 0 && (
+          {/* Show pending mobilizations and camp placements during mobilize phase */}
+          {gameState.phase === 'mobilize' && (pendingMobilizations.length > 0 || pendingCampPlacements.length > 0) && (
             <div className="pending-moves">
               <h3>Planned Mobilizations</h3>
+              {pendingCampPlacements.map((p, index) => {
+                const destName = territoryData[p.territory_id]?.name || p.territory_id;
+                return (
+                  <div key={`camp-${index}`} className="pending-move-item">
+                    <span className="move-info">
+                      Camp → {destName}
+                    </span>
+                    <button
+                      className="cancel-move-x"
+                      onClick={() => onCancelQueuedCampPlacement?.(index)}
+                      title="Cancel this camp placement"
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
               {pendingMobilizations.map((mob, index) => {
                 const destName = territoryData[mob.destination]?.name || mob.destination;
                 const unitSummary = mob.units
@@ -424,13 +526,37 @@ function Sidebar({
           </div>
         )}
 
-        {!pendingEndPhaseConfirm && (
+        {!pendingEndPhaseConfirm && !gameOver && (
           <>
             {gameState.phase === 'combat_move' && !pendingMoveConfirm && (gameState.pending_moves || []).filter(m => m.phase === 'combat_move').length === 0 && (
               <p className="phase-instruction">Drag units into territories on the map.</p>
             )}
             {gameState.phase === 'non_combat_move' && !pendingMoveConfirm && (gameState.pending_moves || []).filter(m => m.phase === 'non_combat_move').length === 0 && (
-              <p className="phase-instruction">Drag units into territories on the map.</p>
+              <>
+                <p className="phase-instruction">Drag units into territories on the map.</p>
+                {aerialUnitsMustMove.length > 0 && (
+                  <p className="phase-instruction aerial-must-move-msg">
+                    ⚠️ Move aerial unit{aerialUnitsMustMove.length !== 1 ? 's' : ''} to friendly territory before ending phase.
+                    {(() => {
+                      const byTerritory = new Map<string, number>();
+                      for (const u of aerialUnitsMustMove) {
+                        byTerritory.set(u.territory_id, (byTerritory.get(u.territory_id) ?? 0) + 1);
+                      }
+                      const names = Array.from(byTerritory.keys())
+                        .map(tid => territoryData[tid]?.name ?? tid)
+                        .slice(0, 5);
+                      if (names.length > 0) {
+                        return (
+                          <span className="aerial-must-move-where">
+                            {' '}In: {names.join(', ')}{names.length < byTerritory.size ? '…' : ''}
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </p>
+                )}
+              </>
             )}
             {gameState.phase === 'mobilize' && !pendingMobilization && hasUnmobilizedPurchases && (
               <p className="phase-instruction">Drag unit stacks to map to mobilize.</p>
@@ -449,7 +575,7 @@ function Sidebar({
       )}
 
       {/* Territory Panel */}
-      <div className="panel territory-panel">
+      <div className={`panel territory-panel${territory ? ' has-territory' : ''}`}>
         <h2
           className="territory-panel-header"
           style={
@@ -470,17 +596,17 @@ function Sidebar({
           )}
           <span className="territory-title-content">
             {territory ? (
-              <span className="territory-name">
-                {territory.name}{' '}
-                <span className="power-production">({territory.produces}P)</span>
-              </span>
+              <>
+                <span className="territory-name">{territory.name}</span>
+                <span className="power-terrain">
+                  {(Number(territory.produces) || 0)}P
+                  {territory.terrain ? ` | ${territory.terrain.charAt(0).toUpperCase() + territory.terrain.slice(1)}` : ''}
+                </span>
+              </>
             ) : (
               'Select Territory'
             )}
           </span>
-          {territory?.terrain && (
-            <span className="terrain-type">{territory.terrain}</span>
-          )}
         </h2>
 
         {territory && (
@@ -496,25 +622,50 @@ function Sidebar({
             )}
 
             {gameState.phase === 'non_combat_move' && territoryUnitStacksWithMovement && territoryUnitStacksWithMovement.length > 0 ? (
-              <div className="units-by-movement">
+              <div className="territory-units-list">
                 {territoryUnitStacksWithMovement.map((row, index) => {
                   const unitDef = unitDefs[row.unit_id];
+                  const icon = unitDef?.icon;
+                  const factionColor = unitDef?.faction ? factionData[unitDef.faction]?.color : undefined;
                   return (
-                    <div key={`${row.unit_id}-${row.remaining_movement}-${index}`} className="unit-movement-row">
-                      {unitDef?.name || row.unit_id} with {row.remaining_movement}M ({row.count})
+                    <div key={`${row.unit_id}-${row.remaining_movement}-${index}`} className="territory-unit-row">
+                      {icon && (
+                        <span
+                          className="territory-unit-icon-wrap"
+                          style={factionColor ? { ['--faction-border' as string]: factionColor } : undefined}
+                        >
+                          <img src={icon} alt="" className="territory-unit-icon" />
+                        </span>
+                      )}
+                      <span className="territory-unit-label">
+                        {unitDef?.name || row.unit_id} with {row.remaining_movement}M
+                      </span>
+                      <span className="territory-unit-count-badge">{row.count}</span>
                     </div>
                   );
                 })}
               </div>
             ) : units.length > 0 && (
-              <div className="units-inline">
+              <div className="territory-units-list">
                 {units.map(({ unit_id, count }, index) => {
                   const unitDef = unitDefs[unit_id];
+                  const icon = unitDef?.icon;
+                  const factionColor = unitDef?.faction ? factionData[unitDef.faction]?.color : undefined;
                   return (
-                    <span key={unit_id}>
-                      {unitDef?.name || unit_id} ({count})
-                      {index < units.length - 1 && ', '}
-                    </span>
+                    <div key={`${unit_id}-${index}`} className="territory-unit-row">
+                      {icon && (
+                        <span
+                          className="territory-unit-icon-wrap"
+                          style={factionColor ? { ['--faction-border' as string]: factionColor } : undefined}
+                        >
+                          <img src={icon} alt="" className="territory-unit-icon" />
+                        </span>
+                      )}
+                      <span className="territory-unit-label">
+                        {unitDef?.name || unit_id}
+                      </span>
+                      <span className="territory-unit-count-badge">{count}</span>
+                    </div>
                   );
                 })}
               </div>

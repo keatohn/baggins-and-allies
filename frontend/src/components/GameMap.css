@@ -30,8 +30,9 @@
 .map-inner {
   position: relative;
   transform-origin: 0 0;
-  width: 1137px;
-  height: 900px;
+  /* Match outer map window (parchment tan) so map area blends with app */
+  background: var(--parchment-dark);
+  /* width/height come from inline style (IMG_DIMENSIONS) per map */
 }
 
 .map-background {
@@ -72,30 +73,31 @@
 }
 
 .territory-path.highlight {
-  fill-opacity: 0.45;
-  stroke: var(--gold);
-  stroke-width: 2;
-  stroke-dasharray: 5 3;
-  animation: pulse 1.5s ease-in-out infinite;
+  fill-opacity: 0.5;
+  stroke: var(--gold-dark);
+  stroke-width: 10;
+  stroke-dasharray: 8 5;
+  paint-order: stroke fill;
+  animation: territory-highlight-pulse 1.2s ease-in-out infinite;
 }
 
 .territory-path.drop-target {
-  fill-opacity: 0.6;
-  stroke: var(--gold);
-  stroke-width: 4;
+  fill-opacity: 0.55;
+  stroke: var(--gold-dark);
+  stroke-width: 10;
   stroke-dasharray: none;
   filter: brightness(1.2);
 }
 
-@keyframes pulse {
-
+@keyframes territory-highlight-pulse {
   0%,
   100% {
-    fill-opacity: 0.35;
+    fill-opacity: 0.4;
+    stroke-opacity: 0.9;
   }
-
   50% {
-    fill-opacity: 0.5;
+    fill-opacity: 0.55;
+    stroke-opacity: 1;
   }
 }
 
@@ -119,8 +121,22 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   transform: translate(-50%, -50%);
+}
+
+/* When territory has both camp and stronghold, show them side by side */
+.territory-markers-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+/* Power + camp only (no stronghold): power left, camp right */
+.territory-markers-row--power-camp {
+  gap: 8px;
 }
 
 .territory-marker {
@@ -134,11 +150,56 @@
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
 }
 
+/* Power production: large circled number above markers so units don't overlap */
+.territory-power-badge {
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 52px;
+  height: 52px;
+  padding: 0 10px;
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 52px;
+  text-align: center;
+  color: var(--ink);
+  background: rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(61, 41, 20, 0.3);
+  border-radius: 50%;
+  text-shadow: 0 0 2px rgba(255, 255, 255, 0.8), 0 1px 1px rgba(255, 255, 255, 0.5);
+  pointer-events: none;
+}
+
+/* Stronghold/capital: power icon in top middle, above the faction logo */
+.territory-power-badge.territory-power-badge--above-logo {
+  top: -52px;
+}
+
+/* Inline power badge (in power+camp row): not absolutely positioned */
+.territory-power-badge.territory-power-badge--inline {
+  position: static;
+  transform: none;
+  min-width: 44px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 44px;
+}
+
+.territory-marker.camp-marker .camp-marker-emoji {
+  font-size: 44px;
+  line-height: 1;
+  display: inline-block;
+}
+
 .territory-marker.faction-marker {
-  background: rgba(255, 255, 255, 0.85);
+  background: transparent;
   padding: 1px;
   border-radius: 50%;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  box-shadow: none;
 }
 
 .territory-marker.faction-marker--capital {
@@ -152,16 +213,16 @@
   object-fit: cover;
 }
 
-/* Neutral stronghold: gold ring (same visual as turn ticker current slot), same size as non-capital faction logo */
+/* Neutral stronghold: solid gold ring, thick; inside transparent */
 .territory-marker.neutral-stronghold-marker {
-  width: 22px;
-  height: 22px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.9);
+  background: transparent;
+  border: 8px solid #b8860b;
   box-shadow:
-    0 0 0 2px #d4a017,
-    0 0 0 3px #b8860b,
-    0 0 10px 2px rgba(232, 126, 34, 0.6);
+    0 0 0 3px #d4a017,
+    0 0 8px 2px rgba(232, 126, 34, 0.5);
 }
 
 .unit-layer {

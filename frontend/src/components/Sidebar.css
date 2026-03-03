@@ -125,6 +125,36 @@
   margin-bottom: 0.5rem;
 }
 
+.charge-path-prompt {
+  font-size: 0.8rem;
+  color: var(--ink);
+  margin-bottom: 0.5rem;
+}
+
+.charge-path-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+}
+
+.charge-path-btn {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  background: var(--parchment);
+  border: 2px solid var(--gold-dark);
+  border-radius: 4px;
+  color: var(--ink);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.charge-path-btn:hover {
+  background: var(--gold-light);
+  border-color: var(--gold);
+  color: var(--ink);
+}
+
 .move-confirm-buttons {
   display: flex;
   gap: 0.5rem;
@@ -355,13 +385,23 @@
 }
 
 .territory-name {
-  font-size: 0.95rem;
+  font-size: 1.0rem;
+  flex: 1;
+  min-width: 0;
 }
 
 .power-production {
   font-weight: 400;
   font-size: 0.8rem;
   color: var(--ink-light);
+}
+
+.power-terrain {
+  font-weight: 400;
+  font-size: 0.8rem;
+  color: var(--ink-light);
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .terrain-type {
@@ -375,7 +415,7 @@
 
 .capital-badge {
   font-family: 'Cinzel', serif;
-  font-size: 0.8rem;
+  font-size: 0.95rem;
   font-weight: 700;
   color: var(--gold);
   margin-bottom: 0.25rem;
@@ -383,7 +423,7 @@
 
 .stronghold-badge {
   font-family: 'Cinzel', serif;
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   font-weight: 700;
   color: var(--gold-dark);
   margin-bottom: 0.25rem;
@@ -391,7 +431,7 @@
 
 .camp-badge {
   font-family: 'Cinzel', serif;
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   font-weight: 700;
   color: #8B6914;
   margin-bottom: 0.25rem;
@@ -401,6 +441,89 @@
   font-size: 0.9rem;
   color: var(--ink-light);
   line-height: 1.5;
+  padding: 0.5rem 0;
+}
+
+/* Selected territory: slightly elevated panel when it has content */
+.territory-panel.has-territory {
+  border-width: 2px;
+  border-color: var(--ink);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.territory-units-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--ink-faded);
+}
+
+.territory-unit-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--ink);
+  line-height: 1.3;
+  padding: 0.25rem 0.4rem;
+  background: var(--parchment-light);
+  border-radius: 4px;
+  border: 1px solid var(--ink-faded);
+}
+
+.territory-unit-icon-wrap {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 3px;
+  border: 2px solid var(--faction-border, var(--ink-faded));
+  background: var(--parchment);
+  box-sizing: border-box;
+}
+
+.territory-unit-icon-wrap .territory-unit-icon {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 2px;
+}
+
+.territory-unit-icon {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  flex-shrink: 0;
+  border-radius: 3px;
+  background: var(--parchment);
+}
+
+.territory-unit-label {
+  font-family: 'Cinzel', serif;
+  font-weight: 500;
+  min-width: 0;
+  flex: 1;
+}
+
+.territory-unit-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-family: 'Cinzel', serif;
+  color: var(--ink);
+  background: var(--parchment);
+  border: 1px solid var(--ink-faded);
+  border-radius: 999px;
+  flex-shrink: 0;
 }
 
 .units-inline {
@@ -481,6 +604,16 @@
   text-align: center;
   line-height: 1.35;
   margin: 0 0 0.5rem 0;
+}
+
+.phase-instruction.aerial-must-move-msg {
+  color: var(--gold-dark, #9a7b2e);
+  font-weight: 600;
+}
+
+.phase-instruction .aerial-must-move-where {
+  font-weight: 400;
+  color: var(--ink-faded);
 }
 
 .empty-state {

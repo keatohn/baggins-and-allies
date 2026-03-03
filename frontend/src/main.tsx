@@ -1,6 +1,6 @@
 import { StrictMode, Component, type ErrorInfo, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter, Routes, Route, useParams, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useParams, useLocation, Navigate } from 'react-router-dom'
 import './index.css'
 import App from './App.tsx'
 import MainMenu from './pages/MainMenu.tsx'
@@ -58,9 +58,12 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { error: Error
 
 function GameRoute() {
   const { gameId } = useParams<{ gameId: string }>()
+  const location = useLocation()
   if (!gameId) return <Navigate to="/" replace />
   if (gameId === 'new') return <CreateGame />
-  return <App gameId={gameId} />
+  const navState = location.state as { initialState?: import('./services/api').ApiGameState; gameId?: string } | undefined
+  const initialState = navState?.gameId === gameId ? navState.initialState : undefined
+  return <App gameId={gameId} initialState={initialState} />
 }
 
 const rootEl = document.getElementById('root')

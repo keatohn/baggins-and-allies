@@ -1,0 +1,11 @@
+# Render.com blueprint (alternative to Railway)
+# Deploy from Render dashboard: New → Blueprint, connect repo. Set CORS_ORIGINS in env.
+services:
+  - type: web
+    name: baggins-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile.backend
+    envVars:
+      - key: CORS_ORIGINS
+        value: "https://bagginsandallies.com,https://www.bagginsandallies.com"
+    # Omit DATABASE_URL to use SQLite (ephemeral); or add from Render Postgres if you create one

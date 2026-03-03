@@ -1,0 +1,58 @@
+{
+  "rivendell_camp": {
+    "id": "rivendell_camp",
+    "territory_id": "rivendell"
+  },
+  "lorien_camp": {
+    "id": "lorien_camp",
+    "territory_id": "lorien"
+  },
+  "grey_havens_camp": {
+    "id": "grey_havens_camp",
+    "territory_id": "grey_havens"
+  },
+  "dol_goldur_camp": {
+    "id": "dol_goldur_camp",
+    "territory_id": "dol_goldur"
+  },
+  "erebor_camp": {
+    "id": "erebor_camp",
+    "territory_id": "erebor"
+  },
+  "west_rhun_camp": {
+    "id": "west_rhun_camp",
+    "territory_id": "west_rhun"
+  },
+  "minas_tirith_camp": {
+    "id": "minas_tirith_camp",
+    "territory_id": "minas_tirith"
+  },
+  "west_osgiliath_camp": {
+    "id": "west_osgiliath_camp",
+    "territory_id": "west_osgiliath"
+  },
+  "minas_morgul_camp": {
+    "id": "minas_morgul_camp",
+    "territory_id": "minas_morgul"
+  },
+  "barad_dur_camp": {
+    "id": "barad_dur_camp",
+    "territory_id": "barad_dur"
+  },
+  "isengard_camp": {
+    "id": "isengard_camp",
+    "territory_id": "isengard"
+  },
+  "edoras_camp": {
+    "id": "edoras_camp",
+    "territory_id": "edoras"
+  },
+  "dunharrow_camp": {
+    "id": "dunharrow_camp",
+    "territory_id": "dunharrow"
+  },
+  "haradwaith_camp": {
+    "id": "haradwaith_camp",
+    "territory_id": "haradwaith"
+  }
+}

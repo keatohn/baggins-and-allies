@@ -14,7 +14,8 @@ from backend.engine.definitions import (
     TerritoryDefinition,
     FactionDefinition,
 )
-from backend.engine.movement import get_reachable_territories_for_unit
+from backend.engine.movement import get_reachable_territories_for_unit, is_friendly_territory_for_landing
+from backend.engine.utils import get_unit_faction, is_aerial_unit
 
 
 def _territory_has_standing_camp(
@@ -38,7 +39,7 @@ PHASE_ALLOWED_ACTIONS = {
     "combat_move": ["move_units", "cancel_move", "end_phase"],
     "combat": ["initiate_combat", "continue_combat", "retreat", "end_phase"],
     "non_combat_move": ["move_units", "cancel_move", "end_phase"],
-    "mobilization": ["mobilize_units", "place_camp", "cancel_mobilization", "end_phase", "end_turn"],
+    "mobilization": ["mobilize_units", "place_camp", "queue_camp_placement", "cancel_camp_placement", "cancel_mobilization", "end_phase", "end_turn"],
 }
 
 
@@ -109,22 +110,28 @@ def validate_action(
     elif action.type == "move_units":
         return _validate_move(state, action, unit_defs, territory_defs, faction_defs)
     elif action.type == "initiate_combat":
-        return _validate_initiate_combat(state, action, faction_defs)
+        return _validate_initiate_combat(state, action, faction_defs, unit_defs)
     elif action.type == "mobilize_units":
         return _validate_mobilize(
             state, action, unit_defs, territory_defs, camp_defs
         )
     elif action.type == "retreat":
-        return _validate_retreat(state, action, territory_defs, faction_defs)
+        return _validate_retreat(state, action, territory_defs, faction_defs, unit_defs)
     elif action.type == "cancel_move":
         return _validate_cancel_move(state, action)
     elif action.type == "cancel_mobilization":
         return _validate_cancel_mobilization(state, action)
     elif action.type == "purchase_camp":
-        return _validate_purchase_camp(state, action, camp_defs)
+        return _validate_purchase_camp(state, action, camp_defs, territory_defs)
     elif action.type == "place_camp":
         return _validate_place_camp(state, action, camp_defs)
-    elif action.type in ["end_phase", "end_turn", "continue_combat"]:
+    elif action.type == "queue_camp_placement":
+        return _validate_queue_camp_placement(state, action, camp_defs)
+    elif action.type == "cancel_camp_placement":
+        return _validate_cancel_camp_placement(state, action)
+    elif action.type == "end_phase":
+        return _validate_end_phase(state)
+    elif action.type in ["end_turn", "continue_combat"]:
         return ValidationResult(True)
 
     return ValidationResult(False, f"Unknown action type: {action.type}")
@@ -251,6 +258,7 @@ def _validate_initiate_combat(
     state: GameState,
     action: Action,
     faction_defs: dict[str, FactionDefinition],
+    unit_defs: dict[str, UnitDefinition],
 ) -> ValidationResult:
     """Validate an initiate_combat action."""
     territory_id = action.payload.get("territory_id")
@@ -270,10 +278,10 @@ def _validate_initiate_combat(
     defender_units = []
 
     for unit in territory.units:
-        unit_faction = unit.instance_id.split("_")[0]
+        unit_faction = get_unit_faction(unit, unit_defs)
         if unit_faction == attacker_faction:
             attacker_units.append(unit)
-        else:
+        elif unit_faction is not None:
             unit_alliance = faction_defs.get(unit_faction, FactionDefinition(
                 "", "", "", "", "")).alliance
             if unit_alliance != attacker_alliance:
@@ -336,6 +344,21 @@ def _validate_mobilize(
                 f"Not enough {unit_id} purchased: need {count}, have {available}"
             )
 
+    # Total mobilized to this territory (pending + this action) cannot exceed power production
+    this_action_count = sum(item.get("count", 0) for item in units_to_mobilize)
+    already_pending = sum(
+        sum(u.get("count", 0) for u in pm.units)
+        for pm in state.pending_mobilizations
+        if pm.destination == destination
+    )
+    power_production = dest_def.produces.get("power", 0)
+    if already_pending + this_action_count > power_production:
+        return ValidationResult(
+            False,
+            f"Cannot mobilize {this_action_count} more to {destination}: "
+            f"already {already_pending} pending, territory produces only {power_production} power",
+        )
+
     return ValidationResult(True)
 
 
@@ -344,6 +367,7 @@ def _validate_retreat(
     action: Action,
     territory_defs: dict[str, TerritoryDefinition],
     faction_defs: dict[str, FactionDefinition],
+    unit_defs: dict[str, UnitDefinition],
 ) -> ValidationResult:
     """Validate a retreat action."""
     if not state.active_combat:
@@ -371,10 +395,10 @@ def _validate_retreat(
         return ValidationResult(False, f"Territory {destination} does not exist")
 
     attacker_faction = action.faction
-    if not _territory_is_friendly_for_retreat(dest_territory, attacker_faction, faction_defs):
+    if not _territory_is_friendly_for_retreat(dest_territory, attacker_faction, faction_defs, unit_defs):
         return ValidationResult(
             False,
-            f"Cannot retreat to {destination}: must be allied or friendly neutral (no enemy units)"
+            f"Cannot retreat to {destination}: must be allied territory"
         )
 
     return ValidationResult(True)
@@ -406,8 +430,9 @@ def _validate_purchase_camp(
     state: GameState,
     action: Action,
     camp_defs: dict[str, CampDefinition],
+    territory_defs: dict[str, TerritoryDefinition],
 ) -> ValidationResult:
-    """Validate a purchase_camp action."""
+    """Validate a purchase_camp action. Only territories that produce power are valid (so units can mobilize there)."""
     faction_id = action.faction
     if state.phase != "purchase" or state.current_faction != faction_id:
         return ValidationResult(False, "Can only purchase a camp during your purchase phase")
@@ -420,13 +445,35 @@ def _validate_purchase_camp(
         p.get("placed_territory_id") for p in getattr(state, "pending_camps", [])
         if p.get("placed_territory_id")
     ]
-    options = [
-        tid for tid in owned_at_start
-        if not _territory_has_standing_camp(state, tid, camp_defs)
-        and tid not in already_placed
-    ]
+    options = []
+    for tid in owned_at_start:
+        if tid in already_placed:
+            continue
+        if _territory_has_standing_camp(state, tid, camp_defs):
+            continue
+        tdef = territory_defs.get(tid)
+        if tdef and (tdef.produces.get("power", 0) or 0) > 0:
+            options.append(tid)
     if not options:
-        return ValidationResult(False, "No valid territory to place a camp")
+        return ValidationResult(False, "No valid territory to place a camp (need owned territory with power production)")
+    return ValidationResult(True)
+
+
+def _validate_end_phase(state: GameState) -> ValidationResult:
+    """Validate end_phase: in mobilization, all purchased camps must be placed or queued."""
+    if state.phase != "mobilization":
+        return ValidationResult(True)
+    pending = getattr(state, "pending_camps", [])
+    queued_indices = {p.camp_index for p in getattr(state, "pending_camp_placements", [])}
+    unplaced = [
+        p for i, p in enumerate(pending)
+        if not p.get("placed_territory_id") and i not in queued_indices
+    ]
+    if unplaced:
+        return ValidationResult(
+            False,
+            f"Place or queue all camps before ending mobilization ({len(unplaced)} camp(s) remaining)",
+        )
     return ValidationResult(True)
 
 
@@ -454,6 +501,38 @@ def _validate_place_camp(
     return ValidationResult(True)
 
 
+def _validate_queue_camp_placement(
+    state: GameState,
+    action: Action,
+    camp_defs: dict[str, CampDefinition],
+) -> ValidationResult:
+    """Validate a queue_camp_placement action (same as place_camp; camp must not already be queued; territory must not have another pending placement)."""
+    r = _validate_place_camp(state, action, camp_defs)
+    if not r.valid:
+        return r
+    camp_index = action.payload.get("camp_index", -1)
+    territory_id = action.payload.get("territory_id", "")
+    pending_placements = getattr(state, "pending_camp_placements", [])
+    for p in pending_placements:
+        if p.camp_index == camp_index:
+            return ValidationResult(False, "Camp already queued for placement")
+        if p.territory_id == territory_id:
+            return ValidationResult(False, "Territory already has a pending camp placement")
+    return ValidationResult(True)
+
+
+def _validate_cancel_camp_placement(state: GameState, action: Action) -> ValidationResult:
+    """Validate a cancel_camp_placement action."""
+    idx = action.payload.get("placement_index", -1)
+    pending = getattr(state, "pending_camp_placements", [])
+    if idx < 0 or idx >= len(pending):
+        return ValidationResult(
+            False,
+            f"Invalid placement_index: {idx}. Pending: {len(pending)}"
+        )
+    return ValidationResult(True)
+
+
 # ===== Query Functions =====
 
 def get_available_action_types(state: GameState) -> list[str]:
@@ -476,17 +555,23 @@ def get_available_action_types(state: GameState) -> list[str]:
 def get_movable_units(
     state: GameState,
     faction_id: str,
+    unit_defs: dict[str, UnitDefinition] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Get all units for a faction that can still move (remaining_movement > 0).
+    Includes units in any territory (owned, allied, or neutral) that belong to the current faction.
     Returns list of {instance_id, unit_id, territory_id, remaining_movement}.
     """
     result = []
 
     for territory_id, territory in state.territories.items():
         for unit in territory.units:
-            # Check if unit belongs to faction
-            if not unit.instance_id.startswith(faction_id + "_"):
+            # Unit belongs to faction if instance_id prefix matches or unit_def.faction matches (e.g. units in neutral with def faction)
+            belongs = unit.instance_id.startswith(faction_id + "_")
+            if not belongs and unit_defs:
+                unit_faction = get_unit_faction(unit, unit_defs)
+                belongs = unit_faction == faction_id
+            if not belongs:
                 continue
 
             if unit.remaining_movement > 0:
@@ -630,6 +715,7 @@ def get_contested_territories(
     state: GameState,
     faction_id: str,
     faction_defs: dict[str, FactionDefinition],
+    unit_defs: dict[str, UnitDefinition],
 ) -> list[dict[str, Any]]:
     """
     Get territories where faction has units alongside enemy units.
@@ -646,10 +732,10 @@ def get_contested_territories(
         defender_units = []
 
         for unit in territory.units:
-            unit_faction = unit.instance_id.split("_")[0]
+            unit_faction = get_unit_faction(unit, unit_defs)
             if unit_faction == faction_id:
                 attacker_units.append(unit)
-            else:
+            elif unit_faction is not None:
                 unit_alliance = faction_defs.get(unit_faction, FactionDefinition(
                     "", "", "", "", "")).alliance
                 if unit_alliance != attacker_alliance:
@@ -671,26 +757,18 @@ def _territory_is_friendly_for_retreat(
     territory: TerritoryState,
     attacker_faction: str,
     faction_defs: dict[str, FactionDefinition],
+    unit_defs: dict[str, UnitDefinition],
 ) -> bool:
     """
-    True if a territory is valid for retreat: allied (same alliance) or neutral with no enemy units.
-    Neutral = nobody owns it. Friendly neutral = empty or has only friendly/allied units.
+    True if a territory is valid for retreat: allied-owned only (same alliance).
+    Neutral (unowned) territory is not valid for retreat.
     """
     owner = territory.owner
+    if owner is None:
+        return False
+
     attacker_alliance = faction_defs.get(attacker_faction, FactionDefinition(
         "", "", "", "", "")).alliance
-
-    if owner is None:
-        # Neutral: allow only if no enemy units (empty or friendly-only)
-        for u in territory.units:
-            unit_faction = u.instance_id.split("_")[0]
-            unit_faction_def = faction_defs.get(unit_faction)
-            if unit_faction_def and unit_faction_def.alliance != attacker_alliance:
-                return False
-            if not unit_faction_def:
-                return False  # Unknown faction (e.g. monsters) = hostile
-        return True
-
     owner_alliance = faction_defs.get(owner, FactionDefinition("", "", "", "", "")).alliance
     return owner_alliance == attacker_alliance
 
@@ -699,10 +777,11 @@ def get_retreat_options(
     state: GameState,
     territory_defs: dict[str, TerritoryDefinition],
     faction_defs: dict[str, FactionDefinition],
+    unit_defs: dict[str, UnitDefinition],
 ) -> list[str]:
     """
     Get valid retreat destinations for the current active combat.
-    Returns list of adjacent territory IDs that are allied or friendly neutral (no enemy units).
+    Returns list of adjacent territory IDs that are allied (same alliance).
     """
     if not state.active_combat:
         return []
@@ -718,9 +797,44 @@ def get_retreat_options(
         adj_territory = state.territories.get(adj_id)
         if not adj_territory:
             continue
-        if _territory_is_friendly_for_retreat(adj_territory, attacker_faction, faction_defs):
+        if _territory_is_friendly_for_retreat(adj_territory, attacker_faction, faction_defs, unit_defs):
             result.append(adj_id)
 
+    return result
+
+
+def get_aerial_units_must_move(
+    state: GameState,
+    unit_defs: dict[str, UnitDefinition],
+    territory_defs: dict[str, TerritoryDefinition],
+    faction_defs: dict[str, FactionDefinition],
+    current_faction: str,
+) -> list[dict[str, str]]:
+    """
+    Aerial units that attacked but did not conquer are in enemy/non-friendly territory.
+    They must move to friendly territory before non-combat move phase can end.
+    Returns list of {"territory_id", "unit_id", "instance_id"} for current_faction's aerial units
+    that are in a territory that is not friendly for landing.
+    """
+    result: list[dict[str, str]] = []
+    for territory_id, territory in state.territories.items():
+        unit_faction = None
+        for unit in territory.units:
+            u_faction = get_unit_faction(unit, unit_defs)
+            if u_faction != current_faction:
+                continue
+            unit_def = unit_defs.get(unit.unit_id)
+            if not is_aerial_unit(unit_def):
+                continue
+            if is_friendly_territory_for_landing(
+                territory, current_faction, faction_defs, unit_defs
+            ):
+                continue
+            result.append({
+                "territory_id": territory_id,
+                "unit_id": unit.unit_id,
+                "instance_id": unit.instance_id,
+            })
     return result
 
 
@@ -728,22 +842,30 @@ def get_faction_stats(
     state: GameState,
     territory_defs: dict[str, TerritoryDefinition],
     faction_defs: dict[str, FactionDefinition],
+    unit_defs: dict[str, UnitDefinition] | None = None,
 ) -> dict[str, Any]:
     """
-    Get per-faction and per-alliance stats for the UI (territories, strongholds, power, power_per_turn).
+    Get per-faction and per-alliance stats for the UI (territories, strongholds, power, power_per_turn, units, unit_power).
     power = current resource from faction_resources; power_per_turn = sum of produces across owned territories.
+    unit_power = sum of power cost for all active units for that faction.
     """
+    unit_defs = unit_defs or {}
     factions: dict[str, dict[str, int]] = {}
     for faction_id in faction_defs:
         territories_count = 0
         strongholds_count = 0
         power_per_turn = 0
         units_count = 0
+        unit_power = 0
         for tid, ts in state.territories.items():
             if ts.owner != faction_id:
                 continue
             territories_count += 1
-            units_count += len(ts.units)
+            for unit in ts.units:
+                units_count += 1
+                ud = unit_defs.get(unit.unit_id)
+                if ud and isinstance(getattr(ud, "cost", None), dict):
+                    unit_power += ud.cost.get("power", 0)
             tdef = territory_defs.get(tid)
             if tdef and getattr(tdef, "is_stronghold", False):
                 strongholds_count += 1
@@ -756,19 +878,21 @@ def get_faction_stats(
             "power": power,
             "power_per_turn": power_per_turn,
             "units": units_count,
+            "unit_power": unit_power,
         }
 
     alliances: dict[str, dict[str, int]] = {}
     for faction_id, fd in faction_defs.items():
         alliance = getattr(fd, "alliance", "") or ""
         if alliance not in alliances:
-            alliances[alliance] = {"territories": 0, "strongholds": 0, "power": 0, "power_per_turn": 0, "units": 0}
+            alliances[alliance] = {"territories": 0, "strongholds": 0, "power": 0, "power_per_turn": 0, "units": 0, "unit_power": 0}
         st = factions.get(faction_id, {})
         alliances[alliance]["territories"] += st.get("territories", 0)
         alliances[alliance]["strongholds"] += st.get("strongholds", 0)
         alliances[alliance]["power"] += st.get("power", 0)
         alliances[alliance]["power_per_turn"] += st.get("power_per_turn", 0)
         alliances[alliance]["units"] += st.get("units", 0)
+        alliances[alliance]["unit_power"] += st.get("unit_power", 0)
 
     # Strongholds with no owner (e.g. Moria at start) for UI bar: good | neutral | evil
     neutral_strongholds = 0
@@ -828,6 +952,7 @@ def get_game_summary(
     state: GameState,
     faction_defs: dict[str, FactionDefinition],
     territory_defs: dict[str, TerritoryDefinition],
+    unit_defs: dict[str, UnitDefinition],
 ) -> dict[str, Any]:
     """
     Get a summary of the current game state for UI display.
@@ -852,8 +977,9 @@ def get_game_summary(
     unit_counts: dict[str, int] = {}
     for ts in state.territories.values():
         for unit in ts.units:
-            faction = unit.instance_id.split("_")[0]
-            unit_counts[faction] = unit_counts.get(faction, 0) + 1
+            faction = get_unit_faction(unit, unit_defs)
+            if faction:
+                unit_counts[faction] = unit_counts.get(faction, 0) + 1
 
     return {
         "turn_number": state.turn_number,
@@ -899,7 +1025,7 @@ def get_territory_unit_stacks(
     for unit in territory.units:
         # Filter by faction if specified
         if faction_id:
-            unit_faction = unit.instance_id.split("_")[0]
+            unit_faction = get_unit_faction(unit, unit_defs) if unit_defs else (unit.instance_id.split("_")[0] if unit.instance_id else None)
             if unit_faction != faction_id:
                 continue
 
@@ -995,6 +1121,8 @@ def get_stack_move_targets(
         )
 
         for dest_id, cost in targets.items():
+            if dest_id == territory_id:
+                continue  # Never allow move from X to X
             if dest_id not in destinations:
                 destinations[dest_id] = {
                     "cost": cost,
@@ -1069,6 +1197,8 @@ def get_move_preview(
         # Add is_enemy flag and filter for combat_move phase
         destinations = {}
         for dest_id, dest_info in raw_destinations.items():
+            if dest_id == territory_id:
+                continue  # Never allow move from X to X
             dest_territory = state.territories.get(dest_id)
             dest_owner = dest_territory.owner if dest_territory else None
 

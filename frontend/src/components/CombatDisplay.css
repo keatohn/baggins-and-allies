@@ -1,5 +1,6 @@
 /* Combat Modal */
 .combat-modal {
+  position: relative;
   width: 900px;
   max-width: 95vw;
   max-height: 90vh;
@@ -12,6 +13,12 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.combat-header-indicators {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 .round-indicator {
@@ -90,6 +97,13 @@
   min-width: 100px;
 }
 
+.vs-divider-terror {
+  font-family: 'IM Fell English', serif;
+  font-size: 1rem;
+  color: var(--ink-light);
+  order: -1;
+}
+
 .vs-divider > span {
   font-family: 'Cinzel', serif;
   font-size: 1.5rem;
@@ -166,9 +180,19 @@
 .dice-stack {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.25rem;
   flex: 1;
   justify-content: flex-end;
+}
+
+.dice-stack-reroll-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--ink-faded);
+  text-transform: uppercase;
+  margin-left: 0.25rem;
+  margin-right: 0.15rem;
 }
 
 /* Combat Unit Group (grouped by unit type) */
@@ -189,6 +213,28 @@
   object-fit: contain;
 }
 
+/* Top-left specials: T=Terror, M=Mountain, F=Forest, C=Captain */
+.unit-specials-badge {
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 2px;
+  background: rgba(0, 0, 0, 0.75);
+  color: var(--parchment);
+  font-family: 'Cinzel', serif;
+  font-size: 0.5rem;
+  font-weight: 700;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0 0 4px 0;
+  letter-spacing: -0.5px;
+  z-index: 1;
+}
+
 .unit-count {
   position: absolute;
   bottom: -4px;
@@ -205,6 +251,25 @@
   justify-content: center;
   border-radius: 9px;
   padding: 0 4px;
+}
+
+/* Red X on unit stack when all units in that stack are eliminated (same style as Terror re-roll X on dice) */
+.unit-stack-eliminated-x {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: bold;
+  color: #c62828;
+  text-shadow: 0 0 2px white, 0 0 4px white;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.combat-unit-group.eliminated img {
+  opacity: 0.5;
 }
 
 /* Small red badge on top-right of icon: number of hits that stack received */
@@ -353,6 +418,24 @@
 .die.miss .dot.visible,
 .die.miss .tenth-dot {
   background: #999;
+}
+
+/* Terror re-roll: red X on the die that will be re-rolled */
+.die.rerolled {
+  outline: 2px solid #c62828;
+  outline-offset: 1px;
+}
+.die-reroll-x {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: bold;
+  color: #c62828;
+  text-shadow: 0 0 2px white, 0 0 4px white;
+  pointer-events: none;
 }
 
 /* Dice landing animation - impact/slam effect */

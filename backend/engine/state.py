@@ -93,13 +93,26 @@ class Unit:
                 return int(v) if v is not None else default
             except (TypeError, ValueError):
                 return default
+        # Require explicit health; no fallbacks (fail fast if state wasn't persisted correctly)
+        if "base_health" not in data or "remaining_health" not in data:
+            raise ValueError(
+                f"Unit dict must include 'base_health' and 'remaining_health' "
+                f"(instance_id={data.get('instance_id')}, unit_id={data.get('unit_id')})"
+            )
+        base_health = _int(data["base_health"], 0)
+        remaining_health = _int(data["remaining_health"], 0)
+        if base_health < 1 or remaining_health < 1 or remaining_health > base_health:
+            raise ValueError(
+                f"Unit health invalid: base_health={base_health}, remaining_health={remaining_health} "
+                f"(instance_id={data.get('instance_id')})"
+            )
         return cls(
             instance_id=str(data.get("instance_id") or ""),
             unit_id=str(data.get("unit_id") or ""),
             remaining_movement=_int(data.get("remaining_movement"), 0),
-            remaining_health=_int(data.get("remaining_health"), 1),
+            remaining_health=remaining_health,
             base_movement=_int(data.get("base_movement"), 0),
-            base_health=_int(data.get("base_health"), 1),
+            base_health=base_health,
         )
 
 
@@ -183,6 +196,25 @@ class PendingMobilization:
         if not isinstance(u, list):
             u = []
         return cls(destination=str(data.get("destination") or ""), units=list(u))
+
+
+@dataclass
+class PendingCampPlacement:
+    """A queued camp placement, applied at end of mobilization phase (like PendingMobilization)."""
+    camp_index: int
+    territory_id: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"camp_index": self.camp_index, "territory_id": self.territory_id}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "PendingCampPlacement":
+        if not isinstance(data, dict):
+            data = {}
+        return cls(
+            camp_index=int(data.get("camp_index", -1)),
+            territory_id=str(data.get("territory_id") or ""),
+        )
 
 
 @dataclass
@@ -374,8 +406,12 @@ class GameState:
     faction_territories_at_turn_start: dict[str, list[str]] = field(default_factory=dict)
     # Purchased camps this turn: list of {territory_options: [tid, ...], placed_territory_id: None | str}
     pending_camps: list[dict[str, Any]] = field(default_factory=list)
+    # Queued camp placements (applied at end of mobilization phase, like pending_mobilizations)
+    pending_camp_placements: list[PendingCampPlacement] = field(default_factory=list)
     # Purchased camps that were placed: camp_id -> territory_id (camp_id e.g. "purchased_camp_pelennor")
     dynamic_camps: dict[str, str] = field(default_factory=dict)
+    # Faction IDs in turn order (from setup). Empty = use sorted faction_defs when advancing.
+    turn_order: list[str] = field(default_factory=list)
 
     def copy(self) -> "GameState":
         """Return a deep copy of this game state."""
@@ -418,7 +454,9 @@ class GameState:
             "camp_cost": self.camp_cost,
             "faction_territories_at_turn_start": self.faction_territories_at_turn_start,
             "pending_camps": self.pending_camps,
+            "pending_camp_placements": [p.to_dict() for p in self.pending_camp_placements],
             "dynamic_camps": self.dynamic_camps,
+            "turn_order": self.turn_order,
         }
 
     @classmethod
@@ -481,7 +519,12 @@ class GameState:
                 data.get("faction_territories_at_turn_start")
             ),
             pending_camps=list(data.get("pending_camps") or []) if isinstance(data.get("pending_camps"), list) else [],
+            pending_camp_placements=[
+                PendingCampPlacement.from_dict(p) for p in (data.get("pending_camp_placements") or [])
+                if isinstance(p, dict)
+            ],
             dynamic_camps=dict(data.get("dynamic_camps") or {}) if isinstance(data.get("dynamic_camps"), dict) else {},
+            turn_order=list(data.get("turn_order") or []) if isinstance(data.get("turn_order"), list) else [],
         )
 
     def to_json(self, indent: int = 2) -> str:

@@ -1,0 +1,9 @@
+# Railway backend deploy: use Dockerfile in repo root
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile.backend"
+
+[deploy]
+startCommand = "uvicorn backend.api.main:app --host 0.0.0.0 --port $PORT"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10

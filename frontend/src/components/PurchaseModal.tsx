@@ -15,11 +15,15 @@ interface UnitPurchaseInfo {
 
 interface PurchaseModalProps {
   isOpen: boolean;
+  /** Faction color for unit icon borders (e.g. from factionData[faction].color). */
+  factionColor?: string;
   availableResources: Record<string, number>;
   availableUnits: UnitPurchaseInfo[];
   currentPurchases: Record<string, number>;
   /** Number of camps in cart (bought in purchase phase, placed in mobilization). */
   currentCamps?: number;
+  /** Max camps that can be purchased (number of owned territories without a camp). */
+  maxCamps?: number;
   /** Max units that can be mobilized this turn (from backend). Total units purchased cannot exceed this; camps do not count. */
   mobilizationCapacity?: number;
   /** Units already purchased this turn (from backend). */
@@ -42,10 +46,12 @@ type PurchaseTab = 'units' | 'other';
 
 function PurchaseModal({
   isOpen,
+  factionColor,
   availableResources,
   availableUnits,
   currentPurchases,
   currentCamps = 0,
+  maxCamps = 0,
   mobilizationCapacity,
   purchasedUnitsCount: _purchasedUnitsCount = 0,
   campCost = 10,
@@ -56,13 +62,14 @@ function PurchaseModal({
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [campQuantity, setCampQuantity] = useState(0);
 
-  // Sync quantities and camps when modal opens
+  // Sync quantities and camps when modal opens; clamp camps to maxCamps
   useEffect(() => {
     if (isOpen) {
       setQuantities(currentPurchases);
-      setCampQuantity(currentCamps);
+      const clamped = maxCamps != null && maxCamps > 0 ? Math.min(currentCamps, maxCamps) : currentCamps;
+      setCampQuantity(clamped);
     }
-  }, [isOpen, currentPurchases, currentCamps]);
+  }, [isOpen, currentPurchases, currentCamps, maxCamps]);
 
   // Total cost for units only
   const totalUnitCosts = useMemo(() => {
@@ -132,14 +139,20 @@ function PurchaseModal({
   const totalUnits = Object.values(quantities).reduce((sum, qty) => sum + qty, 0);
   const atMobilizationCap = mobilizationCapacity != null && totalUnits >= mobilizationCapacity;
   const canAffordOneMoreCamp = campCost > 0 && (remainingResources.power ?? 0) >= campCost;
+  const atCampCap = maxCamps !== undefined && maxCamps > 0 && campQuantity >= maxCamps;
 
   const handleCampChange = (delta: number) => {
-    setCampQuantity(prev => Math.max(0, prev + delta));
+    setCampQuantity(prev => {
+      const next = prev + delta;
+      if (maxCamps != null && maxCamps > 0 && next > maxCamps) return maxCamps;
+      return Math.max(0, next);
+    });
   };
 
   const handleConfirm = () => {
     if (mobilizationCapacity != null && totalUnits > mobilizationCapacity) return;
-    onPurchase(quantities, campQuantity);
+    const campsToSubmit = maxCamps != null && maxCamps > 0 ? Math.min(campQuantity, maxCamps) : campQuantity;
+    onPurchase(quantities, campsToSubmit);
     onClose();
   };
 
@@ -177,12 +190,13 @@ function PurchaseModal({
         </div>
 
         <div className="resources-display">
-          {Object.entries(availableResources).map(([resource, amount]) => {
+          {Object.entries(availableResources).map(([resource]) => {
             const resourceLabel = resource.charAt(0).toUpperCase() + resource.slice(1);
+            const remaining = remainingResources[resource] ?? 0;
             return (
               <div key={resource} className="resource-row">
                 <span className="resource-label">{resourceLabel}:</span>
-                <span className="resource-value">{amount}</span>
+                <span className="resource-value">{remaining}</span>
               </div>
             );
           })}
@@ -194,6 +208,12 @@ function PurchaseModal({
           </p>
         )}
 
+        {activeTab === 'other' && campCost > 0 && maxCamps != null && maxCamps > 0 && (
+          <p className="mobilization-capacity">
+            Camp Capacity: <strong>{campQuantity}/{maxCamps}</strong>
+          </p>
+        )}
+
         {activeTab === 'units' && (
           <>
             <div className="unit-list">
@@ -201,9 +221,14 @@ function PurchaseModal({
                 const qty = quantities[unit.id] || 0;
                 const affordable = canAfford(unit);
                 return (
-                  <div key={unit.id} className="unit-row">
+                    <div key={unit.id} className="unit-row">
                     <div className="unit-info">
-                      <img src={unit.icon} alt={unit.name} className="unit-icon" />
+                      <span
+                        className="unit-icon-wrap"
+                        style={factionColor ? { ['--faction-border' as string]: factionColor } : undefined}
+                      >
+                        <img src={unit.icon} alt={unit.name} className="unit-icon" />
+                      </span>
                       <div className="unit-details">
                         <span className="unit-name">{unit.name}</span>
                         <span className="unit-stats">
@@ -246,7 +271,7 @@ function PurchaseModal({
                 <div className="quantity-controls">
                   <button onClick={() => handleCampChange(-1)} disabled={campQuantity === 0}>−</button>
                   <span className="quantity">{campQuantity}</span>
-                  <button onClick={() => handleCampChange(1)} disabled={!canAffordOneMoreCamp}>+</button>
+                  <button onClick={() => handleCampChange(1)} disabled={!canAffordOneMoreCamp || atCampCap}>+</button>
                 </div>
               </div>
             ) : (

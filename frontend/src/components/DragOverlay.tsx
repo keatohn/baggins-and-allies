@@ -17,9 +17,25 @@ interface DragOverlayProps {
     count: number;
     factionColor?: string;
   } | null;
+  activeCampDrag?: { campIndex: number } | null;
+  factionColor?: string;
 }
 
-function DragOverlay({ activeUnit, activeMobilizationItem }: DragOverlayProps) {
+function DragOverlay({ activeUnit, activeMobilizationItem, activeCampDrag, factionColor }: DragOverlayProps) {
+  if (activeCampDrag) {
+    const style: CSSProperties = factionColor
+      ? { borderColor: factionColor, cursor: 'grabbing' }
+      : { cursor: 'grabbing' };
+    return (
+      <DndDragOverlay dropAnimation={null}>
+        <div className="purchase-stack camp-item purchase-stack-overlay" style={style}>
+          <span className="purchase-icon camp-icon" aria-hidden>⛺</span>
+          <span className="purchase-name">Camp</span>
+        </div>
+      </DndDragOverlay>
+    );
+  }
+
   if (activeMobilizationItem) {
     const style: CSSProperties = activeMobilizationItem.factionColor
       ? { borderColor: activeMobilizationItem.factionColor, cursor: 'grabbing' }

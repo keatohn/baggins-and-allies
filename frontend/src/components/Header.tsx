@@ -14,10 +14,13 @@ export interface UnitForStats {
   dice: number;
   movement: number;
   health: number;
+  specials: string[];
 }
 
 interface HeaderProps {
   gameState: GameState;
+  /** Faction IDs in display order for ticker (from create response or backend). Overrides gameState.turn_order when provided. */
+  turnOrderForTicker?: string[];
   factionData: Record<string, { name: string; icon: string; color: string; alliance: string }>;
   effectivePower?: number;
   factionStats?: ApiFactionStats | null;
@@ -45,7 +48,7 @@ function phaseLabel(phase: string): string {
   return `${formatPhase(phase)} (${current}/${n})`;
 }
 
-function Header({ gameState, factionData, effectivePower, factionStats, unitsByFaction = {}, gameName = null }: HeaderProps) {
+function Header({ gameState, turnOrderForTicker, factionData, effectivePower, factionStats, unitsByFaction = {}, gameName = null }: HeaderProps) {
   const [statsOpen, setStatsOpen] = useState(false);
   const [unitStatsOpen, setUnitStatsOpen] = useState(false);
   const faction = factionData[gameState.current_faction];
@@ -56,11 +59,27 @@ function Header({ gameState, factionData, effectivePower, factionStats, unitsByF
   const alliances = factionStats?.alliances ?? {};
   const factionStatEntries = factionStats?.factions ?? {};
   const allianceOrder = ['good', 'evil'].filter(a => a in alliances);
-  // For unit stats, show factions that have units; order by alliance if available, else by factionData keys
+  const turnOrder = (turnOrderForTicker?.length ? turnOrderForTicker : gameState.turn_order) ?? [];
+  const sortByTurnOrder = (factionIds: string[]) =>
+    [...factionIds].sort((a, b) => {
+      const ia = turnOrder.indexOf(a);
+      const ib = turnOrder.indexOf(b);
+      if (ia === -1 && ib === -1) return 0;
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    });
+  // Unit stats: factions with units, grouped by alliance, sorted by turn order
   const unitStatsFactionOrder =
     allianceOrder.length > 0
-      ? allianceOrder.flatMap(a => Object.keys(factionData).filter(fid => factionData[fid]?.alliance === a))
-      : Object.keys(factionData).filter(fid => (unitsByFaction[fid]?.length ?? 0) > 0);
+      ? allianceOrder.flatMap(a =>
+          sortByTurnOrder(
+            Object.keys(factionData).filter(
+              fid => factionData[fid]?.alliance === a && (unitsByFaction[fid]?.length ?? 0) > 0
+            )
+          )
+        )
+      : sortByTurnOrder(Object.keys(factionData).filter(fid => (unitsByFaction[fid]?.length ?? 0) > 0));
 
   return (
     <>
@@ -82,7 +101,7 @@ function Header({ gameState, factionData, effectivePower, factionStats, unitsByF
           title="Unit stats"
           aria-label="Open unit stats"
         >
-          <img src="/assets/units/gondor_infantry.png" alt="" className="header-unit-stats-icon" aria-hidden />
+          <img src="/assets/units/gondor_soldier.png" alt="" className="header-unit-stats-icon" aria-hidden />
         </button>
         <button
           type="button"
@@ -136,11 +155,12 @@ function Header({ gameState, factionData, effectivePower, factionStats, unitsByF
 
         <div className="header-spacer" />
 
-        {/* Turn order ticker: faction logos in order, gold ring around current; border matches faction */}
+        {/* Turn order ticker: faction logos in turn order (from setup or turnOrderForTicker), gold ring around current */}
         <div className="header-turn-ticker" aria-label="Turn order" style={factionColor ? { borderColor: factionColor } : undefined}>
           {(() => {
-            const turnOrder = Object.keys(factionData).sort();
-            return turnOrder.map((fid) => {
+            const displayOrder = turnOrder.filter((f) => factionData[f]);
+            const order = displayOrder.length > 0 ? displayOrder : Object.keys(factionData).sort();
+            return order.map((fid) => {
               const fd = factionData[fid];
               const isCurrent = fid === gameState.current_faction;
               return (
@@ -189,6 +209,7 @@ function Header({ gameState, factionData, effectivePower, factionStats, unitsByF
                         <th className="stats-col-num">PP</th>
                         <th className="stats-col-num">P</th>
                         <th className="stats-col-num">U</th>
+                        <th className="stats-col-num">UP</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -196,8 +217,10 @@ function Header({ gameState, factionData, effectivePower, factionStats, unitsByF
                         const tot = alliances[allianceKey];
                         if (!tot) return null;
                         const allianceLabel = allianceKey === 'good' ? 'Good' : 'Evil';
-                        const factionIds = Object.keys(factionData).filter(
-                          fid => factionData[fid]?.alliance === allianceKey
+                        const factionIds = sortByTurnOrder(
+                          Object.keys(factionData).filter(
+                            fid => factionData[fid]?.alliance === allianceKey
+                          )
                         );
                         return (
                           <React.Fragment key={allianceKey}>
@@ -208,6 +231,7 @@ function Header({ gameState, factionData, effectivePower, factionStats, unitsByF
                               <td className="stats-col-num">{tot.power_per_turn}</td>
                               <td className="stats-col-num">{tot.power}</td>
                               <td className="stats-col-num">{tot.units ?? 0}</td>
+                              <td className="stats-col-num">{tot.unit_power ?? 0}</td>
                             </tr>
                             {factionIds.map(fid => {
                               const st = factionStatEntries[fid];
@@ -227,6 +251,7 @@ function Header({ gameState, factionData, effectivePower, factionStats, unitsByF
                                   <td className="stats-col-num">{st.power_per_turn}</td>
                                   <td className="stats-col-num">{st.power}</td>
                                   <td className="stats-col-num">{st.units ?? 0}</td>
+                                  <td className="stats-col-num">{st.unit_power ?? 0}</td>
                                 </tr>
                               );
                             })}
@@ -240,7 +265,7 @@ function Header({ gameState, factionData, effectivePower, factionStats, unitsByF
               )}
             </div>
             <p className="stats-modal-key">
-              S = Strongholds | T = Territories | PP = Power production | P = Power | U = Units
+              S = Strongholds | T = Territories | PP = Power production | P = Power | U = Units | UP = Unit power
             </p>
           </div>
         </div>
@@ -265,6 +290,7 @@ function Header({ gameState, factionData, effectivePower, factionStats, unitsByF
                       <th className="stats-col-num">R</th>
                       <th className="stats-col-num">M</th>
                       <th className="stats-col-num">HP</th>
+                      <th className="stats-col-num">SP</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -273,7 +299,7 @@ function Header({ gameState, factionData, effectivePower, factionStats, unitsByF
                       const fd = factionData[fid];
                       return [
                         <tr key={`faction-${fid}`} className="unit-stats-faction-row">
-                          <td colSpan={7} className="stats-col-unit">
+                          <td colSpan={8} className="stats-col-unit">
                             {fd?.icon && (
                               <img className="unit-stats-faction-icon" src={fd.icon} alt="" aria-hidden />
                             )}
@@ -292,6 +318,7 @@ function Header({ gameState, factionData, effectivePower, factionStats, unitsByF
                             <td className="stats-col-num">{u.dice}</td>
                             <td className="stats-col-num">{u.movement}</td>
                             <td className="stats-col-num">{u.health}</td>
+                            <td className="stats-col-num stats-col-specials">{u.specials?.length ? u.specials.join(', ') : ''}</td>
                           </tr>
                         )),
                       ];
@@ -303,8 +330,11 @@ function Header({ gameState, factionData, effectivePower, factionStats, unitsByF
               )}
             </div>
             <p className="unit-stats-modal-key">
-              C = Cost | A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points
+              C = Cost | A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points | SP = Specials
             </p>
+            <section className="unit-stats-specials-definitions" aria-label="Special ability definitions">
+              {/* Definitions for each special will be added here */}
+            </section>
           </div>
         </div>
       )}

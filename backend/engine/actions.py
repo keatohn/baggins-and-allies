@@ -69,6 +69,8 @@ def initiate_combat(
     territory_id: str,  # The contested territory where attackers moved during combat_move
     # "attacker" -> [rolls], "defender" -> [rolls]
     dice_rolls: dict[str, list[int]],
+    terror_applied: bool = False,
+    terror_final_defender_hits: int | None = None,
 ) -> Action:
     """
     Initiate combat in a contested territory.
@@ -90,35 +92,42 @@ def initiate_combat(
     Example: After moving Gondor units into Mordor during combat_move:
              initiate_combat("gondor", "mordor", {"attacker": [3, 4, 5], "defender": [1, 2, 3, 4]})
     """
-    return Action(
-        type="initiate_combat",
-        faction=faction,
-        payload={
-            "attacker": faction,
-            "territory_id": territory_id,
-            "dice_rolls": dice_rolls,
-        },
-    )
+    payload: dict = {
+        "attacker": faction,
+        "territory_id": territory_id,
+        "dice_rolls": dice_rolls,
+    }
+    if terror_applied:
+        payload["terror_applied"] = True
+    if terror_final_defender_hits is not None:
+        payload["terror_final_defender_hits"] = terror_final_defender_hits
+    return Action(type="initiate_combat", faction=faction, payload=payload)
 
 
 def continue_combat(
     faction: str,
     # "attacker" -> [rolls], "defender" -> [rolls]
     dice_rolls: dict[str, list[int]],
+    terror_applied: bool = False,
+    terror_final_defender_hits: int | None = None,
 ) -> Action:
     """
     Continue an active combat with another round.
     Only valid when there is an active_combat in the game state.
     dice_rolls must be provided for this round.
+    terror_applied: True when round 1 terror was applied (defender re-rolls).
 
     Example: continue_combat("gondor", {"attacker": [2, 5], "defender": [1, 3, 4]})
     """
+    payload: dict = {"dice_rolls": dice_rolls}
+    if terror_applied:
+        payload["terror_applied"] = True
+    if terror_final_defender_hits is not None:
+        payload["terror_final_defender_hits"] = terror_final_defender_hits
     return Action(
         type="continue_combat",
         faction=faction,
-        payload={
-            "dice_rolls": dice_rolls,
-        },
+        payload=payload,
     )
 
 
@@ -197,6 +206,33 @@ def place_camp(
         type="place_camp",
         faction=faction,
         payload={"camp_index": camp_index, "territory_id": territory_id},
+    )
+
+
+def queue_camp_placement(
+    faction: str,
+    camp_index: int,
+    territory_id: str,
+) -> Action:
+    """
+    Queue a camp placement (like mobilize_units). Applied at end of mobilization phase.
+    """
+    return Action(
+        type="queue_camp_placement",
+        faction=faction,
+        payload={"camp_index": camp_index, "territory_id": territory_id},
+    )
+
+
+def cancel_camp_placement(
+    faction: str,
+    placement_index: int,
+) -> Action:
+    """Remove a queued camp placement from pending_camp_placements."""
+    return Action(
+        type="cancel_camp_placement",
+        faction=faction,
+        payload={"placement_index": placement_index},
     )
 
 

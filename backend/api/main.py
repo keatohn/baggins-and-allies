@@ -4,10 +4,12 @@ Provides REST API endpoints for game state management and actions.
 """
 
 import json
+import os
 import random
 import secrets
 import string
 import uuid
+from copy import deepcopy
 from dataclasses import asdict
 from typing import Any
 
@@ -33,6 +35,9 @@ from backend.engine.actions import (
     Action,
     purchase_units,
     purchase_camp,
+    place_camp,
+    queue_camp_placement,
+    cancel_camp_placement,
     move_units,
     cancel_move,
     cancel_mobilization,
@@ -43,8 +48,20 @@ from backend.engine.actions import (
     end_phase,
     end_turn,
 )
-from backend.engine.reducer import apply_action
-from backend.engine.combat import ARCHETYPE_ARCHER
+from backend.engine.reducer import apply_action, get_state_after_pending_moves
+from backend.engine.combat import (
+    ARCHETYPE_ARCHER,
+    get_defender_hit_flat_indices,
+    get_eff_def_per_flat_index,
+    get_terror_reroll_targets,
+    group_dice_by_stat,
+    compute_terrain_stat_modifiers,
+    compute_anti_cavalry_stat_modifiers,
+    compute_captain_stat_modifiers,
+    merge_stat_modifiers,
+    _count_hits as combat_count_hits,
+    _has_special as combat_has_special,
+)
 from backend.config import DEFAULT_SETUP_ID
 from backend.engine.definitions import (
     load_static_definitions,
@@ -59,6 +76,7 @@ from backend.engine.queries import (
     get_purchasable_units,
     get_movable_units,
     get_unit_move_targets,
+    get_aerial_units_must_move,
     get_mobilization_territories,
     get_mobilization_capacity,
     get_contested_territories,
@@ -66,7 +84,7 @@ from backend.engine.queries import (
     get_purchased_units,
     get_faction_stats,
 )
-from backend.engine.utils import initialize_game_state
+from backend.engine.utils import initialize_game_state, generate_dice_rolls_for_units
 
 app = FastAPI(
     title="Baggins & Allies API",
@@ -74,8 +92,12 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS configuration for frontend
-CORS_ORIGINS = ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"]
+# CORS configuration for frontend (add production origins via CORS_ORIGINS env, comma-separated)
+_default_origins = ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"]
+_extra = os.environ.get("CORS_ORIGINS", "")
+if _extra:
+    _default_origins = [o.strip() for o in _extra.split(",") if o.strip()] + _default_origins
+CORS_ORIGINS = _default_origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -212,6 +234,17 @@ class CancelMobilizationRequest(BaseModel):
     mobilization_index: int
 
 
+class PlaceCampRequest(BaseModel):
+    game_id: str
+    camp_index: int
+    territory_id: str
+
+
+class CancelCampPlacementRequest(BaseModel):
+    game_id: str
+    placement_index: int
+
+
 # ===== Helper Functions =====
 
 def generate_game_code(db: Session) -> str:
@@ -311,13 +344,15 @@ def get_game(game_id: str, db: Session | None = None) -> GameState:
 
 
 def save_game(game_id: str, state: GameState, db: Session | None = None) -> None:
-    """Persist game state to DB and cache."""
+    """Persist game state to DB and cache. Marks game as finished when state.winner is set."""
     games[game_id] = state
     if db is None:
         db = next(get_db())
     row = db.query(GameModel).filter(GameModel.id == game_id).first()
     if row:
         row.game_state = json.dumps(state.to_dict())
+        if state.winner is not None:
+            row.status = "finished"
         db.commit()
 
 
@@ -331,15 +366,103 @@ def state_to_dict(state: GameState) -> dict[str, Any]:
     return state.to_dict()
 
 
+def _get_combat_modifiers_and_specials(
+    state: GameState,
+    ud: dict,
+    td: dict,
+    fd: dict,
+) -> tuple[dict, dict]:
+    """Compute combat stat modifiers and special flags for active combat. Single source of truth for frontend.
+    Returns (combat_stat_modifiers, combat_specials)."""
+    if not state.active_combat:
+        return {}, {}
+    territory = state.territories.get(state.active_combat.territory_id)
+    if not territory:
+        return {}, {}
+    attacker_faction = state.current_faction
+    attacker_alliance = getattr(fd.get(attacker_faction), "alliance", None) if fd.get(attacker_faction) else None
+    attacker_ids = set(state.active_combat.attacker_instance_ids)
+    attackers = sorted(
+        [u for u in territory.units if u.instance_id in attacker_ids],
+        key=lambda u: u.instance_id,
+    )
+    defenders = sorted(
+        [
+            u for u in territory.units
+            if u.instance_id not in attacker_ids
+            and ud.get(u.unit_id)
+            and (getattr(fd.get(ud[u.unit_id].faction), "alliance", None) if fd.get(ud[u.unit_id].faction) else None) != attacker_alliance
+        ],
+        key=lambda u: u.instance_id,
+    )
+    territory_def = td.get(state.active_combat.territory_id)
+    terrain_att, terrain_def = compute_terrain_stat_modifiers(
+        territory_def, attackers, defenders, ud
+    )
+    anticav_att, anticav_def = compute_anti_cavalry_stat_modifiers(attackers, defenders, ud)
+    captain_att, captain_def = compute_captain_stat_modifiers(attackers, defenders, ud)
+    attacker_mods = merge_stat_modifiers(terrain_att, anticav_att, captain_att)
+    defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
+
+    terrain_type = (getattr(territory_def, "terrain_type", None) or "").lower()
+    is_mountain = terrain_type in ("mountain", "mountains")
+    is_forest = terrain_type == "forest"
+
+    def build_specials(units: list, captain_mods: dict, anticav_mods: dict, terrain_mods: dict, is_attacker: bool) -> dict:
+        out_specials: dict[str, dict[str, bool]] = {}
+        for u in units:
+            unit_def = ud.get(u.unit_id)
+            if not unit_def:
+                continue
+            tags = getattr(unit_def, "tags", []) or []
+            out_specials[u.instance_id] = {
+                "terror": is_attacker and "terror" in tags,
+                "terrainMountain": bool(terrain_mods.get(u.instance_id) and is_mountain),
+                "terrainForest": bool(terrain_mods.get(u.instance_id) and is_forest),
+                "captain": bool(captain_mods.get(u.instance_id, 0) > 0),
+                "antiCavalry": bool(anticav_mods.get(u.instance_id, 0) > 0),
+            }
+        return out_specials
+
+    combat_specials = {
+        "attacker": build_specials(attackers, captain_att, anticav_att, terrain_att, True),
+        "defender": build_specials(defenders, captain_def, anticav_def, terrain_def, False),
+    }
+    combat_stat_modifiers = {
+        "attacker": dict(attacker_mods),
+        "defender": dict(defender_mods),
+    }
+    return combat_stat_modifiers, combat_specials
+
+
 def state_for_response(state: GameState, game_id: str | None = None, db: Session | None = None) -> dict[str, Any]:
-    """State dict including computed faction_stats for the UI. Uses game's definitions if game_id provided."""
+    """State dict including computed faction_stats for the UI. Uses game's definitions if game_id provided.
+    When state.turn_order is empty, fills from game config starting_setup so the turn ticker and faction order are correct."""
     out = state_to_dict(state)
+    # Ensure pending_camps is always present so frontend can show camp placement during mobilization
+    if "pending_camps" not in out:
+        out["pending_camps"] = getattr(state, "pending_camps", [])
+    if game_id and db is not None and (not out.get("turn_order") or len(out.get("turn_order", [])) == 0):
+        row = db.query(GameModel).filter(GameModel.id == game_id).first()
+        if row and row.config:
+            try:
+                config = json.loads(row.config) if isinstance(row.config, str) else row.config
+                start = config.get("starting_setup") or {}
+                order = start.get("turn_order")
+                if isinstance(order, list) and order:
+                    out["turn_order"] = order
+            except Exception:
+                pass
     try:
         if game_id and db is not None:
-            _, td, fd, _ = get_game_definitions(game_id, db)
+            ud, td, fd, _ = get_game_definitions(game_id, db)
         else:
-            td, fd = territory_defs, faction_defs
-        out["faction_stats"] = get_faction_stats(state, td, fd)
+            ud, td, fd = unit_defs, territory_defs, faction_defs
+        out["faction_stats"] = get_faction_stats(state, td, fd, ud)
+        if state.active_combat and game_id and db is not None:
+            combat_stat_modifiers, combat_specials = _get_combat_modifiers_and_specials(state, ud, td, fd)
+            out["combat_stat_modifiers"] = combat_stat_modifiers
+            out["combat_specials"] = combat_specials
     except Exception:
         out["faction_stats"] = {"factions": {}, "alliances": {}}
     return out
@@ -437,6 +560,13 @@ def create_game(
         camp_cost=camp_cost,
     )
     state.map_asset = setup["map_asset"]
+    # Ensure turn_order is never empty for new games (ticker and faction order)
+    if not state.turn_order and isinstance(setup.get("starting_setup"), dict):
+        order = setup["starting_setup"].get("turn_order")
+        if isinstance(order, list) and order:
+            state.turn_order = [f for f in order if f in fd]
+    if not state.turn_order:
+        state.turn_order = sorted(fd.keys())
     game_id = str(uuid.uuid4())
     game_code = generate_game_code(db) if request.is_multiplayer else None
     if request.is_multiplayer:
@@ -464,14 +594,22 @@ def create_game(
     db.commit()
     games[game_id] = state
     game_defs[game_id] = (ud, td, fd, cd)
-    return {"game_id": game_id, "game_code": game_code, "name": request.name}
+    state_dict = state_for_response(state, game_id, db)
+    turn_order = state_dict.get("turn_order") if isinstance(state_dict.get("turn_order"), list) else None
+    return {
+        "game_id": game_id,
+        "game_code": game_code,
+        "name": request.name,
+        "state": state_dict,
+        "turn_order": turn_order,
+    }
 
 
 DEFAULT_FACTION_STATS = {
     "factions": {},
     "alliances": {
-        "good": {"strongholds": 0, "territories": 0, "power": 0, "power_per_turn": 0, "units": 0},
-        "evil": {"strongholds": 0, "territories": 0, "power": 0, "power_per_turn": 0, "units": 0},
+        "good": {"strongholds": 0, "territories": 0, "power": 0, "power_per_turn": 0, "units": 0, "unit_power": 0},
+        "evil": {"strongholds": 0, "territories": 0, "power": 0, "power_per_turn": 0, "units": 0, "unit_power": 0},
     },
     "neutral_strongholds": 0,
 }
@@ -540,10 +678,10 @@ def _build_games_list(player: Player, db: Session) -> list[dict[str, Any]]:
             except Exception:
                 state = GameState.from_dict({})
             try:
-                _, td, fd, _ = get_game_definitions(str(r.id), db)
+                ud, td, fd, _ = get_game_definitions(str(r.id), db)
             except Exception:
-                td, fd = territory_defs, faction_defs
-            faction_stats = get_faction_stats(state, td, fd)
+                ud, td, fd = None, territory_defs, faction_defs
+            faction_stats = get_faction_stats(state, td, fd, ud)
         except Exception:
             faction_stats = dict(DEFAULT_FACTION_STATS)
 
@@ -674,9 +812,14 @@ def get_game_state(
     state = get_game(game_id, db)
     ud, td, fd, cd = get_game_definitions(game_id, db)
     can_act = _player_can_act(game_id, player, db) if player else False
+    state_dict = state_for_response(state, game_id, db)
+    turn_order = state_dict.get("turn_order") if isinstance(state_dict.get("turn_order"), list) else None
+    pending_camps = state_dict.get("pending_camps") if isinstance(state_dict.get("pending_camps"), list) else getattr(state, "pending_camps", [])
     return {
         "game_id": game_id,
-        "state": state_for_response(state, game_id, db),
+        "state": state_dict,
+        "turn_order": turn_order,
+        "pending_camps": pending_camps,
         "definitions": {
             "units": _safe_asdict_map(ud),
             "territories": _safe_asdict_map(td),
@@ -772,7 +915,7 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
             actions["purchased_units_count"] = already_purchased
             actions["camp_cost"] = getattr(state, "camp_cost", 0)
         elif phase in ("combat_move", "non_combat_move"):
-            movable = get_movable_units(state, faction)
+            movable = get_movable_units(state, faction, ud)
             actions["moveable_units"] = []
             for unit_info in movable:
                 targets, charge_routes = get_unit_move_targets(
@@ -784,12 +927,19 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                     "destinations": targets,
                     "charge_routes": charge_routes,
                 })
+            if phase == "non_combat_move":
+                aerial_must_move = get_aerial_units_must_move(state, ud, td, fd, faction)
+                actions["aerial_units_must_move"] = aerial_must_move
+                # Can end phase only if, after applying pending moves, no aerial is left in enemy territory
+                state_after_moves = get_state_after_pending_moves(state, "non_combat_move", ud, td, fd)
+                aerial_still_stuck = get_aerial_units_must_move(state_after_moves, ud, td, fd, faction)
+                actions["can_end_phase"] = len(aerial_still_stuck) == 0
         elif phase == "combat":
-            combat_territories = get_contested_territories(state, faction, fd)
+            combat_territories = get_contested_territories(state, faction, fd, ud)
             actions["combat_territories"] = combat_territories
             if state.active_combat:
                 actions["active_combat"] = state.active_combat.to_dict()
-                retreat_destinations = get_retreat_options(state, td, fd)
+                retreat_destinations = get_retreat_options(state, td, fd, ud)
                 actions["retreat_options"] = {
                     "can_retreat": len(retreat_destinations) > 0,
                     "valid_destinations": retreat_destinations,
@@ -803,10 +953,12 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                 "capacity": mobilize_capacity,
                 "pending_units": purchased,
             }
+            # Expose pending_camps so frontend can show placement UI even if main state was missing it
+            actions["pending_camps"] = getattr(state, "pending_camps", [])
             actions["can_end_turn"] = True
         return actions
-    except Exception:
-        return {
+    except Exception as e:
+        fallback = {
             "faction": getattr(state, "current_faction", "") or "",
             "phase": getattr(state, "phase", "purchase") or "purchase",
             "can_end_phase": True,
@@ -815,6 +967,16 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
             "purchased_units_count": 0,
             "camp_cost": 0,
         }
+        if getattr(state, "phase", None) == "mobilization":
+            fallback["mobilize_options"] = {
+                "territories": [],
+                "capacity": {"total_capacity": 0, "territories": []},
+                "pending_units": [],
+            }
+        # Log so we fix the root cause instead of relying on fallback shape
+        import logging
+        logging.getLogger(__name__).exception("available_actions failed: %s", e)
+        return fallback
 
 
 @app.get("/games/{game_id}/available-actions")
@@ -949,6 +1111,120 @@ def do_cancel_mobilization(
     }
 
 
+@app.post("/games/{game_id}/place-camp")
+def do_place_camp(
+    game_id: str,
+    request: PlaceCampRequest,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Place a purchased camp on a territory during mobilization (immediate). Prefer queue-camp-placement for planned placement at end of phase."""
+    _require_can_act(game_id, player, db)
+    state = get_game(game_id, db)
+    ud, td, fd, cd = get_game_definitions(game_id, db)
+    action = place_camp(state.current_faction, request.camp_index, request.territory_id)
+    validation = validate_action(state, action, ud, td, fd, cd)
+    if not validation.valid:
+        raise HTTPException(status_code=400, detail=validation.error)
+    new_state, events = apply_action(state, action, ud, td, fd, cd)
+    save_game(game_id, new_state, db)
+    return {
+        "state": state_for_response(new_state, game_id, db),
+        "events": [e.to_dict() for e in events],
+        "can_act": _player_can_act(game_id, player, db),
+    }
+
+
+@app.post("/games/{game_id}/queue-camp-placement")
+def do_queue_camp_placement(
+    game_id: str,
+    request: PlaceCampRequest,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Queue a camp placement (applied at end of mobilization phase, like unit mobilizations)."""
+    _require_can_act(game_id, player, db)
+    state = get_game(game_id, db)
+    ud, td, fd, cd = get_game_definitions(game_id, db)
+    action = queue_camp_placement(state.current_faction, request.camp_index, request.territory_id)
+    validation = validate_action(state, action, ud, td, fd, cd)
+    if not validation.valid:
+        raise HTTPException(status_code=400, detail=validation.error)
+    new_state, events = apply_action(state, action, ud, td, fd, cd)
+    save_game(game_id, new_state, db)
+    return {
+        "state": state_for_response(new_state, game_id, db),
+        "events": [e.to_dict() for e in events],
+        "can_act": _player_can_act(game_id, player, db),
+    }
+
+
+@app.post("/games/{game_id}/cancel-camp-placement")
+def do_cancel_camp_placement(
+    game_id: str,
+    request: CancelCampPlacementRequest,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Cancel a queued camp placement."""
+    _require_can_act(game_id, player, db)
+    state = get_game(game_id, db)
+    ud, td, fd, cd = get_game_definitions(game_id, db)
+    action = cancel_camp_placement(state.current_faction, request.placement_index)
+    validation = validate_action(state, action, ud, td, fd, cd)
+    if not validation.valid:
+        raise HTTPException(status_code=400, detail=validation.error)
+    new_state, events = apply_action(state, action, ud, td, fd, cd)
+    save_game(game_id, new_state, db)
+    return {
+        "state": state_for_response(new_state, game_id, db),
+        "events": [e.to_dict() for e in events],
+        "can_act": _player_can_act(game_id, player, db),
+    }
+
+
+def _terror_rerolled_indices_by_stat(
+    defenders: list,
+    ud: dict,
+    defender_mods: dict | None,
+    num_rolls: int,
+    flat_indices: list[int],
+) -> dict[str, list[int]]:
+    """Build defender_rerolled_indices_by_stat for terror UI: stat -> list of roll indices (within that stat row) that were re-rolled.
+    flat_indices are in unit order (same as defender_rolls and get_terror_reroll_targets), so we must build
+    flat_to_stat in the same unit order, not stat order."""
+    stat_name = "defense"
+    mods = defender_mods or {}
+    # Map each flat index (unit order) to (stat_value, idx_within_that_stat_row)
+    flat_to_stat: list[tuple[int, int]] = []
+    count_per_stat: dict[int, int] = {}
+    for u in defenders:
+        unit_def = ud.get(u.unit_id)
+        if not unit_def:
+            flat_to_stat.append((0, 0))
+            continue
+        stat_value = getattr(unit_def, stat_name, 0) + mods.get(u.instance_id, 0)
+        dice_count = getattr(unit_def, "dice", 1)
+        for _ in range(dice_count):
+            idx_in_stat = count_per_stat.get(stat_value, 0)
+            if len(flat_to_stat) < num_rolls:
+                flat_to_stat.append((stat_value, idx_in_stat))
+            count_per_stat[stat_value] = idx_in_stat + 1
+    rerolled: dict[str, list[int]] = {}
+    for flat_idx in flat_indices:
+        if flat_idx >= len(flat_to_stat):
+            continue
+        stat_value, idx_in_stat = flat_to_stat[flat_idx]
+        key = str(stat_value)
+        if key not in rerolled:
+            rerolled[key] = []
+        if idx_in_stat not in rerolled[key]:
+            rerolled[key].append(idx_in_stat)
+    for key in rerolled:
+        rerolled[key].sort()
+    return rerolled
+
+
 @app.post("/games/{game_id}/combat/initiate")
 def do_initiate_combat(
     game_id: str,
@@ -965,34 +1241,133 @@ def do_initiate_combat(
     if not territory:
         raise HTTPException(status_code=400, detail="Invalid territory")
 
-    attackers = [
-        u for u in territory.units if ud.get(u.unit_id) and ud[u.unit_id].faction == state.current_faction]
-    defenders = [
-        u for u in territory.units if ud.get(u.unit_id) and ud[u.unit_id].faction == territory.owner]
+    attacker_faction = state.current_faction
+    attacker_alliance = getattr(fd.get(attacker_faction), "alliance", None) if fd.get(attacker_faction) else None
+    attackers = sorted(
+        [u for u in territory.units if ud.get(u.unit_id) and ud[u.unit_id].faction == attacker_faction],
+        key=lambda u: u.instance_id,
+    )
+    defenders = sorted(
+        [
+            u for u in territory.units
+            if ud.get(u.unit_id)
+            and ud[u.unit_id].faction != attacker_faction
+            and (getattr(fd.get(ud[u.unit_id].faction), "alliance", None) if fd.get(ud[u.unit_id].faction) else None) != attacker_alliance
+        ],
+        key=lambda u: u.instance_id,
+    )
+
+    def _is_archer(unit_def) -> bool:
+        if not unit_def:
+            return False
+        if getattr(unit_def, "archetype", "") == ARCHETYPE_ARCHER:
+            return True
+        return "archer" in getattr(unit_def, "tags", []) or []
+
+    terror_reroll_response: dict[str, Any] = {}
 
     # If defender has archers, only archers roll in prefire (initiate runs prefire only)
     defender_has_archers = any(
-        getattr(ud.get(u.unit_id), "archetype", "") == ARCHETYPE_ARCHER for u in defenders if u.unit_id in ud
+        _is_archer(ud.get(u.unit_id)) for u in defenders if u.unit_id in ud
     )
     if defender_has_archers:
-        defender_archer_dice = sum(
-            ud[u.unit_id].dice for u in defenders
-            if u.unit_id in ud and getattr(ud[u.unit_id], "archetype", "") == ARCHETYPE_ARCHER
+        defender_archer_units = sorted(
+            [u for u in defenders if u.unit_id in ud and _is_archer(ud[u.unit_id])],
+            key=lambda u: u.instance_id,
         )
         dice_rolls = {
             "attacker": [],
-            "defender": roll_dice(defender_archer_dice),
+            "defender": generate_dice_rolls_for_units(defender_archer_units, ud),
         }
     else:
-        attacker_dice = sum(ud[u.unit_id].dice for u in attackers if u.unit_id in ud)
-        defender_dice = sum(ud[u.unit_id].dice for u in defenders if u.unit_id in ud)
         dice_rolls = {
-            "attacker": roll_dice(attacker_dice),
-            "defender": roll_dice(defender_dice),
+            "attacker": generate_dice_rolls_for_units(attackers, ud),
+            "defender": generate_dice_rolls_for_units(defenders, ud),
         }
 
-    action = initiate_combat(state.current_faction,
-                             request.territory_id, dice_rolls)
+        # Terror (round 1 only): attackers with "terror" force lowest effective-defense hit defenders to re-roll (cap 3). Fearless immune.
+        territory_def = td.get(request.territory_id)
+        terrain_att, terrain_def = compute_terrain_stat_modifiers(
+            territory_def, attackers, defenders, ud
+        )
+        anticav_att, anticav_def = compute_anti_cavalry_stat_modifiers(
+            attackers, defenders, ud
+        )
+        captain_att, captain_def = compute_captain_stat_modifiers(
+            attackers, defenders, ud
+        )
+        attacker_mods = merge_stat_modifiers(terrain_att, anticav_att, captain_att)
+        defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
+        # Terror cap = number of attackers with terror (max 3); no prefire in this branch
+        terror_cap = min(3, sum(1 for u in attackers if combat_has_special(ud.get(u.unit_id), "terror")))
+        flat_indices, total_reroll_dice = get_terror_reroll_targets(
+            attackers,
+            defenders,
+            ud,
+            dice_rolls,
+            defender_mods or None,
+            terror_cap=terror_cap,
+        )
+        # Only apply terror when at least one defender actually scored a hit (re-roll cancels that hit)
+        defender_hits_from_rolls = combat_count_hits(
+            defenders,
+            dice_rolls.get("defender", []),
+            ud,
+            is_attacker=False,
+            stat_modifiers=defender_mods or None,
+        )
+        # Only re-roll dice that are actually hits; never re-roll misses (would help defender)
+        hit_flat_set = get_defender_hit_flat_indices(
+            defenders, dice_rolls["defender"], ud, defender_mods or None
+        )
+        flat_indices = [i for i in flat_indices if i in hit_flat_set][:defender_hits_from_rolls]
+        total_reroll_dice = len(flat_indices)
+        if flat_indices and total_reroll_dice > 0 and defender_hits_from_rolls > 0:
+            # Build initial defender dice (grouped) for UI to show before re-roll, then replace only hit dice.
+            defender_dice_initial_grouped = group_dice_by_stat(
+                defenders,
+                dice_rolls["defender"],
+                ud,
+                is_attacker=False,
+                stat_modifiers=defender_mods or None,
+            )
+            new_reroll_values = roll_dice(total_reroll_dice)
+            defender_rolls = list(dice_rolls["defender"])
+            initial_len = len(defender_rolls)
+            # Final defender hits = (hits not re-rolled) + (hits from re-rolls). Re-rolled hits don't count.
+            eff_def_per_idx = get_eff_def_per_flat_index(
+                defenders, ud, defender_mods or None
+            )
+            hits_from_rerolls = sum(
+                1
+                for j in range(len(flat_indices))
+                if flat_indices[j] < len(eff_def_per_idx)
+                and new_reroll_values[j] <= eff_def_per_idx[flat_indices[j]]
+            )
+            terror_final_defender_hits = (
+                defender_hits_from_rolls - total_reroll_dice + hits_from_rerolls
+            )
+            for i, flat_idx in enumerate(flat_indices):
+                if flat_idx < initial_len:
+                    defender_rolls[flat_idx] = new_reroll_values[i]
+            dice_rolls["defender"] = defender_rolls
+            rerolled_indices_by_stat = _terror_rerolled_indices_by_stat(
+                defenders, ud, defender_mods or None, initial_len, flat_indices
+            )
+            terror_reroll_response = {
+                "applied": True,
+                "defender_dice_initial_grouped": {str(k): v for k, v in defender_dice_initial_grouped.items()},
+                "defender_rerolled_indices_by_stat": rerolled_indices_by_stat,
+                "terror_final_defender_hits": terror_final_defender_hits,
+            }
+
+    action = initiate_combat(
+        state.current_faction,
+        request.territory_id,
+        dice_rolls,
+        terror_applied=bool(terror_reroll_response),
+        terror_final_defender_hits=terror_reroll_response.get("terror_final_defender_hits") if terror_reroll_response else None,
+    )
 
     validation = validate_action(state, action, ud, td, fd)
     if not validation.valid:
@@ -1000,12 +1375,15 @@ def do_initiate_combat(
 
     new_state, events = apply_action(state, action, ud, td, fd)
     save_game(game_id, new_state, db)
-    return {
+    response: dict[str, Any] = {
         "state": state_for_response(new_state, game_id, db),
         "events": [e.to_dict() for e in events],
         "dice_rolls": dice_rolls,
         "can_act": _player_can_act(game_id, player, db),
     }
+    if terror_reroll_response:
+        response["terror_reroll"] = terror_reroll_response
+    return response
 
 
 @app.post("/games/{game_id}/combat/continue")
@@ -1027,20 +1405,103 @@ def do_continue_combat(
     if not territory:
         raise HTTPException(status_code=400, detail="Invalid combat territory")
 
-    attackers = [
-        u for u in territory.units if u.instance_id in state.active_combat.attacker_instance_ids]
-    defenders = [
-        u for u in territory.units if u.instance_id not in state.active_combat.attacker_instance_ids]
-
-    attacker_dice = sum(ud[u.unit_id].dice for u in attackers if u.unit_id in ud)
-    defender_dice = sum(ud[u.unit_id].dice for u in defenders if u.unit_id in ud)
+    attacker_ids = set(state.active_combat.attacker_instance_ids)
+    attackers = sorted(
+        [u for u in territory.units if u.instance_id in attacker_ids],
+        key=lambda u: u.instance_id,
+    )
+    defenders = sorted(
+        [u for u in territory.units if u.instance_id not in attacker_ids],
+        key=lambda u: u.instance_id,
+    )
 
     dice_rolls = {
-        "attacker": roll_dice(attacker_dice),
-        "defender": roll_dice(defender_dice),
+        "attacker": generate_dice_rolls_for_units(attackers, ud),
+        "defender": generate_dice_rolls_for_units(defenders, ud),
     }
 
-    action = continue_combat(state.current_faction, dice_rolls)
+    terror_reroll_response: dict[str, Any] = {}
+    is_round_one = state.active_combat.round_number == 0
+    if is_round_one:
+        territory_def = td.get(state.active_combat.territory_id)
+        terrain_att, terrain_def = compute_terrain_stat_modifiers(
+            territory_def, attackers, defenders, ud
+        )
+        anticav_att, anticav_def = compute_anti_cavalry_stat_modifiers(
+            attackers, defenders, ud
+        )
+        captain_att, captain_def = compute_captain_stat_modifiers(
+            attackers, defenders, ud
+        )
+        attacker_mods = merge_stat_modifiers(terrain_att, anticav_att, captain_att)
+        defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
+        # Terror cap = number of surviving attackers with terror (max 3); after prefire this is correct
+        terror_cap = min(3, sum(1 for u in attackers if combat_has_special(ud.get(u.unit_id), "terror")))
+        flat_indices, total_reroll_dice = get_terror_reroll_targets(
+            attackers,
+            defenders,
+            ud,
+            dice_rolls,
+            defender_mods or None,
+            terror_cap=terror_cap,
+        )
+        defender_hits_from_rolls = combat_count_hits(
+            defenders,
+            dice_rolls.get("defender", []),
+            ud,
+            is_attacker=False,
+            stat_modifiers=defender_mods or None,
+        )
+        # Only re-roll dice that are actually hits; never re-roll misses (would help defender)
+        hit_flat_set = get_defender_hit_flat_indices(
+            defenders, dice_rolls["defender"], ud, defender_mods or None
+        )
+        flat_indices = [i for i in flat_indices if i in hit_flat_set][:defender_hits_from_rolls]
+        total_reroll_dice = len(flat_indices)
+        if flat_indices and total_reroll_dice > 0 and defender_hits_from_rolls > 0:
+            defender_dice_initial_grouped = group_dice_by_stat(
+                defenders,
+                dice_rolls["defender"],
+                ud,
+                is_attacker=False,
+                stat_modifiers=defender_mods or None,
+            )
+            new_reroll_values = roll_dice(total_reroll_dice)
+            defender_rolls = list(dice_rolls["defender"])
+            initial_len = len(defender_rolls)
+            # Final defender hits = (hits not re-rolled) + (hits from re-rolls). Re-rolled hits don't count.
+            eff_def_per_idx = get_eff_def_per_flat_index(
+                defenders, ud, defender_mods or None
+            )
+            hits_from_rerolls = sum(
+                1
+                for j in range(len(flat_indices))
+                if flat_indices[j] < len(eff_def_per_idx)
+                and new_reroll_values[j] <= eff_def_per_idx[flat_indices[j]]
+            )
+            terror_final_defender_hits = (
+                defender_hits_from_rolls - total_reroll_dice + hits_from_rerolls
+            )
+            for i, flat_idx in enumerate(flat_indices):
+                if flat_idx < initial_len:
+                    defender_rolls[flat_idx] = new_reroll_values[i]
+            dice_rolls["defender"] = defender_rolls
+            rerolled_indices_by_stat = _terror_rerolled_indices_by_stat(
+                defenders, ud, defender_mods or None, initial_len, flat_indices
+            )
+            terror_reroll_response = {
+                "applied": True,
+                "defender_dice_initial_grouped": {str(k): v for k, v in defender_dice_initial_grouped.items()},
+                "defender_rerolled_indices_by_stat": rerolled_indices_by_stat,
+                "terror_final_defender_hits": terror_final_defender_hits,
+            }
+
+    action = continue_combat(
+        state.current_faction,
+        dice_rolls,
+        terror_applied=bool(terror_reroll_response),
+        terror_final_defender_hits=terror_reroll_response.get("terror_final_defender_hits") if terror_reroll_response else None,
+    )
 
     validation = validate_action(state, action, ud, td, fd)
     if not validation.valid:
@@ -1048,12 +1509,15 @@ def do_continue_combat(
 
     new_state, events = apply_action(state, action, ud, td, fd)
     save_game(game_id, new_state, db)
-    return {
+    response: dict[str, Any] = {
         "state": state_for_response(new_state, game_id, db),
         "events": [e.to_dict() for e in events],
         "dice_rolls": dice_rolls,
         "can_act": _player_can_act(game_id, player, db),
     }
+    if terror_reroll_response:
+        response["terror_reroll"] = terror_reroll_response
+    return response
 
 
 @app.post("/games/{game_id}/combat/retreat")

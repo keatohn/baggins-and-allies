@@ -203,6 +203,27 @@
   flex: 1;
 }
 
+.unit-icon-wrap {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  background: var(--parchment-light);
+  border: 2px solid var(--faction-border, var(--ink-faded));
+  border-radius: 4px;
+  padding: 2px;
+  box-sizing: border-box;
+}
+
+.unit-icon-wrap .unit-icon {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border: none;
+  background: transparent;
+}
+
 .unit-icon {
   width: 40px;
   height: 40px;

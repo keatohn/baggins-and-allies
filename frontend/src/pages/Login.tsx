@@ -19,8 +19,16 @@ export default function Login() {
       setAuthToken(res.access_token);
       navigate('/', { replace: true });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Login failed';
-      setError(message || 'Invalid email or password.');
+      const raw = err instanceof Error ? err.message : 'Login failed';
+      const isNetwork =
+        raw.includes('timed out') ||
+        raw.includes('backend running') ||
+        raw.includes('Failed to fetch') ||
+        raw.includes('NetworkError');
+      const message = isNetwork
+        ? `${raw} Run the full app from project root: npm run dev`
+        : raw || 'Invalid email or password.';
+      setError(message);
     } finally {
       setLoading(false);
     }

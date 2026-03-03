@@ -12,6 +12,8 @@ interface DraggableUnitProps {
   isSelected: boolean;
   disabled?: boolean;
   factionColor?: string; // Color from faction definition
+  /** Aerial in enemy territory: must move to friendly before ending non-combat move phase */
+  showAerialMustMove?: boolean;
 }
 
 function DraggableUnit({
@@ -23,6 +25,7 @@ function DraggableUnit({
   isSelected,
   disabled = false,
   factionColor,
+  showAerialMustMove = false,
 }: DraggableUnitProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id,
@@ -45,17 +48,26 @@ function DraggableUnit({
 
   if (!unitDef) return null;
 
+  const title = showAerialMustMove
+    ? `${unitDef.name} ×${count} — Must move to friendly territory before ending phase`
+    : `${unitDef.name} ×${count}`;
+
   return (
     <div
       ref={setNodeRef}
-      className={`unit-token ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${disabled ? 'disabled' : ''}`}
+      className={`unit-token ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${disabled ? 'disabled' : ''} ${showAerialMustMove ? 'aerial-must-move' : ''}`}
       style={style}
-      title={`${unitDef.name} ×${count}`}
+      title={title}
       {...listeners}
       {...attributes}
     >
       <img src={unitDef.icon} alt={unitDef.name} draggable={false} />
       <span className={`count ${count === 1 ? 'single' : ''}`}>{count}</span>
+      {showAerialMustMove && (
+        <span className="unit-token-caution" title="Must move to friendly territory" aria-hidden>
+          ⚠️
+        </span>
+      )}
     </div>
   );
 }

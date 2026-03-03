@@ -91,9 +91,13 @@ export interface GameState {
   pending_purchases: Record<string, number>;
   pending_moves: PendingMove[];
   pending_mobilizations: PendingMobilization[];
+  /** Queued camp placements (applied at end of mobilization phase). */
+  pending_camp_placements: { camp_index: number; territory_id: string }[];
   declared_battles: DeclaredBattle[];
   /** Map asset filename for this game (e.g. "test_map.svg"). Omitted/null = legacy default. */
   map_asset?: string | null;
+  /** Faction IDs in turn order (from setup). Empty/omitted = use alphabetical. */
+  turn_order?: string[];
 }
 
 // UI State types

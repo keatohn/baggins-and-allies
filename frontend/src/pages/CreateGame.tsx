@@ -15,8 +15,14 @@ export default function CreateGame() {
     setError(null);
     setLoading(true);
     try {
-      const res = await api.createGame(name.trim() || 'My game', isMultiplayer);
-      navigate(`/game/${res.game_id}`, { replace: true });
+      const res = await api.createGame(name.trim() || 'My game', isMultiplayer, '1.0');
+      const initialState = res.state != null
+        ? { ...res.state, turn_order: res.turn_order ?? res.state.turn_order }
+        : undefined;
+      navigate(`/game/${res.game_id}`, {
+        replace: true,
+        state: initialState != null ? { initialState, gameId: res.game_id } : undefined,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create game');
     } finally {

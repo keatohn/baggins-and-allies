@@ -88,7 +88,7 @@
   background: var(--parchment);
 }
 
-/* Unit Stats button - warrior icon (blacked-out gondor_infantry), same size as stats btn */
+/* Unit Stats button - warrior icon (blacked-out gondor_soldier), same size as stats btn */
 .header-unit-stats-btn {
   flex: 0 0 auto;
   width: 40px;
@@ -256,6 +256,13 @@
   text-align: center;
   border-top: 1px solid var(--ink-faded);
   border-radius: 0 0 5px 5px;
+}
+
+.unit-stats-specials-definitions {
+  padding: 0.75rem 1rem 1rem;
+  font-size: 0.9rem;
+  color: var(--ink-light);
+  border-top: 1px solid var(--ink-faded);
   background: var(--parchment);
 }
 
@@ -272,6 +279,7 @@
 .unit-stats-modal .header-stats-table td {
   padding: 0.5rem 1rem;
   text-align: left;
+  font-family: var(--font-parchment);
 }
 
 .stats-modal .header-stats-table th,
@@ -336,6 +344,7 @@
   height: 18px;
   object-fit: contain;
   flex-shrink: 0;
+  background: transparent;
 }
 
 .unit-stats-modal .unit-stats-faction-icon {
@@ -343,6 +352,7 @@
   height: 22px;
   object-fit: contain;
   flex-shrink: 0;
+  background: transparent;
 }
 
 .unit-stats-modal .unit-stats-unit-row td {
@@ -351,8 +361,19 @@
   padding-left: 2rem;
 }
 
+/* All unit row cells: parchment so SP column isn't a different font */
+.unit-stats-modal .unit-stats-unit-row td {
+  font-family: var(--font-parchment);
+}
+
 .unit-stats-modal .unit-stats-unit-row .stats-col-unit .unit-name-text {
   font-size: 0.95rem;
+}
+
+/* SP column: smaller font, same as unit name; blank when no specials */
+.unit-stats-modal .unit-stats-unit-row td.stats-col-num.stats-col-specials {
+  font-size: 0.85rem;
+  font-family: var(--font-parchment);
 }
 
 .unit-stats-modal .unit-stats-unit-row .stats-col-unit {
@@ -446,8 +467,8 @@
   border-radius: 50%;
   padding: 2px;
   border: 2px solid var(--ink-faded);
-  background: rgba(255, 255, 255, 0.85);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  background: transparent;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
   overflow: hidden;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }

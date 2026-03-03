@@ -6,7 +6,11 @@
     "dev:backend": ".venv/bin/python -m backend.api.main",
     "dev:frontend": "npm run dev --prefix frontend",
     "kill-ports": "node scripts/kill-ports.js",
-    "restart": "npm run kill-ports && npm run dev"
+    "restart": "npm run kill-ports && npm run dev",
+    "build:frontend": "cd frontend && (test -f .env.production || cp .env.production.example .env.production) && npm run build",
+    "deploy:frontend": "npm run build:frontend && cd frontend && npx vercel --prod",
+    "deploy:backend": "railway up",
+    "deploy:backend:heroku": "git push heroku main"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

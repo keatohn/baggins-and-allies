@@ -174,29 +174,39 @@ def combat_round_resolved(
     defender_wounded: list[str],
     attackers_remaining: int,
     defenders_remaining: int,
+    attacker_units_at_start: list[dict],
+    defender_units_at_start: list[dict],
+    *,
     attacker_hits_by_unit_type: dict[str, int] | None = None,
     defender_hits_by_unit_type: dict[str, int] | None = None,
     is_archer_prefire: bool = False,
+    terror_applied: bool = False,
 ) -> GameEvent:
     """
     Emit combat round resolved event.
 
-    attacker_dice and defender_dice are grouped by stat value:
-    {
-        stat_value: {
-            "rolls": [list of dice rolls],
-            "hits": number of hits from these rolls
-        }
-    }
+    This event is the complete UI contract for one combat round. The frontend
+    uses it as the single source of truth for that round: no mixing with
+    post-round state.
 
-    attacker_wounded/defender_wounded are unit instance_ids that took damage
-    but survived this round.
-
-    attacker_hits_by_unit_type / defender_hits_by_unit_type: hits that each
-    unit type (stack) received this round (casualties count as base_health hits
-    each, wounded count as 1). For UI hit badges per stack.
-
-    is_archer_prefire: True when this is defender archer prefire (before round 1).
+    Payload:
+    - territory, round_number: identity.
+    - attacker_dice / defender_dice: grouped by stat value,
+      { stat: { "rolls": [int], "hits": int } }.
+    - attacker_hits / defender_hits: total hits this round.
+    - attacker_casualties / defender_casualties: instance_ids destroyed.
+    - attacker_wounded / defender_wounded: instance_ids that took damage but survived.
+    - attackers_remaining / defenders_remaining: counts after this round.
+    - attacker_units_at_start / defender_units_at_start: REQUIRED. Snapshot of every
+      unit at round start (before dice), with effective_attack/effective_defense and
+      specials (terror, terrain_mountain, etc.). Each item: instance_id, unit_id,
+      display_name, attack, defense, effective_attack, effective_defense, health,
+      remaining_health, remaining_movement, is_archer, faction, terror,
+      terrain_mountain, terrain_forest, captain_bonus, anti_cavalry.
+    - attacker_hits_by_unit_type / defender_hits_by_unit_type: hits per unit type
+      (stack) for hit badges.
+    - is_archer_prefire: true when this is defender archer prefire (before round 1).
+    - terror_applied: true when terror forced defender re-rolls (round 1 only).
     """
     payload: dict = {
         "territory": territory,
@@ -211,6 +221,8 @@ def combat_round_resolved(
         "defender_wounded": defender_wounded,
         "attackers_remaining": attackers_remaining,
         "defenders_remaining": defenders_remaining,
+        "attacker_units_at_start": attacker_units_at_start,
+        "defender_units_at_start": defender_units_at_start,
     }
     if attacker_hits_by_unit_type is not None:
         payload["attacker_hits_by_unit_type"] = attacker_hits_by_unit_type
@@ -218,6 +230,8 @@ def combat_round_resolved(
         payload["defender_hits_by_unit_type"] = defender_hits_by_unit_type
     if is_archer_prefire:
         payload["is_archer_prefire"] = True
+    if terror_applied:
+        payload["terror_applied"] = True
     return GameEvent(COMBAT_ROUND_RESOLVED, payload)
 
 

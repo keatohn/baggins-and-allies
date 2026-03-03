@@ -1,7 +1,7 @@
 .unit-token {
   position: relative;
-  width: 25px;
-  height: 25px;
+  width: 42px;
+  height: 42px;
   background: var(--parchment);
   border: 2px solid var(--ink-faded);
   border-radius: 4px;
@@ -53,19 +53,30 @@
 
 .unit-token .count {
   position: absolute;
-  bottom: -3px;
-  right: -3px;
-  min-width: 12px;
-  height: 12px;
+  bottom: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
   background: var(--ink);
   color: var(--parchment);
   font-family: 'Cinzel', serif;
-  font-size: 0.55rem;
+  font-size: 0.65rem;
   font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
-  padding: 0 2px;
+  border-radius: 9px;
+  padding: 0 3px;
+}
+
+/* Aerial unit must move to friendly territory (caution emoji) */
+.unit-token-caution {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  font-size: 1.1rem;
+  line-height: 1;
+  pointer-events: none;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.9));
 }
 

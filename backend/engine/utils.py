@@ -16,6 +16,34 @@ from backend.engine.definitions import (
 from backend.engine import DICE_SIDES
 
 
+def get_unit_faction(unit: Unit, unit_defs: dict[str, UnitDefinition]) -> str | None:
+    """Return the faction id for a unit from its definition. Handles faction_ids with underscores if needed."""
+    ud = unit_defs.get(unit.unit_id)
+    return ud.faction if ud else None
+
+
+def is_ground_unit(unit_def: UnitDefinition | None) -> bool:
+    """True if the unit is ground (not aerial). Aerial units cannot conquer territory by themselves."""
+    if not unit_def:
+        return False
+    if getattr(unit_def, "archetype", "") == "aerial":
+        return False
+    if "aerial" in getattr(unit_def, "tags", []):
+        return False
+    return True
+
+
+def is_aerial_unit(unit_def: UnitDefinition | None) -> bool:
+    """True if the unit is aerial (archetype or tag)."""
+    if not unit_def:
+        return False
+    if getattr(unit_def, "archetype", "") == "aerial":
+        return True
+    if "aerial" in getattr(unit_def, "tags", []):
+        return True
+    return False
+
+
 def unitstack_to_units(
     stack: UnitStack,
     faction_id: str,
@@ -86,6 +114,11 @@ def initialize_game_state(
         territories[territory_id] = TerritoryState(owner=None, units=[])
 
     faction_ids = sorted(faction_defs.keys())
+    turn_order: list[str] = []
+    if starting_setup and "turn_order" in starting_setup and isinstance(starting_setup["turn_order"], list):
+        turn_order = [f for f in starting_setup["turn_order"] if f in faction_defs]
+    if not turn_order:
+        turn_order = faction_ids.copy()
 
     # Set territory ownership and original_owner
     if starting_setup and "territory_owners" in starting_setup:
@@ -123,7 +156,7 @@ def initialize_game_state(
 
     # All camps start standing; mobilization = owned territories with a standing camp
     camps_standing = list(camp_defs.keys()) if camp_defs else []
-    first_faction = faction_ids[0]
+    first_faction = turn_order[0] if turn_order else faction_ids[0]
 
     def _territory_has_standing_camp(tid: str) -> bool:
         for cid in camps_standing:
@@ -158,6 +191,7 @@ def initialize_game_state(
         victory_criteria=vc,
         camp_cost=camp_cost_val,
         faction_territories_at_turn_start=faction_territories_at_turn_start,
+        turn_order=turn_order,
     )
 
     # Add starting units if provided
@@ -167,10 +201,6 @@ def initialize_game_state(
                 continue
 
             territory = state.territories[territory_id]
-            # Determine faction from territory owner
-            faction_id = territory.owner
-            if not faction_id:
-                continue
 
             for unit_entry in unit_list:
                 unit_id = unit_entry.get("unit_id")
@@ -178,6 +208,11 @@ def initialize_game_state(
 
                 unit_def = unit_defs.get(unit_id)
                 if not unit_def:
+                    continue
+
+                # Faction: territory owner, or unit definition (e.g. "neutral") for unowned territories (moria, withered_heath)
+                faction_id = territory.owner or getattr(unit_def, "faction", None)
+                if not faction_id:
                     continue
 
                 # Create individual unit instances

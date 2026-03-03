@@ -2,7 +2,9 @@
  * API service for communicating with the Baggins & Allies game backend.
  */
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE =
+  import.meta.env.VITE_API_URL ??
+  (import.meta.env.DEV ? '' : 'http://localhost:8000');
 
 const AUTH_TOKEN_KEY = 'baggins_auth_token';
 
@@ -20,6 +22,10 @@ export function setAuthToken(token: string | null): void {
 export interface GameStateResponse {
   game_id: string;
   state: ApiGameState;
+  /** Faction IDs in turn order (from setup). Same as state.turn_order; top-level so UI never misses it. */
+  turn_order?: string[] | null;
+  /** Pending camps from state; top-level so tray never misses them. Same shape as state.pending_camps. */
+  pending_camps?: ApiGameState['pending_camps'];
   /** This game's definitions snapshot (when loaded from DB). Use instead of /definitions when present. */
   definitions?: Definitions;
   /** True if the authenticated player is assigned to the current faction (can perform actions). */
@@ -45,6 +51,8 @@ export interface FactionStatEntry {
   power_per_turn: number;
   /** Currently alive unit instances for this faction */
   units?: number;
+  /** Sum of power cost for all active units (UP = Unit power) */
+  unit_power?: number;
 }
 
 export interface ApiFactionStats {
@@ -70,6 +78,14 @@ export interface ApiGameState {
   camps_standing?: string[];
   /** Map asset filename for this game (e.g. "test_map.svg"). Omitted/null = legacy default. */
   map_asset?: string | null;
+  /** Faction IDs in turn order (from setup). Empty/omitted = use alphabetical. */
+  turn_order?: string[];
+  /** Camps purchased this turn; must be placed during mobilization. Index = camp_index for place_camp. */
+  pending_camps?: { territory_options: string[]; placed_territory_id?: string | null }[];
+  /** Queued camp placements (applied at end of mobilization phase, like pending_mobilizations). */
+  pending_camp_placements?: { camp_index: number; territory_id: string }[];
+  /** Placed purchased camps: camp_id (e.g. purchased_camp_<territory_id>) -> territory_id. Used to show camp icon on map. */
+  dynamic_camps?: Record<string, string>;
 }
 
 export interface ApiTerritory {
@@ -119,6 +135,17 @@ export interface ApiEvent {
   payload: Record<string, unknown>;
 }
 
+/** Round 1 terror: defenders forced to re-roll (attacker special). */
+export interface TerrorRerollResponse {
+  applied: boolean;
+  instance_ids?: string[];
+  initial_rolls_by_instance?: Record<string, number[]>;
+  /** Initial defender dice by stat (before re-roll) for UI. Keys are stat numbers as strings. */
+  defender_dice_initial_grouped?: Record<string, { rolls: number[]; hits: number }>;
+  /** Per-stat indices of dice that were re-rolled (for red X and re-rolled shelf). Keys are stat numbers as strings. */
+  defender_rerolled_indices_by_stat?: Record<string, number[]>;
+}
+
 export interface ActionResponse {
   state: ApiGameState;
   events: ApiEvent[];
@@ -128,6 +155,8 @@ export interface ActionResponse {
     attacker: number[];
     defender: number[];
   };
+  /** Set when round 1 terror was applied (attackers with terror forced defender re-rolls). */
+  terror_reroll?: TerrorRerollResponse;
 }
 
 export interface AvailableActionsResponse {
@@ -143,10 +172,14 @@ export interface AvailableActionsResponse {
   /** Power cost to purchase one camp (0 = camps not purchasable). */
   camp_cost?: number;
   moveable_units?: ApiMoveableUnit[];
+  /** Aerial units in enemy territory that must move to friendly before ending non-combat move phase. */
+  aerial_units_must_move?: { territory_id: string; unit_id: string; instance_id: string }[];
   combat_territories?: ApiCombatTerritory[];
   active_combat?: ApiActiveCombat;
   retreat_options?: ApiRetreatOptions;
   mobilize_options?: ApiMobilizeOptions;
+  /** Pending camps to place (mobilization phase); fallback if state.pending_camps missing. */
+  pending_camps?: { territory_options: string[]; placed_territory_id?: string | null }[];
 }
 
 export interface ApiPurchasableUnit {
@@ -383,7 +416,7 @@ export const api = {
 
   // Games (create, list, join)
   createGame: (name: string, isMultiplayer: boolean, setupId?: string) =>
-    fetchJson<{ game_id: string; game_code: string | null; name: string }>('/games/create', {
+    fetchJson<{ game_id: string; game_code: string | null; name: string; state?: ApiGameState; turn_order?: string[] }>('/games/create', {
       method: 'POST',
       body: JSON.stringify({
         name,
@@ -434,7 +467,28 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ game_id: gameId }),
     }),
-  
+
+  // Place a purchased camp on a territory (mobilization phase) — immediate. Prefer queueCampPlacement.
+  placeCamp: (gameId: string, campIndex: number, territoryId: string) =>
+    fetchJson<ActionResponse>(`/games/${gameId}/place-camp`, {
+      method: 'POST',
+      body: JSON.stringify({ game_id: gameId, camp_index: campIndex, territory_id: territoryId }),
+    }),
+
+  // Queue a camp placement (applied at end of mobilization phase, like unit mobilizations)
+  queueCampPlacement: (gameId: string, campIndex: number, territoryId: string) =>
+    fetchJson<ActionResponse>(`/games/${gameId}/queue-camp-placement`, {
+      method: 'POST',
+      body: JSON.stringify({ game_id: gameId, camp_index: campIndex, territory_id: territoryId }),
+    }),
+
+  // Cancel a queued camp placement
+  cancelCampPlacement: (gameId: string, placementIndex: number) =>
+    fetchJson<ActionResponse>(`/games/${gameId}/cancel-camp-placement`, {
+      method: 'POST',
+      body: JSON.stringify({ game_id: gameId, placement_index: placementIndex }),
+    }),
+
   // Move units (declares a pending move). chargeThrough for cavalry charging (empty enemy territories to conquer).
   move: (gameId: string, fromTerritory: string, toTerritory: string, unitInstanceIds: string[], chargeThrough?: string[]) =>
     fetchJson<ActionResponse>(`/games/${gameId}/move`, {
