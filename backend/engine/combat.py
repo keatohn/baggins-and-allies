@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from backend.engine.state import Unit, CombatRoundResult
 from backend.engine.definitions import UnitDefinition
+from backend.engine.utils import has_unit_special, is_aerial_unit
 
 if TYPE_CHECKING:
     from backend.engine.definitions import TerritoryDefinition
@@ -20,9 +21,19 @@ if TYPE_CHECKING:
 ARCHETYPE_ARCHER = "archer"
 ARCHETYPE_CAVALRY = "cavalry"
 
-# Tags that do NOT count as specials (match frontend getUnitSpecials: exclude ground, mounted).
-# All other tags (forest, mountain, fearless, terror, etc.) count as specials for casualty order.
-TAGS_NOT_SPECIALS = frozenset({"ground", "mounted"})
+
+def _is_naval_unit(unit_def: UnitDefinition | None) -> bool:
+    """True if unit is naval (ship/boat). Used for naval combat casualty order (cargo value)."""
+    if not unit_def:
+        return False
+    arch = getattr(unit_def, "archetype", "") or ""
+    tags = getattr(unit_def, "tags", []) or []
+    return arch == "naval" or "naval" in tags
+
+
+# Tags that do NOT count as specials (match frontend getUnitSpecials: exclude land, mounted).
+# All other tags (forest, mountain, fearless, terror, aerial, etc.) count as specials for casualty order.
+TAGS_NOT_SPECIALS = frozenset({"land", "mounted"})
 
 # Default terrain bonuses: terrain_type -> bonus (int)
 # Unit must have a tag matching the terrain (e.g. "forest") to get the bonus.
@@ -65,11 +76,13 @@ def compute_terrain_stat_modifiers(
     if bonus == 0:
         return attacker_mods, defender_mods
 
-    # Mountain/mountains: unit tag "mountain" or "mountains" triggers on either terrain type
-    def unit_has_terrain_tag(tags: list, terr: str) -> bool:
+    # Mountain/mountains: unit tag/special "mountain" or "mountains" triggers on either terrain type
+    def unit_has_terrain_tag(unit_def: UnitDefinition | None, terr: str) -> bool:
+        if not unit_def:
+            return False
         if terr in ("mountain", "mountains"):
-            return "mountain" in tags or "mountains" in tags
-        return terr in tags
+            return has_unit_special(unit_def, "mountain") or has_unit_special(unit_def, "mountains")
+        return has_unit_special(unit_def, terr)
 
     def apply_for_units(units: list[Unit]) -> dict[str, int]:
         mods: dict[str, int] = {}
@@ -77,8 +90,7 @@ def compute_terrain_stat_modifiers(
             unit_def = unit_defs.get(unit.unit_id)
             if not unit_def:
                 continue
-            tags = getattr(unit_def, "tags", []) or []
-            if unit_has_terrain_tag(tags, terrain):
+            if unit_has_terrain_tag(unit_def, terrain):
                 mods[unit.instance_id] = bonus
         return mods
 
@@ -117,8 +129,7 @@ def compute_anti_cavalry_stat_modifiers(
             unit_def = unit_defs.get(unit.unit_id)
             if not unit_def:
                 continue
-            tags = getattr(unit_def, "tags", []) or []
-            if "anti_cavalry" in tags:
+            if has_unit_special(unit_def, "anti_cavalry"):
                 mods[unit.instance_id] = bonus
         return mods
 
@@ -197,6 +208,31 @@ def compute_captain_stat_modifiers(
     return attacker_mods, defender_mods
 
 
+def compute_sea_raider_stat_modifiers(
+    attacker_units: list[Unit],
+    unit_defs: dict[str, UnitDefinition],
+    is_sea_raid: bool,
+    bonus: int = 1,
+) -> tuple[dict[str, int], dict[str, int]]:
+    """
+    Sea raider: attackers with "sea_raider" special get +bonus attack when this combat
+    is a sea raid (attackers came from boats in the given sea zone). Only applies to
+    units that actually came from the sea raid, not land units attacking the same
+    territory in a coordinated attack. Caller must pass is_sea_raid=True only for
+    combat initiated with sea_zone_id (attackers from that sea zone).
+    Returns (attacker_modifiers, defender_modifiers); defender_modifiers is always {}.
+    """
+    if not is_sea_raid or bonus == 0:
+        return {}, {}
+
+    mods: dict[str, int] = {}
+    for unit in attacker_units:
+        unit_def = unit_defs.get(unit.unit_id)
+        if unit_def and has_unit_special(unit_def, "sea_raider"):
+            mods[unit.instance_id] = bonus
+    return mods, {}
+
+
 def merge_stat_modifiers(*mod_dicts: dict[str, int] | None) -> dict[str, int]:
     """Merge multiple modifier dicts by adding values for same instance_id."""
     result: dict[str, int] = {}
@@ -231,6 +267,13 @@ def resolve_combat_round(
     stat_modifiers_attacker: dict[str, int] | None = None,
     stat_modifiers_defender: dict[str, int] | None = None,
     defender_hits_override: int | None = None,
+    attacker_effective_dice_override: dict[str, int] | None = None,
+    bombikazi_self_destruct_ids: list[str] | None = None,
+    casualty_order_attacker: str = "best_unit",
+    casualty_order_defender: str = "best_unit",
+    must_conquer: bool = False,
+    is_naval_combat_attacker: bool = False,
+    is_naval_combat_defender: bool = False,
 ) -> RoundResult:
     """
     Resolve a single combat round.
@@ -265,10 +308,10 @@ def resolve_combat_round(
     attacker_rolls = dice_rolls.get("attacker", [])
     defender_rolls = dice_rolls.get("defender", [])
 
-    # Count hits using actual unit stats (with optional modifiers)
     attacker_hits = _count_hits(
         attacker_units, attacker_rolls, unit_defs, is_attacker=True,
         stat_modifiers=stat_modifiers_attacker,
+        effective_dice_override=attacker_effective_dice_override,
     )
     defender_hits = (
         defender_hits_override
@@ -281,14 +324,28 @@ def resolve_combat_round(
 
     # Apply hits simultaneously - each side takes hits from the OTHER side's rolls
     # Defenders hit attackers, attackers hit defenders. Use effective stat (with modifiers) for loss priority.
+    # Naval combat: only boats (and aerials) take hits; passengers are not targets. Boat casualty order uses cargo value.
     attacker_casualties, attacker_wounded = _apply_hits(
         attacker_units, defender_hits, unit_defs, is_attacker=True,
         stat_modifiers=stat_modifiers_attacker,
+        casualty_order=casualty_order_attacker,
+        must_conquer=must_conquer,
+        is_naval_combat=is_naval_combat_attacker,
     )
     defender_casualties, defender_wounded = _apply_hits(
         defender_units, attacker_hits, unit_defs, is_attacker=False,
         stat_modifiers=stat_modifiers_defender,
+        casualty_order=casualty_order_defender,
+        must_conquer=False,
+        is_naval_combat=is_naval_combat_defender,
     )
+
+    # Bombikazi: paired bombikazi + bomb self-destruct (add to casualties, remove from list)
+    if bombikazi_self_destruct_ids:
+        self_destruct_set = set(bombikazi_self_destruct_ids)
+        for uid in bombikazi_self_destruct_ids:
+            attacker_casualties.append(uid)
+        attacker_units[:] = [u for u in attacker_units if u.instance_id not in self_destruct_set]
 
     return RoundResult(
         attacker_hits=attacker_hits,
@@ -310,13 +367,14 @@ def _count_hits(
     unit_defs: dict[str, UnitDefinition],
     is_attacker: bool,
     stat_modifiers: dict[str, int] | None = None,
+    effective_dice_override: dict[str, int] | None = None,
 ) -> int:
     """
     Count hits from dice rolls using actual unit attack/defense values.
 
-    Each unit rolls dice based on its unit definition's 'dice' attribute.
+    Each unit rolls dice based on its unit definition's 'dice' attribute
+    (or effective_dice_override[instance_id] when provided, e.g. for bombikazi).
     A roll is a hit if roll <= (unit stat + stat_modifiers.get(instance_id, 0)).
-    stat_modifiers: optional instance_id -> modifier to add to the stat for this roll (e.g. -1 for archer prefire).
     """
     stat_name = "attack" if is_attacker else "defense"
     mods = stat_modifiers or {}
@@ -329,11 +387,13 @@ def _count_hits(
         if not unit_def:
             continue
 
-        stat_value = getattr(unit_def, stat_name, 0) + \
-            mods.get(unit.instance_id, 0)
-        dice_count = getattr(unit_def, 'dice', 1)
+        stat_value = getattr(unit_def, stat_name, 0) + mods.get(unit.instance_id, 0)
+        dice_count = (
+            effective_dice_override.get(unit.instance_id, getattr(unit_def, "dice", 1))
+            if effective_dice_override is not None
+            else getattr(unit_def, "dice", 1)
+        )
 
-        # Consume exactly dice_count rolls for this unit (or remaining rolls if fewer)
         for _ in range(dice_count):
             if roll_idx >= len(rolls):
                 break
@@ -341,7 +401,6 @@ def _count_hits(
                 hits += 1
             roll_idx += 1
 
-    # Sanity: we cannot have counted more hits than rolls consumed
     assert hits <= roll_idx <= len(rolls), (
         f"Combat roll mismatch: hits={hits} roll_idx={roll_idx} len(rolls)={len(rolls)}"
     )
@@ -354,20 +413,26 @@ def _apply_hits(
     unit_defs: dict[str, UnitDefinition],
     is_attacker: bool,
     stat_modifiers: dict[str, int] | None = None,
+    casualty_order: str = "best_unit",
+    must_conquer: bool = False,
+    is_naval_combat: bool = False,
 ) -> tuple[list[str], list[str]]:
     """
     Apply hits to units, returning (destroyed_ids, wounded_ids).
 
-    Priority order for taking hits (re-evaluated after each hit):
-    1. remaining_health desc (high health units soak damage first)
-    2. cost asc (lose cheap units first when HP is equal)
-    3. effective attack/defense asc (lose weak units first; effective = base + stat_modifiers e.g. captain/terrain)
-    4. num_specials asc (lose units with fewer specials first; same logic as frontend getUnitSpecials: tags except ground/mounted + unit_def.specials)
-    5. remaining_movement asc (lose immobile units first)
-    6. instance_id (deterministic tiebreaker)
+    casualty_order: "best_unit" | "best_attack" (attacker) or "best_unit" | "best_defense" (defender).
+    Full tiebreak order (after remaining_health desc): best_unit = cost asc, then effective stat asc;
+    best_attack/best_defense = effective stat asc, then cost asc. Then num_specials asc, remaining_movement asc, instance_id.
+    must_conquer: attacker-only; when True, if the next hit would kill the last ground unit, assign that hit to an aerial
+    instead (so a ground unit can conquer). Aerials are NOT always first—only when the hit would otherwise kill the last ground.
+    is_naval_combat: only naval and aerial units can take hits (passengers are not targets). Naval units use cargo value
+    (sum of passenger costs) as first sort key (asc — sink boats with less valuable cargo first).
 
-    This ensures high-HP units soak damage until their HP equals others,
-    then we lose cheap/weak/immobile units before expensive/strong/mobile ones.
+    Priority order for taking hits (re-evaluated after each hit):
+    1. (Naval only) cargo_value asc (sink low-value cargo first)
+    2. remaining_health desc (least wounded / healthiest takes the hit first—high HP units soak for others)
+    3. cost vs effective stat per casualty_order
+    4. num_specials asc, remaining_movement asc, instance_id
 
     Note: Modifies units list in place (removes dead units).
 
@@ -380,30 +445,64 @@ def _apply_hits(
     destroyed_ids = []
     wounded_ids = set()  # Use set to avoid duplicates
     remaining_hits = hits
+    use_stat_before_cost = casualty_order in ("best_attack", "best_defense")
+
+    def _cargo_sort_key(boat_unit: Unit, all_units: list[Unit]) -> tuple[int, int, tuple[int, ...]]:
+        """
+        For naval casualty order: (cargo_value_sum, num_passengers, tuple(sorted passenger costs)).
+        Sink boats with lower cargo value first; if equal, fewer passengers first; if equal, deterministic by passenger makeup.
+        """
+        boat_id = boat_unit.instance_id or ""
+        costs: list[int] = []
+        for u in all_units:
+            if getattr(u, "loaded_onto", None) != boat_id:
+                continue
+            ud = unit_defs.get(u.unit_id)
+            if not ud:
+                continue
+            cost_dict = getattr(ud, "cost", None) or {}
+            c = sum(cost_dict.values()) if isinstance(cost_dict, dict) else 0
+            costs.append(c)
+        costs.sort()
+        return (sum(costs), len(costs), tuple(costs))
 
     def sort_key(unit: Unit):
+        """Normal casualty order: healthiest first (soak), then cost/stat. Naval: cargo (value, count, makeup) first (asc)."""
         unit_def = unit_defs.get(unit.unit_id)
         if not unit_def:
-            return (-1, float('inf'), float('inf'), float('inf'), float('inf'), unit.instance_id or '')
+            return (0, 0, (), 1, -1, float('inf'), float('inf'), float('inf'), unit.instance_id or '')
         cost_dict = getattr(unit_def, 'cost', None) or {}
-        total_cost = sum(cost_dict.values()) if isinstance(
-            cost_dict, dict) else 0
+        total_cost = sum(cost_dict.values()) if isinstance(cost_dict, dict) else 0
         base_stat = getattr(unit_def, stat_name, 0)
         effective_stat = base_stat + mods.get(unit.instance_id or '', 0)
         specials_list = getattr(unit_def, 'specials', None) or []
-        tags_list = getattr(unit_def, 'tags', None) or []
-        # Same as frontend getUnitSpecials: all tags except ground/mounted count as specials, plus unit_def.specials
         num_specials = len(specials_list) if isinstance(specials_list, list) else 0
-        if isinstance(tags_list, list):
-            num_specials += sum(1 for t in tags_list if t not in TAGS_NOT_SPECIALS)
-        # Order: high HP soaks first, then cheap, then weak (effective stat), then fewer specials, then immobile; instance_id for stable tiebreak
-        return (-unit.remaining_health, total_cost, effective_stat, num_specials, unit.remaining_movement, unit.instance_id)
+        # Naval combat: boats sorted by cargo value asc, then passenger count asc, then passenger makeup (sorted costs tuple)
+        cargo_key = _cargo_sort_key(unit, units) if (is_naval_combat and _is_naval_unit(unit_def)) else (0, 0, ())
+        rest = (-unit.remaining_health, total_cost, effective_stat, num_specials, unit.remaining_movement, unit.instance_id or '')
+        if use_stat_before_cost:
+            rest = (-unit.remaining_health, effective_stat, total_cost, num_specials, unit.remaining_movement, unit.instance_id or '')
+        return cargo_key + rest
 
-    # Apply one hit at a time, re-sorting after each to account for HP changes
-    while remaining_hits > 0 and units:
-        # Sort to find the best target for this hit
-        units.sort(key=sort_key)
-        target = units[0]
+    # Naval combat: only naval and aerial units can take hits (passengers are not targets)
+    if is_naval_combat:
+        eligible = [u for u in units if _is_naval_unit(unit_defs.get(u.unit_id)) or is_aerial_unit(unit_defs.get(u.unit_id))]
+    else:
+        eligible = units
+
+    # Apply one hit at a time, re-sorting eligible after each to account for HP changes
+    while remaining_hits > 0 and eligible:
+        eligible.sort(key=sort_key)
+        target = eligible[0]
+
+        # must_conquer (attacker only): if this hit would kill the last ground unit, assign it to an aerial instead
+        if must_conquer and is_attacker:
+            ground = [u for u in eligible if not is_aerial_unit(unit_defs.get(u.unit_id))]
+            aerials = [u for u in eligible if is_aerial_unit(unit_defs.get(u.unit_id))]
+            # Would this hit kill the last ground? (target is ground and is the only ground, and one hit kills it)
+            if target in ground and len(ground) == 1 and target.remaining_health <= 1 and aerials:
+                # Assign hit to best aerial casualty instead
+                target = min(aerials, key=sort_key)
 
         # Apply one hit
         target.remaining_health -= 1
@@ -412,11 +511,12 @@ def _apply_hits(
         # Check if unit is destroyed
         if target.remaining_health == 0:
             destroyed_ids.append(target.instance_id)
-            # Don't count as wounded if destroyed
             wounded_ids.discard(target.instance_id)
-            units.pop(0)  # Remove from list
+            units.remove(target)
+            if is_naval_combat and target in eligible:
+                eligible.remove(target)
         else:
-            wounded_ids.add(target.instance_id)  # Survived with damage
+            wounded_ids.add(target.instance_id)
 
     return destroyed_ids, list(wounded_ids)
 
@@ -437,26 +537,19 @@ def group_dice_by_stat(
     unit_defs: dict[str, UnitDefinition],
     is_attacker: bool,
     stat_modifiers: dict[str, int] | None = None,
+    effective_dice_override: dict[str, int] | None = None,
 ) -> dict[int, dict]:
     """
     Group dice rolls by stat value for UI display. Rolls are tied to units:
     we iterate units in order (same as flat index order) and append each
-    unit's dice to that unit's stat bucket. So each stat row's dice are
-    in unit order, matching get_terror_reroll_targets / defender_rerolled_indices_by_stat.
+    unit's dice to that unit's stat bucket. When effective_dice_override is
+    provided (e.g. bombikazi), use it instead of unit_def.dice for dice count.
 
     Returns dict of {stat_value: {"rolls": [rolls], "hits": count}}
-    stat_modifiers: optional instance_id -> modifier (e.g. -1 for archer prefire defense).
-
-    Example with 2 infantry (attack=2) and 1 knight (attack=5):
-    {
-        2: {"rolls": [3, 1], "hits": 1},  # 2 dice at attack=2, 1 hit (the "1")
-        5: {"rolls": [4], "hits": 1}       # 1 die at attack=5, 1 hit (4 <= 5)
-    }
     """
     stat_name = "attack" if is_attacker else "defense"
     mods = stat_modifiers or {}
 
-    # Build stat -> list of (roll, is_hit) in unit order (same as flat index order)
     result: dict[int, dict] = {}
     roll_idx = 0
     for unit in units:
@@ -465,7 +558,11 @@ def group_dice_by_stat(
             roll_idx += 1
             continue
         stat_value = getattr(unit_def, stat_name, 0) + mods.get(unit.instance_id, 0)
-        dice_count = getattr(unit_def, "dice", 1)
+        dice_count = (
+            effective_dice_override.get(unit.instance_id, getattr(unit_def, "dice", 1))
+            if effective_dice_override is not None
+            else getattr(unit_def, "dice", 1)
+        )
         if stat_value not in result:
             result[stat_value] = {"rolls": [], "hits": 0}
         for _ in range(dice_count):
@@ -480,11 +577,56 @@ def group_dice_by_stat(
 
 def _has_special(unit_def: UnitDefinition | None, special: str) -> bool:
     """Check if unit has the given special (in tags or specials)."""
-    if not unit_def:
-        return False
-    tags = getattr(unit_def, "tags", []) or []
-    specials = getattr(unit_def, "specials", []) or []
-    return special in tags or special in specials
+    return has_unit_special(unit_def, special)
+
+
+# --- Bombikazi (attacker-only): paired bombikazi + bomb roll as bomb, then both self-destruct ---
+
+def get_bombikazi_pairing(
+    attacker_units: list[Unit],
+    unit_defs: dict[str, UnitDefinition],
+) -> tuple[set[str], set[str]]:
+    """
+    When attackers include both bombikazi units and bomb units, pair them 1:1.
+    Only applies when attacking. Returns (paired_bombikazi_instance_ids, paired_bomb_instance_ids).
+    Pairing is deterministic (sort by instance_id).
+    """
+    bombikazi_units = sorted(
+        [u for u in attacker_units if _has_special(unit_defs.get(u.unit_id), "bombikazi")],
+        key=lambda u: u.instance_id,
+    )
+    bomb_units = sorted(
+        [u for u in attacker_units if u.unit_id == "bomb"],
+        key=lambda u: u.instance_id,
+    )
+    n_pairs = min(len(bombikazi_units), len(bomb_units))
+    paired_bombikazi = {bombikazi_units[i].instance_id for i in range(n_pairs)}
+    paired_bombs = {bomb_units[i].instance_id for i in range(n_pairs)}
+    return paired_bombikazi, paired_bombs
+
+
+def get_attacker_effective_dice_and_bombikazi_self_destruct(
+    attacker_units: list[Unit],
+    unit_defs: dict[str, UnitDefinition],
+) -> tuple[dict[str, int], list[str]]:
+    """
+    Bombikazi (attacker-only): paired bombikazi don't roll (bomb rolls for the pair);
+    unpaired bombs don't roll. Paired bombikazi + paired bombs self-destruct after the round.
+    Returns (effective_dice: instance_id -> dice count, self_destruct_ids: list to add to attacker casualties).
+    """
+    paired_bombikazi, paired_bombs = get_bombikazi_pairing(attacker_units, unit_defs)
+    effective_dice: dict[str, int] = {}
+    for unit in attacker_units:
+        ud = unit_defs.get(unit.unit_id)
+        base_dice = getattr(ud, "dice", 1) if ud else 1
+        if unit.instance_id in paired_bombikazi:
+            effective_dice[unit.instance_id] = 0  # Bomb rolls for the pair
+        elif unit.unit_id == "bomb" and unit.instance_id not in paired_bombs:
+            effective_dice[unit.instance_id] = 0  # Unpaired bomb doesn't roll
+        else:
+            effective_dice[unit.instance_id] = base_dice
+    self_destruct_ids = list(paired_bombikazi | paired_bombs)
+    return effective_dice, self_destruct_ids
 
 
 def get_eff_def_per_flat_index(
@@ -607,16 +749,24 @@ def resolve_archer_prefire(
     unit_defs: dict[str, UnitDefinition],
     defender_rolls: list[int],
     stat_modifiers_defender_extra: dict[str, int] | None = None,
+    territory_def: "TerritoryDefinition | None" = None,
 ) -> RoundResult:
     """
     Resolve defender archer prefire: only archers roll at defense-1, hits applied to attackers only.
+    No -1 penalty when defending a stronghold or terrain_type fortress.
     Modifies attacker_units in place (removes dead, decrements health).
     defender_archer_units are not modified (no defender casualties from prefire).
-    stat_modifiers_defender_extra: optional instance_id -> extra modifier (e.g. terrain bonus), merged with -1.
+    stat_modifiers_defender_extra: optional instance_id -> extra modifier (e.g. terrain bonus), merged with -1 (or 0 if no penalty).
     """
     extra = stat_modifiers_defender_extra or {}
+    no_penalty = False
+    if territory_def:
+        no_penalty = bool(getattr(territory_def, "is_stronghold", False)) or (
+            getattr(territory_def, "terrain_type", "").lower() == "fortress"
+        )
+    archer_penalty = 0 if no_penalty else -1
     stat_modifiers = {
-        u.instance_id: -1 + extra.get(u.instance_id, 0) for u in defender_archer_units
+        u.instance_id: archer_penalty + extra.get(u.instance_id, 0) for u in defender_archer_units
     }
     defender_hits = _count_hits(
         defender_archer_units, defender_rolls, unit_defs, is_attacker=False,
@@ -625,7 +775,9 @@ def resolve_archer_prefire(
     attacker_hits = 0  # Attackers do not roll in prefire
 
     attacker_casualties, attacker_wounded = _apply_hits(
-        attacker_units, defender_hits, unit_defs, is_attacker=True
+        attacker_units, defender_hits, unit_defs, is_attacker=True,
+        casualty_order="best_unit",
+        must_conquer=False,
     )
     defender_casualties: list[str] = []
     defender_wounded: list[str] = []
@@ -641,6 +793,50 @@ def resolve_archer_prefire(
         surviving_defender_ids=[u.instance_id for u in defender_archer_units],
         attackers_eliminated=len(attacker_units) == 0,
         defenders_eliminated=False,
+    )
+
+
+def resolve_stealth_prefire(
+    attacker_units: list[Unit],
+    defender_units: list[Unit],
+    unit_defs: dict[str, UnitDefinition],
+    attacker_rolls: list[int],
+    stat_modifiers_attacker_extra: dict[str, int] | None = None,
+) -> RoundResult:
+    """
+    Resolve attacker stealth prefire: only attackers roll at attack-1, hits applied to defenders only.
+    Call when EVERY attacker has the stealth special. Modifies defender_units in place.
+    """
+    STEALTH_PENALTY = -1
+    extra = stat_modifiers_attacker_extra or {}
+    stat_modifiers = {
+        u.instance_id: STEALTH_PENALTY + extra.get(u.instance_id, 0) for u in attacker_units
+    }
+    attacker_hits = _count_hits(
+        attacker_units, attacker_rolls, unit_defs, is_attacker=True,
+        stat_modifiers=stat_modifiers,
+    )
+    defender_hits = 0  # Defenders do not roll in stealth prefire
+
+    defender_casualties, defender_wounded = _apply_hits(
+        defender_units, attacker_hits, unit_defs, is_attacker=False,
+        casualty_order="best_unit",
+        must_conquer=False,
+    )
+    attacker_casualties: list[str] = []
+    attacker_wounded: list[str] = []
+
+    return RoundResult(
+        attacker_hits=attacker_hits,
+        defender_hits=defender_hits,
+        attacker_casualties=attacker_casualties,
+        defender_casualties=defender_casualties,
+        attacker_wounded=attacker_wounded,
+        defender_wounded=defender_wounded,
+        surviving_attacker_ids=[u.instance_id for u in attacker_units],
+        surviving_defender_ids=[u.instance_id for u in defender_units],
+        attackers_eliminated=False,
+        defenders_eliminated=len(defender_units) == 0,
     )
 
 

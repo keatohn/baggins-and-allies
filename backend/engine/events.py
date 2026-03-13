@@ -27,6 +27,7 @@ class GameEvent:
 PHASE_CHANGED = "phase_changed"
 TURN_STARTED = "turn_started"
 TURN_ENDED = "turn_ended"
+TURN_SKIPPED = "turn_skipped"
 
 # Resource events
 RESOURCES_CHANGED = "resources_changed"
@@ -75,6 +76,13 @@ def turn_ended(turn_number: int, faction: str) -> GameEvent:
     return GameEvent(TURN_ENDED, {
         "turn_number": turn_number,
         "faction": faction,
+    })
+
+
+def turn_skipped(faction: str, reason: str = "no_capital_and_no_units") -> GameEvent:
+    return GameEvent(TURN_SKIPPED, {
+        "faction": faction,
+        "reason": reason,
     })
 
 
@@ -180,6 +188,7 @@ def combat_round_resolved(
     attacker_hits_by_unit_type: dict[str, int] | None = None,
     defender_hits_by_unit_type: dict[str, int] | None = None,
     is_archer_prefire: bool = False,
+    is_stealth_prefire: bool = False,
     terror_applied: bool = False,
 ) -> GameEvent:
     """
@@ -230,6 +239,8 @@ def combat_round_resolved(
         payload["defender_hits_by_unit_type"] = defender_hits_by_unit_type
     if is_archer_prefire:
         payload["is_archer_prefire"] = True
+    if is_stealth_prefire:
+        payload["is_stealth_prefire"] = True
     if terror_applied:
         payload["terror_applied"] = True
     return GameEvent(COMBAT_ROUND_RESOLVED, payload)

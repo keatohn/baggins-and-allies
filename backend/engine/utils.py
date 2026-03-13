@@ -22,8 +22,8 @@ def get_unit_faction(unit: Unit, unit_defs: dict[str, UnitDefinition]) -> str | 
     return ud.faction if ud else None
 
 
-def is_ground_unit(unit_def: UnitDefinition | None) -> bool:
-    """True if the unit is ground (not aerial). Aerial units cannot conquer territory by themselves."""
+def is_land_unit(unit_def: UnitDefinition | None) -> bool:
+    """True if the unit is land (not aerial). Aerial units cannot conquer territory by themselves."""
     if not unit_def:
         return False
     if getattr(unit_def, "archetype", "") == "aerial":
@@ -42,6 +42,15 @@ def is_aerial_unit(unit_def: UnitDefinition | None) -> bool:
     if "aerial" in getattr(unit_def, "tags", []):
         return True
     return False
+
+
+def has_unit_special(unit_def: UnitDefinition | None, special: str) -> bool:
+    """True if the unit has the given special (in tags or specials list)."""
+    if not unit_def:
+        return False
+    tags = getattr(unit_def, "tags", []) or []
+    specials = getattr(unit_def, "specials", []) or []
+    return special in tags or special in specials
 
 
 def unitstack_to_units(
@@ -355,15 +364,12 @@ def generate_dice_rolls_for_units(
     units: list[Unit],
     unit_defs: dict[str, UnitDefinition],
     seed: int | None = None,
+    effective_dice_override: dict[str, int] | None = None,
 ) -> list[int]:
     """
     Generate dice rolls for a list of Unit instances.
-    Each unit rolls based on its unit definition's 'dice' attribute.
-
-    Args:
-        units: List of Unit instances
-        unit_defs: Unit definitions
-        seed: Optional random seed for reproducibility
+    Each unit rolls based on its unit definition's 'dice' attribute,
+    or effective_dice_override[instance_id] when provided (e.g. bombikazi: 0 for paired bombikazi, 0 for unpaired bomb).
 
     Returns:
         List of dice rolls (1 to DICE_SIDES per roll)
@@ -372,15 +378,15 @@ def generate_dice_rolls_for_units(
         random.seed(seed)
 
     rolls = []
-
     for unit in units:
         unit_def = unit_defs.get(unit.unit_id)
-        dice_count = getattr(unit_def, 'dice', 1) if unit_def else 1
-        # Roll dice_count times for this unit
+        dice_count = (
+            effective_dice_override.get(unit.instance_id, getattr(unit_def, "dice", 1))
+            if effective_dice_override is not None
+            else (getattr(unit_def, "dice", 1) if unit_def else 1)
+        )
         for _ in range(dice_count):
-            roll = random.randint(1, DICE_SIDES)
-            rolls.append(roll)
-
+            rolls.append(random.randint(1, DICE_SIDES))
     return rolls
 
 

@@ -68,6 +68,8 @@ export interface PendingMove {
   unitType: string; // e.g., 'gondor_infantry'
   count: number;
   phase: 'combat_move' | 'non_combat_move'; // Which phase this move was declared in
+  /** "load" | "offload" | "sail" for sea transport */
+  move_type?: string | null;
 }
 
 export interface PendingMobilization {
@@ -78,6 +80,8 @@ export interface PendingMobilization {
 
 export interface DeclaredBattle {
   territory: string;
+  /** Set for sea raid: attackers are in this sea zone, territory is the land target. */
+  sea_zone_id?: string;
   attacker_units: string[];
   defender_units: string[];
 }

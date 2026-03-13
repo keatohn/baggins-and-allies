@@ -1,0 +1,27 @@
+{
+    "id": "wotr_exp_1.0",
+    "display_name": "War of the Ring - Expanded",
+    "map_asset": "wotr_map_1.0",
+    "context": {
+        "year": "TA 3019",
+        "map": "Middle-earth",
+        "faction_count": 8,
+        "factions": [
+            "Isengard",
+            "Rohan",
+            "Mordor",
+            "Gondor",
+            "Rhûn",
+            "Erebor",
+            "Harad",
+            "Elves"
+        ]
+    },
+    "victory_criteria": {
+        "strongholds": {
+            "good": 10,
+            "evil": 10
+        }
+    },
+    "camp_cost": 10
+}

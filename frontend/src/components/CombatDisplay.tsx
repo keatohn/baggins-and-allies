@@ -28,6 +28,40 @@ interface CombatUnit {
   hasCaptainBonus?: boolean;
   /** Unit is receiving anti-cavalry (pikes) +1. */
   hasAntiCavalry?: boolean;
+  /** Attacker only: unit has Sea Raider and is in a sea raid (+1 attack). */
+  hasSeaRaider?: boolean;
+  /** Defender only: unit is archer (prefire). */
+  hasArcher?: boolean;
+  /** Attacker only: unit has Stealth (prefire when all attackers have it). */
+  hasStealth?: boolean;
+  /** Attacker only: unit has Bombikazi (self-destruct with bomb). */
+  hasBombikazi?: boolean;
+  /** Defender only: unit has Fearless (immune to terror), when attackers have terror. */
+  hasFearless?: boolean;
+  /** Defender only: unit has Hope (cancels 1 terror), when attackers have terror. */
+  hasHope?: boolean;
+}
+
+/** Cumulative eliminated stack (all units in this group died in a prior round). Shown with red X, no rolls. */
+interface EliminatedStack {
+  unitType: string;
+  name: string;
+  icon: string;
+  health: number;
+  statValue: number;
+  count: number;
+  factionColor?: string;
+  hasTerror?: boolean;
+  terrainMountain?: boolean;
+  terrainForest?: boolean;
+  hasCaptainBonus?: boolean;
+  hasAntiCavalry?: boolean;
+  hasSeaRaider?: boolean;
+  hasArcher?: boolean;
+  hasStealth?: boolean;
+  hasBombikazi?: boolean;
+  hasFearless?: boolean;
+  hasHope?: boolean;
 }
 
 interface DiceRoll {
@@ -50,6 +84,7 @@ export interface CombatRound {
   attackerHitsByUnitType?: Record<string, number>;
   defenderHitsByUnitType?: Record<string, number>;
   isArcherPrefire?: boolean;
+  isStealthPrefire?: boolean;
   terrorApplied?: boolean;
   /** Units at round start (from backend). Always present; use this for round display, not state. */
   attackerUnitsAtStart: CombatUnit[];
@@ -81,7 +116,13 @@ interface CombatDisplayProps {
   retreatOptions: RetreatOption[];
   /** False after archer prefire until round 1 is run; retreat button is disabled. */
   canRetreat?: boolean;
-  onStartRound: () => Promise<{
+  /** Current attacker casualty priority from backend (best_unit | best_attack). */
+  casualtyPriorityAttacker?: string;
+  /** Current defender (territory) casualty priority from backend (best_unit | best_defense). */
+  casualtyPriorityDefender?: string;
+  /** Current must_conquer from backend. */
+  mustConquer?: boolean;
+  onStartRound: (casualtyOrder?: string, mustConquer?: boolean) => Promise<{
     round: CombatRound;
     combatOver: boolean;
     attackerWon: boolean;
@@ -97,6 +138,14 @@ interface CombatDisplayProps {
   onClose: (attackerWon: boolean, survivingAttackers: CombatUnit[]) => void;
   onCancel?: () => void;
   onHighlightTerritories?: (territoryIds: string[]) => void;
+  /** Special definitions from setup (for display codes in unit badges: T, M, FR, etc.). */
+  specials?: Record<string, { name?: string; display_code?: string }>;
+  /** When true (spectator view): no actions, only a close button to dismiss. */
+  readOnly?: boolean;
+  /** Backend active_combat.combat_log for spectator sync (rounds from poll). */
+  combatLog?: unknown[];
+  /** When combat ended while spectating: show result then auto-close after 3s. */
+  combatEndResult?: { attackerWon: boolean; defenderWon: boolean } | null;
 }
 
 // Combat phase states
@@ -172,6 +221,7 @@ function Die({
 function UnitRow({
   statValue,
   units,
+  eliminatedGroups = [],
   rolls,
   countCasualties,
   badgeHitsByUnitType,
@@ -185,9 +235,12 @@ function UnitRow({
   rerolledIndices,
   rerolledDice,
   showRerollX,
+  specials: specialsDefs,
 }: {
   statValue: number;
   units: CombatUnit[];
+  /** Cumulative stacks eliminated in prior rounds (show with red X, no rolls). */
+  eliminatedGroups?: EliminatedStack[];
   rolls: DiceRoll[];
   countCasualties: string[];
   badgeHitsByUnitType: Record<string, number>;
@@ -198,13 +251,26 @@ function UnitRow({
   currentRowKey: string | null;
   isLanding: boolean;
   hitColor?: string;
-  /** Indices in this row's rolls that were re-rolled by Terror (show red X). */
   rerolledIndices?: number[];
-  /** Re-rolled dice to show next to original (Terror); shown after pause. */
   rerolledDice?: DiceRoll[];
-  /** When false, red X is hidden (used to delay showing X until after dice are visible). */
   showRerollX?: boolean;
+  specials?: Record<string, { name?: string; display_code?: string }>;
 }) {
+  const code = (id: string, fallback: string) => (specialsDefs?.[id]?.display_code ?? fallback);
+  const badgeTitle = [
+    specialsDefs?.terror?.name && `${code('terror', 'T')}=${specialsDefs.terror.name}`,
+    specialsDefs?.mountain?.name && `${code('mountain', 'M')}=${specialsDefs.mountain.name}`,
+    specialsDefs?.forest?.name && `${code('forest', 'FR')}=${specialsDefs.forest.name}`,
+    specialsDefs?.captain?.name && `${code('captain', 'C')}=${specialsDefs.captain.name}`,
+    specialsDefs?.anti_cavalry?.name && `${code('anti_cavalry', 'AC')}=${specialsDefs.anti_cavalry.name}`,
+    specialsDefs?.sea_raider?.name && `${code('sea_raider', 'SR')}=${specialsDefs.sea_raider.name}`,
+    specialsDefs?.archer?.name && `${code('archer', 'AR')}=${specialsDefs.archer.name}`,
+    specialsDefs?.stealth?.name && `${code('stealth', 'ST')}=${specialsDefs.stealth.name}`,
+    specialsDefs?.bombikazi?.name && `${code('bombikazi', 'B')}=${specialsDefs.bombikazi.name}`,
+    specialsDefs?.fearless?.name && `${code('fearless', 'FL')}=${specialsDefs.fearless.name}`,
+    specialsDefs?.hope?.name && `${code('hope', 'HP')}=${specialsDefs.hope.name}`,
+  ].filter(Boolean).join(', ') || 'T=Terror, M=Mountain, FR=Forest, C=Captain, AC=Anti-cavalry, SR=Sea Raider, AR=Archer, ST=Stealth, B=Bombikazi, FL=Fearless, HP=Hope';
+
   const rowKey = `${isAttacker ? 'attacker' : 'defender'}_${statValue}`;
   const isRevealed = revealedRows.has(rowKey);
   const isCurrentlyLanding = currentRowKey === rowKey && isLanding;
@@ -227,6 +293,16 @@ function UnitRow({
     terrainForest?: boolean;
     hasCaptainBonus?: boolean;
     hasAntiCavalry?: boolean;
+    hasSeaRaider?: boolean;
+    hasArcher?: boolean;
+    hasStealth?: boolean;
+    hasBombikazi?: boolean;
+    hasFearless?: boolean;
+    hasHope?: boolean;
+    /** When true, always show red X (cumulative eliminated from prior round). */
+    isCumulativeEliminated?: boolean;
+    /** Unique key for React when same unitType appears multiple times (eliminated stacks). */
+    groupKey?: string;
   }[] = [];
   const groupMap = new Map<string, {
     name: string;
@@ -240,6 +316,12 @@ function UnitRow({
     terrainForest?: boolean;
     hasCaptainBonus?: boolean;
     hasAntiCavalry?: boolean;
+    hasSeaRaider?: boolean;
+    hasArcher?: boolean;
+    hasStealth?: boolean;
+    hasBombikazi?: boolean;
+    hasFearless?: boolean;
+    hasHope?: boolean;
   }>();
 
   units.forEach(unit => {
@@ -253,6 +335,12 @@ function UnitRow({
       if (unit.terrainForest) existing.terrainForest = true;
       if (unit.hasCaptainBonus) existing.hasCaptainBonus = true;
       if (unit.hasAntiCavalry) existing.hasAntiCavalry = true;
+      if (unit.hasSeaRaider) existing.hasSeaRaider = true;
+      if (unit.hasArcher || unit.isArcher) existing.hasArcher = true;
+      if (unit.hasStealth) existing.hasStealth = true;
+      if (unit.hasBombikazi) existing.hasBombikazi = true;
+      if (unit.hasFearless) existing.hasFearless = true;
+      if (unit.hasHope) existing.hasHope = true;
     } else {
       groupMap.set(unit.unitType, {
         name: unit.name,
@@ -266,6 +354,12 @@ function UnitRow({
         terrainForest: unit.terrainForest,
         hasCaptainBonus: unit.hasCaptainBonus,
         hasAntiCavalry: unit.hasAntiCavalry,
+        hasSeaRaider: unit.hasSeaRaider,
+        hasArcher: unit.hasArcher ?? unit.isArcher,
+        hasStealth: unit.hasStealth,
+        hasBombikazi: unit.hasBombikazi,
+        hasFearless: unit.hasFearless,
+        hasHope: unit.hasHope,
       });
     }
   });
@@ -274,34 +368,68 @@ function UnitRow({
     unitGroups.push({ unitType: key, ...value });
   });
 
+  // Only add cumulative eliminated stacks that aren't already shown by current round's units.
+  // (Same unitType on this row = one stack: show count going down until all dead, then red X; don't duplicate.)
+  eliminatedGroups.forEach((es, idx) => {
+    if (groupMap.has(es.unitType)) return; // already showing this stack from units (alive or just died this round)
+    unitGroups.push({
+      unitType: es.unitType,
+      name: es.name,
+      icon: es.icon,
+      health: es.health,
+      total: es.count,
+      countCasualties: es.count,
+      factionColor: es.factionColor,
+      hasTerror: es.hasTerror,
+      terrainMountain: es.terrainMountain,
+      terrainForest: es.terrainForest,
+      hasCaptainBonus: es.hasCaptainBonus,
+      hasAntiCavalry: es.hasAntiCavalry,
+      hasSeaRaider: es.hasSeaRaider,
+      hasArcher: es.hasArcher,
+      hasStealth: es.hasStealth,
+      hasBombikazi: es.hasBombikazi,
+      hasFearless: es.hasFearless,
+      hasHope: es.hasHope,
+      isCumulativeEliminated: true,
+      groupKey: `elim-${es.unitType}-${idx}`,
+    });
+  });
+
   return (
     <div className={`unit-row-shelf ${isRevealed ? 'revealed' : ''}`}>
       <div className="stat-label">{statValue}</div>
       <div className="unit-stack">
-        {unitGroups.map(group => {
+        {unitGroups.map((group) => {
           const hits = badgeHitsByUnitType[group.unitType] ?? 0;
           const aliveCount = group.total - group.countCasualties;
           const eliminated = aliveCount === 0;
-          // Delay red X until after dice and hits are revealed so stacks don't "disappear" mid-animation
-          const showEliminated = eliminated && showCasualtyBadges;
+          // Cumulative eliminated: always show red X; current-round eliminated: delay until showCasualtyBadges
+          const showEliminated = group.isCumulativeEliminated ? true : (eliminated && showCasualtyBadges);
           // Only show hit badge after all dice are revealed (showCasualtyBadges), then apply HP filter
           const showBadge = hits > 0 && showCasualtyBadges && (!onlyShowBadgeForHpGreaterThanOne || group.health > 1);
-          const specials: string[] = [];
-          if (group.hasTerror) specials.push('T');
-          if (group.terrainMountain) specials.push('M');
-          if (group.terrainForest) specials.push('F');
-          if (group.hasCaptainBonus) specials.push('C');
-          if (group.hasAntiCavalry) specials.push('P');
+          const specialCodes: string[] = [];
+          if (group.hasTerror) specialCodes.push(code('terror', 'T'));
+          if (group.terrainMountain) specialCodes.push(code('mountain', 'M'));
+          if (group.terrainForest) specialCodes.push(code('forest', 'FR'));
+          if (group.hasCaptainBonus) specialCodes.push(code('captain', 'C'));
+          if (group.hasAntiCavalry) specialCodes.push(code('anti_cavalry', 'AC'));
+          if (group.hasSeaRaider) specialCodes.push(code('sea_raider', 'SR'));
+          if (group.hasArcher) specialCodes.push(code('archer', 'AR'));
+          if (group.hasStealth) specialCodes.push(code('stealth', 'ST'));
+          if (group.hasBombikazi) specialCodes.push(code('bombikazi', 'B'));
+          if (group.hasFearless) specialCodes.push(code('fearless', 'FL'));
+          if (group.hasHope) specialCodes.push(code('hope', 'HP'));
           return (
             <div
-              key={group.unitType}
+              key={group.groupKey ?? group.unitType}
               className={`combat-unit-group ${showEliminated ? 'eliminated' : ''}`}
               title={group.name}
               style={(group.factionColor ?? hitColor) ? { borderColor: group.factionColor ?? hitColor } : undefined}
             >
-              {specials.length > 0 && (
-                <span className="unit-specials-badge" title="T=Terror, M=Mountain, F=Forest, C=Captain, P=Pikes (anti-cavalry)">
-                  {specials.join('')}
+              {specialCodes.length > 0 && (
+                <span className="unit-specials-badge" title={badgeTitle}>
+                  {specialCodes.join('')}
                 </span>
               )}
               <img src={group.icon} alt={group.name} />
@@ -364,7 +492,7 @@ function CombatSide({
   onlyShowBadgeForHpGreaterThanOne,
   showCasualtyBadges,
   isAttacker,
-  isArcherPrefire,
+  isArcherPrefire: _isArcherPrefire,
   revealedRows,
   currentRowKey,
   isLanding,
@@ -372,6 +500,9 @@ function CombatSide({
   defenderRerolledIndicesByStat,
   defenderRerolledDiceByStat,
   showRerollX,
+  specials: specialsForBadges,
+  casualtyPriorityLabel,
+  eliminatedStacks,
 }: {
   title: string;
   factionIcon: string;
@@ -397,25 +528,45 @@ function CombatSide({
   defenderRerolledDiceByStat?: Record<string, DiceRoll[]>;
   /** When false, red X on re-rolled dice is hidden (delay until after dice visible). Defender only. */
   showRerollX?: boolean;
+  /** Special definitions from setup (display_code for unit badges). */
+  specials?: Record<string, { name?: string; display_code?: string }>;
+  /** Very small label under unit boxes: e.g. "Casualty Priority: Best Unit" or "Casualty Priority: Best Defense". */
+  casualtyPriorityLabel?: string;
+  /** Cumulative stacks fully eliminated in prior rounds (show with red X, no rolls). */
+  eliminatedStacks?: EliminatedStack[];
 }) {
-  // Shelf/row is always by effective stat (base + terrain, captain, anti-cavalry, etc.) when provided by parent
+  // Shelf/row is always by effective stat (base + terrain, captain, anti-cavalry, etc.) when provided by parent.
+  // Backend keys dice by this same value (e.g. archer prefire sends effective_defense = defense - 1 + terrain), so do not subtract again for archer prefire.
   const unitsByValue: Record<number, CombatUnit[]> = {};
   units.forEach(unit => {
     const baseAtk = unit.attack;
     const baseDef = unit.defense;
     const effAtk = unit.effectiveAttack ?? baseAtk;
     const effDef = unit.effectiveDefense ?? baseDef;
-    let value = isAttacker ? effAtk : effDef;
-    if (isArcherPrefire && !isAttacker) value = effDef - 1;
+    const value = isAttacker ? effAtk : effDef;
     if (!unitsByValue[value]) unitsByValue[value] = [];
     unitsByValue[value].push(unit);
+  });
+
+  const eliminatedByValue: Record<number, EliminatedStack[]> = {};
+  (eliminatedStacks ?? []).forEach(es => {
+    if (!eliminatedByValue[es.statValue]) eliminatedByValue[es.statValue] = [];
+    eliminatedByValue[es.statValue].push(es);
   });
 
   const allValues = new Set([
     ...Object.keys(unitsByValue).map(Number),
     ...Object.keys(rolls).map(Number),
+    ...Object.keys(eliminatedByValue).map(Number),
   ]);
-  const sortedValues = Array.from(allValues).sort((a, b) => a - b);
+  const sortedValues = Array.from(allValues)
+    .filter((value) => {
+      const hasUnits = (unitsByValue[value]?.length ?? 0) > 0;
+      const hasRolls = (rolls[value] ?? (rolls as Record<string, DiceRoll[]>)[String(value)])?.length > 0;
+      const hasEliminated = (eliminatedByValue[value]?.length ?? 0) > 0;
+      return hasUnits || hasRolls || hasEliminated;
+    })
+    .sort((a, b) => a - b);
 
   return (
     <div
@@ -436,6 +587,7 @@ function CombatSide({
             key={value}
             statValue={value}
             units={unitsByValue[value] || []}
+            eliminatedGroups={eliminatedByValue[value] ?? []}
             rolls={rolls[value] ?? (rolls as Record<string, DiceRoll[]>)[String(value)] ?? []}
             countCasualties={countCasualties}
             badgeHitsByUnitType={badgeHitsPerShelf ? (badgeHitsPerShelf[value] ?? {}) : badgeHitsByUnitType}
@@ -449,6 +601,7 @@ function CombatSide({
             rerolledIndices={!isAttacker ? (defenderRerolledIndicesByStat?.[String(value)] ?? []) : undefined}
             rerolledDice={!isAttacker ? (defenderRerolledDiceByStat?.[String(value)] ?? []) : undefined}
             showRerollX={!isAttacker ? showRerollX : undefined}
+            specials={specialsForBadges}
           />
         ))}
       </div>
@@ -456,6 +609,11 @@ function CombatSide({
       <div className={`hits-display ${showHits ? 'visible' : ''}`}>
         <span className="hits-count">{hits} Hit{hits !== 1 ? 's' : ''}</span>
       </div>
+      {casualtyPriorityLabel && (
+        <div className="combat-side-casualty-order" title={casualtyPriorityLabel}>
+          {casualtyPriorityLabel}
+        </div>
+      )}
     </div>
   );
 }
@@ -472,7 +630,20 @@ function CombatDisplay({
   onClose,
   onCancel,
   onHighlightTerritories,
+  specials,
+  casualtyPriorityAttacker = 'best_unit',
+  casualtyPriorityDefender = 'best_unit',
+  mustConquer: mustConquerProp = false,
+  readOnly = false,
+  combatLog,
+  combatEndResult,
 }: CombatDisplayProps) {
+  const [casualtyPriorityPill, setCasualtyPriorityPill] = useState<'best_unit' | 'best_attack'>(casualtyPriorityAttacker as 'best_unit' | 'best_attack');
+  const [mustConquerPill, setMustConquerPill] = useState(mustConquerProp);
+  useEffect(() => {
+    setCasualtyPriorityPill((casualtyPriorityAttacker === 'best_attack' ? 'best_attack' : 'best_unit'));
+    setMustConquerPill(mustConquerProp);
+  }, [casualtyPriorityAttacker, mustConquerProp]);
   const [combatPhase, setCombatPhase] = useState<CombatPhase>('ready');
   const [currentRound, setCurrentRound] = useState<CombatRound | null>(null);
   const [roundNumber, setRoundNumber] = useState(0);
@@ -493,6 +664,10 @@ function CombatDisplay({
   // Track casualties from PREVIOUS rounds (these units don't show)
   const [previousAttackerCasualties, setPreviousAttackerCasualties] = useState<string[]>([]);
   const [previousDefenderCasualties, setPreviousDefenderCasualties] = useState<string[]>([]);
+
+  // Cumulative eliminated stacks (fully dead in a prior round); shown with red X and no rolls in later rounds
+  const [previousEliminatedAttackerStacks, setPreviousEliminatedAttackerStacks] = useState<EliminatedStack[]>([]);
+  const [previousEliminatedDefenderStacks, setPreviousEliminatedDefenderStacks] = useState<EliminatedStack[]>([]);
 
   // Track if combat is actually over (computed after round)
   const [isCombatOver, setIsCombatOver] = useState(false);
@@ -515,6 +690,8 @@ function CombatDisplay({
       setShowTerrorRerollX(false);
       setPreviousAttackerCasualties([]);
       setPreviousDefenderCasualties([]);
+      setPreviousEliminatedAttackerStacks([]);
+      setPreviousEliminatedDefenderStacks([]);
       setIsCombatOver(false);
       setAttackerWon(false);
       setDefenderWon(false);
@@ -528,6 +705,73 @@ function CombatDisplay({
     }
   }, [combatPhase, onHighlightTerritories]);
 
+  // Spectator: sync round state from backend combat_log when it updates (e.g. from polling)
+  useEffect(() => {
+    if (!readOnly || !combatLog?.length || !attacker.units.length || !defender.units.length) return;
+    const last = combatLog[combatLog.length - 1] as {
+      round_number?: number;
+      attacker_rolls?: number[];
+      defender_rolls?: number[];
+      attacker_hits?: number;
+      defender_hits?: number;
+      attacker_casualties?: string[];
+      defender_casualties?: string[];
+      is_archer_prefire?: boolean;
+      is_stealth_prefire?: boolean;
+    };
+    const rn = last.round_number ?? 0;
+    const aRolls = last.attacker_rolls ?? [];
+    const dRolls = last.defender_rolls ?? [];
+    const aHits = last.attacker_hits ?? 0;
+    const dHits = last.defender_hits ?? 0;
+    const toRolls = (rolls: number[], hitCount: number): Record<number, { value: number; target: number; isHit: boolean }[]> => {
+      const arr = rolls.map((value, i) => ({ value, target: 10, isHit: i < hitCount }));
+      return arr.length ? { 1: arr } : {}; // use key 1 so we don't show an empty "0" stat row
+    };
+    let prevA: string[] = [];
+    let prevD: string[] = [];
+    for (let i = 0; i < combatLog.length - 1; i++) {
+      const e = combatLog[i] as { attacker_casualties?: string[]; defender_casualties?: string[] };
+      prevA = prevA.concat(e.attacker_casualties ?? []);
+      prevD = prevD.concat(e.defender_casualties ?? []);
+    }
+    const aAtStart = attacker.units.filter(u => !prevA.includes(u.id));
+    const dAtStart = defender.units.filter(u => !prevD.includes(u.id));
+    const round: CombatRound = {
+      roundNumber: rn,
+      attackerRolls: toRolls(aRolls, aHits) as CombatRound['attackerRolls'],
+      defenderRolls: toRolls(dRolls, dHits) as CombatRound['defenderRolls'],
+      attackerHits: aHits,
+      defenderHits: dHits,
+      attackerCasualties: last.attacker_casualties ?? [],
+      defenderCasualties: last.defender_casualties ?? [],
+      isArcherPrefire: last.is_archer_prefire ?? false,
+      isStealthPrefire: last.is_stealth_prefire ?? false,
+      terrorApplied: false,
+      attackerUnitsAtStart: aAtStart,
+      defenderUnitsAtStart: dAtStart,
+    };
+    setRoundNumber(rn);
+    setPreviousAttackerCasualties(prevA);
+    setPreviousDefenderCasualties(prevD);
+    setCurrentRound(round);
+    setShowHits(true);
+    setShowCasualtyBadges(true);
+    setCombatPhase('awaiting_decision'); // Show round + hits; result banner only when combatEndResult is set
+  }, [readOnly, combatLog, attacker.units, defender.units]);
+
+  // Spectator: when combat ended, show result banner then auto-close after 3s
+  useEffect(() => {
+    if (!readOnly || !combatEndResult) return;
+    setAttackerWon(combatEndResult.attackerWon);
+    setDefenderWon(combatEndResult.defenderWon);
+    setCombatPhase('complete');
+    const t = setTimeout(() => {
+      onClose(combatEndResult.attackerWon, []);
+    }, 3000);
+    return () => clearTimeout(t);
+  }, [readOnly, combatEndResult, onClose]);
+
   // Single source of truth: when we have a round result, the backend payload defines who was on each shelf.
   // Before any round runs (ready phase), we use props built from state.
   const attackerUnitsThisRound = currentRound ? currentRound.attackerUnitsAtStart : attacker.units;
@@ -535,12 +779,13 @@ function CombatDisplay({
 
   // Only show units that are rolling this round: prefire = defender archers only; round 1+ = everyone
   const attackerUnitsToShow = useMemo(() => {
-    if (currentRound?.isArcherPrefire) return [];
+    if (currentRound?.isArcherPrefire) return []; // Defender archer prefire: only defenders roll
     return attackerUnitsThisRound;
   }, [currentRound?.isArcherPrefire, attackerUnitsThisRound]);
   const defenderUnitsToShow = useMemo(() => {
     if (currentRound?.isArcherPrefire)
       return defenderUnitsThisRound.filter(u => u.isArcher === true);
+    // Stealth prefire: show all defenders (they take hits, don't roll)
     return defenderUnitsThisRound;
   }, [currentRound?.isArcherPrefire, defenderUnitsThisRound]);
 
@@ -697,15 +942,19 @@ function CombatDisplay({
           setTimeout(() => {
             const unitListA = round.attackerUnitsAtStart ?? attackerUnitsThisRound;
             const unitListD = round.defenderUnitsAtStart ?? defenderUnitsThisRound;
+            // Prefire rounds: backend sends empty attacker list for archer prefire, so never decide combat ended from local casualty count
+            const isPrefireRound = round.isArcherPrefire === true || round.isStealthPrefire === true;
             const combatEnded = combatOverResult
               ? combatOverResult.combatOver
-              : (() => {
-                const totalAttackerCasualties = [...currentPrevAttackerCasualties, ...round.attackerCasualties];
-                const totalDefenderCasualties = [...currentPrevDefenderCasualties, ...round.defenderCasualties];
-                const attackersAlive = unitListA.filter(u => !totalAttackerCasualties.includes(u.id));
-                const defendersAlive = unitListD.filter(u => !totalDefenderCasualties.includes(u.id));
-                return attackersAlive.length === 0 || defendersAlive.length === 0;
-              })();
+              : isPrefireRound
+                ? false
+                : (() => {
+                  const totalAttackerCasualties = [...currentPrevAttackerCasualties, ...round.attackerCasualties];
+                  const totalDefenderCasualties = [...currentPrevDefenderCasualties, ...round.defenderCasualties];
+                  const attackersAlive = unitListA.filter(u => !totalAttackerCasualties.includes(u.id));
+                  const defendersAlive = unitListD.filter(u => !totalDefenderCasualties.includes(u.id));
+                  return attackersAlive.length === 0 || defendersAlive.length === 0;
+                })();
             if (combatEnded) {
               setIsCombatOver(true);
               if (combatOverResult) {
@@ -763,6 +1012,59 @@ function CombatDisplay({
     revealNextRow();
   }, [getRowOrder, attackerUnitsThisRound, defenderUnitsThisRound]);
 
+  // Compute fully eliminated stacks from a round (whole group died) for cumulative display
+  const computeEliminatedStacksFromRound = useCallback((round: CombatRound): { attacker: EliminatedStack[]; defender: EliminatedStack[] } => {
+    const casualtySetA = new Set(round.attackerCasualties);
+    const casualtySetD = new Set(round.defenderCasualties);
+    const groupByKey = (units: CombatUnit[], getStat: (u: CombatUnit) => number) => {
+      const map = new Map<string, CombatUnit[]>();
+      units.forEach(u => {
+        const stat = getStat(u);
+        const key = `${stat}_${u.unitType}`;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push(u);
+      });
+      return map;
+    };
+    const getAttackerStat = (u: CombatUnit) => u.effectiveAttack ?? u.attack;
+    const getDefenderStat = (u: CombatUnit) => u.effectiveDefense ?? u.defense;
+    const toEliminated = (units: CombatUnit[], casualtySet: Set<string>, getStat: (u: CombatUnit) => number): EliminatedStack[] => {
+      const groups = groupByKey(units, getStat);
+      const out: EliminatedStack[] = [];
+      groups.forEach((group) => {
+        const dead = group.filter(u => casualtySet.has(u.id));
+        if (dead.length === group.length && dead.length > 0) {
+          const u = group[0];
+          out.push({
+            unitType: u.unitType,
+            name: u.name,
+            icon: u.icon,
+            health: u.health,
+            statValue: getStat(u),
+            count: group.length,
+            factionColor: u.factionColor,
+            hasTerror: u.hasTerror,
+            terrainMountain: u.terrainMountain,
+            terrainForest: u.terrainForest,
+            hasCaptainBonus: u.hasCaptainBonus,
+            hasAntiCavalry: u.hasAntiCavalry,
+            hasSeaRaider: u.hasSeaRaider,
+            hasArcher: u.hasArcher ?? u.isArcher,
+            hasStealth: u.hasStealth,
+            hasBombikazi: u.hasBombikazi,
+            hasFearless: u.hasFearless,
+            hasHope: u.hasHope,
+          });
+        }
+      });
+      return out;
+    };
+    return {
+      attacker: toEliminated(round.attackerUnitsAtStart, casualtySetA, getAttackerStat),
+      defender: toEliminated(round.defenderUnitsAtStart, casualtySetD, getDefenderStat),
+    };
+  }, []);
+
   // Start battle (round 1) or continue to next round - call backend then animate
   const handleRoll = useCallback(async (
     overridePrevAttacker?: string[],
@@ -775,7 +1077,7 @@ function CombatDisplay({
     setCurrentRowKey(null);
     setTerrorFinalRound(null);
 
-    const result = await onStartRound();
+    const result = await onStartRound(casualtyPriorityPill, mustConquerPill);
     if (!result) {
       setCombatPhase(roundNumber === 0 ? 'ready' : 'awaiting_decision');
       return;
@@ -783,6 +1085,11 @@ function CombatDisplay({
 
     const newRoundNumber = result.round.roundNumber;
     setRoundNumber(newRoundNumber);
+
+    // Append fully eliminated stacks from this round so they stay visible (red X) in future rounds
+    const { attacker: newElimA, defender: newElimD } = computeEliminatedStacksFromRound(result.round);
+    setPreviousEliminatedAttackerStacks(prev => [...prev, ...newElimA]);
+    setPreviousEliminatedDefenderStacks(prev => [...prev, ...newElimD]);
 
     const prevA = overridePrevAttacker ?? previousAttackerCasualties;
     const prevD = overridePrevDefender ?? previousDefenderCasualties;
@@ -819,7 +1126,7 @@ function CombatDisplay({
       result.combatOver ? { combatOver: true, attackerWon: result.attackerWon } : undefined,
       hasInitialGrouped ? { applied: true, finalRound: result.round } : terrorApplied ? { applied: true } : undefined
     );
-  }, [onStartRound, animateDiceReveals, previousAttackerCasualties, previousDefenderCasualties, roundNumber, groupedToDefenderRolls]);
+  }, [onStartRound, casualtyPriorityPill, mustConquerPill, animateDiceReveals, previousAttackerCasualties, previousDefenderCasualties, roundNumber, groupedToDefenderRolls, computeEliminatedStacksFromRound]);
 
   // Continue = start next round (merge this round's casualties then roll)
   const handleContinue = useCallback(() => {
@@ -917,10 +1224,24 @@ function CombatDisplay({
             {currentRound?.isArcherPrefire && (
               <span className="round-indicator">Archers</span>
             )}
-            {roundNumber > 0 && !currentRound?.isArcherPrefire && (
+            {currentRound?.isStealthPrefire && (
+              <span className="round-indicator">Stealth</span>
+            )}
+            {roundNumber > 0 && !currentRound?.isArcherPrefire && !currentRound?.isStealthPrefire && (
               <span className="round-indicator">Round {roundNumber}</span>
             )}
           </div>
+          {readOnly && (
+            <button
+              type="button"
+              className="combat-modal-close-x"
+              onClick={handleClose}
+              title="Close"
+              aria-label="Close"
+            >
+              ×
+            </button>
+          )}
         </header>
 
         <div className="combat-arena">
@@ -941,6 +1262,9 @@ function CombatDisplay({
             currentRowKey={currentRowKey}
             isLanding={isLanding}
             showHits={showHits}
+            specials={specials}
+            casualtyPriorityLabel={casualtyPriorityPill === 'best_attack' ? 'Casualty Priority: Best Attack' : 'Casualty Priority: Best Unit'}
+            eliminatedStacks={previousEliminatedAttackerStacks}
           />
 
           <div className="vs-divider">
@@ -974,6 +1298,9 @@ function CombatDisplay({
             defenderRerolledIndicesByStat={(terrorRerollPhase === 'initial' || terrorRerollPhase === 'rerolled') ? terrorRerolledIndicesByStat : undefined}
             defenderRerolledDiceByStat={terrorRerollPhase === 'rerolled' ? terrorRerolledDiceByStat : undefined}
             showRerollX={showTerrorRerollX}
+            specials={specials}
+            casualtyPriorityLabel={casualtyPriorityDefender === 'best_defense' ? 'Casualty Priority: Best Defense' : 'Casualty Priority: Best Unit'}
+            eliminatedStacks={previousEliminatedDefenderStacks}
           />
         </div>
 
@@ -999,8 +1326,12 @@ function CombatDisplay({
 
         <footer className="modal-footer">
           <div className="combat-actions">
+            {/* Read-only (spectator): no action buttons */}
+            {readOnly && (
+              <span className="combat-spectator-label">Spectating</span>
+            )}
             {/* Initial: Close (tan) + Start (red) */}
-            {showInitialButtons && (
+            {!readOnly && showInitialButtons && (
               <>
                 <button type="button" className="combat-btn-close" onClick={handleCancel}>
                   Close
@@ -1012,7 +1343,7 @@ function CombatDisplay({
             )}
 
             {/* After round: Retreat (red, disabled until attackers have rolled) + Continue (tan) */}
-            {showDecisionButtons && (
+            {!readOnly && showDecisionButtons && (
               <>
                 <button
                   type="button"
@@ -1029,8 +1360,56 @@ function CombatDisplay({
               </>
             )}
 
+            {/* Attacker options: casualty priority + must conquer (bottom right, same row) */}
+            {!readOnly && (showInitialButtons || showDecisionButtons) && (
+              <div className="combat-options-pills">
+                <div className="combat-options-row">
+                  <div className="combat-pill-group">
+                    <button
+                      type="button"
+                      className={`combat-pill combat-pill--segmented-left${casualtyPriorityPill === 'best_unit' ? ' combat-pill--active' : ''}`}
+                      onClick={() => setCasualtyPriorityPill('best_unit')}
+                      title="Lose cheap/weak units first (cost then attack)"
+                    >
+                      Best Unit
+                    </button>
+                    <button
+                      type="button"
+                      className={`combat-pill combat-pill--segmented-right${casualtyPriorityPill === 'best_attack' ? ' combat-pill--active' : ''}`}
+                      onClick={() => setCasualtyPriorityPill('best_attack')}
+                      title="Prioritize attack value (lose low attack first)"
+                    >
+                      Best Attack
+                    </button>
+                  </div>
+                  <span className="combat-options-field-label">Casualty Priority</span>
+                </div>
+                <div className="combat-options-row">
+                  <div className="combat-pill-group">
+                    <button
+                      type="button"
+                      className={`combat-pill combat-pill--segmented-left${!mustConquerPill ? ' combat-pill--active' : ''}`}
+                      onClick={() => setMustConquerPill(false)}
+                      title="Aerial may survive last"
+                    >
+                      Off
+                    </button>
+                    <button
+                      type="button"
+                      className={`combat-pill combat-pill--segmented-right${mustConquerPill ? ' combat-pill--active' : ''}`}
+                      onClick={() => setMustConquerPill(true)}
+                      title="Kill aerial before last ground unit so a ground unit can conquer"
+                    >
+                      On
+                    </button>
+                  </div>
+                  <span className="combat-options-field-label">Must conquer</span>
+                </div>
+              </div>
+            )}
+
             {/* Retreat confirmation */}
-            {showRetreatConfirm && (
+            {!readOnly && showRetreatConfirm && (
               <div className="retreat-confirm">
                 <p className="confirm-message">Are you sure you want to retreat? Your surviving units will flee the battle.</p>
                 <div className="confirm-buttons">
@@ -1043,7 +1422,7 @@ function CombatDisplay({
             )}
 
             {/* Retreat territory selection */}
-            {showRetreatSelection && (
+            {!readOnly && showRetreatSelection && (
               <div className="retreat-selection">
                 <p className="selection-message">Select a territory to retreat to:</p>
                 <div className="retreat-options">
@@ -1064,7 +1443,7 @@ function CombatDisplay({
             )}
 
             {/* Combat over - Close */}
-            {showCloseButton && (
+            {!readOnly && showCloseButton && (
               <button type="button" className="combat-btn-close" onClick={handleClose}>
                 Close
               </button>

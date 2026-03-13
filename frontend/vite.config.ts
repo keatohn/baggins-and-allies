@@ -34,11 +34,13 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true, // Fail if 5173 is in use so you always use the same URL
+    // Single /api proxy so path /games (SPA route) is not forwarded; only /api/* hits the backend (with header).
     proxy: {
-      '/games': { target: 'http://localhost:8000', changeOrigin: true },
-      '/auth': { target: 'http://localhost:8000', changeOrigin: true },
-      '/definitions': { target: 'http://localhost:8000', changeOrigin: true },
-      '/setups': { target: 'http://localhost:8000', changeOrigin: true },
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
     },
   },
 })

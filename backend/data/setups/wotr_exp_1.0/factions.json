@@ -1,0 +1,74 @@
+{
+    "mordor": {
+        "id": "mordor",
+        "display_name": "Mordor",
+        "alliance": "evil",
+        "capital": "barad_dur",
+        "color": "#8b2500",
+        "icon": "mordor.png"
+    },
+    "isengard": {
+        "id": "isengard",
+        "display_name": "Isengard",
+        "alliance": "evil",
+        "capital": "isengard",
+        "color": "#2a2a2a",
+        "icon": "isengard.png"
+    },
+    "gondor": {
+        "id": "gondor",
+        "display_name": "Gondor",
+        "alliance": "good",
+        "capital": "minas_tirith",
+        "color": "#265399",
+        "icon": "gondor.png"
+    },
+    "rohan": {
+        "id": "rohan",
+        "display_name": "Rohan",
+        "alliance": "good",
+        "capital": "edoras",
+        "color": "#c9a227",
+        "icon": "rohan.png"
+    },
+    "elves": {
+        "id": "elves",
+        "display_name": "Elves",
+        "alliance": "good",
+        "capital": "rivendell",
+        "color": "#2d5a27",
+        "icon": "elves.png"
+    },
+    "erebor": {
+        "id": "erebor",
+        "display_name": "Erebor",
+        "alliance": "good",
+        "capital": "erebor",
+        "color": "#9c6b2e",
+        "icon": "erebor.png"
+    },
+    "harad": {
+        "id": "harad",
+        "display_name": "Harad",
+        "alliance": "evil",
+        "capital": "haradwaith",
+        "color": "#b85a22",
+        "icon": "harad.png"
+    },
+    "rhun": {
+        "id": "rhun",
+        "display_name": "Rhûn",
+        "alliance": "evil",
+        "capital": "dorwinion",
+        "color": "#722f37",
+        "icon": "rhun.png"
+    },
+    "neutral": {
+        "id": "neutral",
+        "display_name": "Neutral",
+        "alliance": "neutral",
+        "capital": "None",
+        "color": "#888888",
+        "icon": "neutral.png"
+    }
+}

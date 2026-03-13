@@ -55,6 +55,71 @@
   color: var(--ink);
 }
 
+.create-game-form__hint {
+  font-size: 0.9rem;
+  color: var(--ink-faded);
+  margin: 0;
+}
+
+.create-game-form__scenarios {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.create-game-form__scenario {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.95rem;
+  text-align: left;
+  color: var(--ink-faded);
+  background: var(--parchment-dark, #e8e0d0);
+  border: 2px solid var(--ink-faded);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.create-game-form__scenario:hover {
+  color: var(--ink);
+  border-color: var(--gold-dark, #8b7355);
+}
+
+.create-game-form__scenario--active {
+  color: var(--ink);
+  background: var(--parchment);
+  border-color: var(--gold-dark, #8b7355);
+  box-shadow: inset 0 0 0 2px rgba(139, 115, 85, 0.2);
+}
+
+.create-game-form__scenario-name {
+  font-weight: 600;
+}
+
+.create-game-form__scenario-context {
+  font-size: 0.75rem;
+  color: var(--ink-faded);
+}
+
+.create-game-form__scenario--active .create-game-form__scenario-context {
+  color: var(--ink);
+}
+
+.create-game-form__scenario-factions {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.6rem;
+  font-family: var(--font-parchment);
+  color: var(--ink-faded);
+}
+
+.create-game-form__scenario--active .create-game-form__scenario-factions {
+  color: var(--ink);
+}
+
 .create-game-form__picker {
   display: flex;
   border: 2px solid var(--ink-faded);

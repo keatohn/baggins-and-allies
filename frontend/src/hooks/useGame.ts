@@ -25,7 +25,7 @@ export interface UseGameReturn {
   loadGame: (gameId: string) => Promise<void>;
   purchase: (purchases: Record<string, number>) => Promise<void>;
   move: (from: string, to: string, unitIds: string[]) => Promise<void>;
-  initiateCombat: (territoryId: string) => Promise<void>;
+  initiateCombat: (territoryId: string, seaZoneId?: string) => Promise<void>;
   continueCombat: () => Promise<void>;
   retreat: (retreatTo: string) => Promise<void>;
   mobilize: (destination: string, units: { unit_id: string; count: number }[]) => Promise<void>;
@@ -130,13 +130,13 @@ export function useGame(): UseGameReturn {
     }
   }, [gameId, handleActionResponse]);
 
-  // Initiate combat
-  const initiateCombat = useCallback(async (territoryId: string) => {
+  // Initiate combat (seaZoneId for sea raid: attackers in sea zone, territoryId = land target)
+  const initiateCombat = useCallback(async (territoryId: string, seaZoneId?: string) => {
     if (!gameId) return;
     setIsLoading(true);
     setError(null);
     try {
-      const response = await api.initiateCombat(gameId, territoryId);
+      const response = await api.initiateCombat(gameId, territoryId, seaZoneId);
       handleActionResponse(response, gameId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Combat initiation failed');

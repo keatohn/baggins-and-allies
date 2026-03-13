@@ -4,7 +4,7 @@
 
 const API_BASE =
   import.meta.env.VITE_API_URL ??
-  (import.meta.env.DEV ? '' : 'http://localhost:8000');
+  (import.meta.env.DEV ? '/api' : 'http://localhost:8000');
 
 const AUTH_TOKEN_KEY = 'baggins_auth_token';
 
@@ -37,6 +37,8 @@ export interface ApiPendingMove {
   to_territory: string;
   unit_instance_ids: string[];
   phase: string;
+  /** "load" | "offload" | "sail" for sea transport; omitted for normal moves */
+  move_type?: string | null;
 }
 
 export interface ApiPendingMobilization {
@@ -86,6 +88,8 @@ export interface ApiGameState {
   pending_camp_placements?: { camp_index: number; territory_id: string }[];
   /** Placed purchased camps: camp_id (e.g. purchased_camp_<territory_id>) -> territory_id. Used to show camp icon on map. */
   dynamic_camps?: Record<string, string>;
+  /** Defender casualty order per territory: "best_unit" | "best_defense". */
+  territory_defender_casualty_order?: Record<string, string>;
 }
 
 export interface ApiTerritory {
@@ -101,6 +105,8 @@ export interface ApiUnit {
   remaining_health: number;
   base_movement: number;
   base_health: number;
+  /** Sea transport: instance_id of naval unit carrying this unit (only for land units in sea). */
+  loaded_onto?: string | null;
 }
 
 export interface ApiUnitStack {
@@ -151,6 +157,9 @@ export interface ActionResponse {
   events: ApiEvent[];
   /** True if the authenticated player can still perform actions (their faction's turn). */
   can_act?: boolean;
+  /** When moving sea->land with multiple valid offload sea zones: client must resubmit with offload_sea_zone_id. */
+  need_offload_sea_choice?: boolean;
+  valid_offload_sea_zones?: string[];
   dice_rolls?: {
     attacker: number[];
     defender: number[];
@@ -167,6 +176,12 @@ export interface AvailableActionsResponse {
   purchasable_units?: ApiPurchasableUnit[];
   /** Max units that can be mobilized this turn (purchase phase). Total purchased cannot exceed this. */
   mobilization_capacity?: number;
+  /** Land mobilization capacity (camps + home slots). Land units purchased cannot exceed this. */
+  mobilization_land_capacity?: number;
+  /** Land capacity from camps only (excl. home). Used with cart to show denominator = camp + home slots from cart. */
+  mobilization_camp_land_capacity?: number;
+  /** Sea mobilization capacity (port-adjacent sea zones). Naval units purchased cannot exceed this. */
+  mobilization_sea_capacity?: number;
   /** Units already purchased this turn (purchase phase). */
   purchased_units_count?: number;
   /** Power cost to purchase one camp (0 = camps not purchasable). */
@@ -174,7 +189,11 @@ export interface AvailableActionsResponse {
   moveable_units?: ApiMoveableUnit[];
   /** Aerial units in enemy territory that must move to friendly before ending non-combat move phase. */
   aerial_units_must_move?: { territory_id: string; unit_id: string; instance_id: string }[];
+  /** Boat instance IDs that received a load this combat move and must attack before ending phase (per boat, not per sea zone). */
+  loaded_naval_must_attack_instance_ids?: string[];
   combat_territories?: ApiCombatTerritory[];
+  /** Sea raid options: land territories attackable from a friendly sea zone (no enemies there). */
+  sea_raid_targets?: { territory_id: string; sea_zone_id: string }[];
   active_combat?: ApiActiveCombat;
   retreat_options?: ApiRetreatOptions;
   mobilize_options?: ApiMobilizeOptions;
@@ -209,6 +228,8 @@ export interface ApiCombatTerritory {
   territory_id: string;
   attacker_count: number;
   defender_count: number;
+  attacker_unit_ids?: string[];
+  defender_unit_ids?: string[];
 }
 
 export interface ApiRetreatOptions {
@@ -217,11 +238,17 @@ export interface ApiRetreatOptions {
 }
 
 export interface ApiMobilizeOptions {
-  /** Territory IDs where faction can mobilize (owned territories with a camp). Backend sends "territories". */
+  /** Territory IDs where faction can mobilize land units (owned territories with a camp). */
   territories?: string[];
+  /** Sea zone IDs where faction can mobilize naval units (adjacent to an owned port). */
+  sea_zones?: string[];
   available_strongholds?: string[];
   pending_units: ApiUnitStack[];
-  capacity?: { total_capacity: number; territories: { territory_id: string; power: number }[] };
+  capacity?: {
+    total_capacity: number;
+    territories: { territory_id: string; power: number }[];
+    sea_zones?: { sea_zone_id: string; power: number }[];
+  };
   total_capacity?: number;
 }
 
@@ -230,11 +257,28 @@ export interface ApiCampDefinition {
   territory_id: string;
 }
 
+export interface ApiPortDefinition {
+  id: string;
+  territory_id: string;
+}
+
+export interface SpecialDefinition {
+  name: string;
+  description: string;
+  /** Short code shown in combat modal when this special is active (e.g. T, M, FR). */
+  display_code?: string;
+}
+
 export interface Definitions {
   units: Record<string, ApiUnitDefinition>;
   territories: Record<string, ApiTerritoryDefinition>;
   factions: Record<string, ApiFactionDefinition>;
   camps?: Record<string, ApiCampDefinition>;
+  ports?: Record<string, ApiPortDefinition>;
+  /** Unit special ability definitions (setup-specific). Key = special id. */
+  specials?: Record<string, SpecialDefinition>;
+  /** Display order for specials in the Specials modal. */
+  specials_order?: string[];
 }
 
 export interface ApiUnitDefinition {
@@ -255,6 +299,10 @@ export interface ApiUnitDefinition {
   transport_capacity?: number;
   downgrade_to?: string | null;
   specials?: string[];
+  /** Single home territory (backward compat). */
+  home_territory_id?: string | null;
+  /** Multiple home territories (deploy 1 per territory per mobilization). */
+  home_territory_ids?: string[] | null;
 }
 
 export interface ApiTerritoryDefinition {
@@ -309,12 +357,15 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const token = getAuthToken();
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
+  const mergedHeaders = { ...(options?.headers as Record<string, string>), ...headers };
   const response = await fetch(`${API_BASE}${url}`, {
     ...options,
-    headers: { ...headers, ...(options?.headers as Record<string, string>) },
+    credentials: 'include',
+    headers: mergedHeaders,
   });
 
   if (!response.ok) {
+    if (response.status === 401) setAuthToken(null);
     const text = await response.text();
     let message = response.statusText;
     try {
@@ -353,7 +404,15 @@ export interface GameMeta {
   game_code: string | null;
   status: string;
   created_at: string | null;
+  /** Host (creator) player id; only they can start the game. */
+  created_by?: string | null;
   players: { player_id: string; faction_id: string | null }[];
+  /** Lobby only: faction_id -> player_id (who claimed each faction). */
+  lobby_claims?: Record<string, string>;
+  /** Lobby: player_id -> username for display. */
+  player_usernames?: Record<string, string>;
+  /** Lobby: scenario chosen at create (display_name + context from manifest). */
+  scenario?: { display_name: string; context?: Record<string, unknown> } | null;
 }
 
 export interface GameListItem {
@@ -362,6 +421,8 @@ export interface GameListItem {
   game_code: string | null;
   status: string;
   created_at: string | null;
+  /** Host (creator) player id; only they can delete the game. */
+  created_by?: string | null;
   turn_number?: number | null;
   phase?: string | null;
   current_faction?: string | null;
@@ -370,6 +431,25 @@ export interface GameListItem {
   current_player_username?: string | null;
   /** Same as in-game header: alliances + neutral_strongholds for the list stronghold bar. */
   faction_stats?: ApiFactionStats | null;
+  /** Lobby only: number of players in the game. */
+  lobby_players?: number | null;
+  /** Lobby only: number of factions claimed. */
+  lobby_factions_claimed?: number | null;
+  /** Lobby only: total factions (turn order length). */
+  lobby_factions_total?: number | null;
+}
+
+/** Setup/scenario from GET /setups (manifest id, display_name, map_asset, optional context for UX). */
+export interface SetupInfo {
+  id: string;
+  display_name: string;
+  map_asset: string;
+  context?: {
+    year?: string;
+    map?: string;
+    faction_count?: number;
+    factions?: string[];
+  };
 }
 
 async function authFetchJson<T>(url: string, body: object): Promise<T> {
@@ -415,6 +495,8 @@ export const api = {
   authMe: () => fetchJson<AuthPlayer>('/auth/me'),
 
   // Games (create, list, join)
+  getSetups: () =>
+    fetchJson<{ setups: SetupInfo[] }>('/setups'),
   createGame: (name: string, isMultiplayer: boolean, setupId?: string) =>
     fetchJson<{ game_id: string; game_code: string | null; name: string; state?: ApiGameState; turn_order?: string[] }>('/games/create', {
       method: 'POST',
@@ -432,6 +514,19 @@ export const api = {
       body: JSON.stringify({ game_code: gameCode.trim().toUpperCase() }),
     }),
   getGameMeta: (gameId: string) => fetchJson<GameMeta>(`/games/${gameId}/meta`),
+  claimFaction: (gameId: string, factionId: string, claim: boolean) =>
+    fetchJson<{ lobby_claims: Record<string, string> }>(`/games/${gameId}/claim-faction`, {
+      method: 'POST',
+      body: JSON.stringify({ faction_id: factionId, claim }),
+    }),
+  startGame: (gameId: string) =>
+    fetchJson<{ message: string; status: string }>(`/games/${gameId}/start`, {
+      method: 'POST',
+    }),
+  forfeitGame: (gameId: string) =>
+    fetchJson<{ message: string }>(`/games/${gameId}/forfeit`, {
+      method: 'POST',
+    }),
 
   // Get static definitions
   getDefinitions: () => fetchJson<Definitions>('/definitions'),
@@ -490,17 +585,52 @@ export const api = {
     }),
 
   // Move units (declares a pending move). chargeThrough for cavalry charging (empty enemy territories to conquer).
-  move: (gameId: string, fromTerritory: string, toTerritory: string, unitInstanceIds: string[], chargeThrough?: string[]) =>
-    fetchJson<ActionResponse>(`/games/${gameId}/move`, {
+  // loadOntoBoatInstanceId: when loading to sea, assign passengers only to this boat.
+  // offloadSeaZoneId: when moving sea->land and multiple sea zones can offload, send the chosen one (after need_offload_sea_choice).
+  move: (gameId: string, fromTerritory: string, toTerritory: string, unitInstanceIds: string[], chargeThrough?: string[], loadOntoBoatInstanceId?: string | null, offloadSeaZoneId?: string | null) => {
+    const ids = Array.from(unitInstanceIds, (id: unknown) =>
+      typeof id === 'string' ? id : (id != null && typeof id === 'object' && 'instance_id' in id ? String((id as { instance_id: unknown }).instance_id) : '')
+    ).filter(Boolean);
+    const toStr =
+      typeof toTerritory === 'string'
+        ? toTerritory
+        : toTerritory != null && typeof toTerritory === 'object'
+          ? String((toTerritory as { territoryId?: string; id?: string; territory_id?: string }).territoryId ?? (toTerritory as { id?: string }).id ?? (toTerritory as { territory_id?: string }).territory_id ?? '')
+          : '';
+    const fromStr =
+      typeof fromTerritory === 'string'
+        ? fromTerritory
+        : fromTerritory != null && typeof fromTerritory === 'object'
+          ? String((fromTerritory as { territoryId?: string; id?: string }).territoryId ?? (fromTerritory as { id?: string }).id ?? '')
+          : '';
+    const safeFrom = (typeof fromStr === 'string' && fromStr && fromStr !== '[object Object]') ? fromStr : (typeof fromTerritory === 'string' && fromTerritory !== '[object Object]' ? fromTerritory : '');
+    const safeTo = (typeof toStr === 'string' && toStr && toStr !== '[object Object]') ? toStr : (typeof toTerritory === 'string' && toTerritory !== '[object Object]' ? toTerritory : '');
+    if (!safeTo.trim()) {
+      throw new Error('No destination specified');
+    }
+    if (!safeFrom.trim()) {
+      throw new Error('No origin specified');
+    }
+    const body: Record<string, unknown> = {
+      game_id: String(gameId),
+      from_territory: safeFrom,
+      to_territory: safeTo,
+      unit_instance_ids: ids,
+    };
+    if (chargeThrough && chargeThrough.length > 0) {
+      body.charge_through = Array.from(chargeThrough, (s: unknown) => typeof s === 'string' ? s : String(s));
+    }
+    if (loadOntoBoatInstanceId != null && loadOntoBoatInstanceId !== '') {
+      body.load_onto_boat_instance_id = String(loadOntoBoatInstanceId);
+    }
+    if (offloadSeaZoneId != null && offloadSeaZoneId !== '') {
+      body.offload_sea_zone_id = String(offloadSeaZoneId);
+    }
+    return fetchJson<ActionResponse>(`/games/${gameId}/move`, {
       method: 'POST',
-      body: JSON.stringify({
-        game_id: gameId,
-        from_territory: fromTerritory,
-        to_territory: toTerritory,
-        unit_instance_ids: unitInstanceIds,
-        ...(chargeThrough && chargeThrough.length > 0 ? { charge_through: chargeThrough } : {}),
-      }),
-    }),
+      body: JSON.stringify(body),
+    });
+  },
   
   // Cancel a pending move
   cancelMove: (gameId: string, moveIndex: number) =>
@@ -515,20 +645,35 @@ export const api = {
       body: JSON.stringify({ game_id: gameId, mobilization_index: mobilizationIndex }),
     }),
   
-  // Initiate combat
-  initiateCombat: (gameId: string, territoryId: string) =>
+  // Initiate combat (seaZoneId required for sea raid: attackers in sea zone, target = territoryId land)
+  initiateCombat: (gameId: string, territoryId: string, seaZoneId?: string) =>
     fetchJson<ActionResponse>(`/games/${gameId}/combat/initiate`, {
       method: 'POST',
-      body: JSON.stringify({ game_id: gameId, territory_id: territoryId }),
+      body: JSON.stringify({
+        game_id: gameId,
+        territory_id: territoryId,
+        ...(seaZoneId != null && seaZoneId !== '' && { sea_zone_id: seaZoneId }),
+      }),
     }),
   
-  // Continue combat
-  continueCombat: (gameId: string) =>
+  // Continue combat (optional casualty_order: "best_unit" | "best_attack", must_conquer: boolean)
+  continueCombat: (gameId: string, options?: { casualty_order?: string; must_conquer?: boolean }) =>
     fetchJson<ActionResponse>(`/games/${gameId}/combat/continue`, {
       method: 'POST',
-      body: JSON.stringify({ game_id: gameId }),
+      body: JSON.stringify({
+        game_id: gameId,
+        ...(options?.casualty_order != null && { casualty_order: options.casualty_order }),
+        ...(options?.must_conquer != null && { must_conquer: options.must_conquer }),
+      }),
     }),
   
+  // Set defender casualty order for a territory (owner only, any phase)
+  setTerritoryDefenderCasualtyOrder: (gameId: string, territoryId: string, casualtyOrder: string) =>
+    fetchJson<ActionResponse>(`/games/${gameId}/set-territory-defender-casualty-order`, {
+      method: 'POST',
+      body: JSON.stringify({ game_id: gameId, territory_id: territoryId, casualty_order: casualtyOrder }),
+    }),
+
   // Retreat from combat
   retreat: (gameId: string, retreatTo: string) =>
     fetchJson<ActionResponse>(`/games/${gameId}/combat/retreat`, {
@@ -553,6 +698,13 @@ export const api = {
   // End turn
   endTurn: (gameId: string) =>
     fetchJson<ActionResponse>(`/games/${gameId}/end-turn`, {
+      method: 'POST',
+      body: JSON.stringify({ game_id: gameId }),
+    }),
+
+  /** Force end current faction's turn (advances to next; empty factions get turn_skipped). Used by forfeit when player leaves on their turn. Remove only the Skip Turn button for production; keep this endpoint. */
+  skipTurn: (gameId: string) =>
+    fetchJson<ActionResponse>(`/games/${gameId}/skip-turn`, {
       method: 'POST',
       body: JSON.stringify({ game_id: gameId }),
     }),

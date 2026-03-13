@@ -23,9 +23,8 @@
   flex-direction: column;
 }
 
-/* Purchase modal specific */
 .purchase-modal {
-  width: 500px;
+  width: 560px;
 }
 
 .purchase-modal-tabs {

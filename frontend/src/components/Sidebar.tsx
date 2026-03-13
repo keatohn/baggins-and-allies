@@ -18,12 +18,14 @@ interface SidebarProps {
     produces: number;
     adjacent: string[];
     hasCamp?: boolean;
+    hasPort?: boolean;
     isCapital?: boolean;
+    ownable?: boolean;
   }>;
   territoryUnits: Record<string, { unit_id: string; count: number }[]>;
   /** When non-combat move and a territory is selected: stacks grouped by (unit_id, remaining_movement) for that territory */
   territoryUnitStacksWithMovement?: { unit_id: string; remaining_movement: number; count: number }[] | null;
-  unitDefs: Record<string, { name: string; icon: string; faction?: string }>;
+  unitDefs: Record<string, { name: string; icon: string; faction?: string; home_territory_id?: string; home_territory_ids?: string[]; cost?: number }>;
   factionData: Record<string, { name: string; icon: string; color: string; alliance: string; capital?: string }>;
   eventLog: GameEvent[];
   onEndPhase: () => void;
@@ -36,11 +38,21 @@ interface SidebarProps {
   endPhaseDisabledReason?: string;
   onConfirmEndPhase?: () => void;
   onCancelEndPhase?: () => void;
+  /** TEMPORARY DEV: Skip current faction's turn. Remove only the button before release; endpoint is used by forfeit. */
+  onSkipTurn?: () => void;
   pendingMoveConfirm?: PendingMoveConfirm | null;
   onUpdateMoveCount?: (count: number) => void;
   onConfirmMove?: () => void;
   onCancelMove?: () => void;
   onChooseChargePath?: (path: string[]) => void;
+  /** When sea raid and land is adjacent to multiple sea zones: pick which sea zone to conduct the raid from (after Confirm Sea Raid). */
+  onChooseSeaRaidSeaZone?: (seaZoneId: string) => void;
+  /** When user clicks Confirm Sea Raid but multiple sea zones exist: show zone picker (do not submit yet). */
+  onRequestSeaRaidZoneChoice?: () => void;
+  /** When backend returns need_offload_sea_choice: user must pick which sea zone to sail to. */
+  pendingOffloadSeaChoice?: { from: string; to: string; unitInstanceIds: string[]; validSeaZones: string[] } | null;
+  onChooseOffloadSeaZone?: (seaZoneId: string) => void;
+  onCancelOffloadSeaChoice?: () => void;
   onCancelPendingMove?: (moveId: string) => void;
   pendingMobilization?: PendingMobilization | null;
   onUpdateMobilizationCount?: (count: number) => void;
@@ -67,6 +79,16 @@ interface SidebarProps {
   onCancelQueuedCampPlacement?: (placementIndex: number) => void;
   /** Non-combat move: aerial units that must move to friendly territory before phase can end. */
   aerialUnitsMustMove?: { territory_id: string; unit_id: string; instance_id: string }[];
+  /** Defender casualty order per territory (from backend). Shown when selected territory is owned by current faction. */
+  territoryDefenderCasualtyOrder?: Record<string, string>;
+  /** Set defender casualty order for a territory (owner only). */
+  onSetTerritoryDefenderCasualtyOrder?: (territoryId: string, casualtyOrder: 'best_unit' | 'best_defense') => void;
+  /** When !canAct and phase is combat: which battle is currently in progress (territory_id; optional sea_zone_id for sea raids). */
+  activeCombatTerritoryId?: string | null;
+  /** Optional sea_zone_id of active combat (for sea raids). */
+  activeCombatSeaZoneId?: string | null;
+  /** Spectator clicks a battle to view it (only active battle is openable). */
+  onSpectateBattle?: (battle: DeclaredBattle) => void;
 }
 
 // Phase-specific action configurations
@@ -117,11 +139,17 @@ function Sidebar({
   endPhaseDisabledReason,
   onConfirmEndPhase,
   onCancelEndPhase,
+  onSkipTurn,
   pendingMoveConfirm,
   onUpdateMoveCount,
   onConfirmMove,
   onCancelMove,
   onChooseChargePath,
+  onChooseSeaRaidSeaZone,
+  onRequestSeaRaidZoneChoice: _onRequestSeaRaidZoneChoice,
+  pendingOffloadSeaChoice,
+  onChooseOffloadSeaZone,
+  onCancelOffloadSeaChoice,
   onCancelPendingMove,
   pendingMobilization,
   onUpdateMobilizationCount,
@@ -142,6 +170,11 @@ function Sidebar({
   pendingCampPlacements = [],
   onCancelQueuedCampPlacement,
   aerialUnitsMustMove = [],
+  territoryDefenderCasualtyOrder = {},
+  onSetTerritoryDefenderCasualtyOrder,
+  activeCombatTerritoryId = null,
+  activeCombatSeaZoneId = null,
+  onSpectateBattle,
 }: SidebarProps) {
   const territory = selectedTerritory ? territoryData[selectedTerritory] : null;
   const units = selectedTerritory ? territoryUnits[selectedTerritory] || [] : [];
@@ -177,8 +210,34 @@ function Sidebar({
             ))
           )}
 
+          {/* Backend asked for offload sea zone choice (multiple valid sea zones) */}
+          {pendingOffloadSeaChoice && pendingOffloadSeaChoice.validSeaZones.length > 0 && (
+            <div className="move-confirm">
+              <h3>{gameState.phase === 'non_combat_move' ? 'Offload' : 'Sea Raid'}</h3>
+              <p className="move-details">
+                <span className="move-route">
+                  {territoryData[pendingOffloadSeaChoice.from]?.name || pendingOffloadSeaChoice.from} → {territoryData[pendingOffloadSeaChoice.to]?.name || pendingOffloadSeaChoice.to}
+                </span>
+              </p>
+              <p className="charge-path-prompt">Choose which sea zone to sail to (then offload):</p>
+              <div className="charge-path-options">
+                {pendingOffloadSeaChoice.validSeaZones.map((seaZoneId) => (
+                  <button
+                    key={seaZoneId}
+                    type="button"
+                    className="charge-path-btn"
+                    onClick={() => onChooseOffloadSeaZone?.(seaZoneId)}
+                  >
+                    {territoryData[seaZoneId]?.name || seaZoneId}
+                  </button>
+                ))}
+              </div>
+              <button type="button" className="cancel-move-btn" onClick={onCancelOffloadSeaChoice}>Cancel</button>
+            </div>
+          )}
+
           {/* Pending move confirmation with +/- controls */}
-          {pendingMoveConfirm && (
+          {pendingMoveConfirm && !pendingOffloadSeaChoice && (
             <div className="move-confirm">
               {pendingMoveConfirm.chargePathOptions && pendingMoveConfirm.chargePathOptions.length > 1 ? (
                 <>
@@ -193,7 +252,7 @@ function Sidebar({
                       const fromId = pendingMoveConfirm!.fromTerritory;
                       const fromAdjacent = territoryData[fromId]?.adjacent?.includes(toId);
                       const seen = new Set<string>();
-                      return pendingMoveConfirm.chargePathOptions
+                      return pendingMoveConfirm.chargePathOptions!
                         .map((path) => path.filter((tid) => tid !== toId))
                         .filter((path) => {
                           if (path.length > 0) return true;
@@ -221,45 +280,98 @@ function Sidebar({
                   </div>
                   <button className="cancel-move-btn" onClick={onCancelMove}>Cancel</button>
                 </>
-              ) : (
+              ) : (() => {
+                const fromTerrain = territoryData[pendingMoveConfirm.fromTerritory]?.terrain;
+                const toTerrain = territoryData[pendingMoveConfirm.toTerritory]?.terrain;
+                const fromSea = fromTerrain === 'sea' || /^sea_zone\d*$/i.test(pendingMoveConfirm.fromTerritory);
+                const toSea = toTerrain === 'sea' || /^sea_zone\d*$/i.test(pendingMoveConfirm.toTerritory);
+                const isLoad = !fromSea && toSea;
+                const isOffload = fromSea && !toSea && gameState.phase === 'non_combat_move';
+                const isSail = fromSea && toSea;
+                const isSeaRaid = fromSea && !toSea && gameState.phase === 'combat_move';
+                const multipleSeaZones = (isSeaRaid || isOffload) && (pendingMoveConfirm.seaRaidSeaZoneOptions?.length ?? 0) > 1;
+                return multipleSeaZones ? (
+                  <>
+                    <h3>{gameState.phase === 'non_combat_move' ? 'Offload' : 'Sea Raid'}</h3>
+                    <p className="move-details">
+                      <span className="unit-name">{pendingMoveConfirm.unitDef?.name || pendingMoveConfirm.unitId}</span>
+                      <br />
+                      <span className="move-route">
+                        → {territoryData[pendingMoveConfirm.toTerritory]?.name || pendingMoveConfirm.toTerritory}
+                      </span>
+                    </p>
+                    <p className="charge-path-prompt">
+                      {gameState.phase === 'non_combat_move' ? 'Choose which sea zone to sail to (then offload):' : 'Choose which sea zone to conduct the raid from:'}
+                    </p>
+                    <div className="charge-path-options">
+                      {pendingMoveConfirm.seaRaidSeaZoneOptions!.map((seaZoneId) => (
+                        <button
+                          key={seaZoneId}
+                          type="button"
+                          className="charge-path-btn"
+                          onClick={() => onChooseSeaRaidSeaZone?.(seaZoneId)}
+                        >
+                          {territoryData[seaZoneId]?.name || seaZoneId}
+                        </button>
+                      ))}
+                    </div>
+                    <button className="cancel-move-btn" onClick={onCancelMove}>Cancel</button>
+                  </>
+                ) : (
                 <>
-              <h3>{gameState.phase === 'combat_move' ? 'Confirm Attack' : 'Confirm Move'}</h3>
-              <p className="move-details">
-                <span className="unit-name">{pendingMoveConfirm.unitDef?.name || pendingMoveConfirm.unitId}</span>
-                <br />
-                <span className="move-route">
-                  {territoryData[pendingMoveConfirm.fromTerritory]?.name} → {territoryData[pendingMoveConfirm.toTerritory]?.name}
-                </span>
-              </p>
-              <div className="count-controls">
-                <button
-                  className="count-btn minus"
-                  onClick={() => onUpdateMoveCount?.(Math.max(1, pendingMoveConfirm.count - 1))}
-                  disabled={pendingMoveConfirm.count <= 1}
-                >
-                  −
-                </button>
-                <span className="count-value">{pendingMoveConfirm.count}</span>
-                <button
-                  className="count-btn plus"
-                  onClick={() => onUpdateMoveCount?.(Math.min(pendingMoveConfirm.maxCount, pendingMoveConfirm.count + 1))}
-                  disabled={pendingMoveConfirm.count >= pendingMoveConfirm.maxCount}
-                >
-                  +
-                </button>
-              </div>
-              <p className="max-hint">Max: {pendingMoveConfirm.maxCount}</p>
-              <div className="move-confirm-buttons">
-                <button
-                  className={gameState.phase === 'combat_move' ? 'attack-btn' : 'confirm-move-btn'}
-                  onClick={onConfirmMove}
-                >
-                  {gameState.phase === 'combat_move' ? 'Attack' : 'Move'}
-                </button>
-                <button className="cancel-move-btn" onClick={onCancelMove}>Cancel</button>
-              </div>
+              {(() => {
+                const isAttack = gameState.phase === 'combat_move' && (isLoad ? false : (!fromSea && !toSea) || (fromSea && !toSea));
+                const isNavalMove = isLoad || isOffload || isSail;
+                const confirmTitle = isLoad ? 'Confirm Load' : isOffload ? 'Confirm Offload' : isSail ? 'Confirm Sail' : isSeaRaid ? 'Confirm Sea Raid' : isAttack ? 'Confirm Attack' : 'Confirm Move';
+                const buttonLabel = isLoad ? 'Load' : isOffload ? 'Offload' : isSail ? 'Sail' : isSeaRaid ? 'Sea Raid' : isAttack ? 'Attack' : 'Move';
+                const confirmBtnClass = isAttack ? 'attack-btn' : isNavalMove ? 'confirm-move-btn naval-move-btn' : 'confirm-move-btn';
+                const chosenZoneName = (isSeaRaid || isOffload) && pendingMoveConfirm.chosenSeaZoneId
+                  ? territoryData[pendingMoveConfirm.chosenSeaZoneId]?.name || pendingMoveConfirm.chosenSeaZoneId
+                  : null;
+                return (
+                  <>
+                    <h3>{confirmTitle}</h3>
+                    <p className="move-details">
+                      <span className="unit-name">{pendingMoveConfirm.unitDef?.name || pendingMoveConfirm.unitId}</span>
+                      <br />
+                      <span className="move-route">
+                        {territoryData[pendingMoveConfirm.fromTerritory]?.name}
+                        {chosenZoneName ? ` (via ${chosenZoneName})` : ''} → {territoryData[pendingMoveConfirm.toTerritory]?.name}
+                      </span>
+                    </p>
+                    <div className="count-controls">
+                      <button
+                        className="count-btn minus"
+                        onClick={() => onUpdateMoveCount?.(Math.max(1, pendingMoveConfirm.count - 1))}
+                        disabled={pendingMoveConfirm.count <= 1}
+                      >
+                        −
+                      </button>
+                      <span className="count-value">{pendingMoveConfirm.count}</span>
+                      <button
+                        className="count-btn plus"
+                        onClick={() => onUpdateMoveCount?.(Math.min(pendingMoveConfirm.maxCount, pendingMoveConfirm.count + 1))}
+                        disabled={pendingMoveConfirm.count >= pendingMoveConfirm.maxCount}
+                      >
+                        +
+                      </button>
+                    </div>
+                    <p className="max-hint">Max: {pendingMoveConfirm.maxCount}</p>
+                    <div className="move-confirm-buttons">
+                      <button
+                        className={confirmBtnClass}
+                        onClick={() => onConfirmMove?.()}
+                      >
+                        {buttonLabel}
+                      </button>
+                      <button className="cancel-move-btn" onClick={onCancelMove}>Cancel</button>
+                    </div>
+                  </>
+                );
+              })()}
                 </>
-              )}
+                );
+              })()}
             </div>
           )}
 
@@ -339,10 +451,19 @@ function Sidebar({
                     {moves.map(move => {
                       const unitDef = unitDefs[move.unitType];
                       const fromName = territoryData[move.from]?.name || move.from;
+                      const fromSea = territoryData[move.from]?.terrain === 'sea' || /^sea_zone\d*$/i.test(move.from);
+                      const toSea = territoryData[move.to]?.terrain === 'sea' || /^sea_zone\d*$/i.test(move.to);
+                      const isSeaRaidMove = fromSea && !toSea;
+                      const moveTypeLabel = move.move_type
+                        ? (isSeaRaidMove ? 'Sea Raid' : move.move_type.charAt(0).toUpperCase() + move.move_type.slice(1))
+                        : (isSeaRaidMove ? 'Sea Raid' : null);
                       return (
                         <div key={move.id} className="pending-move-item">
                           <span className="move-info">
                             {unitDef?.name || move.unitType} ({move.count}) from {fromName}
+                            {moveTypeLabel && (
+                              <span className="move-type-label" title={isSeaRaidMove ? 'Sea raid (sea unit attacking land)' : `Move type: ${move.move_type}`}> — {moveTypeLabel}</span>
+                            )}
                           </span>
                           <button
                             className="cancel-move-x"
@@ -386,6 +507,9 @@ function Sidebar({
                         <div key={move.id} className="pending-move-item">
                           <span className="move-info">
                             {unitDef?.name || move.unitType} ({move.count}) from {fromName}
+                            {move.move_type && (
+                              <span className="move-type-label" title={`Move type: ${move.move_type}`}> — {move.move_type.charAt(0).toUpperCase() + move.move_type.slice(1)}</span>
+                            )}
                           </span>
                           <button
                             className="cancel-move-x"
@@ -451,11 +575,11 @@ function Sidebar({
           {gameState.phase === 'combat' && gameState.declared_battles.length > 0 && (
             <div className="pending-battles">
               <h3>Battles</h3>
-              {gameState.declared_battles.map((battle, index) => {
+              {gameState.declared_battles.map((battle) => {
                 const territoryName = territoryData[battle.territory]?.name || battle.territory;
                 return (
                   <button
-                    key={index}
+                    key={battle.sea_zone_id ? `sea_${battle.sea_zone_id}_${battle.territory}` : battle.territory}
                     className="battle-btn"
                     onClick={() => onInitiateCombat?.(battle)}
                   >
@@ -569,13 +693,59 @@ function Sidebar({
             >
               End {formatPhase(gameState.phase)} Phase
             </button>
+            {onSkipTurn && (
+              <button
+                type="button"
+                className="skip-turn-btn-temp"
+                onClick={onSkipTurn}
+                title="TEMPORARY: Skip my turn (remove button before release; endpoint used by forfeit)"
+              >
+                SKIP TURN
+              </button>
+            )}
           </>
         )}
       </div>
       )}
 
+      {/* Spectate Battles: only when not our turn, phase is combat, and there are battles */}
+      {!canAct && gameState.phase === 'combat' && gameState.declared_battles.length > 0 && (
+        <div className="panel spectate-battles-panel">
+          <h2>Spectate Battles</h2>
+          <div className="spectate-battles-list">
+            {gameState.declared_battles.map((battle) => {
+              const territoryName = territoryData[battle.territory]?.name || battle.territory;
+              const isActive =
+                activeCombatTerritoryId === battle.territory &&
+                (battle.sea_zone_id == null ? true : activeCombatSeaZoneId === battle.sea_zone_id);
+              const key = battle.sea_zone_id ? `sea_${battle.sea_zone_id}_${battle.territory}` : battle.territory;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  className={`spectate-battle-btn${isActive ? ' spectate-battle-btn--active' : ''}`}
+                  onClick={() => onSpectateBattle?.(battle)}
+                  title={isActive ? 'View this battle (in progress)' : 'View units in this battle'}
+                >
+                  {territoryName}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Territory Panel */}
       <div className={`panel territory-panel${territory ? ' has-territory' : ''}`}>
+        {selectedTerritory && (
+          <img
+            src={`/assets/territories/${selectedTerritory}.png`}
+            alt=""
+            className="territory-panel-bg-image"
+            aria-hidden
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
+        )}
         <h2
           className="territory-panel-header"
           style={
@@ -599,8 +769,9 @@ function Sidebar({
               <>
                 <span className="territory-name">{territory.name}</span>
                 <span className="power-terrain">
-                  {(Number(territory.produces) || 0)}P
-                  {territory.terrain ? ` | ${territory.terrain.charAt(0).toUpperCase() + territory.terrain.slice(1)}` : ''}
+                  {territory.ownable === false
+                    ? (territory.terrain ? territory.terrain.charAt(0).toUpperCase() + territory.terrain.slice(1) : '')
+                    : `${(Number(territory.produces) || 0)}P${territory.terrain ? ` | ${territory.terrain.charAt(0).toUpperCase() + territory.terrain.slice(1)}` : ''}`}
                 </span>
               </>
             ) : (
@@ -620,10 +791,42 @@ function Sidebar({
             {territory.hasCamp && !territory.isCapital && !(selectedTerritory && territory.owner && factionData[territory.owner]?.capital === selectedTerritory) && (
               <div className="camp-badge">Camp</div>
             )}
+            {territory.hasPort && (
+              <div className="camp-badge">Port</div>
+            )}
+            {selectedTerritory &&
+              territory.owner &&
+              (() => {
+                const homeUnitNames = Object.entries(unitDefs)
+                  .filter(([, def]) => {
+                    if (def.faction !== territory.owner) return false;
+                    const single = def.home_territory_id != null ? [def.home_territory_id] : [];
+                    const multi = def.home_territory_ids ?? [];
+                    const ids = [...new Set([...single, ...multi])];
+                    return ids.includes(selectedTerritory);
+                  })
+                  .map(([, def]) => def.name)
+                  .sort();
+                if (homeUnitNames.length === 0) return null;
+                return (
+                  <div className="home-to-badge" title="Home territory: can deploy 1 of these unit types here without a camp">
+                    Home to {homeUnitNames.join(', ')}
+                  </div>
+                );
+              })()}
 
             {gameState.phase === 'non_combat_move' && territoryUnitStacksWithMovement && territoryUnitStacksWithMovement.length > 0 ? (
               <div className="territory-units-list">
-                {territoryUnitStacksWithMovement.map((row, index) => {
+                {[...territoryUnitStacksWithMovement]
+                  .sort((a, b) => {
+                    if (b.count !== a.count) return b.count - a.count;
+                    const costA = unitDefs[a.unit_id]?.cost ?? 0;
+                    const costB = unitDefs[b.unit_id]?.cost ?? 0;
+                    if (costB !== costA) return costB - costA;
+                    if (a.unit_id !== b.unit_id) return a.unit_id.localeCompare(b.unit_id);
+                    return (b.remaining_movement ?? 0) - (a.remaining_movement ?? 0);
+                  })
+                  .map((row, index) => {
                   const unitDef = unitDefs[row.unit_id];
                   const icon = unitDef?.icon;
                   const factionColor = unitDef?.faction ? factionData[unitDef.faction]?.color : undefined;
@@ -647,7 +850,15 @@ function Sidebar({
               </div>
             ) : units.length > 0 && (
               <div className="territory-units-list">
-                {units.map(({ unit_id, count }, index) => {
+                {[...units]
+                  .sort((a, b) => {
+                    if (b.count !== a.count) return b.count - a.count;
+                    const costA = unitDefs[a.unit_id]?.cost ?? 0;
+                    const costB = unitDefs[b.unit_id]?.cost ?? 0;
+                    if (costB !== costA) return costB - costA;
+                    return a.unit_id.localeCompare(b.unit_id);
+                  })
+                  .map(({ unit_id, count }, index) => {
                   const unitDef = unitDefs[unit_id];
                   const icon = unitDef?.icon;
                   const factionColor = unitDef?.faction ? factionData[unitDef.faction]?.color : undefined;
@@ -668,6 +879,42 @@ function Sidebar({
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {/* Defensive casualty priority: show for any selected territory; editable only when owned by current faction */}
+            {selectedTerritory && territory && (
+              <div className="defender-casualty-order">
+                <span className="defender-casualty-order-label">Defensive Casualty Priority</span>
+                {territory.owner === gameState.current_faction && canAct && onSetTerritoryDefenderCasualtyOrder ? (
+                  <div className="defender-casualty-order-pills">
+                    <button
+                      type="button"
+                      className={`defender-pill${(territoryDefenderCasualtyOrder[selectedTerritory] ?? 'best_unit') === 'best_unit' ? ' defender-pill--active' : ''}`}
+                      onClick={() => onSetTerritoryDefenderCasualtyOrder(selectedTerritory, 'best_unit')}
+                      title="Lose cheap/weak units first (cost then defense)"
+                    >
+                      Best Unit
+                    </button>
+                    <button
+                      type="button"
+                      className={`defender-pill${(territoryDefenderCasualtyOrder[selectedTerritory] ?? 'best_unit') === 'best_defense' ? ' defender-pill--active' : ''}`}
+                      onClick={() => onSetTerritoryDefenderCasualtyOrder(selectedTerritory, 'best_defense')}
+                      title="Prioritize defense value (lose low defense first)"
+                    >
+                      Best Defense
+                    </button>
+                  </div>
+                ) : (
+                  <div className="defender-casualty-order-pills">
+                    <span
+                      className="defender-pill defender-pill--readonly defender-pill--active"
+                      title="Defensive casualty priority (set by territory owner)"
+                    >
+                      {(territoryDefenderCasualtyOrder[selectedTerritory] ?? 'best_unit') === 'best_defense' ? 'Best Defense' : 'Best Unit'}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
           </div>

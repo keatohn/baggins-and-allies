@@ -1,0 +1,102 @@
+ID,Display Name,Power Production,Terrain,Stronghold,Camp,Faction,Ownable,Adjacent Territories,Aerial Adjacent,Starting Units
+forlindon,Forlindon,1,Forest,No,No,Elves,Yes,"grey_havens, sea_zone1, sea_zone2",lune_valley,
+harlindon,Harlindon,1,Forest,No,No,Elves,Yes,"grey_havens, minhiriath, sea_zone2",tower_hills,
+the_shire,The Shire,2,Hills,No,No,Elves,Yes,"south_downs, north_downs, evendim_hills, tower_hills, bree_fornost, minhiriath",,2 hobbit
+grey_havens,Grey Havens,4,Port,No,No,Elves,Yes,"tower_hills, harlindon, forlindon, lune_valley, sea_zone2",,1 wood_elf
+tower_hills,Tower Hills,1,Hills,No,No,None,Yes,"the_shire, grey_havens, evendim_hills, minhiriath, lune_valley",harlindon,
+lune_valley,Lune Valley,1,Valley,No,No,None,Yes,"grey_havens, evendim_hills, tower_hills, sea_zone1",forlindon,
+bree_fornost,Bree-Fornost,1,City,No,No,None,Yes,"the_shire, south_downs, north_downs, weather_hills",,
+south_downs,South Downs,1,Hills,No,No,None,Yes,"bree_fornost, the_shire, minhiriath, eregion, weather_hills, rhudaur",,
+north_downs,North Downs,1,Hills,No,No,None,Yes,"angmar, evendim_hills, the_shire, bree_fornost, weather_hills, rhudaur, carn_dum",,
+evendim_hills,Evendim Hills,1,Hills,No,No,None,Yes,"lune_valley, tower_hills, the_shire, north_downs, carn_dum, sea_zone1",,
+angmar,Angmar,1,Mountains,No,No,None,Yes,"gundabad, north_downs, carn_dum, sea_zone1",,
+carn_dum,Carn Dum,1,Mountains,No,No,None,Yes,"angmar, north_downs, evendim_hills, sea_zone1",,
+weather_hills,Weather Hills,1,Hills,No,No,None,Yes,"bree_fornost, north_downs, rhudaur, south_downs",,
+rivendell,Rivendell,8,Forest,Yes,Yes,Elves,Yes,"carrock, eregion, rhudaur",,"1 rivendell_knight, 2 rivendell_warrior"
+caras_galadhon,Caras Galadhon,5,Forest,Yes,No,Elves,Yes,lothlorien,,1 galadhrim_archer
+lothlorien,Lothlórien,3,Forest,No,Yes,Elves,Yes,"the_wold, caras_galadhon, moria, gladden_fields","anduin_valley, eregion, north_dunland",2 wood_elf
+gladden_fields,Gladden Fields,1,Valley,No,No,None,Yes,"lothlorien, anduin_valley, carrock",eregion,
+anduin_valley,Anduin Valley,2,Valley,No,No,None,Yes,"gladden_fields, dol_goldur, north_mirkwood, south_mirkwood, carrock, west_brown_lands","lothlorien, forodwaith",
+carrock,Carrock,1,Mountains,No,No,None,Yes,"gladden_fields, anduin_valley, rivendell, gundabad",rhudaur,
+moria,Moria,6,Mountains,No,No,None,Yes,"lothlorien, eregion",,"10 goblin, 1 cave_troll"
+eregion,Eregion,1,Mountains,No,No,None,Yes,"moria, north_dunland, enedwaith, rivendell, south_downs, rhudaur","lothlorien, gladden_fields",
+fangorn,Fangorn,3,Forest,No,No,Elves,Yes,"isengard, the_wold, westemnet, gap_of_rohan","north_dunland, south_dunland",2 ent
+dol_goldur,Dol Goldur,4,Fortress,Yes,Yes,Mordor,Yes,"south_mirkwood, anduin_valley, west_brown_lands",,"3 mordor_warg_rider, 2 orc_archer"
+south_mirkwood,South Mirkwood,1,Forest,No,No,None,Yes,"dol_goldur, anduin_valley, celduin_valley, north_mirkwood, west_brown_lands, east_brown_lands",,
+north_mirkwood,North Mirkwood,1,Forest,No,No,None,Yes,"south_mirkwood, thranduils_halls, celduin_valley, withered_heath, esgaroth, anduin_valley",forodwaith,
+thranduils_halls,Thranduil's Halls,3,Forest,No,Yes,Erebor,Yes,"north_mirkwood, esgaroth, dale",,2 mirkwood_elf
+rhudaur,Rhudaur,1,Hills,No,No,Elves,Yes,"rivendell, weather_hills, north_downs, south_downs, eregion","carrock, gundabad",
+gundabad,Gundabad,2,Fortress,No,No,Mordor,Yes,"angmar, carrock, forodwaith",rhudaur,1 mordor_warg_rider
+forodwaith,Forodwaith,0,Wasteland,No,No,None,Yes,"gundabad, withered_heath","anduin_valley, north_mirkwood",
+minhiriath,Minhiriath,1,Wasteland,No,No,None,Yes,"enedwaith, harlindon, south_downs, tower_hills, the_shire, sea_zone4",,
+erebor,Erebor,5,Mountains,Yes,Yes,Erebor,Yes,"dale, withered_heath, iron_hills",,2 dwarf_warrior
+dale,Dale,3,City,No,No,Erebor,Yes,"thranduils_halls, esgaroth, iron_hills, erebor, withered_heath",,1 northman
+esgaroth,Esgaroth,2,Lake,No,No,Erebor,Yes,"dale, thranduils_halls, north_mirkwood, celduin_valley, iron_hills",,2 northman
+celduin_valley,Celduin Valley,1,Valley,No,No,None,Yes,"esgaroth, north_mirkwood, south_mirkwood, west_rhun, east_brown_lands",,
+withered_heath,Withered Heath,1,Mountains,No,No,None,Yes,"erebor, north_mirkwood, forodwaith, iron_hills, dale",,1 dragon
+iron_hills,Iron Hills,3,Mountains,No,No,Erebor,Yes,"erebor, north_rhun, withered_heath, west_rhun, esgaroth, dale",,2 iron_hills_dwarf
+north_rhun,North Rhûn,2,Desert,No,No,Rhun,Yes,"iron_hills, dorwinion",,1 easterling_warrior
+west_rhun,West Rhûn,3,Desert,No,No,Rhun,Yes,"iron_hills, celduin_valley, rhun_hills, dorwinion",,2 easterling_warrior
+rhun_hills,Rhûn Hills,3,Hills,No,No,Rhun,Yes,"dorwinion, west_rhun, dagorlad",nurn,"1 easterling_warrior, 1 easterling pikeman"
+dorwinion,Dorwinion,6,Grassland,Yes,Yes,Rhun,Yes,"north_rhun, west_rhun, rhun_hills",,"2 easterling_warrior, 2 easterling_pikeman, 1 easterling_kataphrakt"
+minas_tirith,Minas Tirith,10,City,Yes,Yes,Gondor,Yes,"pelennor, lossarnach",anorien,"1 trebuchet, 1 citadel_guard, 1 gondor_archer, 1 gondor_soldier"
+pelennor,Pelennor,2,Grassland,No,No,Gondor,Yes,"minas_tirith, west_osgiliath, lossarnach, anorien, sea_zone12","north_ithilien, south_ithilien, east_osgiliath",
+anorien,Anorien,1,Grassland,No,No,Gondor,Yes,"pelennor, eastfold, entwash, north_ithilien","minas_tirith, lossarnach, lebennin",
+west_osgiliath,West Osgiliath,3,City,No,Yes,Gondor,Yes,"pelennor, east_osgiliath, sea_zone12",north_ithilien,1 gondor_soldier
+east_osgiliath,East Osgiliath,3,City,Yes,No,Gondor,Yes,"west_osgiliath, north_ithilien, sea_zone12",pelennor,"1 gondor_archer, 3 gondor_soldier"
+south_ithilien,South Ithilien,2,Forest,No,No,Gondor,Yes,"north_ithilien, harondor, sea_zone12","pelennor, lossarnach, pelargir, gorgoroth, nurn",2 ithilien_ranger
+north_ithilien,North Ithilien,2,Forest,No,No,Gondor,Yes,"minas_morgul, south_ithilien, east_osgiliath, dagorlad, anorien, sea_zone12","pelennor, west_osgiliath, udun, cirith_ungol, gorgoroth",3 ithilien_ranger
+lossarnach,Lossarnach,1,Grassland,No,No,Gondor,Yes,"pelennor, lebennin, pelargir, minas_tirith, sea_zone12","south_ithilien, anorien",
+lebennin,Lebennin,1,Grassland,No,No,Gondor,Yes,"lossarnach, belfalas, pelargir, erech_lamedon, sea_zone12","anorien, eastfold",1 gondor_soldier
+pelargir,Pelargir,3,Port,No,No,Gondor,Yes,"lebennin, lossarnach, sea_zone12",south_ithilien,2 gondor_soldier
+belfalas,Belfalas,1,Grassland,No,No,Gondor,Yes,"lebennin, erech_lamedon, anfalas, sea_zone9, sea_zone12",,1 gondor_soldier
+anfalas,Anfalas,1,Grassland,No,No,Gondor,Yes,"belfalas, erech_lamedon, andrast, sea_zone9","dunharrow, west_march, helms_deep",1 gondor_soldier
+andrast,Andrast,1,Mountains,No,No,Gondor,Yes,"anfalas, druwaith_iaur, sea_zone7, sea_zone9",,
+erech_lamedon,Erech-Lamedon,1,Mountains,No,No,Gondor,Yes,"anfalas, dunharrow, belfalas, lebennin","eastfold, edoras",
+druwaith_iaur,Drúwaith Iaur,1,Forest,No,No,None,Yes,"andrast, west_march, enedwaith, sea_zone6",,
+minas_morgul,Minas Morgul,7,Fortress,Yes,Yes,Mordor,Yes,"north_ithilien, cirith_ungol, gorgoroth",,"1 nazgul, 5 morgul_orc"
+the_black_gate,The Black Gate,4,Fortress,Yes,No,Mordor,Yes,"dagorlad, udun",,"1 armored_troll, 2 morannon_orc, 1 orc_archer"
+barad_dur,Barad-Dûr,12,Fortress,Yes,Yes,Mordor,Yes,"mount_doom, gorgoroth, nurn",,"2 morannon_orc, 1 orc_archer"
+mount_doom,Mount Doom,2,Volcano,No,No,Mordor,Yes,"udun, gorgorth, barad_dur",,
+gorgorth,Gorgoroth,1,Wasteland,No,No,Mordor,Yes,"udun, cirith_ungol, minas_morgul, mount_doom, barad_dur, nurn","south_ithilien, north_ithilien",
+nurn,Nurn,1,Wasteland,No,No,Mordor,Yes,"gorgoroth, barad_dur","rhun_hills, khand, near_harad, harondor, south_ithilien",
+udun,Udun,1,Wasteland,No,No,Mordor,Yes,"the_black_gate, gorgoroth, mount_doom, cirith_ungol","north_ithilien, dagorlad",
+cirith_ungol,Cirith Ungol,2,Fortress,No,No,Mordor,Yes,"minas_morgul, gorgorth, udun",north_ithilien,"1 morgul_orc, 1 morannon_orc"
+isengard,Isengard,12,Fortress,Yes,Yes,Isengard,Yes,"south_dunland, fangorn, gap_of_rohan",,"2 uruk_crossbowman, 2 uruk_pikeman, 6 urukhai_warrior, 1 berserker, 3 isengard_warg_rider"
+south_dunland,South Dunland,4,Hills,No,No,Isengard,Yes,"enedwaith, isengard, gap_of_rohan, north_dunland",fangorn,4 dunland_wildman
+north_dunland,North Dunland,2,Hills,No,No,None,Yes,"enedwaith, eregion, south_dunland","lothlorien, fangorn, the_wold",
+gap_of_rohan,Gap of Rohan,2,Plains,No,No,Rohan,Yes,"isengard, westfold, west_march, south_dunland, westemnet, fangorn, enedwaith",,
+westfold,Westfold,2,Plains,No,No,Rohan,Yes,"gap_of_rohan, westemnet, helms_deep, edoras","west_march, dunharrow",2 rohan_peasant
+westemnet,Westemnet,1,Plains,No,No,Rohan,Yes,"westfold, eastemnet, edoras, eastfold, fangorn, gap_of_rohan, the_wold",,1 rohan_peasant
+edoras,Edoras,7,City,Yes,Yes,Rohan,Yes,"westemnet, eastfold, dunharrow, westfold",erech_lamedon,"2 royal_guard, 2 rohirrim_soldier"
+helms_deep,Helm's Deep,3,Fortress,Yes,No,Rohan,Yes,"westfold, dunharrow","anfalas, west_march",1 rohirrim_soldier
+dunharrow,Dunharrow,3,Mountains,No,Yes,Rohan,Yes,"edoras, erech_lamedon, helps_deep","anfalas, westfold",1 rohirrim_soldier
+eastfold,Eastfold,2,Plains,No,No,Rohan,Yes,"edoras, eastemnet, westemnet, entwash, anorien","erech_lamedon, lebennin",1 rohan_peasant
+eastemnet,Eastemnet,1,Plains,No,No,Rohan,Yes,"westemnet, the_wold, entwash, eastfold",dead_marshes,
+entwash,Entwash,1,Marsh,No,No,Rohan,Yes,"eastfold, eastemnet, anorien",dead_marshes,
+the_wold,The Wold,1,Plains,No,No,Rohan,Yes,"eastemnet, fangorn, west_brown_lands, lothlorien, westemnet, emyn_muil",north_dunland,"3 rider_of_rohan, 1 rohirrim_archer_rider"
+dead_marshes,Dead Marshes,0,Marsh,No,No,None,Yes,"emyn_muil, dagorlad, north_ithilien","eastemnet, entwash",
+emyn_muil,Emyn Muil,0,Wasteland,No,No,None,Yes,"dead_marshes, the_wold, west_brown_lands",,
+dagorlad,Dagorlad,0,Wasteland,No,No,None,Yes,"dead_marshes, the_black_gate, north_ithilien, rhun_hills, east_brown_lands",udun,
+enedwaith,Enedwaith,1,Hills,No,No,None,Yes,"north_dunland, south_dunland, minhiriath, west_march, eregion, druwaith_iaur, gap_of_rohan, sea_zone4, sea_zone6",,
+west_march,West-march,1,Marsh,No,No,Rohan,Yes,"druwaith_iaur, enedwaith, gap_of_rohan","anfalas, westfold, helms_deep",
+east_brown_lands,East Brown Lands,1,Wasteland,No,No,None,Yes,"west_brown_lands, south_mirkwood, celduin_valley, dagorlad",,
+west_brown_lands,West Brown Lands,1,Wasteland,No,No,None,Yes,"anduin_valley, dol_goldur, south_mirkwood, east_brown_lands, emyn_muil, the_wold",,
+harondor,Harondor,1,Desert,No,No,None,Yes,"south_ithilien, umbar, haradwaith, near_harad, sea_zone10, sea_zone11, sea_zone12",nurn,
+khand,Khand,2,Desert,No,No,Harad,Yes,near_harad,nurn,1 haradrim_rider
+near_harad,Near Harad,2,Desert,No,No,Harad,Yes,"khand, haradwaith, harondor",nurn,
+far_harad,Far Harad,1,Desert,No,No,Harad,Yes,"haradwaith, umbar",,"1 war_mumakil, 2 haradrim_warrior, 2 haradrim_archer"
+haradwaith,Haradwaith,5,Desert,Yes,Yes,Harad,Yes,"far_harad, near_harad, umbar, harondor",,
+umbar,Umbar,4,Port,No,No,Harad,Yes,"harondor, far_harad, haradwaith, sea_zone11",,2 corsair_of_umbar
+sea_zone1,Sea Zone 1,-,Sea,No,No,,No,"sea_zone2, angmar, carn_dum, evendim_hills, lune_valley, forlindon",,
+sea_zone2,Sea Zone 2,-,Sea,No,No,,No,"sea_zone1, sea_zone3, sea_zone4, forlindon, grey_havens, harlindon",,
+sea_zone3,Sea Zone 3,-,Sea,No,No,,No,"sea_zone2, sea_zone4, sea_zone5",,
+sea_zone4,Sea Zone 4,-,Sea,No,No,,No,"sea_zone2, sea_zone3, sea_zone6, minhiriath, enedwaith",,
+sea_zone5,Sea Zone 5,-,Sea,No,No,,No,"sea_zone3, sea_zone6, sea_zone7",,
+sea_zone6,Sea Zone 6,-,Sea,No,No,,No,"sea_zone4, sea_zone5, sea_zone7, enedwaith, druwaith_iaur",,
+sea_zone7,Sea Zone 7,-,Sea,No,No,,No,"sea_zone5, sea_zone6, sea_zone8, sea_zone9, sea_zone10, andrast",,
+sea_zone8,Sea Zone 8,-,Sea,No,No,,No,"sea_zone7, sea_zone10, sea_zone11",,
+sea_zone9,Sea Zone 9,-,Sea,No,No,,No,"sea_zone7, sea_zone10, sea_zone12, andrast, anfalas, belfalas",,
+sea_zone10,Sea Zone 10,-,Sea,No,No,,No,"sea_zone7, sea_zone8, sea_zone9, sea_zone11, sea_zone12, harondor",,
+sea_zone11,Sea Zone 11,-,Sea,No,No,,No,"sea_zone8, sea_zone10, harondor, umbar",,1 black_ship
+sea_zone12,Sea Zone 12,-,Sea,No,No,,No,"sea_zone9, sea_zone10, belfalas, lebennin, pelargir, lossarnach, pelennor, west_osgiliath, east_osgiliath, north_ithilien, south_ithilien, harondor",,

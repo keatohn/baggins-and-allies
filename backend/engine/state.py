@@ -73,9 +73,11 @@ class Unit:
     remaining_health: int  # Health remaining (durability during/after combat)
     base_movement: int  # Original movement (restored at turn start)
     base_health: int  # Original health (restored after battle)
+    # Sea transport: instance_id of the naval unit carrying this unit (None if not loaded)
+    loaded_onto: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "instance_id": self.instance_id,
             "unit_id": self.unit_id,
             "remaining_movement": self.remaining_movement,
@@ -83,6 +85,9 @@ class Unit:
             "base_movement": self.base_movement,
             "base_health": self.base_health,
         }
+        if self.loaded_onto is not None:
+            out["loaded_onto"] = self.loaded_onto
+        return out
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Unit":
@@ -106,6 +111,11 @@ class Unit:
                 f"Unit health invalid: base_health={base_health}, remaining_health={remaining_health} "
                 f"(instance_id={data.get('instance_id')})"
             )
+        loaded_onto = data.get("loaded_onto")
+        if loaded_onto is not None and not isinstance(loaded_onto, str):
+            loaded_onto = None
+        if loaded_onto == "":
+            loaded_onto = None
         return cls(
             instance_id=str(data.get("instance_id") or ""),
             unit_id=str(data.get("unit_id") or ""),
@@ -113,6 +123,7 @@ class Unit:
             remaining_health=remaining_health,
             base_movement=_int(data.get("base_movement"), 0),
             base_health=base_health,
+            loaded_onto=loaded_onto,
         )
 
 
@@ -145,6 +156,10 @@ class PendingMove:
     phase: str  # "combat_move" or "non_combat_move"
     # Cavalry charging: empty enemy territory IDs to conquer when move is applied (order matters)
     charge_through: list[str] = field(default_factory=list)
+    # Sea transport: "load" (land->sea, cost 1 to land), "offload" (sea->land, cost 0), "sail" (sea move, cost 0 to passengers)
+    move_type: str | None = None
+    # Load only: assign passengers to this boat instance in the destination sea zone (must exist and have capacity)
+    load_onto_boat_instance_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -155,6 +170,9 @@ class PendingMove:
         }
         if self.charge_through:
             out["charge_through"] = self.charge_through
+        out["move_type"] = self.move_type
+        if self.load_onto_boat_instance_id:
+            out["load_onto_boat_instance_id"] = self.load_onto_boat_instance_id
         return out
 
     @classmethod
@@ -167,12 +185,19 @@ class PendingMove:
         ct = data.get("charge_through")
         if not isinstance(ct, list):
             ct = []
+        mt = data.get("move_type")
+        if mt not in ("load", "offload", "sail", "land", "aerial"):
+            mt = None
+        load_boat = data.get("load_onto_boat_instance_id")
+        load_onto_boat_instance_id = str(load_boat).strip() if load_boat else None
         return cls(
             from_territory=str(data.get("from_territory") or ""),
             to_territory=str(data.get("to_territory") or ""),
             unit_instance_ids=[str(x) for x in uids],
             phase=str(data.get("phase") or "combat_move"),
             charge_through=[str(x) for x in ct],
+            move_type=mt,
+            load_onto_boat_instance_id=load_onto_boat_instance_id or None,
         )
 
 
@@ -261,6 +286,7 @@ class CombatRoundResult:
     attackers_remaining: int  # count after this round
     defenders_remaining: int  # count after this round
     is_archer_prefire: bool = False  # True when this entry is defender archer prefire before round 1
+    is_stealth_prefire: bool = False  # True when this entry is attacker stealth prefire before round 1
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -276,6 +302,8 @@ class CombatRoundResult:
         }
         if self.is_archer_prefire:
             out["is_archer_prefire"] = True
+        if self.is_stealth_prefire:
+            out["is_stealth_prefire"] = True
         return out
 
     @classmethod
@@ -302,6 +330,7 @@ class CombatRoundResult:
             attackers_remaining=_int(data.get("attackers_remaining"), 0),
             defenders_remaining=_int(data.get("defenders_remaining"), 0),
             is_archer_prefire=_bool(data.get("is_archer_prefire"), False),
+            is_stealth_prefire=_bool(data.get("is_stealth_prefire"), False),
         )
 
 
@@ -311,15 +340,21 @@ class ActiveCombat:
     Tracks an ongoing multi-round combat.
     Both attackers and defenders are in the same territory (the contested territory).
     Attackers moved INTO the territory during combat_move phase.
+    For sea raid: sea_zone_id is set; attackers remain in that sea zone until combat ends (then move to territory if they win).
     """
     attacker_faction: str
-    territory_id: str  # The contested territory where combat is happening
+    territory_id: str  # The contested territory where combat is happening (land)
     # Instance IDs of attacking units still alive (for tracking who can retreat)
     attacker_instance_ids: list[str]
     round_number: int
     combat_log: list[CombatRoundResult] = field(default_factory=list)
     # False only after defender archer prefire, until round 1 is resolved (retreat disallowed until then)
     attackers_have_rolled: bool = True
+    # For sea raid: attackers came from this sea zone; when combat ends (attacker wins), they move here -> territory_id
+    sea_zone_id: str | None = None
+    # Attacker choices (persist through rounds of this battle; reset each new battle)
+    casualty_order_attacker: str = "best_unit"  # "best_unit" | "best_attack"
+    must_conquer: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -331,6 +366,12 @@ class ActiveCombat:
         }
         if not self.attackers_have_rolled:
             out["attackers_have_rolled"] = False
+        if self.sea_zone_id:
+            out["sea_zone_id"] = self.sea_zone_id
+        if self.casualty_order_attacker != "best_unit":
+            out["casualty_order_attacker"] = self.casualty_order_attacker
+        if self.must_conquer:
+            out["must_conquer"] = True
         return out
 
     @classmethod
@@ -351,6 +392,13 @@ class ActiveCombat:
         have_rolled = data.get("attackers_have_rolled", True)
         if not isinstance(have_rolled, bool):
             have_rolled = True
+        sea_zone_id = data.get("sea_zone_id")
+        if not isinstance(sea_zone_id, str) or not sea_zone_id:
+            sea_zone_id = None
+        casualty_order_attacker = str(data.get("casualty_order_attacker") or "best_unit")
+        if casualty_order_attacker not in ("best_unit", "best_attack"):
+            casualty_order_attacker = "best_unit"
+        must_conquer = bool(data.get("must_conquer", False))
         return cls(
             attacker_faction=str(data.get("attacker_faction") or ""),
             territory_id=str(data.get("territory_id") or ""),
@@ -358,6 +406,9 @@ class ActiveCombat:
             round_number=rn,
             combat_log=[CombatRoundResult.from_dict(r) for r in log if isinstance(r, dict)],
             attackers_have_rolled=have_rolled,
+            sea_zone_id=sea_zone_id,
+            casualty_order_attacker=casualty_order_attacker,
+            must_conquer=must_conquer,
         )
 
 
@@ -412,6 +463,12 @@ class GameState:
     dynamic_camps: dict[str, str] = field(default_factory=dict)
     # Faction IDs in turn order (from setup). Empty = use sorted faction_defs when advancing.
     turn_order: list[str] = field(default_factory=list)
+    # Boat instance IDs that received a load during combat_move and must attack (naval combat or sea raid) before phase end.
+    loaded_naval_must_attack_instance_ids: list[str] = field(default_factory=list)
+    # Defender casualty order per territory (territory_id -> "best_unit" | "best_defense"). Default at create: best_defense for strongholds/capitals/camps/ports.
+    territory_defender_casualty_order: dict[str, str] = field(default_factory=dict)
+    # After applying offload in combat_move: land territory_id -> sea_zone_id (so combat_territories can include sea_zone_id for initiate).
+    territory_sea_raid_from: dict[str, str] = field(default_factory=dict)
 
     def copy(self) -> "GameState":
         """Return a deep copy of this game state."""
@@ -457,6 +514,9 @@ class GameState:
             "pending_camp_placements": [p.to_dict() for p in self.pending_camp_placements],
             "dynamic_camps": self.dynamic_camps,
             "turn_order": self.turn_order,
+            "loaded_naval_must_attack_instance_ids": getattr(self, "loaded_naval_must_attack_instance_ids", []),
+            "territory_defender_casualty_order": getattr(self, "territory_defender_casualty_order", {}),
+            "territory_sea_raid_from": getattr(self, "territory_sea_raid_from", {}),
         }
 
     @classmethod
@@ -509,6 +569,9 @@ class GameState:
             pending_mobilizations=[
                 PendingMobilization.from_dict(pm) for pm in (data.get("pending_mobilizations") or []) if isinstance(pm, dict)
             ],
+            loaded_naval_must_attack_instance_ids=_ensure_str_list(data.get("loaded_naval_must_attack_instance_ids")),
+            territory_defender_casualty_order=dict(data.get("territory_defender_casualty_order") or {}) if isinstance(data.get("territory_defender_casualty_order"), dict) else {},
+            territory_sea_raid_from=dict(data.get("territory_sea_raid_from") or {}) if isinstance(data.get("territory_sea_raid_from"), dict) else {},
             winner=data.get("winner"),
             map_asset=data.get("map_asset") if isinstance(data.get("map_asset"), str) else None,
             victory_criteria=_ensure_victory_criteria(

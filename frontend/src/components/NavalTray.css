@@ -1,0 +1,148 @@
+.naval-tray {
+  flex-shrink: 0;
+  background: var(--parchment);
+  border-top: 3px solid;
+  padding: 0.4rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.naval-tray-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem;
+}
+
+.naval-tray-title {
+  font-family: 'Cinzel', serif;
+  font-size: 0.8rem;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.naval-tray-close {
+  font-size: 1.25rem;
+  line-height: 1;
+  padding: 0.1rem 0.3rem;
+  background: transparent;
+  border: 1px solid var(--ink-faded);
+  border-radius: 4px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.naval-tray-close:hover {
+  background: var(--parchment-light);
+  border-color: var(--ink);
+}
+
+.naval-tray-boats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+  align-items: flex-end;
+}
+
+.naval-tray-empty {
+  font-family: 'IM Fell English', serif;
+  font-style: italic;
+  color: var(--ink-light);
+  padding: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.naval-tray-load-prompt {
+  font-size: 0.8rem;
+  color: var(--ink);
+  margin: 0 0 0.2rem 0;
+}
+
+.naval-tray-boat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.35rem;
+  background: var(--parchment-light);
+  border: 2px solid var(--ink-faded);
+  border-radius: 5px;
+  min-width: 72px;
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.naval-tray-boat-card-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  cursor: grab;
+}
+
+.naval-tray-load-btn {
+  font-size: 0.65rem;
+  padding: 0.2rem 0.35rem;
+  background: var(--ink);
+  color: var(--parchment);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.naval-tray-load-btn:hover {
+  background: var(--ink-light);
+}
+
+.naval-tray-boat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  border-color: var(--ink);
+}
+
+.naval-tray-boat-card--drop-over {
+  box-shadow: 0 0 0 2px var(--ink);
+  background: var(--parchment);
+}
+
+.naval-tray-boat-card-inner--no-drag {
+  cursor: default;
+}
+
+.naval-tray-passenger-icon--draggable {
+  cursor: grab;
+}
+
+.naval-tray-passengers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  justify-content: center;
+  min-height: 22px;
+}
+
+.naval-tray-passenger-icon {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.naval-tray-boat-icon {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+}
+
+.naval-tray-boat-name {
+  font-size: 0.65rem;
+  color: var(--ink);
+  text-align: center;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+

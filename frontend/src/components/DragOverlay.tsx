@@ -9,6 +9,8 @@ interface DragOverlayProps {
     count: number;
     unitDef?: { name: string; icon: string };
     factionColor?: string;
+    isNaval?: boolean;
+    passengerCount?: number;
   } | null;
   activeMobilizationItem?: {
     unitId: string;
@@ -57,13 +59,18 @@ function DragOverlay({ activeUnit, activeMobilizationItem, activeCampDrag, facti
     ? { borderColor: activeUnit.factionColor }
     : {};
 
+  const passengerCount = activeUnit.passengerCount ?? 0;
+
   return (
     <DndDragOverlay dropAnimation={null}>
-      <div className="unit-token dragging-overlay" style={style}>
+      <div className={`unit-token dragging-overlay${activeUnit.isNaval ? ' unit-token--naval' : ''}`} style={style}>
         <img src={activeUnit.unitDef.icon} alt={activeUnit.unitDef.name} draggable={false} />
-        <span className={`count ${activeUnit.count === 1 ? 'single' : ''}`}>
+        <span className={`count ${activeUnit.count === 1 && passengerCount === 0 ? 'single' : ''}`}>
           {activeUnit.count}
         </span>
+        {passengerCount > 0 && (
+          <span className="unit-token-passenger-badge" title={`${passengerCount} aboard`}>{passengerCount}</span>
+        )}
       </div>
     </DndDragOverlay>
   );

@@ -13,6 +13,12 @@
   touch-action: none;
 }
 
+/* Sea units 1.5× larger on map only (not in territory panel) */
+.unit-token.unit-token--naval {
+  width: 63px;
+  height: 63px;
+}
+
 .unit-token:hover:not(.disabled) {
   transform: scale(1.15);
   border-color: var(--ink);
@@ -69,7 +75,24 @@
   padding: 0 3px;
 }
 
-/* Aerial unit must move to friendly territory (caution emoji) */
+/* Passenger count on ships (and draggable tokens) */
+.unit-token-passenger-badge {
+  position: absolute;
+  top: -6px;
+  left: -6px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 5px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 24px;
+  text-align: center;
+  color: #fff;
+  background: var(--gold-dark, #6b5344);
+  border-radius: 999px;
+  border: 2px solid rgba(255,255,255,0.5);
+}
+
 .unit-token-caution {
   position: absolute;
   top: -4px;

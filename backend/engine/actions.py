@@ -44,11 +44,15 @@ def move_units(
     territory_to: str,
     unit_instance_ids: list[str],  # List of unit instance_ids to move
     charge_through: list[str] | None = None,  # Cavalry: empty enemy territory IDs to conquer (order)
+    move_type: str | None = None,  # "load" | "offload" | "sail" for sea transport; None = normal move
+    load_onto_boat_instance_id: str | None = None,  # Load: assign passengers only to this boat in destination sea zone
 ) -> Action:
     """
     Move units from one territory to another.
     Units are specified by their instance_ids for granular control.
     charge_through: for cavalry charging, list of empty enemy territory IDs passed through (conquered when move is applied).
+    move_type: "load" = land units boarding adjacent sea (cost 1 to passengers); "offload" = land units disembarking to adjacent land (cost 0); "sail" = boats moving with passengers (cost 0 to passengers, path cost to drivers). Omit for normal land moves.
+    load_onto_boat_instance_id: when loading to sea, assign moved passengers only to this boat (must exist in destination and have capacity).
     """
     payload = {
         "from": territory_from,
@@ -57,6 +61,10 @@ def move_units(
     }
     if charge_through:
         payload["charge_through"] = charge_through
+    if move_type:
+        payload["move_type"] = move_type
+    if load_onto_boat_instance_id:
+        payload["load_onto_boat_instance_id"] = load_onto_boat_instance_id
     return Action(
         type="move_units",
         faction=faction,
@@ -66,11 +74,12 @@ def move_units(
 
 def initiate_combat(
     faction: str,
-    territory_id: str,  # The contested territory where attackers moved during combat_move
+    territory_id: str,  # The contested territory (land); for sea raid this is the target
     # "attacker" -> [rolls], "defender" -> [rolls]
     dice_rolls: dict[str, list[int]],
     terror_applied: bool = False,
     terror_final_defender_hits: int | None = None,
+    sea_zone_id: str | None = None,  # For sea raid: attackers are in this sea zone, target is territory_id (land)
 ) -> Action:
     """
     Initiate combat in a contested territory.
@@ -101,6 +110,8 @@ def initiate_combat(
         payload["terror_applied"] = True
     if terror_final_defender_hits is not None:
         payload["terror_final_defender_hits"] = terror_final_defender_hits
+    if sea_zone_id:
+        payload["sea_zone_id"] = sea_zone_id
     return Action(type="initiate_combat", faction=faction, payload=payload)
 
 
@@ -110,24 +121,45 @@ def continue_combat(
     dice_rolls: dict[str, list[int]],
     terror_applied: bool = False,
     terror_final_defender_hits: int | None = None,
+    casualty_order: str | None = None,  # "best_unit" | "best_attack" for this round
+    must_conquer: bool | None = None,
 ) -> Action:
     """
     Continue an active combat with another round.
     Only valid when there is an active_combat in the game state.
     dice_rolls must be provided for this round.
     terror_applied: True when round 1 terror was applied (defender re-rolls).
-
-    Example: continue_combat("gondor", {"attacker": [2, 5], "defender": [1, 3, 4]})
+    casualty_order / must_conquer: optional attacker choices for this round (persist on active_combat).
     """
     payload: dict = {"dice_rolls": dice_rolls}
     if terror_applied:
         payload["terror_applied"] = True
     if terror_final_defender_hits is not None:
         payload["terror_final_defender_hits"] = terror_final_defender_hits
+    if casualty_order is not None:
+        payload["casualty_order"] = casualty_order
+    if must_conquer is not None:
+        payload["must_conquer"] = must_conquer
     return Action(
         type="continue_combat",
         faction=faction,
         payload=payload,
+    )
+
+
+def set_territory_defender_casualty_order(
+    faction: str,
+    territory_id: str,
+    casualty_order: str,  # "best_unit" | "best_defense"
+) -> Action:
+    """
+    Set the defender casualty order for a territory the faction owns.
+    Valid anytime during that faction's turn. All players can see the setting.
+    """
+    return Action(
+        type="set_territory_defender_casualty_order",
+        faction=faction,
+        payload={"territory_id": territory_id, "casualty_order": casualty_order},
     )
 
 
@@ -264,3 +296,8 @@ def end_turn(faction: str) -> Action:
         faction=faction,
         payload={},
     )
+
+
+def skip_turn(faction: str) -> Action:
+    """Force end current faction's turn from any phase. Used by forfeit when a player leaves on their turn. Advances to next faction; existing logic skips factions with no capital and no units (turn_skipped event). Remove only the Skip Turn button in the UI for production; keep this action and endpoint."""
+    return Action(type="skip_turn", faction=faction, payload={})

@@ -14,15 +14,15 @@
   gap: 1rem;
 }
 
-/* Centered title: game brand + this game's name */
+/* Title: to the right of stronghold bar (left-aligned), so it doesn’t overlap faction logos on narrow screens */
 .header-center-title {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  flex: 0 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  justify-content: center;
   gap: 0.1rem;
+  margin-left: 0.25rem;
   pointer-events: none;
 }
 
@@ -33,6 +33,7 @@
   color: var(--ink);
   letter-spacing: 0.06em;
   line-height: 1.2;
+  white-space: nowrap;
 }
 
 .header-center-title-game {
@@ -41,6 +42,19 @@
   color: var(--ink-light);
   font-style: italic;
   line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 900px) {
+  .header-center-title-brand {
+    font-size: 1.2rem;
+  }
+
+  .header-center-title-game {
+    font-size: 0.85rem;
+  }
 }
 
 /* Extra horizontal breathing room between header sections */
@@ -110,10 +124,52 @@
   box-shadow: 0 1px 4px var(--shadow);
 }
 
+/* Specials button - same tan as other buttons, black star with tan SP in the middle */
+.header-specials-btn {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  font-family: var(--font-parchment);
+  font-size: 0.65rem;
+  font-weight: 700;
+  background: var(--parchment-dark);
+  border: 2px solid var(--ink-faded);
+  border-radius: 4px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.header-specials-star {
+  position: absolute;
+  font-size: 28px;
+  line-height: 1;
+  color: #1a1a1a;
+  z-index: 0;
+}
+
+.header-specials-sp {
+  position: relative;
+  z-index: 1;
+  font-size: 0.6rem;
+  color: #c4a574;
+  text-shadow: 0 0 1px rgba(0, 0, 0, 0.3);
+}
+
+.header-specials-btn:hover {
+  border-color: var(--ink);
+  background: var(--parchment);
+  box-shadow: 0 1px 4px var(--shadow);
+}
+
 /* Blacked-out unit icon so it reads as a single-color silhouette on the button */
 .header-unit-stats-icon {
-  width: 24px;
-  height: 24px;
+  width: 30px;
+  height: 30px;
   object-fit: contain;
   filter: brightness(0);
 }
@@ -200,6 +256,7 @@
 
 /* Stats modal (same pattern as purchase/combat modals) - larger size and font */
 .stats-modal .modal-header,
+.specials-modal .modal-header,
 .unit-stats-modal .modal-header {
   display: flex;
   justify-content: space-between;
@@ -211,6 +268,7 @@
 }
 
 .stats-modal .modal-header h2,
+.specials-modal .modal-header h2,
 .unit-stats-modal .modal-header h2 {
   font-family: 'Cinzel', serif;
   font-size: 1.55rem;
@@ -219,6 +277,7 @@
 }
 
 .stats-modal .close-btn,
+.specials-modal .close-btn,
 .unit-stats-modal .close-btn {
   background: none;
   border: none;
@@ -234,16 +293,60 @@
 }
 
 .stats-modal .close-btn:hover,
+.specials-modal .close-btn:hover,
 .unit-stats-modal .close-btn:hover {
   color: var(--ink);
 }
 
 .stats-modal-body,
+.specials-modal-body,
 .unit-stats-modal-body {
   padding: 1.75rem 2rem;
   background: var(--parchment-dark);
   max-height: min(60vh, 500px);
   overflow-y: auto;
+}
+
+.specials-modal-intro {
+  margin: 0 0 1rem;
+  font-family: var(--font-parchment);
+  font-size: 1rem;
+  color: var(--ink-light);
+}
+
+.specials-list {
+  margin: 0;
+  font-family: var(--font-parchment);
+}
+
+.specials-term {
+  font-weight: 600;
+  color: var(--ink);
+  margin-top: 1rem;
+  margin-bottom: 0.25rem;
+}
+
+.specials-term:first-child {
+  margin-top: 0;
+}
+
+.specials-desc {
+  margin: 0 0 0 1rem;
+  font-size: 0.95rem;
+  color: var(--ink-light);
+  line-height: 1.45;
+}
+
+.specials-unit-list {
+  margin: 0.5rem 0 0 0;
+  padding-left: 1.25rem;
+  list-style: disc;
+  font-size: 0.9rem;
+  color: var(--ink-light);
+}
+
+.specials-unit-list li {
+  margin-bottom: 0.2rem;
 }
 
 .stats-modal-key,
@@ -298,6 +401,16 @@
 .unit-stats-modal .header-stats-table th.stats-col-num {
   text-align: right;
   min-width: 2.75rem;
+}
+
+.unit-stats-modal .header-stats-table th.stats-col-specials {
+  text-align: left;
+  min-width: 8rem;
+}
+
+.unit-stats-modal .header-stats-table td.stats-col-specials {
+  font-size: 0.82rem;
+  max-width: 14rem;
 }
 
 .stats-modal .stats-alliance-row td {
@@ -403,13 +516,21 @@
 
 /* Stronghold tug-of-war bar in header (right of stats button) */
 .header-stronghold-bar-wrap {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.25rem;
-  min-width: 240px;
-  max-width: 340px;
+  width: min(100%, 280px);
+}
+
+@media (min-width: 1000px) {
+  .header-stronghold-bar-wrap {
+    width: 240px;
+    min-width: 200px;
+    max-width: 340px;
+  }
 }
 
 .header-stronghold-bar {
@@ -514,6 +635,7 @@
 
 /* Stats modal - overlay uses .modal-overlay (same as PurchaseModal) for centering */
 .stats-modal,
+.specials-modal,
 .unit-stats-modal {
   background: var(--parchment);
   border: 3px solid var(--ink-faded);

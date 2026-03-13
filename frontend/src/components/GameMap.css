@@ -32,88 +32,148 @@
   transform-origin: 0 0;
   /* Match outer map window (parchment tan) so map area blends with app */
   background: var(--parchment-dark);
-  /* width/height come from inline style (IMG_DIMENSIONS) per map */
+  /* width/height come from inline style (IMG_DIMENSIONS + 16) so 8px buffer for territory strokes */
 }
 
-.map-background {
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  user-select: none;
+/* Inset content 8px so colored borders (stroke) are not clipped by .map-wrapper overflow */
+.map-inner-content {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  /* width/height from inline style (IMG_DIMENSIONS) */
 }
 
+/* Territory SVG: pointer-events auto so path children receive hover/click (sea zones and land both get hover); images on top have pointer-events: none so events reach the SVG */
 .map-svg {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  pointer-events: none;
-}
-
-.territory-path {
-  stroke: transparent;
-  stroke-width: 0;
-  fill-opacity: 0.35;
-  cursor: pointer;
   pointer-events: auto;
-  transition: fill-opacity 0.2s ease, stroke 0.2s ease;
+  z-index: 0;
 }
 
-.territory-path:hover {
-  fill-opacity: 0.45;
-  stroke: var(--ink-faded);
-  stroke-width: 2;
-}
-
-.territory-path.selected {
-  fill-opacity: 0.45;
-  stroke: var(--gold);
-  stroke-width: 3;
-}
-
-.territory-path.highlight {
-  fill-opacity: 0.5;
-  stroke: var(--gold-dark);
-  stroke-width: 10;
-  stroke-dasharray: 8 5;
-  paint-order: stroke fill;
-  animation: territory-highlight-pulse 1.2s ease-in-out infinite;
-}
-
-.territory-path.drop-target {
-  fill-opacity: 0.55;
-  stroke: var(--gold-dark);
-  stroke-width: 10;
-  stroke-dasharray: none;
-  filter: brightness(1.2);
-}
-
-@keyframes territory-highlight-pulse {
-  0%,
-  100% {
-    fill-opacity: 0.4;
-    stroke-opacity: 0.9;
-  }
-  50% {
-    fill-opacity: 0.55;
-    stroke-opacity: 1;
-  }
-}
-
-.map-wrapper.panning {
-  cursor: grabbing;
-}
-
-/* Territory markers (camp icon, faction logo on strongholds) - below units */
-.territory-markers-layer {
+/* Map art PNG on top of territory colors. Use a PNG with white/background made transparent so territory fill shows through; pointer-events: none so clicks hit the SVG. */
+.map-art-on-top {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
   pointer-events: none;
+  user-select: none;
+  z-index: 1;
+}
+
+/* Optional overlay PNG on top (e.g. {map_asset}_overlay.png); pointer-events: none so clicks hit SVG */
+.map-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  display: block;
   z-index: 2;
+}
+
+/* Territory stroke and glow. Fill path: no filter for svg-glow (glow is on stroke layer). */
+.territory-path {
+  fill-opacity: 0.52;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: fill-opacity 0.2s ease, stroke 0.2s ease;
+  stroke: var(--territory-stroke, #444);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  paint-order: stroke fill;
+  filter: drop-shadow(0 0 2px var(--territory-glow-rgba, rgba(0, 0, 0, 0.25))) drop-shadow(0 0 4px var(--territory-glow-rgba-soft, rgba(0, 0, 0, 0.15)));
+}
+.territory-path-fill.territory-path--svg-glow {
+  filter: none;
+}
+
+/* Stroke-only layer. Land paths use native SVG filter (attribute) so Safari shows glow; sea uses CSS. */
+.territory-path-stroke:not(.territory-path--svg-glow) {
+  filter: drop-shadow(0 0 2px var(--territory-glow-rgba, rgba(0, 0, 0, 0.25))) drop-shadow(0 0 4px var(--territory-glow-rgba-soft, rgba(0, 0, 0, 0.15)));
+}
+.territory-path-stroke {
+  pointer-events: none;
+}
+
+.territory-path:hover {
+  fill-opacity: 0.6;
+  stroke: var(--territory-stroke, #333);
+  stroke-width: 2;
+}
+
+.territory-path.selected {
+  fill-opacity: 0.6;
+  stroke: var(--gold);
+  stroke-width: 3;
+}
+
+.territory-path.highlight {
+  fill-opacity: 0.68;
+  stroke: var(--gold-dark);
+  stroke-width: 10;
+  stroke-dasharray: 8 5;
+  paint-order: stroke fill;
+}
+
+.territory-path.drop-target {
+  fill-opacity: 0.82;
+  stroke: var(--gold);
+  stroke-width: 12;
+  stroke-dasharray: none;
+  filter: drop-shadow(0 0 4px var(--territory-glow-rgba, rgba(0, 0, 0, 0.3))) drop-shadow(0 0 8px var(--territory-glow-rgba-soft, rgba(0, 0, 0, 0.2))) brightness(1.25);
+  transition: fill-opacity 0.15s ease, stroke 0.15s ease, filter 0.15s ease;
+}
+
+/* Sea zones: slightly lower opacity to match land */
+.territory-path--sea {
+  fill-opacity: 0.5;
+  stroke: #0d1319;
+  stroke-width: 4;
+  filter: drop-shadow(0 0 2px rgba(45, 66, 88, 0.6))
+          drop-shadow(0 0 4px rgba(20, 35, 50, 0.4));
+}
+.territory-path--sea:hover {
+  fill-opacity: 0.62;
+  stroke: #0d1319;
+  stroke-width: 4;
+}
+.territory-path--sea.selected {
+  fill-opacity: 0.6;
+  stroke: var(--gold);
+  stroke-width: 5;
+}
+.territory-path--sea.highlight {
+  stroke: var(--gold-dark);
+  stroke-width: 8;
+}
+.territory-path--sea.drop-target {
+  fill-opacity: 0.75;
+  stroke: var(--gold);
+  stroke-width: 10;
+  filter: drop-shadow(0 0 4px rgba(255, 215, 0, 0.5)) brightness(1.2);
+}
+
+.map-wrapper.panning {
+  cursor: grabbing;
+}
+
+/* Territory markers (camp icon, power, sea zone number) - above units so sea zone number isn't hidden by ships */
+.territory-markers-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 8;
+  pointer-events: none;
 }
 
 .territory-markers {
@@ -121,22 +181,44 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  justify-content: flex-start;
+  gap: 6px;
   transform: translate(-50%, -50%);
+  /* Reserve space so units (positioned below) don't overlap: markers sit above center, units layer uses offset */
 }
 
 /* When territory has both camp and stronghold, show them side by side */
 .territory-markers-row {
   display: flex;
   flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 6px;
+  max-width: 180px;
 }
 
-/* Power + camp only (no stronghold): power left, camp right */
+/* Power + home + camp + port + terrain in one row — order fixed, wrap if needed to avoid overlap */
 .territory-markers-row--power-camp {
-  gap: 8px;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  max-width: 200px;
+}
+
+.territory-markers-row--power-camp .territory-power-badge--inline {
+  flex: 0 0 44px;
+  position: relative;
+  z-index: 2;
+}
+
+.territory-markers-row--power-camp .territory-marker {
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 1;
 }
 
 .territory-marker {
@@ -150,7 +232,27 @@
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
 }
 
-/* Power production: large circled number above markers so units don't overlap */
+/* Sea zone: digits at end of id, next to ships (left of center); same font/size/weight as power badge on land */
+.sea-zone-number {
+  position: absolute;
+  top: -30px;
+  left: calc(50% - 72px);
+  transform: translateX(-50%);
+  min-width: 52px;
+  height: 52px;
+  padding: 0 10px;
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 52px;
+  text-align: center;
+  color: #e8e8e8;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8), 0 0 1px rgba(0, 0, 0, 1);
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+/* Power production: large circled number above markers; same standout style as sea zone */
 .territory-power-badge {
   position: absolute;
   top: -30px;
@@ -163,11 +265,10 @@
   font-weight: 800;
   line-height: 52px;
   text-align: center;
-  color: var(--ink);
-  background: rgba(0, 0, 0, 0.08);
-  border: 1px solid rgba(61, 41, 20, 0.3);
+  color: #e8e8e8;
+  background: rgba(0, 0, 0, 0.25);
   border-radius: 50%;
-  text-shadow: 0 0 2px rgba(255, 255, 255, 0.8), 0 1px 1px rgba(255, 255, 255, 0.5);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8), 0 0 1px rgba(0, 0, 0, 1);
   pointer-events: none;
 }
 
@@ -176,9 +277,12 @@
   top: -52px;
 }
 
-/* Inline power badge (in power+camp row): not absolutely positioned */
+/* Inline power badge (in power+camp row): in flow, first in row; same standout style as sea zone */
 .territory-power-badge.territory-power-badge--inline {
-  position: static;
+  position: relative;
+  left: auto;
+  top: auto;
+  z-index: 2;
   transform: none;
   min-width: 44px;
   width: 44px;
@@ -187,12 +291,59 @@
   font-size: 22px;
   font-weight: 800;
   line-height: 44px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  color: #e8e8e8;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 50%;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8), 0 0 1px rgba(0, 0, 0, 1);
 }
 
 .territory-marker.camp-marker .camp-marker-emoji {
-  font-size: 44px;
+  font-size: 40px;
   line-height: 1;
   display: inline-block;
+}
+
+/* Port: 40px circle (matches camp size), icon scaled to fit inside */
+.territory-marker.port-marker {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+}
+
+.territory-marker.port-marker .port-marker-emoji {
+  font-size: 25px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  text-align: center;
+  /* Emoji glyph often sits high-right; nudge into visual center */
+  transform: translate(-1px, 1px);
+}
+
+.territory-marker.home-marker {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+}
+
+.territory-marker.home-marker .home-marker-emoji {
+  font-size: 33px;
+  line-height: 1;
+  display: inline-block;
+}
+
+.territory-marker.terrain-marker {
+  font-size: 33px;
+  line-height: 1;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
 }
 
 .territory-marker.faction-marker {
@@ -231,8 +382,8 @@
   left: 0;
   width: 100%;
   height: 100%;
+  z-index: 9;
   pointer-events: none;
-  z-index: 5;
 }
 
 .territory-units {
@@ -241,48 +392,166 @@
   gap: 2px;
   transform: translate(-50%, -50%);
   z-index: 5;
+  pointer-events: auto;
+}
+
+/* 3+ stacks: overlap left-to-right (left on top), hover to expand */
+.territory-units--stacked {
+  gap: 0;
+}
+
+.territory-units--stacked > * {
+  margin-left: -26px;
+  margin-top: 0;
+  transition: margin-left 0.2s ease, margin-top 0.2s ease;
+}
+
+.territory-units--stacked > *:first-child {
+  margin-left: 0;
+  z-index: 10;
+}
+
+.territory-units--stacked > *:nth-child(2) {
+  margin-top: 2px;
+  z-index: 9;
+}
+
+.territory-units--stacked > *:nth-child(3) {
+  margin-top: 4px;
+  z-index: 8;
+}
+
+.territory-units--stacked > *:nth-child(4) {
+  margin-top: 6px;
+  z-index: 7;
+}
+
+.territory-units--stacked > *:nth-child(n+5) {
+  margin-top: 8px;
+  z-index: 6;
+}
+
+.territory-units--stacked:hover {
+  gap: 4px;
+}
+
+.territory-units--stacked:hover > * {
+  margin-left: 0;
+  margin-top: 0;
 }
 
 /* Map controls */
 .map-controls {
   position: absolute;
-  top: 1rem;
-  left: 1rem;
+  top: 0.75rem;
+  left: 0.75rem;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.15rem;
+  gap: 0.1rem;
   z-index: 10;
   background: var(--parchment);
   border: 2px solid var(--gold);
-  border-radius: 6px;
-  padding: 0.5rem;
+  border-radius: 5px;
+  padding: 0.35rem;
   box-shadow: 2px 2px 8px var(--shadow);
 }
 
-.controls-row {
-  display: flex;
-  gap: 0.15rem;
-  justify-content: center;
+.map-controls--collapsed {
+  padding: 0.25rem;
 }
 
-.controls-row.zoom-controls {
-  margin-top: 0.35rem;
-  padding-top: 0.35rem;
-  border-top: 1px solid var(--gold);
-}
-
-.map-controls .controls-row button {
-  width: 32px;
-  height: 32px;
+.map-controls-toggle {
+  width: 22px;
+  height: 22px;
   padding: 0;
-  font-size: 1rem;
+  font-size: 0.7rem;
   display: flex;
   align-items: center;
   justify-content: center;
   background: #5d4e37;
   border: 1px solid #c9a227;
-  border-radius: 4px;
+  border-radius: 3px;
+  color: #f4e4bc;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-bottom: 0.1rem;
+}
+
+.map-controls-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 0.35rem;
+  margin-bottom: 0.2rem;
+}
+
+.map-controls-toggle--hide {
+  margin-bottom: 0;
+}
+
+.map-controls-key-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #5d4e37;
+  border: 1px solid #c9a227;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: #f4e4bc;
+}
+
+.map-controls-key-btn .map-controls-key-icon {
+  width: 12px;
+  height: 12px;
+  stroke: #f4e4bc;
+}
+
+.map-controls-key-btn:hover {
+  background: #c9a227;
+}
+
+.map-controls-key-btn:hover .map-controls-key-icon {
+  stroke: #2c1810;
+}
+
+.map-controls-toggle:hover {
+  background: #c9a227;
+  color: #2c1810;
+}
+
+.map-controls--collapsed .map-controls-toggle {
+  margin-bottom: 0;
+}
+
+.controls-row {
+  display: flex;
+  gap: 0.1rem;
+  justify-content: center;
+}
+
+.controls-row.zoom-controls {
+  margin-top: 0.25rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--gold);
+}
+
+.map-controls .controls-row button {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #5d4e37;
+  border: 1px solid #c9a227;
+  border-radius: 3px;
   color: #f4e4bc;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -297,6 +566,41 @@
 
 .map-controls .controls-row button:active {
   transform: scale(0.95);
+}
+
+/* Map key strip at top of map when key button is toggled */
+.map-key-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  padding: 0.4rem 0.75rem;
+  justify-content: center;
+  text-align: center;
+  background: var(--parchment);
+  border: 2px solid var(--gold);
+  border-radius: 5px;
+  box-shadow: 2px 2px 8px var(--shadow);
+  font-family: var(--font-parchment);
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+
+.map-key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.map-key-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9em;
 }
 
 .movement-hint {
@@ -320,6 +624,14 @@
   pointer-events: none;
   filter: drop-shadow(1px 1px 2px rgba(0, 0, 0, 0.4));
   animation: arrow-pulse 2s ease-in-out infinite;
+}
+
+.move-arrow-load-emoji {
+  pointer-events: none;
+  fill: #1565c0;
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-width: 1.5px;
+  paint-order: stroke fill;
 }
 
 @keyframes arrow-pulse {

@@ -51,7 +51,7 @@
   list-style: none;
   padding: 0;
   margin: 0;
-  max-width: 475px;
+  max-width: 560px;
 }
 
 .game-list__item {
@@ -171,6 +171,19 @@
   gap: 0.35rem;
 }
 
+/* Lobby label = same prominence as faction + player name in non-lobby */
+.game-list__turn-meta--lobby {
+  font-size: 1.15rem;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+/* Players/factions line = same as turn-meta (Turn 1 | Purchase) in non-lobby */
+.game-list__lobby-stats {
+  font-size: 0.9rem;
+  color: var(--ink-faded);
+}
+
 .game-list__meta-sep {
   opacity: 0.6;
 }
@@ -197,6 +210,24 @@
 
 .game-list__delete-btn:hover {
   background: #c62828;
+  color: #fff;
+}
+
+.game-list__forfeit-btn {
+  flex-shrink: 0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--gold-dark, #8b7355);
+  background: transparent;
+  border: 1px solid var(--gold-dark, #8b7355);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.game-list__forfeit-btn:hover {
+  background: var(--gold-dark, #8b7355);
   color: #fff;
 }
 

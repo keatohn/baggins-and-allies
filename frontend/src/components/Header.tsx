@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { GameState } from '../types/game';
-import type { ApiFactionStats } from '../services/api';
+import type { ApiFactionStats, SpecialDefinition } from '../services/api';
 import './Header.css';
 
 export interface UnitForStats {
@@ -27,6 +27,12 @@ interface HeaderProps {
   unitsByFaction?: Record<string, UnitForStats[]>;
   /** Current game name (created/loaded), shown under "Baggins & Allies" in the center */
   gameName?: string | null;
+  /** Special ability definitions from setup (backend). Key = special id. */
+  specials?: Record<string, SpecialDefinition>;
+  /** Display order for specials (from setup). */
+  specialsOrder?: string[];
+  /** Per-special list of units (for Specials modal). Key = special id. */
+  unitsBySpecial?: Record<string, Array<{ unitId: string; name: string; faction: string; factionDisplayName: string; cost: number; homeTerritoryDisplayNames?: string[] }>>;
 }
 
 const PHASE_ORDER: string[] = ['purchase', 'combat_move', 'combat', 'non_combat_move', 'mobilization'];
@@ -48,8 +54,9 @@ function phaseLabel(phase: string): string {
   return `${formatPhase(phase)} (${current}/${n})`;
 }
 
-function Header({ gameState, turnOrderForTicker, factionData, effectivePower, factionStats, unitsByFaction = {}, gameName = null }: HeaderProps) {
+function Header({ gameState, turnOrderForTicker, factionData, effectivePower, factionStats, unitsByFaction = {}, gameName = null, specials = {}, specialsOrder = [], unitsBySpecial = {} }: HeaderProps) {
   const [statsOpen, setStatsOpen] = useState(false);
+  const [specialsOpen, setSpecialsOpen] = useState(false);
   const [unitStatsOpen, setUnitStatsOpen] = useState(false);
   const faction = factionData[gameState.current_faction];
   const resources = gameState.faction_resources[gameState.current_faction];
@@ -69,17 +76,24 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
       if (ib === -1) return -1;
       return ia - ib;
     });
-  // Unit stats: factions with units, grouped by alliance, sorted by turn order
-  const unitStatsFactionOrder =
-    allianceOrder.length > 0
-      ? allianceOrder.flatMap(a =>
-          sortByTurnOrder(
-            Object.keys(factionData).filter(
-              fid => factionData[fid]?.alliance === a && (unitsByFaction[fid]?.length ?? 0) > 0
-            )
+  // Unit stats: factions with units, grouped by alliance (good then evil), then neutral/other at bottom
+  const unitStatsFactionOrder = (() => {
+    const withUnits = (fid: string) => (unitsByFaction[fid]?.length ?? 0) > 0;
+    if (allianceOrder.length > 0) {
+      const ordered = allianceOrder.flatMap(a =>
+        sortByTurnOrder(
+          Object.keys(factionData).filter(
+            fid => factionData[fid]?.alliance === a && withUnits(fid)
           )
         )
-      : sortByTurnOrder(Object.keys(factionData).filter(fid => (unitsByFaction[fid]?.length ?? 0) > 0));
+      );
+      const neutralAndOther = Object.keys(factionData).filter(
+        fid => withUnits(fid) && !ordered.includes(fid)
+      );
+      return [...ordered, ...sortByTurnOrder(neutralAndOther)];
+    }
+    return sortByTurnOrder(Object.keys(factionData).filter(withUnits));
+  })();
 
   return (
     <>
@@ -94,6 +108,16 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
         <Link to="/" className="header-menu-btn" title="Main menu" aria-label="Main menu">
           Menu
         </Link>
+        <button
+          type="button"
+          className="header-specials-btn"
+          onClick={() => setSpecialsOpen(true)}
+          title="Specials"
+          aria-label="Open specials definitions"
+        >
+          <span className="header-specials-star" aria-hidden>★</span>
+          <span className="header-specials-sp">SP</span>
+        </button>
         <button
           type="button"
           className="header-unit-stats-btn"
@@ -116,12 +140,6 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
             <rect x="17" y="4" width="4" height="16" rx="1" />
           </svg>
         </button>
-
-        {/* Centered: Baggins & Allies + game name */}
-        <div className="header-center-title">
-          <span className="header-center-title-brand">Baggins & Allies</span>
-          {gameName && <span className="header-center-title-game">{gameName}</span>}
-        </div>
 
         {/* Stronghold bar: Good (white) | Neutral (gray) | Evil (black) — no label for neutral */}
         {allianceOrder.length > 0 && (() => {
@@ -152,6 +170,12 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
             </div>
           );
         })()}
+
+        {/* Title to the right of stronghold bar (left-aligned group) so it doesn’t overlap faction logos on narrow screens */}
+        <div className="header-center-title">
+          <span className="header-center-title-brand">Baggins & Allies</span>
+          {gameName && <span className="header-center-title-game">{gameName}</span>}
+        </div>
 
         <div className="header-spacer" />
 
@@ -271,6 +295,46 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
         </div>
       )}
 
+      {specialsOpen && (
+        <div className="modal-overlay" onClick={() => setSpecialsOpen(false)}>
+          <div className="modal specials-modal" onClick={e => e.stopPropagation()}>
+            <header className="modal-header">
+              <h2>Specials</h2>
+              <button type="button" className="close-btn" onClick={() => setSpecialsOpen(false)}>×</button>
+            </header>
+            <div className="specials-modal-body">
+              <dl className="specials-list">
+                {(specialsOrder.length > 0 ? specialsOrder : Object.keys(specials).sort()).filter(k => specials[k]).map(key => {
+                  const def = specials[key];
+                  const termLabel = (def.display_code != null && String(def.display_code).trim() !== '') ? `${def.name} (${def.display_code})` : (def.name ?? key);
+                  const unitList = unitsBySpecial[key] ?? [];
+                  return (
+                    <React.Fragment key={key}>
+                      <dt className="specials-term">{termLabel}</dt>
+                      <dd className="specials-desc">
+                        {def.description}
+                        {unitList.length > 0 && (
+                          <ul className="specials-unit-list" aria-label={`Units with ${def.name}`}>
+                            {unitList.map(({ unitId, name, factionDisplayName, homeTerritoryDisplayNames }) => (
+                              <li key={unitId}>
+                                {name} ({factionDisplayName})
+                                {key === 'home' && homeTerritoryDisplayNames?.length
+                                  ? `: ${homeTerritoryDisplayNames.join(', ')}`
+                                  : ''}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </dd>
+                    </React.Fragment>
+                  );
+                })}
+              </dl>
+            </div>
+          </div>
+        </div>
+      )}
+
       {unitStatsOpen && (
         <div className="modal-overlay" onClick={() => setUnitStatsOpen(false)}>
           <div className="modal unit-stats-modal" onClick={e => e.stopPropagation()}>
@@ -290,7 +354,7 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
                       <th className="stats-col-num">R</th>
                       <th className="stats-col-num">M</th>
                       <th className="stats-col-num">HP</th>
-                      <th className="stats-col-num">SP</th>
+                      <th className="stats-col-num stats-col-specials">SP</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -300,7 +364,7 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
                       return [
                         <tr key={`faction-${fid}`} className="unit-stats-faction-row">
                           <td colSpan={8} className="stats-col-unit">
-                            {fd?.icon && (
+                            {fd?.icon && (fd?.alliance === 'good' || fd?.alliance === 'evil') && (
                               <img className="unit-stats-faction-icon" src={fd.icon} alt="" aria-hidden />
                             )}
                             <span>{fd?.name ?? fid}</span>
@@ -332,9 +396,6 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
             <p className="unit-stats-modal-key">
               C = Cost | A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points | SP = Specials
             </p>
-            <section className="unit-stats-specials-definitions" aria-label="Special ability definitions">
-              {/* Definitions for each special will be added here */}
-            </section>
           </div>
         </div>
       )}

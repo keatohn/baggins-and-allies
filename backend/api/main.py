@@ -9,12 +9,14 @@ import random
 import secrets
 import string
 import uuid
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.testclient import TestClient
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -30,7 +32,7 @@ from .auth import (
     verify_password,
 )
 
-from backend.engine.state import GameState
+from backend.engine.state import GameState, PendingMove
 from backend.engine.actions import (
     Action,
     purchase_units,
@@ -44,13 +46,18 @@ from backend.engine.actions import (
     initiate_combat,
     continue_combat,
     retreat,
+    set_territory_defender_casualty_order,
     mobilize_units,
     end_phase,
     end_turn,
+    skip_turn,
 )
 from backend.engine.reducer import apply_action, get_state_after_pending_moves
 from backend.engine.combat import (
     ARCHETYPE_ARCHER,
+    _is_naval_unit as combat_is_naval_unit,
+    get_attacker_effective_dice_and_bombikazi_self_destruct,
+    get_bombikazi_pairing,
     get_defender_hit_flat_indices,
     get_eff_def_per_flat_index,
     get_terror_reroll_targets,
@@ -58,6 +65,7 @@ from backend.engine.combat import (
     compute_terrain_stat_modifiers,
     compute_anti_cavalry_stat_modifiers,
     compute_captain_stat_modifiers,
+    compute_sea_raider_stat_modifiers,
     merge_stat_modifiers,
     _count_hits as combat_count_hits,
     _has_special as combat_has_special,
@@ -67,6 +75,7 @@ from backend.engine.definitions import (
     load_static_definitions,
     load_starting_setup,
     load_setup,
+    load_specials,
     list_setups,
     definitions_from_snapshot,
 )
@@ -78,18 +87,30 @@ from backend.engine.queries import (
     get_unit_move_targets,
     get_aerial_units_must_move,
     get_mobilization_territories,
+    get_mobilization_sea_zones,
     get_mobilization_capacity,
     get_contested_territories,
+    get_sea_raid_targets,
     get_retreat_options,
     get_purchased_units,
     get_faction_stats,
 )
-from backend.engine.utils import initialize_game_state, generate_dice_rolls_for_units
+from backend.engine.utils import initialize_game_state, generate_dice_rolls_for_units, get_unit_faction
+from backend.engine.movement import _is_sea_zone
+from backend.engine.queries import _is_naval_unit, get_valid_offload_sea_zones
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup: init DB. Shutdown: nothing to do."""
+    init_db()
+    yield
+
 
 app = FastAPI(
     title="Baggins & Allies API",
     description="Backend API for Baggins & Allies - a turn-based strategy game",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS configuration for frontend (add production origins via CORS_ORIGINS env, comma-separated)
@@ -142,13 +163,13 @@ async def unhandled_exception_handler(request, exc):
     )
 
 # Fallback definitions for games without config snapshot (e.g. legacy). New games load by setup_id.
-unit_defs, territory_defs, faction_defs, camp_defs = load_static_definitions(setup_id=DEFAULT_SETUP_ID)
+unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(setup_id=DEFAULT_SETUP_ID)
 starting_setup = load_starting_setup(setup_id=DEFAULT_SETUP_ID)
 
 # In-memory cache of loaded game state (also persisted in DB)
 games: dict[str, GameState] = {}
 
-# Per-game definitions (from config snapshot); key = game_id, value = (unit_defs, territory_defs, faction_defs, camp_defs)
+# Per-game definitions (from config snapshot); key = game_id, value = (unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
 game_defs: dict[str, tuple] = {}
 
 # Alphanumeric for game codes (uppercase + digits)
@@ -182,6 +203,11 @@ class JoinGameRequest(BaseModel):
     game_code: str
 
 
+class ClaimFactionRequest(BaseModel):
+    faction_id: str
+    claim: bool  # True to claim, False to unclaim
+
+
 class NewGameRequest(BaseModel):
     game_id: str
     map_asset: str | None = None
@@ -198,15 +224,20 @@ class MoveRequest(BaseModel):
     to_territory: str
     unit_instance_ids: list[str]
     charge_through: list[str] | None = None  # Cavalry: empty enemy territory IDs to conquer (order)
+    load_onto_boat_instance_id: str | None = None  # Load: assign passengers only to this boat in the destination sea zone
+    offload_sea_zone_id: str | None = None  # Sea->land: when multiple sea zones can offload to this land, client sends which one to sail to
 
 
 class CombatRequest(BaseModel):
     game_id: str
     territory_id: str
+    sea_zone_id: str | None = None  # For sea raid: attackers are in this sea zone, target is territory_id (land)
 
 
 class ContinueCombatRequest(BaseModel):
     game_id: str
+    casualty_order: str | None = None  # "best_unit" | "best_attack" for this round
+    must_conquer: bool | None = None
 
 
 class RetreatRequest(BaseModel):
@@ -245,6 +276,12 @@ class CancelCampPlacementRequest(BaseModel):
     placement_index: int
 
 
+class SetTerritoryDefenderCasualtyOrderRequest(BaseModel):
+    game_id: str
+    territory_id: str
+    casualty_order: str  # "best_unit" | "best_defense"
+
+
 # ===== Helper Functions =====
 
 def generate_game_code(db: Session) -> str:
@@ -256,43 +293,54 @@ def generate_game_code(db: Session) -> str:
     raise HTTPException(status_code=500, detail="Could not generate unique game code")
 
 
-def _build_definitions_snapshot(ud=None, td=None, fd=None, cd=None, start=None) -> dict:
+def _build_definitions_snapshot(
+    ud=None, td=None, fd=None, cd=None, pd=None, start=None,
+    specials=None, specials_order=None,
+) -> dict:
     """Snapshot of definitions + starting_setup for storing in game config. Uses provided defs or module fallback."""
     ud = ud if ud is not None else unit_defs
     td = td if td is not None else territory_defs
     fd = fd if fd is not None else faction_defs
     cd = cd if cd is not None else camp_defs
+    pd = pd if pd is not None else port_defs
     start = start if start is not None else starting_setup
+    defs = {
+        "units": {k: asdict(v) for k, v in ud.items()},
+        "territories": {k: asdict(v) for k, v in td.items()},
+        "factions": {k: asdict(v) for k, v in fd.items()},
+        "camps": {k: asdict(v) for k, v in cd.items()},
+        "ports": {k: asdict(v) for k, v in pd.items()},
+    }
+    if specials is not None:
+        defs["specials"] = specials
+    if specials_order is not None:
+        defs["specials_order"] = specials_order
     return {
-        "definitions": {
-            "units": {k: asdict(v) for k, v in ud.items()},
-            "territories": {k: asdict(v) for k, v in td.items()},
-            "factions": {k: asdict(v) for k, v in fd.items()},
-            "camps": {k: asdict(v) for k, v in cd.items()},
-        },
+        "definitions": defs,
         "starting_setup": start,
+        "lobby_claims": {},  # set by create_game for multiplayer; faction_id -> player_id
     }
 
 
 def get_game_definitions(game_id: str, db: Session | None = None):
-    """Return (unit_defs, territory_defs, faction_defs, camp_defs) for this game. Uses snapshot from config if present, else global defs."""
+    """Return (unit_defs, territory_defs, faction_defs, camp_defs, port_defs) for this game. Uses snapshot from config if present, else global defs."""
     if game_id in game_defs:
         return game_defs[game_id]
     if db is None:
         db = next(get_db())
     row = db.query(GameModel).filter(GameModel.id == game_id).first()
     if not row or not row.config:
-        return (unit_defs, territory_defs, faction_defs, camp_defs)
+        return (unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
     try:
         config = json.loads(row.config) if isinstance(row.config, str) else row.config
         defs_snapshot = config.get("definitions")
         if not defs_snapshot:
-            return (unit_defs, territory_defs, faction_defs, camp_defs)
-        ud, td, fd, cd = definitions_from_snapshot(defs_snapshot)
-        game_defs[game_id] = (ud, td, fd, cd)
-        return (ud, td, fd, cd)
+            return (unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+        ud, td, fd, cd, port_d = definitions_from_snapshot(defs_snapshot)
+        game_defs[game_id] = (ud, td, fd, cd, port_d)
+        return (ud, td, fd, cd, port_d)
     except Exception:
-        return (unit_defs, territory_defs, faction_defs, camp_defs)
+        return (unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
 
 
 def _player_can_act(game_id: str, player: Player, db: Session) -> bool:
@@ -382,10 +430,29 @@ def _get_combat_modifiers_and_specials(
     attacker_faction = state.current_faction
     attacker_alliance = getattr(fd.get(attacker_faction), "alliance", None) if fd.get(attacker_faction) else None
     attacker_ids = set(state.active_combat.attacker_instance_ids)
-    attackers = sorted(
-        [u for u in territory.units if u.instance_id in attacker_ids],
-        key=lambda u: u.instance_id,
-    )
+    sea_zone_id = getattr(state.active_combat, "sea_zone_id", None)
+    if sea_zone_id:
+        sea_zone = state.territories.get(sea_zone_id)
+        if sea_zone and sea_zone.units:
+            from backend.engine.utils import is_land_unit
+            attackers = sorted(
+                [
+                    u for u in sea_zone.units
+                    if u.instance_id in attacker_ids
+                    and is_land_unit(ud.get(u.unit_id))
+                ],
+                key=lambda u: u.instance_id,
+            )
+        else:
+            attackers = sorted(
+                [u for u in territory.units if u.instance_id in attacker_ids],
+                key=lambda u: u.instance_id,
+            )
+    else:
+        attackers = sorted(
+            [u for u in territory.units if u.instance_id in attacker_ids],
+            key=lambda u: u.instance_id,
+        )
     defenders = sorted(
         [
             u for u in territory.units
@@ -396,36 +463,84 @@ def _get_combat_modifiers_and_specials(
         key=lambda u: u.instance_id,
     )
     territory_def = td.get(state.active_combat.territory_id)
+    from backend.engine.utils import has_unit_special
     terrain_att, terrain_def = compute_terrain_stat_modifiers(
         territory_def, attackers, defenders, ud
     )
     anticav_att, anticav_def = compute_anti_cavalry_stat_modifiers(attackers, defenders, ud)
     captain_att, captain_def = compute_captain_stat_modifiers(attackers, defenders, ud)
-    attacker_mods = merge_stat_modifiers(terrain_att, anticav_att, captain_att)
+    sea_raider_att, _ = compute_sea_raider_stat_modifiers(attackers, ud, is_sea_raid=bool(sea_zone_id))
+    attacker_mods = merge_stat_modifiers(terrain_att, anticav_att, captain_att, sea_raider_att)
     defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
 
     terrain_type = (getattr(territory_def, "terrain_type", None) or "").lower()
     is_mountain = terrain_type in ("mountain", "mountains")
     is_forest = terrain_type == "forest"
 
-    def build_specials(units: list, captain_mods: dict, anticav_mods: dict, terrain_mods: dict, is_attacker: bool) -> dict:
+    attackers_have_terror = any(
+        has_unit_special(ud.get(u.unit_id), "terror") for u in attackers if ud.get(u.unit_id)
+    )
+    # Stealth: only show ST when all attackers have stealth (prefire is activated)
+    stealth_activated = (
+        len(attackers) > 0
+        and all(has_unit_special(ud.get(u.unit_id), "stealth") for u in attackers if ud.get(u.unit_id))
+    )
+    # Bombikazi: only show B when unit is paired with a bomb (special activated this round)
+    paired_bombikazi_ids = set(get_bombikazi_pairing(attackers, ud)[0]) if attackers else set()
+
+    # Archer: only show AR during defender archer prefire (first round in log is archer prefire)
+    combat_log = getattr(state.active_combat, "combat_log", []) or []
+    first_round = combat_log[0] if len(combat_log) >= 1 else None
+    first_is_archer_prefire = (
+        first_round is not None
+        and getattr(first_round, "is_archer_prefire", False)
+    )
+    archer_badge_active = bool(first_is_archer_prefire)
+
+    def _is_archer(unit_def) -> bool:
+        if not unit_def:
+            return False
+        arch = getattr(unit_def, "archetype", "") or ""
+        tags = getattr(unit_def, "tags", []) or []
+        return arch == "archer" or "archer" in tags
+
+    def build_specials(
+        units: list,
+        captain_mods: dict,
+        anticav_mods: dict,
+        terrain_mods: dict,
+        is_attacker: bool,
+        sea_raider_mods: dict | None = None,
+        stealth_activated: bool = False,
+        paired_bombikazi_ids: set | None = None,
+    ) -> dict:
         out_specials: dict[str, dict[str, bool]] = {}
+        sea_raider_mods = sea_raider_mods or {}
+        paired_bombikazi_ids = paired_bombikazi_ids or set()
         for u in units:
             unit_def = ud.get(u.unit_id)
             if not unit_def:
                 continue
-            tags = getattr(unit_def, "tags", []) or []
             out_specials[u.instance_id] = {
-                "terror": is_attacker and "terror" in tags,
+                "terror": is_attacker and has_unit_special(unit_def, "terror"),
                 "terrainMountain": bool(terrain_mods.get(u.instance_id) and is_mountain),
                 "terrainForest": bool(terrain_mods.get(u.instance_id) and is_forest),
                 "captain": bool(captain_mods.get(u.instance_id, 0) > 0),
                 "antiCavalry": bool(anticav_mods.get(u.instance_id, 0) > 0),
+                "seaRaider": bool(sea_raider_mods.get(u.instance_id, 0) > 0),
+                "archer": (not is_attacker) and _is_archer(unit_def) and archer_badge_active,
+                "stealth": is_attacker and has_unit_special(unit_def, "stealth") and stealth_activated,
+                "bombikazi": is_attacker and u.instance_id in paired_bombikazi_ids,
+                "fearless": (not is_attacker) and has_unit_special(unit_def, "fearless") and attackers_have_terror,
+                "hope": (not is_attacker) and has_unit_special(unit_def, "hope") and attackers_have_terror,
             }
         return out_specials
 
     combat_specials = {
-        "attacker": build_specials(attackers, captain_att, anticav_att, terrain_att, True),
+        "attacker": build_specials(
+            attackers, captain_att, anticav_att, terrain_att, True,
+            sea_raider_att, stealth_activated=stealth_activated, paired_bombikazi_ids=paired_bombikazi_ids,
+        ),
         "defender": build_specials(defenders, captain_def, anticav_def, terrain_def, False),
     }
     combat_stat_modifiers = {
@@ -455,7 +570,7 @@ def state_for_response(state: GameState, game_id: str | None = None, db: Session
                 pass
     try:
         if game_id and db is not None:
-            ud, td, fd, _ = get_game_definitions(game_id, db)
+            ud, td, fd, _, _ = get_game_definitions(game_id, db)
         else:
             ud, td, fd = unit_defs, territory_defs, faction_defs
         out["faction_stats"] = get_faction_stats(state, td, fd, ud)
@@ -466,11 +581,6 @@ def state_for_response(state: GameState, game_id: str | None = None, db: Session
     except Exception:
         out["faction_stats"] = {"factions": {}, "alliances": {}}
     return out
-
-
-@app.on_event("startup")
-def on_startup():
-    init_db()
 
 
 # ===== API Endpoints =====
@@ -547,7 +657,8 @@ def create_game(
         setup = load_setup(setup_id)
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    ud, td, fd, cd = load_static_definitions(setup_id=setup_id)
+    ud, td, fd, cd, port_d = load_static_definitions(setup_id=setup_id)
+    specials_defs, specials_order = load_specials(setup_id=setup_id)
     victory_criteria = setup.get("victory_criteria")
     camp_cost = setup.get("camp_cost")
     state = initialize_game_state(
@@ -567,6 +678,18 @@ def create_game(
             state.turn_order = [f for f in order if f in fd]
     if not state.turn_order:
         state.turn_order = sorted(fd.keys())
+    # Default defender casualty order: best_defense for strongholds, capitals, camps, ports
+    for tid, tdef in td.items():
+        if getattr(tdef, "is_stronghold", False):
+            state.territory_defender_casualty_order[tid] = "best_defense"
+    for fid, fdef in fd.items():
+        cap = getattr(fdef, "capital", None)
+        if cap and cap in td:
+            state.territory_defender_casualty_order[cap] = "best_defense"
+    for cid, cdef in cd.items():
+        state.territory_defender_casualty_order[cdef.territory_id] = "best_defense"
+    for pid, pdef in port_d.items():
+        state.territory_defender_casualty_order[pdef.territory_id] = "best_defense"
     game_id = str(uuid.uuid4())
     game_code = generate_game_code(db) if request.is_multiplayer else None
     if request.is_multiplayer:
@@ -579,7 +702,14 @@ def create_game(
         ]
         status = "active"
     players_json = json.dumps(players_list)
-    config_snapshot = _build_definitions_snapshot(ud, td, fd, cd, setup["starting_setup"])
+    config_snapshot = _build_definitions_snapshot(
+        ud, td, fd, cd, port_d, setup["starting_setup"],
+        specials=specials_defs, specials_order=specials_order,
+    )
+    if not request.is_multiplayer:
+        config_snapshot.pop("lobby_claims", None)
+    if request.setup_id is not None:
+        config_snapshot["setup_id"] = request.setup_id
     row = GameModel(
         id=game_id,
         name=request.name,
@@ -593,7 +723,7 @@ def create_game(
     db.add(row)
     db.commit()
     games[game_id] = state
-    game_defs[game_id] = (ud, td, fd, cd)
+    game_defs[game_id] = (ud, td, fd, cd, port_d)
     state_dict = state_for_response(state, game_id, db)
     turn_order = state_dict.get("turn_order") if isinstance(state_dict.get("turn_order"), list) else None
     return {
@@ -615,8 +745,22 @@ DEFAULT_FACTION_STATS = {
 }
 
 
+def _get_forfeited_player_ids(row) -> list[str]:
+    """Extract forfeited_player_ids from game config. Players who forfeited are excluded from their list."""
+    if not getattr(row, "config", None):
+        return []
+    try:
+        config = json.loads(row.config) if isinstance(row.config, str) else row.config
+        ids = config.get("forfeited_player_ids")
+        if isinstance(ids, list):
+            return [str(x) for x in ids]
+    except (TypeError, json.JSONDecodeError):
+        pass
+    return []
+
+
 def _build_games_list(player: Player, db: Session) -> list[dict[str, Any]]:
-    """Build list of game dicts for the current player (with faction_stats and current_player_username). Username only from player→faction assignment (no fallback to current user)."""
+    """Build list of game dicts for the current player (with faction_stats and current_player_username). Excludes games the player has forfeited."""
     rows = db.query(GameModel).filter(GameModel.status != "finished").all()
     mine = []
     player_ids = set()
@@ -627,6 +771,8 @@ def _build_games_list(player: Player, db: Session) -> list[dict[str, Any]]:
             if not isinstance(pl, list):
                 continue
             if not any(str(p.get("player_id")) == player_id_str for p in pl):
+                continue
+            if player_id_str in _get_forfeited_player_ids(r):
                 continue
             player_ids.add(player_id_str)
             for p in pl:
@@ -649,6 +795,8 @@ def _build_games_list(player: Player, db: Session) -> list[dict[str, Any]]:
                 continue
             if not any(str(p.get("player_id")) == player_id_str for p in pl):
                 continue
+            if player_id_str in _get_forfeited_player_ids(r):
+                continue
         except (json.JSONDecodeError, TypeError):
             continue
 
@@ -659,6 +807,7 @@ def _build_games_list(player: Player, db: Session) -> list[dict[str, Any]]:
         current_faction_display_name = None
         current_faction_icon = None
         faction_stats = None
+        fd = faction_defs  # fallback to default setup if get_game_definitions not run or fails
 
         try:
             state_dict = json.loads(r.game_state) if isinstance(r.game_state, str) else {}
@@ -678,17 +827,18 @@ def _build_games_list(player: Player, db: Session) -> list[dict[str, Any]]:
             except Exception:
                 state = GameState.from_dict({})
             try:
-                ud, td, fd, _ = get_game_definitions(str(r.id), db)
+                ud, td, fd, _, _ = get_game_definitions(str(r.id), db)
             except Exception:
                 ud, td, fd = None, territory_defs, faction_defs
             faction_stats = get_faction_stats(state, td, fd, ud)
         except Exception:
             faction_stats = dict(DEFAULT_FACTION_STATS)
 
-        if current_faction and faction_defs.get(current_faction):
-            fd = faction_defs[current_faction]
-            current_faction_display_name = getattr(fd, "display_name", None) or current_faction
-            icon = getattr(fd, "icon", None) or f"{current_faction}.png"
+        # Use this game's setup faction defs (fd), not global default, so old games with different setups show correct names/icons
+        if current_faction and fd and fd.get(current_faction):
+            current_fd = fd[current_faction]
+            current_faction_display_name = getattr(current_fd, "display_name", None) or current_faction
+            icon = getattr(current_fd, "icon", None) or f"{current_faction}.png"
             current_faction_icon = f"/assets/factions/{icon}"
             for p in pl:
                 if str(p.get("faction_id")) == str(current_faction):
@@ -705,6 +855,17 @@ def _build_games_list(player: Player, db: Session) -> list[dict[str, Any]]:
         if faction_stats is None:
             faction_stats = dict(DEFAULT_FACTION_STATS)
 
+        # Lobby-only: player count, faction counts for list display
+        lobby_players = None
+        lobby_factions_claimed = None
+        lobby_factions_total = None
+        if r.status == "lobby":
+            lobby_players = len(pl) if isinstance(pl, list) else 0
+            turn_order = (state_dict or {}).get("turn_order") or []
+            lobby_factions_total = len(turn_order) if isinstance(turn_order, list) else 0
+            lobby_claims = _get_lobby_claims_from_config(r)
+            lobby_factions_claimed = len(lobby_claims)
+
         # Username only from faction match or single-player lookup (no fallback to current user)
         item = {
             "id": str(r.id),
@@ -712,6 +873,7 @@ def _build_games_list(player: Player, db: Session) -> list[dict[str, Any]]:
             "game_code": r.game_code,
             "status": r.status,
             "created_at": r.created_at.isoformat() if r.created_at else None,
+            "created_by": str(r.created_by) if r.created_by else None,
             "turn_number": turn_number,
             "phase": phase,
             "current_faction": current_faction,
@@ -719,6 +881,9 @@ def _build_games_list(player: Player, db: Session) -> list[dict[str, Any]]:
             "current_faction_icon": current_faction_icon,
             "current_player_username": current_player_username,
             "faction_stats": faction_stats,
+            "lobby_players": lobby_players,
+            "lobby_factions_claimed": lobby_factions_claimed,
+            "lobby_factions_total": lobby_factions_total,
         }
         mine.append(item)
     return mine
@@ -768,16 +933,23 @@ def _safe_asdict_map(defs_dict):
 
 @app.get("/definitions")
 def get_definitions():
-    """Get all static game definitions. Never raises."""
+    """Get all static game definitions (default setup). Never raises."""
     try:
+        specials_defs, specials_order = load_specials(setup_id=DEFAULT_SETUP_ID)
         return {
             "units": _safe_asdict_map(unit_defs),
             "territories": _safe_asdict_map(territory_defs),
             "factions": _safe_asdict_map(faction_defs),
             "camps": _safe_asdict_map(camp_defs),
+            "ports": _safe_asdict_map(port_defs),
+            "specials": specials_defs,
+            "specials_order": specials_order,
         }
     except Exception:
-        return {"units": {}, "territories": {}, "factions": {}, "camps": {}}
+        return {
+            "units": {}, "territories": {}, "factions": {}, "camps": {}, "ports": {},
+            "specials": {}, "specials_order": [],
+        }
 
 
 @app.post("/games")
@@ -795,7 +967,7 @@ def create_game_legacy(request: NewGameRequest):
     )
     state.map_asset = request.map_asset if request.map_asset is not None else "test_map"
     games[request.game_id] = state
-    game_defs[request.game_id] = (unit_defs, territory_defs, faction_defs, camp_defs)
+    game_defs[request.game_id] = (unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
     return {
         "game_id": request.game_id,
         "state": state_for_response(state, request.game_id, None),
@@ -810,22 +982,37 @@ def get_game_state(
 ):
     """Get current game state (from cache or DB). Includes this game's definitions snapshot when present. can_act is true only if the authenticated player is assigned to the current faction."""
     state = get_game(game_id, db)
-    ud, td, fd, cd = get_game_definitions(game_id, db)
+    ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
     can_act = _player_can_act(game_id, player, db) if player else False
     state_dict = state_for_response(state, game_id, db)
     turn_order = state_dict.get("turn_order") if isinstance(state_dict.get("turn_order"), list) else None
     pending_camps = state_dict.get("pending_camps") if isinstance(state_dict.get("pending_camps"), list) else getattr(state, "pending_camps", [])
+    definitions = {
+        "units": _safe_asdict_map(ud),
+        "territories": _safe_asdict_map(td),
+        "factions": _safe_asdict_map(fd),
+        "camps": _safe_asdict_map(cd),
+        "ports": _safe_asdict_map(port_d),
+    }
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if row and row.config:
+        try:
+            config = json.loads(row.config) if isinstance(row.config, str) else row.config
+            defs_snapshot = config.get("definitions") or {}
+            definitions["specials"] = defs_snapshot.get("specials", {})
+            definitions["specials_order"] = defs_snapshot.get("specials_order", [])
+        except (TypeError, json.JSONDecodeError):
+            definitions["specials"] = {}
+            definitions["specials_order"] = []
+    else:
+        definitions["specials"] = {}
+        definitions["specials_order"] = []
     return {
         "game_id": game_id,
         "state": state_dict,
         "turn_order": turn_order,
         "pending_camps": pending_camps,
-        "definitions": {
-            "units": _safe_asdict_map(ud),
-            "territories": _safe_asdict_map(td),
-            "factions": _safe_asdict_map(fd),
-            "camps": _safe_asdict_map(cd),
-        },
+        "definitions": definitions,
         "can_act": can_act,
     }
 
@@ -848,9 +1035,43 @@ def get_game_debug(game_id: str, db: Session = Depends(get_db)):
     }
 
 
+def _get_lobby_claims_from_config(row) -> dict[str, str]:
+    """Extract lobby_claims from game config (faction_id -> player_id)."""
+    if not getattr(row, "config", None):
+        return {}
+    try:
+        config = json.loads(row.config) if isinstance(row.config, str) else row.config
+        claims = config.get("lobby_claims")
+        if isinstance(claims, dict):
+            return {str(k): str(v) for k, v in claims.items()}
+    except (TypeError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def _get_scenario_from_config(row) -> dict[str, Any] | None:
+    """Return { display_name, context } from setup manifest if config has setup_id."""
+    if not getattr(row, "config", None):
+        return None
+    try:
+        config = json.loads(row.config) if isinstance(row.config, str) else row.config
+        setup_id = config.get("setup_id")
+        if not setup_id or not isinstance(setup_id, str):
+            return None
+        for s in list_setups():
+            if s.get("id") == setup_id:
+                return {
+                    "display_name": s.get("display_name", setup_id),
+                    "context": s.get("context"),
+                }
+    except (TypeError, json.JSONDecodeError):
+        pass
+    return None
+
+
 @app.get("/games/{game_id}/meta")
 def get_game_meta(game_id: str, db: Session = Depends(get_db)):
-    """Get game metadata (name, status, players) for lobby etc."""
+    """Get game metadata (name, status, players, created_by, lobby_claims, player_usernames, scenario) for lobby etc."""
     row = db.query(GameModel).filter(GameModel.id == game_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Game not found")
@@ -858,14 +1079,229 @@ def get_game_meta(game_id: str, db: Session = Depends(get_db)):
         players_list = json.loads(row.players)
     except (json.JSONDecodeError, TypeError):
         players_list = []
+    lobby_claims = _get_lobby_claims_from_config(row)
+    player_ids = set()
+    for p in players_list:
+        pid = p.get("player_id")
+        if pid:
+            player_ids.add(str(pid))
+    for pid in lobby_claims.values():
+        player_ids.add(str(pid))
+    players_by_id = {}
+    if player_ids:
+        for p_row in db.query(Player).filter(Player.id.in_(list(player_ids))).all():
+            players_by_id[str(p_row.id)] = p_row.username
+    scenario = _get_scenario_from_config(row)
     return {
         "id": row.id,
         "name": row.name,
         "game_code": row.game_code,
         "status": row.status,
         "created_at": row.created_at.isoformat() if row.created_at else None,
+        "created_by": str(row.created_by) if row.created_by else None,
         "players": players_list,
+        "lobby_claims": lobby_claims,
+        "player_usernames": players_by_id,
+        "scenario": scenario,
     }
+
+
+@app.post("/games/{game_id}/claim-faction")
+def claim_faction(
+    game_id: str,
+    request: ClaimFactionRequest,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Claim or unclaim a faction in the lobby. One alliance per player."""
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Game not found")
+    if row.status != "lobby":
+        raise HTTPException(status_code=400, detail="Game already started")
+    try:
+        players_list = json.loads(row.players)
+    except (TypeError, json.JSONDecodeError):
+        players_list = []
+    if not any(str(p.get("player_id")) == str(player.id) for p in players_list):
+        raise HTTPException(status_code=403, detail="Not in this game")
+    fid = (request.faction_id or "").strip()
+    if not fid:
+        raise HTTPException(status_code=400, detail="faction_id required")
+    _, _, fd, _, _ = get_game_definitions(game_id, db)
+    faction_def = fd.get(fid) if isinstance(fd, dict) else None
+    if not faction_def:
+        raise HTTPException(status_code=400, detail="Unknown faction")
+    alliance = getattr(faction_def, "alliance", None) or "neutral"
+    config = json.loads(row.config) if isinstance(row.config, str) else {}
+    if not isinstance(config, dict):
+        config = {}
+    lobby_claims = config.get("lobby_claims")
+    if not isinstance(lobby_claims, dict):
+        lobby_claims = {}
+    lobby_claims = dict(lobby_claims)
+    player_id_str = str(player.id)
+    if request.claim:
+        if lobby_claims.get(fid) and lobby_claims.get(fid) != player_id_str:
+            raise HTTPException(status_code=400, detail="Faction already claimed by another player")
+        my_claimed = [f for f, pid in lobby_claims.items() if pid == player_id_str]
+        for other_fid in my_claimed:
+            other_def = fd.get(other_fid) if isinstance(fd, dict) else None
+            other_alliance = getattr(other_def, "alliance", None) if other_def else "neutral"
+            if other_alliance != alliance:
+                raise HTTPException(
+                    status_code=400,
+                    detail="You can only claim factions from one alliance",
+                )
+        lobby_claims[fid] = player_id_str
+    else:
+        if lobby_claims.get(fid) != player_id_str:
+            raise HTTPException(status_code=400, detail="You have not claimed this faction")
+        del lobby_claims[fid]
+    config["lobby_claims"] = lobby_claims
+    row.config = json.dumps(config)
+    db.commit()
+    return {"lobby_claims": lobby_claims}
+
+
+@app.post("/games/{game_id}/start")
+def start_game(
+    game_id: str,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Start the game (host only). Lobby claims become player–faction assignments."""
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Game not found")
+    if row.status != "lobby":
+        raise HTTPException(status_code=400, detail="Game already started")
+    if str(row.created_by) != str(player.id):
+        raise HTTPException(status_code=403, detail="Only the host can start the game")
+    lobby_claims = _get_lobby_claims_from_config(row)
+    try:
+        state_dict = json.loads(row.game_state) if isinstance(row.game_state, str) else {}
+        turn_order = (state_dict or {}).get("turn_order") or []
+    except (TypeError, json.JSONDecodeError):
+        turn_order = []
+    if not isinstance(turn_order, list):
+        turn_order = []
+    unclaimed = [fid for fid in turn_order if fid and not lobby_claims.get(fid)]
+    if unclaimed:
+        raise HTTPException(
+            status_code=400,
+            detail="All factions must be claimed before starting the game.",
+        )
+    players_list = [{"player_id": pid, "faction_id": fid} for fid, pid in lobby_claims.items()]
+    row.players = json.dumps(players_list)
+    row.status = "active"
+    config = json.loads(row.config) if isinstance(row.config, str) else {}
+    if isinstance(config, dict):
+        config.pop("lobby_claims", None)
+        row.config = json.dumps(config)
+    db.commit()
+    if game_id in games:
+        del games[game_id]
+    if game_id in game_defs:
+        del game_defs[game_id]
+    return {"message": "Game started", "status": "active"}
+
+
+@app.post("/games/{game_id}/forfeit")
+def forfeit_game(
+    game_id: str,
+    request: Request,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Remove yourself from the game. Your faction(s) will be auto-skipped; game stays for others. Forfeited games disappear from your list."""
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Game not found")
+    try:
+        players_list = json.loads(row.players)
+    except (TypeError, json.JSONDecodeError):
+        players_list = []
+    player_id_str = str(player.id)
+    if not any(str(p.get("player_id")) == player_id_str for p in players_list):
+        raise HTTPException(status_code=403, detail="Not in this game")
+    config = json.loads(row.config) if isinstance(row.config, str) else {}
+    if not isinstance(config, dict):
+        config = {}
+    forfeited = config.get("forfeited_player_ids")
+    if not isinstance(forfeited, list):
+        forfeited = []
+    if player_id_str not in forfeited:
+        forfeited = list(forfeited) + [player_id_str]
+    config["forfeited_player_ids"] = forfeited
+    if row.status == "lobby":
+        new_players = [p for p in players_list if str(p.get("player_id")) != player_id_str]
+        lobby_claims = config.get("lobby_claims") or {}
+        if isinstance(lobby_claims, dict):
+            lobby_claims = {f: pid for f, pid in lobby_claims.items() if pid != player_id_str}
+            config["lobby_claims"] = lobby_claims
+    else:
+        new_players = [p for p in players_list if str(p.get("player_id")) != player_id_str]
+        # If the forfeiting player is currently up, call skip-turn until current faction is not forfeited
+        try:
+            raw = json.loads(row.game_state) if isinstance(row.game_state, str) else row.game_state
+            if isinstance(raw, dict):
+                state = GameState.from_dict(raw)
+                faction_to_player = {
+                    str(p["faction_id"]): str(p["player_id"])
+                    for p in players_list
+                    if p.get("faction_id") is not None and p.get("player_id") is not None
+                }
+                forfeited_set = set(forfeited)
+                _, _, fd, _, _ = get_game_definitions(game_id, db)
+                faction_ids = state.turn_order if state.turn_order else (sorted(fd.keys()) if fd else [])
+                max_skips = len(faction_ids) if faction_ids else 1
+                auth = request.headers.get("Authorization") or request.headers.get("authorization")
+                headers = {"Authorization": auth} if auth else {}
+                with TestClient(app) as client:
+                    for _ in range(max_skips):
+                        owner = faction_to_player.get(state.current_faction)
+                        if owner not in forfeited_set:
+                            break
+                        r = client.post(f"/games/{game_id}/skip-turn", headers=headers)
+                        if r.status_code != 200:
+                            break
+                        db.refresh(row)
+                        raw = json.loads(row.game_state) if isinstance(row.game_state, str) else {}
+                        if isinstance(raw, dict):
+                            state = GameState.from_dict(raw)
+                        else:
+                            break
+        except Exception:
+            pass
+    row.players = json.dumps(new_players)
+    # If host forfeited, promote first remaining player to host (by turn order in lobby, else first in list)
+    if str(row.created_by) == player_id_str and new_players:
+        try:
+            state_dict = json.loads(row.game_state) if isinstance(row.game_state, str) else {}
+            turn_order = (state_dict or {}).get("turn_order") or []
+        except (TypeError, json.JSONDecodeError):
+            turn_order = []
+        remaining_ids = list(dict.fromkeys(str(p.get("player_id")) for p in new_players if p.get("player_id")))
+        new_host = None
+        if isinstance(turn_order, list) and turn_order and row.status == "lobby":
+            lobby_claims_after = config.get("lobby_claims") or {}
+            for fid in turn_order:
+                pid = lobby_claims_after.get(fid)
+                if pid and pid in remaining_ids:
+                    new_host = pid
+                    break
+        if new_host is None and remaining_ids:
+            new_host = remaining_ids[0]
+        if new_host:
+            row.created_by = new_host
+    row.config = json.dumps(config)
+    db.commit()
+    if game_id in games:
+        del games[game_id]
+    if game_id in game_defs:
+        del game_defs[game_id]
+    return {"message": "You have left the game"}
 
 
 @app.delete("/games/{game_id}")
@@ -874,16 +1310,16 @@ def delete_game(
     player: Player = Depends(get_current_player),
     db: Session = Depends(get_db),
 ):
-    """Delete a game from DB and cache. Caller must be in the game."""
+    """Delete a game from DB and cache. Only the host (creator) can delete."""
     row = db.query(GameModel).filter(GameModel.id == game_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Game not found")
+    if str(row.created_by) != str(player.id):
+        raise HTTPException(status_code=403, detail="Only the host can delete the game")
     try:
         players_list = json.loads(row.players)
     except (TypeError, json.JSONDecodeError):
         players_list = []
-    if not any(str(p.get("player_id")) == str(player.id) for p in players_list):
-        raise HTTPException(status_code=403, detail="Not in this game")
     db.delete(row)
     db.commit()
     if game_id in games:
@@ -895,7 +1331,7 @@ def delete_game(
 
 def _build_available_actions(state: GameState, game_id: str, db: Session | None = None) -> dict[str, Any]:
     """Build available-actions dict using this game's definitions. Catches so caller never gets 500."""
-    ud, td, fd, cd = get_game_definitions(game_id, db)
+    ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
     try:
         faction = state.current_faction or ""
         phase = state.phase or "purchase"
@@ -907,8 +1343,20 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
         if phase == "purchase":
             purchasable = get_purchasable_units(state, faction, ud)
             actions["purchasable_units"] = purchasable
-            capacity_info = get_mobilization_capacity(state, faction, td, cd)
+            capacity_info = get_mobilization_capacity(state, faction, td, cd, port_d, ud)
             actions["mobilization_capacity"] = capacity_info.get("total_capacity", 0)
+            territories_list = capacity_info.get("territories", [])
+            camp_land_only = sum(t.get("power", 0) for t in territories_list)
+            home_slots = sum(1 for t in territories_list if t.get("home_unit_capacity"))
+            land_cap = camp_land_only + home_slots
+            port_cap = sum(p.get("power", 0) for p in capacity_info.get("port_territories", []))
+            # Land can only mobilize to camps or home; ports mobilize only naval to adjacent sea zones
+            actions["mobilization_land_capacity"] = land_cap
+            actions["mobilization_camp_land_capacity"] = camp_land_only
+            actions["mobilization_sea_capacity"] = port_cap
+            # Expose sea_zones so frontend can show Sea tab in purchase modal (faction has a port)
+            sea_zone_list = [z["sea_zone_id"] for z in capacity_info.get("sea_zones", [])]
+            actions["mobilize_options"] = {"sea_zones": sea_zone_list}
             already_purchased = sum(
                 s.count for s in (state.faction_purchased_units or {}).get(faction, [])
             )
@@ -927,6 +1375,43 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                     "destinations": targets,
                     "charge_routes": charge_routes,
                 })
+            if phase == "combat_move":
+                # Use state after applying pending combat moves so boats that will receive a load (from a pending load move) are included
+                state_after_combat_moves = get_state_after_pending_moves(state, "combat_move", ud, td, fd)
+                loaded_boat_ids = set(getattr(state_after_combat_moves, "loaded_naval_must_attack_instance_ids", []))
+                pending_combat = [pm for pm in (state.pending_moves or []) if getattr(pm, "phase", None) == "combat_move"]
+                # Boats that have declared attack: in a pending move from sea to land or from sea to enemy sea
+                boat_ids_declared_attack: set[str] = set()
+                current_faction = state.current_faction or ""
+                current_fd = fd.get(current_faction)
+                for pm in pending_combat:
+                    from_id = getattr(pm, "from_territory", "")
+                    to_id = getattr(pm, "to_territory", "")
+                    if not _is_sea_zone(td.get(from_id)):
+                        continue
+                    to_land = not _is_sea_zone(td.get(to_id))
+                    to_territory = state.territories.get(to_id) if to_id else None
+                    to_enemy_sea = (
+                        _is_sea_zone(td.get(to_id))
+                        and to_territory
+                        and any(
+                            get_unit_faction(u, ud) != current_faction
+                            and (not current_fd or not fd.get(get_unit_faction(u, ud)) or fd.get(get_unit_faction(u, ud)).alliance != current_fd.alliance)
+                            for u in to_territory.units
+                        )
+                    )
+                    if to_land or to_enemy_sea:
+                        from_territory = state.territories.get(from_id)
+                        if from_territory:
+                            units_by_iid = {u.instance_id: u for u in from_territory.units}
+                            for iid in getattr(pm, "unit_instance_ids", []) or []:
+                                u = units_by_iid.get(iid)
+                                if u and _is_naval_unit(ud.get(u.unit_id)):
+                                    boat_ids_declared_attack.add(iid)
+                effective_boat_ids = loaded_boat_ids - boat_ids_declared_attack
+                actions["loaded_naval_must_attack_instance_ids"] = list(effective_boat_ids)
+                # Allow end phase once every boat that must attack has declared (pending load moves will apply on end_phase)
+                actions["can_end_phase"] = len(effective_boat_ids) == 0
             if phase == "non_combat_move":
                 aerial_must_move = get_aerial_units_must_move(state, ud, td, fd, faction)
                 actions["aerial_units_must_move"] = aerial_must_move
@@ -935,8 +1420,9 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                 aerial_still_stuck = get_aerial_units_must_move(state_after_moves, ud, td, fd, faction)
                 actions["can_end_phase"] = len(aerial_still_stuck) == 0
         elif phase == "combat":
-            combat_territories = get_contested_territories(state, faction, fd, ud)
+            combat_territories = get_contested_territories(state, faction, fd, ud, td)
             actions["combat_territories"] = combat_territories
+            actions["sea_raid_targets"] = get_sea_raid_targets(state, faction, fd, ud, td)
             if state.active_combat:
                 actions["active_combat"] = state.active_combat.to_dict()
                 retreat_destinations = get_retreat_options(state, td, fd, ud)
@@ -945,11 +1431,13 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                     "valid_destinations": retreat_destinations,
                 }
         elif phase == "mobilization":
-            mobilize_territories = get_mobilization_territories(state, faction, td, cd)
-            mobilize_capacity = get_mobilization_capacity(state, faction, td, cd)
+            mobilize_territories = get_mobilization_territories(state, faction, td, cd, port_d, ud)
+            mobilize_sea_zones = get_mobilization_sea_zones(state, faction, td, port_d)
+            mobilize_capacity = get_mobilization_capacity(state, faction, td, cd, port_d, ud)
             purchased = get_purchased_units(state, faction)
             actions["mobilize_options"] = {
                 "territories": mobilize_territories,
+                "sea_zones": mobilize_sea_zones,
                 "capacity": mobilize_capacity,
                 "pending_units": purchased,
             }
@@ -970,7 +1458,8 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
         if getattr(state, "phase", None) == "mobilization":
             fallback["mobilize_options"] = {
                 "territories": [],
-                "capacity": {"total_capacity": 0, "territories": []},
+                "sea_zones": [],
+                "capacity": {"total_capacity": 0, "territories": [], "sea_zones": []},
                 "pending_units": [],
             }
         # Log so we fix the root cause instead of relying on fallback shape
@@ -996,12 +1485,12 @@ def do_purchase(
     """Purchase units. Only the player assigned to the current faction can act."""
     _require_can_act(game_id, player, db)
     state = get_game(game_id, db)
-    ud, td, fd, cd = get_game_definitions(game_id, db)
+    ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
     action = purchase_units(state.current_faction, request.purchases)
-    validation = validate_action(state, action, ud, td, fd, cd)
+    validation = validate_action(state, action, ud, td, fd, cd, port_d)
     if not validation.valid:
         raise HTTPException(status_code=400, detail=validation.error)
-    new_state, events = apply_action(state, action, ud, td, fd, cd)
+    new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db)
     return {
         "state": state_for_response(new_state, game_id, db),
@@ -1019,12 +1508,12 @@ def do_purchase_camp(
     """Purchase one camp (cost from setup). Only in purchase phase."""
     _require_can_act(game_id, player, db)
     state = get_game(game_id, db)
-    ud, td, fd, cd = get_game_definitions(game_id, db)
+    ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
     action = purchase_camp(state.current_faction)
-    validation = validate_action(state, action, ud, td, fd, cd)
+    validation = validate_action(state, action, ud, td, fd, cd, port_d)
     if not validation.valid:
         raise HTTPException(status_code=400, detail=validation.error)
-    new_state, events = apply_action(state, action, ud, td, fd, cd)
+    new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db)
     return {
         "state": state_for_response(new_state, game_id, db),
@@ -1042,19 +1531,125 @@ def do_move(
 ):
     """Move units. Only the player assigned to the current faction can act."""
     _require_can_act(game_id, player, db)
+    to_territory = (request.to_territory or "").strip()
+    from_territory = (request.from_territory or "").strip()
+    if not to_territory:
+        raise HTTPException(status_code=400, detail="No destination specified")
+    if not from_territory:
+        raise HTTPException(status_code=400, detail="No origin specified")
     state = get_game(game_id, db)
-    ud, td, fd, cd = get_game_definitions(game_id, db)
+    ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
+    from_sea = _is_sea_zone(td.get(from_territory))
+    to_sea = _is_sea_zone(td.get(to_territory))
+    move_type = None
+    if not from_sea and to_sea:
+        move_type = "load"
+    elif from_sea and not to_sea:
+        move_type = "offload"
+    elif from_sea and to_sea:
+        move_type = "sail"
+    else:
+        from_terr = state.territories.get(from_territory)
+        if from_terr and request.unit_instance_ids and ud:
+            any_aerial = any(
+                u and (getattr(ud.get(u.unit_id), "archetype", "") == "aerial" or "aerial" in getattr(ud.get(u.unit_id), "tags", []))
+                for iid in request.unit_instance_ids
+                for u in [next((x for x in from_terr.units if x.instance_id == iid), None)]
+            )
+            move_type = "aerial" if any_aerial else "land"
+        else:
+            move_type = "land"
+
+    # Sea -> land (offload): boat must end in a sea zone adjacent to the land. If boat is not already
+    # in such a zone, we sail to one that is reachable and adjacent, then offload. If multiple such
+    # zones exist, client must send offload_sea_zone_id (we return need_offload_sea_choice once).
+    if from_sea and not to_sea:
+        valid_offload = get_valid_offload_sea_zones(
+            from_territory, to_territory, state, request.unit_instance_ids, ud, td, fd, state.phase
+        )
+        if not valid_offload:
+            raise HTTPException(
+                status_code=400,
+                detail="No valid sea zone to offload to that land from your current position",
+            )
+        if len(valid_offload) > 1 and not request.offload_sea_zone_id:
+            return {
+                "need_offload_sea_choice": True,
+                "valid_offload_sea_zones": valid_offload,
+                "state": state_for_response(state, game_id, db),
+                "can_act": _player_can_act(game_id, player, db),
+            }
+        if len(valid_offload) > 1 and request.offload_sea_zone_id:
+            if request.offload_sea_zone_id not in valid_offload:
+                raise HTTPException(status_code=400, detail="Invalid offload sea zone choice")
+            offload_from_sea = request.offload_sea_zone_id
+        else:
+            offload_from_sea = from_territory if from_territory in valid_offload else valid_offload[0]
+
+        if offload_from_sea != from_territory:
+            # Sail to offload_from_sea, then offload to land (two pending moves).
+            # Apply sail (adds sail to pending_moves; units still in from_territory). Validate offload
+            # against state with sail applied, then append offload to pending_moves (reducer would fail
+            # looking for units in offload_from_sea since they're still in from_territory).
+            sail_action = move_units(
+                state.current_faction,
+                from_territory,
+                offload_from_sea,
+                request.unit_instance_ids,
+                charge_through=None,
+                move_type="sail",
+                load_onto_boat_instance_id=None,
+            )
+            val_sail = validate_action(state, sail_action, ud, td, fd, cd, port_d)
+            if not val_sail.valid:
+                raise HTTPException(status_code=400, detail=val_sail.error)
+            state_after_sail, events_sail = apply_action(state, sail_action, ud, td, fd, cd, port_d)
+            # Simulate applying the sail so we can validate offload (units in offload_from_sea)
+            state_simulated = get_state_after_pending_moves(
+                state_after_sail, state.phase, ud, td, fd
+            )
+            offload_action = move_units(
+                state.current_faction,
+                offload_from_sea,
+                to_territory,
+                request.unit_instance_ids,
+                charge_through=None,
+                move_type="offload",
+                load_onto_boat_instance_id=None,
+            )
+            val_offload = validate_action(state_simulated, offload_action, ud, td, fd, cd, port_d)
+            if not val_offload.valid:
+                raise HTTPException(status_code=400, detail=val_offload.error)
+            offload_pending = PendingMove(
+                from_territory=offload_from_sea,
+                to_territory=to_territory,
+                unit_instance_ids=request.unit_instance_ids,
+                phase=state.phase,
+                move_type="offload",
+            )
+            state_after_sail.pending_moves = list(state_after_sail.pending_moves) + [offload_pending]
+            save_game(game_id, state_after_sail, db)
+            return {
+                "state": state_for_response(state_after_sail, game_id, db),
+                "events": [e.to_dict() for e in events_sail],
+                "can_act": _player_can_act(game_id, player, db),
+            }
+        # Boat already in a valid adjacent sea zone; single offload move
+        move_type = "offload"
+
     action = move_units(
         state.current_faction,
-        request.from_territory,
-        request.to_territory,
+        from_territory,
+        to_territory,
         request.unit_instance_ids,
         charge_through=request.charge_through,
+        move_type=move_type,
+        load_onto_boat_instance_id=request.load_onto_boat_instance_id,
     )
-    validation = validate_action(state, action, ud, td, fd, cd)
+    validation = validate_action(state, action, ud, td, fd, cd, port_d)
     if not validation.valid:
         raise HTTPException(status_code=400, detail=validation.error)
-    new_state, events = apply_action(state, action, ud, td, fd, cd)
+    new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db)
     return {
         "state": state_for_response(new_state, game_id, db),
@@ -1073,12 +1668,12 @@ def do_cancel_move(
     """Cancel a pending move. Only the player assigned to the current faction can act."""
     _require_can_act(game_id, player, db)
     state = get_game(game_id, db)
-    ud, td, fd, cd = get_game_definitions(game_id, db)
+    ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
     action = cancel_move(state.current_faction, request.move_index)
-    validation = validate_action(state, action, ud, td, fd, cd)
+    validation = validate_action(state, action, ud, td, fd, cd, port_d)
     if not validation.valid:
         raise HTTPException(status_code=400, detail=validation.error)
-    new_state, events = apply_action(state, action, ud, td, fd, cd)
+    new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db)
     return {
         "state": state_for_response(new_state, game_id, db),
@@ -1097,12 +1692,12 @@ def do_cancel_mobilization(
     """Cancel a pending mobilization. Only the player assigned to the current faction can act."""
     _require_can_act(game_id, player, db)
     state = get_game(game_id, db)
-    ud, td, fd, cd = get_game_definitions(game_id, db)
+    ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
     action = cancel_mobilization(state.current_faction, request.mobilization_index)
-    validation = validate_action(state, action, ud, td, fd, cd)
+    validation = validate_action(state, action, ud, td, fd, cd, port_d)
     if not validation.valid:
         raise HTTPException(status_code=400, detail=validation.error)
-    new_state, events = apply_action(state, action, ud, td, fd, cd)
+    new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db)
     return {
         "state": state_for_response(new_state, game_id, db),
@@ -1121,12 +1716,12 @@ def do_place_camp(
     """Place a purchased camp on a territory during mobilization (immediate). Prefer queue-camp-placement for planned placement at end of phase."""
     _require_can_act(game_id, player, db)
     state = get_game(game_id, db)
-    ud, td, fd, cd = get_game_definitions(game_id, db)
+    ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
     action = place_camp(state.current_faction, request.camp_index, request.territory_id)
-    validation = validate_action(state, action, ud, td, fd, cd)
+    validation = validate_action(state, action, ud, td, fd, cd, port_d)
     if not validation.valid:
         raise HTTPException(status_code=400, detail=validation.error)
-    new_state, events = apply_action(state, action, ud, td, fd, cd)
+    new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db)
     return {
         "state": state_for_response(new_state, game_id, db),
@@ -1145,12 +1740,12 @@ def do_queue_camp_placement(
     """Queue a camp placement (applied at end of mobilization phase, like unit mobilizations)."""
     _require_can_act(game_id, player, db)
     state = get_game(game_id, db)
-    ud, td, fd, cd = get_game_definitions(game_id, db)
+    ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
     action = queue_camp_placement(state.current_faction, request.camp_index, request.territory_id)
-    validation = validate_action(state, action, ud, td, fd, cd)
+    validation = validate_action(state, action, ud, td, fd, cd, port_d)
     if not validation.valid:
         raise HTTPException(status_code=400, detail=validation.error)
-    new_state, events = apply_action(state, action, ud, td, fd, cd)
+    new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db)
     return {
         "state": state_for_response(new_state, game_id, db),
@@ -1169,12 +1764,12 @@ def do_cancel_camp_placement(
     """Cancel a queued camp placement."""
     _require_can_act(game_id, player, db)
     state = get_game(game_id, db)
-    ud, td, fd, cd = get_game_definitions(game_id, db)
+    ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
     action = cancel_camp_placement(state.current_faction, request.placement_index)
-    validation = validate_action(state, action, ud, td, fd, cd)
+    validation = validate_action(state, action, ud, td, fd, cd, port_d)
     if not validation.valid:
         raise HTTPException(status_code=400, detail=validation.error)
-    new_state, events = apply_action(state, action, ud, td, fd, cd)
+    new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db)
     return {
         "state": state_for_response(new_state, game_id, db),
@@ -1235,7 +1830,7 @@ def do_initiate_combat(
     """Initiate combat in a territory. Only the player assigned to the current faction can act."""
     _require_can_act(game_id, player, db)
     state = get_game(game_id, db)
-    ud, td, fd, cd = get_game_definitions(game_id, db)
+    ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
 
     territory = state.territories.get(request.territory_id)
     if not territory:
@@ -1243,19 +1838,77 @@ def do_initiate_combat(
 
     attacker_faction = state.current_faction
     attacker_alliance = getattr(fd.get(attacker_faction), "alliance", None) if fd.get(attacker_faction) else None
-    attackers = sorted(
-        [u for u in territory.units if ud.get(u.unit_id) and ud[u.unit_id].faction == attacker_faction],
-        key=lambda u: u.instance_id,
-    )
-    defenders = sorted(
-        [
-            u for u in territory.units
-            if ud.get(u.unit_id)
-            and ud[u.unit_id].faction != attacker_faction
-            and (getattr(fd.get(ud[u.unit_id].faction), "alliance", None) if fd.get(ud[u.unit_id].faction) else None) != attacker_alliance
-        ],
-        key=lambda u: u.instance_id,
-    )
+
+    if request.sea_zone_id:
+        # Sea raid: attackers from sea zone (land units only) or, after phase end, from territory (already offloaded)
+        sea_zone = state.territories.get(request.sea_zone_id)
+        if not sea_zone or not _is_sea_zone(td.get(request.sea_zone_id)):
+            raise HTTPException(status_code=400, detail="Invalid sea zone for sea raid")
+        sea_raid_from = getattr(state, "territory_sea_raid_from", None) or {}
+        if sea_raid_from.get(request.territory_id) != request.sea_zone_id:
+            sea_def = td.get(request.sea_zone_id)
+            land_def = td.get(request.territory_id)
+            sea_adj = getattr(sea_def, "adjacent", []) or []
+            land_adj = getattr(land_def, "adjacent", []) or []
+            if request.territory_id not in sea_adj and request.sea_zone_id not in land_adj:
+                raise HTTPException(status_code=400, detail="Territory not adjacent to sea zone")
+        attackers_from_sea = sorted(
+            [
+                u for u in sea_zone.units
+                if ud.get(u.unit_id) and ud[u.unit_id].faction == attacker_faction
+                and not combat_is_naval_unit(ud.get(u.unit_id))
+            ],
+            key=lambda u: u.instance_id,
+        )
+        # After combat_move phase end, land units were moved to territory; use them if sea has none
+        if attackers_from_sea:
+            attackers = attackers_from_sea
+        else:
+            attackers = sorted(
+                [
+                    u for u in territory.units
+                    if ud.get(u.unit_id) and ud[u.unit_id].faction == attacker_faction
+                    and not combat_is_naval_unit(ud.get(u.unit_id))
+                ],
+                key=lambda u: u.instance_id,
+            )
+        defenders = sorted(
+            [
+                u for u in territory.units
+                if ud.get(u.unit_id)
+                and ud[u.unit_id].faction != attacker_faction
+                and (getattr(fd.get(ud[u.unit_id].faction), "alliance", None) if fd.get(ud[u.unit_id].faction) else None) != attacker_alliance
+            ],
+            key=lambda u: u.instance_id,
+        )
+        if not attackers:
+            raise HTTPException(status_code=400, detail="Sea raid requires at least one land unit (passenger) in the sea zone or on the target territory")
+    else:
+        # Land combat or naval combat (combat in a sea zone): both sides from same territory
+        is_sea_zone_combat = _is_sea_zone(td.get(request.territory_id))
+        attackers = sorted(
+            [
+                u for u in territory.units
+                if ud.get(u.unit_id) and ud[u.unit_id].faction == attacker_faction
+                and (not is_sea_zone_combat or combat_is_naval_unit(ud.get(u.unit_id)))
+            ],
+            key=lambda u: u.instance_id,
+        )
+        defenders = sorted(
+            [
+                u for u in territory.units
+                if ud.get(u.unit_id)
+                and ud[u.unit_id].faction != attacker_faction
+                and (getattr(fd.get(ud[u.unit_id].faction), "alliance", None) if fd.get(ud[u.unit_id].faction) else None) != attacker_alliance
+                and (not is_sea_zone_combat or combat_is_naval_unit(ud.get(u.unit_id)))
+            ],
+            key=lambda u: u.instance_id,
+        )
+        if is_sea_zone_combat and (not attackers or not defenders):
+            raise HTTPException(
+                status_code=400,
+                detail="Sea zone combat requires at least one naval unit on each side",
+            )
 
     def _is_archer(unit_def) -> bool:
         if not unit_def:
@@ -1266,11 +1919,22 @@ def do_initiate_combat(
 
     terror_reroll_response: dict[str, Any] = {}
 
-    # If defender has archers, only archers roll in prefire (initiate runs prefire only)
+    # Stealth prefire takes precedence: if ALL attackers have stealth, only attackers roll (defender archer prefire is cancelled)
+    all_attackers_have_stealth = (
+        len(attackers) > 0
+        and all(combat_has_special(ud.get(u.unit_id), "stealth") for u in attackers if ud.get(u.unit_id))
+    )
     defender_has_archers = any(
         _is_archer(ud.get(u.unit_id)) for u in defenders if u.unit_id in ud
     )
-    if defender_has_archers:
+
+    if all_attackers_have_stealth:
+        att_effective_dice, _ = get_attacker_effective_dice_and_bombikazi_self_destruct(attackers, ud)
+        dice_rolls = {
+            "attacker": generate_dice_rolls_for_units(attackers, ud, effective_dice_override=att_effective_dice),
+            "defender": [],
+        }
+    elif defender_has_archers:
         defender_archer_units = sorted(
             [u for u in defenders if u.unit_id in ud and _is_archer(ud[u.unit_id])],
             key=lambda u: u.instance_id,
@@ -1280,8 +1944,9 @@ def do_initiate_combat(
             "defender": generate_dice_rolls_for_units(defender_archer_units, ud),
         }
     else:
+        att_effective_dice, _ = get_attacker_effective_dice_and_bombikazi_self_destruct(attackers, ud)
         dice_rolls = {
-            "attacker": generate_dice_rolls_for_units(attackers, ud),
+            "attacker": generate_dice_rolls_for_units(attackers, ud, effective_dice_override=att_effective_dice),
             "defender": generate_dice_rolls_for_units(defenders, ud),
         }
 
@@ -1298,8 +1963,10 @@ def do_initiate_combat(
         )
         attacker_mods = merge_stat_modifiers(terrain_att, anticav_att, captain_att)
         defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
-        # Terror cap = number of attackers with terror (max 3); no prefire in this branch
-        terror_cap = min(3, sum(1 for u in attackers if combat_has_special(ud.get(u.unit_id), "terror")))
+        # Terror cap: terror units - hope units (hope cancels 1 terror each), then cap at 3
+        terror_count = sum(1 for u in attackers if combat_has_special(ud.get(u.unit_id), "terror"))
+        hope_count = sum(1 for u in defenders if combat_has_special(ud.get(u.unit_id), "hope"))
+        terror_cap = min(3, max(0, terror_count - hope_count))
         flat_indices, total_reroll_dice = get_terror_reroll_targets(
             attackers,
             defenders,
@@ -1367,13 +2034,14 @@ def do_initiate_combat(
         dice_rolls,
         terror_applied=bool(terror_reroll_response),
         terror_final_defender_hits=terror_reroll_response.get("terror_final_defender_hits") if terror_reroll_response else None,
+        sea_zone_id=request.sea_zone_id,
     )
 
-    validation = validate_action(state, action, ud, td, fd)
+    validation = validate_action(state, action, ud, td, fd, cd, port_d)
     if not validation.valid:
         raise HTTPException(status_code=400, detail=validation.error)
 
-    new_state, events = apply_action(state, action, ud, td, fd)
+    new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db)
     response: dict[str, Any] = {
         "state": state_for_response(new_state, game_id, db),
@@ -1396,7 +2064,7 @@ def do_continue_combat(
     """Continue an active combat. Only the player assigned to the current faction can act."""
     _require_can_act(game_id, player, db)
     state = get_game(game_id, db)
-    ud, td, fd, cd = get_game_definitions(game_id, db)
+    ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
 
     if not state.active_combat:
         raise HTTPException(status_code=400, detail="No active combat")
@@ -1415,8 +2083,9 @@ def do_continue_combat(
         key=lambda u: u.instance_id,
     )
 
+    att_effective_dice, _ = get_attacker_effective_dice_and_bombikazi_self_destruct(attackers, ud)
     dice_rolls = {
-        "attacker": generate_dice_rolls_for_units(attackers, ud),
+        "attacker": generate_dice_rolls_for_units(attackers, ud, effective_dice_override=att_effective_dice),
         "defender": generate_dice_rolls_for_units(defenders, ud),
     }
 
@@ -1435,8 +2104,10 @@ def do_continue_combat(
         )
         attacker_mods = merge_stat_modifiers(terrain_att, anticav_att, captain_att)
         defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
-        # Terror cap = number of surviving attackers with terror (max 3); after prefire this is correct
-        terror_cap = min(3, sum(1 for u in attackers if combat_has_special(ud.get(u.unit_id), "terror")))
+        # Terror cap: terror units - hope units (hope cancels 1 terror each), then cap at 3
+        terror_count = sum(1 for u in attackers if combat_has_special(ud.get(u.unit_id), "terror"))
+        hope_count = sum(1 for u in defenders if combat_has_special(ud.get(u.unit_id), "hope"))
+        terror_cap = min(3, max(0, terror_count - hope_count))
         flat_indices, total_reroll_dice = get_terror_reroll_targets(
             attackers,
             defenders,
@@ -1501,13 +2172,15 @@ def do_continue_combat(
         dice_rolls,
         terror_applied=bool(terror_reroll_response),
         terror_final_defender_hits=terror_reroll_response.get("terror_final_defender_hits") if terror_reroll_response else None,
+        casualty_order=getattr(request, "casualty_order", None),
+        must_conquer=getattr(request, "must_conquer", None),
     )
 
-    validation = validate_action(state, action, ud, td, fd)
+    validation = validate_action(state, action, ud, td, fd, cd, port_d)
     if not validation.valid:
         raise HTTPException(status_code=400, detail=validation.error)
 
-    new_state, events = apply_action(state, action, ud, td, fd)
+    new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db)
     response: dict[str, Any] = {
         "state": state_for_response(new_state, game_id, db),
@@ -1530,13 +2203,41 @@ def do_retreat(
     """Retreat from active combat. Only the player assigned to the current faction can act."""
     _require_can_act(game_id, player, db)
     state = get_game(game_id, db)
-    ud, td, fd, cd = get_game_definitions(game_id, db)
+    ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
     action = retreat(state.current_faction, request.retreat_to)
 
-    validation = validate_action(state, action, ud, td, fd, cd)
+    validation = validate_action(state, action, ud, td, fd, cd, port_d)
     if not validation.valid:
         raise HTTPException(status_code=400, detail=validation.error)
-    new_state, events = apply_action(state, action, ud, td, fd, cd)
+    new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
+    save_game(game_id, new_state, db)
+    return {
+        "state": state_for_response(new_state, game_id, db),
+        "events": [e.to_dict() for e in events],
+        "can_act": _player_can_act(game_id, player, db),
+    }
+
+
+@app.post("/games/{game_id}/set-territory-defender-casualty-order")
+def do_set_territory_defender_casualty_order(
+    game_id: str,
+    request: SetTerritoryDefenderCasualtyOrderRequest,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Set defender casualty order for a territory owned by the current faction. Any phase during that faction's turn."""
+    _require_can_act(game_id, player, db)
+    state = get_game(game_id, db)
+    ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
+    action = set_territory_defender_casualty_order(
+        state.current_faction,
+        request.territory_id,
+        request.casualty_order,
+    )
+    validation = validate_action(state, action, ud, td, fd, cd, port_d)
+    if not validation.valid:
+        raise HTTPException(status_code=400, detail=validation.error)
+    new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db)
     return {
         "state": state_for_response(new_state, game_id, db),
@@ -1555,14 +2256,14 @@ def do_mobilize(
     """Mobilize purchased units. Only the player assigned to the current faction can act."""
     _require_can_act(game_id, player, db)
     state = get_game(game_id, db)
-    ud, td, fd, cd = get_game_definitions(game_id, db)
+    ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
     action = mobilize_units(state.current_faction,
                             request.destination, request.units)
 
-    validation = validate_action(state, action, ud, td, fd, cd)
+    validation = validate_action(state, action, ud, td, fd, cd, port_d)
     if not validation.valid:
         raise HTTPException(status_code=400, detail=validation.error)
-    new_state, events = apply_action(state, action, ud, td, fd, cd)
+    new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db)
     return {
         "state": state_for_response(new_state, game_id, db),
@@ -1581,13 +2282,13 @@ def do_end_phase(
     """End the current phase. Only the player assigned to the current faction can act."""
     _require_can_act(game_id, player, db)
     state = get_game(game_id, db)
-    ud, td, fd, cd = get_game_definitions(game_id, db)
+    ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
     action = end_phase(state.current_faction)
 
-    validation = validate_action(state, action, ud, td, fd, cd)
+    validation = validate_action(state, action, ud, td, fd, cd, port_d)
     if not validation.valid:
         raise HTTPException(status_code=400, detail=validation.error)
-    new_state, events = apply_action(state, action, ud, td, fd, cd)
+    new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db)
     return {
         "state": state_for_response(new_state, game_id, db),
@@ -1606,14 +2307,37 @@ def do_end_turn(
     """End the current turn. Only the player assigned to the current faction can act."""
     _require_can_act(game_id, player, db)
     state = get_game(game_id, db)
-    ud, td, fd, cd = get_game_definitions(game_id, db)
+    ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
     action = end_turn(state.current_faction)
 
-    validation = validate_action(state, action, ud, td, fd, cd)
+    validation = validate_action(state, action, ud, td, fd, cd, port_d)
     if not validation.valid:
         raise HTTPException(status_code=400, detail=validation.error)
 
-    new_state, events = apply_action(state, action, ud, td, fd, cd)
+    new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
+    save_game(game_id, new_state, db)
+    return {
+        "state": state_for_response(new_state, game_id, db),
+        "events": [e.to_dict() for e in events],
+        "can_act": _player_can_act(game_id, player, db),
+    }
+
+
+@app.post("/games/{game_id}/skip-turn")
+def do_skip_turn(
+    game_id: str,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Force end current faction's turn from any phase (used by forfeit when player leaves on their turn). Next faction gets turn; factions with no capital and no units get turn_skipped. Remove only the Skip Turn button in the UI for production; keep this endpoint."""
+    _require_can_act(game_id, player, db)
+    state = get_game(game_id, db)
+    ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
+    action = skip_turn(state.current_faction)
+    validation = validate_action(state, action, ud, td, fd, cd, port_d)
+    if not validation.valid:
+        raise HTTPException(status_code=400, detail=validation.error)
+    new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db)
     return {
         "state": state_for_response(new_state, game_id, db),
