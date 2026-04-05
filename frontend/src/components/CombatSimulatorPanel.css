@@ -291,47 +291,11 @@
     display: none;
   }
 
-  /* Keep unit name + stats + stepper on one row; portrait uses a tighter stepper below */
-  .combat-sim-unit-row {
-    flex-wrap: nowrap;
-    align-items: center;
-    gap: 0.35rem;
-  }
-
-  .combat-sim-unit-main {
-    flex: 1 1 auto;
-    min-width: 0;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.1rem;
-  }
-
   .combat-sim-unit-name-text {
     white-space: normal;
     word-break: break-word;
     overflow: visible;
     text-overflow: unset;
-    font-size: 0.9rem;
-    line-height: 1.25;
-  }
-
-  .combat-sim-unit-stat {
-    font-size: 0.75rem;
-    line-height: 1.3;
-    font-weight: 500;
-  }
-
-  .combat-sim-unit-row-controls {
-    flex: 0 0 auto;
-    flex-shrink: 0;
-    justify-content: flex-end;
-    margin-left: 0;
-    padding-top: 0;
-  }
-
-  .combat-sim-unit-row--defender .combat-sim-unit-row-controls {
-    flex-wrap: nowrap;
-    gap: 0.35rem;
   }
 
   .combat-sim-add-defender-list {
@@ -346,28 +310,6 @@
   .combat-sim-add-defender-option {
     padding: 0.65rem 0.85rem;
     font-size: 0.9rem;
-  }
-
-  /* Side-by-side attacker / defender shelves (stacking looked like “defenders below attackers”) */
-  .combat-sim-preview-shelf-row {
-    flex-direction: row;
-    align-items: stretch;
-    gap: 0.5rem;
-  }
-
-  .combat-sim-preview-shelf {
-    min-height: 44px;
-    min-width: 0;
-  }
-
-  .combat-sim-preview-unit-stack {
-    flex-wrap: wrap;
-    gap: 0.25rem;
-  }
-
-  .combat-sim-preview-unit-group {
-    width: 32px;
-    height: 32px;
   }
 
   .combat-sim-pill {
@@ -402,32 +344,100 @@
   }
 }
 
-/* Narrow portrait: smaller ± / count controls so they stay on the unit row (landscape keeps default sizes) */
-@media (max-width: 640px) and (orientation: portrait) {
+/* Narrow modals / phones: keep shelf columns readable; scroll if needed */
+@media (max-width: 767px) {
+  .combat-sim-preview-shelf-row {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 0.5rem;
+  }
+
+  .combat-sim-preview-shelf-row .combat-sim-preview-shelf {
+    flex: 1 1 0;
+    min-width: min(110px, 46%);
+  }
+}
+
+/*
+ * Portrait phones/tablets: tiny steppers + single-line rows with horizontal scroll
+ * (matches combat modal full-width breakpoint; wider than 640px so iPad portrait is included)
+ */
+@media (max-width: 767px) and (orientation: portrait) {
+  .combat-sim-unit-row {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.3rem;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+  }
+
+  .combat-sim-unit-icon-wrap {
+    flex-shrink: 0;
+  }
+
+  .combat-sim-unit-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.08rem;
+  }
+
+  .combat-sim-unit-name-text {
+    font-size: 0.82rem;
+    line-height: 1.2;
+  }
+
+  .combat-sim-unit-stat {
+    font-size: 0.7rem;
+    line-height: 1.25;
+    font-weight: 500;
+  }
+
+  .combat-sim-unit-row-controls {
+    flex: 0 0 auto;
+    flex-shrink: 0;
+    margin-left: auto;
+    padding-top: 0;
+  }
+
+  .combat-sim-unit-row--defender .combat-sim-unit-row-controls {
+    flex-wrap: nowrap;
+    gap: 0.25rem;
+  }
+
+  .combat-sim-count-stepper {
+    flex-shrink: 0;
+  }
+
   .combat-sim-count-btn {
-    min-width: 30px;
-    width: 30px;
-    min-height: 30px;
-    height: 30px;
-    font-size: 0.9rem;
+    min-width: 26px;
+    width: 26px;
+    min-height: 28px;
+    height: 28px;
+    font-size: 0.85rem;
   }
 
   .combat-sim-input--stepper {
-    width: 1.85rem;
-    min-width: 1.65rem;
-    max-width: 2.4rem;
-    min-height: 30px;
-    height: 30px;
-    font-size: 0.78rem;
-    padding: 0 0.06rem;
+    width: 1.65rem;
+    min-width: 1.5rem;
+    max-width: 2.1rem;
+    min-height: 28px;
+    height: 28px;
+    font-size: 0.72rem;
+    padding: 0 0.04rem;
   }
 
   .combat-sim-defender-remove {
-    min-width: 30px;
-    min-height: 30px;
-    width: 30px;
-    height: 30px;
-    font-size: 1rem;
+    min-width: 26px;
+    min-height: 28px;
+    width: 26px;
+    height: 28px;
+    font-size: 0.9rem;
+    padding: 0;
   }
 }
 
@@ -1003,11 +1013,11 @@
   display: flex;
   gap: 1rem;
   margin-bottom: 0.35rem;
-  align-items: stretch;
+  align-items: flex-start;
 }
 
 .combat-sim-preview-shelf-row .combat-sim-preview-shelf {
-  flex: 1;
+  flex: 1 1 0;
   min-width: 0;
 }
 
@@ -1025,6 +1035,18 @@
   background: rgba(0, 0, 0, 0.03);
   border-radius: 4px;
   min-height: 44px;
+}
+
+/* No units on this side for this stat tier — avoid empty gray “shelf” slots */
+.combat-sim-preview-shelf--empty {
+  background: transparent;
+  min-height: 0;
+  padding: 0;
+  gap: 0;
+}
+
+.combat-sim-preview-shelf--empty .combat-sim-preview-unit-stack {
+  display: none;
 }
 
 .combat-sim-preview-stat-label {
@@ -1048,7 +1070,11 @@
   flex-wrap: wrap;
   gap: 0.25rem;
   align-items: center;
+  flex: 1 1 auto;
   min-width: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
 }
 
 .combat-sim-preview-unit-group {

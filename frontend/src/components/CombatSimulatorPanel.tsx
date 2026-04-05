@@ -1689,7 +1689,13 @@ export default function CombatSimulatorPanel({
                     const toDisplayCode = (sid: string) => (specialsDefs[sid] as { display_code?: string } | undefined)?.display_code ?? sid;
                     return (
                       <div key={statValue} className="combat-sim-preview-shelf-row">
-                        <div className="combat-sim-preview-shelf">
+                        <div
+                          className={
+                            attackerStacks.length === 0
+                              ? 'combat-sim-preview-shelf combat-sim-preview-shelf--empty'
+                              : 'combat-sim-preview-shelf'
+                          }
+                        >
                           {attackerStacks.length > 0 && <div className="combat-sim-preview-stat-label">{statValue}</div>}
                           <div className="combat-sim-preview-unit-stack">
                             {attackerStacks.map((group, idx) => (
@@ -1708,7 +1714,13 @@ export default function CombatSimulatorPanel({
                             ))}
                           </div>
                         </div>
-                        <div className="combat-sim-preview-shelf">
+                        <div
+                          className={
+                            defenderStacks.length === 0
+                              ? 'combat-sim-preview-shelf combat-sim-preview-shelf--empty'
+                              : 'combat-sim-preview-shelf'
+                          }
+                        >
                           {defenderStacks.length > 0 && <div className="combat-sim-preview-stat-label">{statValue}</div>}
                           <div className="combat-sim-preview-unit-stack">
                             {defenderStacks.map((group, idx) => (
