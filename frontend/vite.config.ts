@@ -8,6 +8,17 @@ export default defineConfig({
   appType: 'spa',
   plugins: [
     react(),
+    // GitHub Pages has no server rewrite for /login etc.; unknown paths get 404.html (same shell as index.html).
+    {
+      name: 'github-pages-spa-404',
+      apply: 'build',
+      closeBundle() {
+        const outDir = path.resolve(__dirname, 'dist')
+        const indexHtml = path.join(outDir, 'index.html')
+        const notFoundHtml = path.join(outDir, '404.html')
+        if (fs.existsSync(indexHtml)) fs.copyFileSync(indexHtml, notFoundHtml)
+      },
+    },
     // SPA fallback: for non-file routes, serve index.html ourselves so we never 500
     {
       name: 'spa-fallback',

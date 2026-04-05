@@ -24,9 +24,14 @@ export default function Login() {
         raw.includes('timed out') ||
         raw.includes('backend running') ||
         raw.includes('Failed to fetch') ||
-        raw.includes('NetworkError');
+        raw.includes('Load failed') ||
+        raw.includes('NetworkError') ||
+        raw.includes('Network request failed');
+      const devHint = import.meta.env.DEV ? ' Run the full app from project root: npm run dev' : '';
+      const prodNetworkHint =
+        ' Can’t reach the API. On Railway, set CORS_ORIGINS to include this site’s exact https:// origin (and www if you use it). GitHub Actions must build with VITE_API_URL = your Railway https URL.';
       const message = isNetwork
-        ? `${raw} Run the full app from project root: npm run dev`
+        ? `${raw}${import.meta.env.DEV ? devHint : prodNetworkHint}`
         : raw || 'Invalid email or password.';
       setError(message);
     } finally {
