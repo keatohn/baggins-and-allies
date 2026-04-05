@@ -14,6 +14,7 @@ import Admin from './pages/Admin.tsx'
 import {
   playUiClickSound,
   resumeMenuAmbienceIfPaused,
+  resumeTurnMusicIfPaused,
   startMenuAmbience,
   stopMenuAmbience,
 } from './audio/gameAudio'
@@ -60,6 +61,7 @@ if (typeof document !== 'undefined') {
     'pointerdown',
     (event) => {
       resumeMenuAmbienceIfPaused()
+      resumeTurnMusicIfPaused()
 
       const target = event.target
       const pathname = window.location.pathname || ''

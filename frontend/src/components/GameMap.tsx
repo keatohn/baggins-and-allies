@@ -2767,12 +2767,16 @@ function GameMap({
           target.closest('.sea-zone-tray-open-btn')
         )
           return;
+        const x = e.touches[0].clientX;
+        const y = e.touches[0].clientY;
         touchPanRef.current = {
-          startX: e.touches[0].clientX,
-          startY: e.touches[0].clientY,
+          startX: x,
+          startY: y,
           startTransformX: transformRef.current.x,
           startTransformY: transformRef.current.y,
         };
+        // Match mousedown so synthesized click on territories uses the same origin as touch (mobile tap-to-move / mobilization).
+        panStartPos.current = { x, y };
       }
     };
     const handleTouchMove = (e: TouchEvent) => {

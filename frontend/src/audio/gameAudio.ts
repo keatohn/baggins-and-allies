@@ -968,3 +968,32 @@ export function resumeMenuAmbienceIfPaused(): void {
     fadeGainMenu(active, 0, 1, MENU_FADE_IN_MS, menuSession, sid);
   }).catch(() => {});
 }
+
+/**
+ * In-game faction turn music: iOS / PWA often reject the first play() until a gesture, and may pause on visibility loss.
+ * Call from global pointerdown (with menu resume) and optionally on visibilitychange.
+ */
+export function resumeTurnMusicIfPaused(): void {
+  if (!turnLoop) return;
+  if (isGameAudioMuted()) return;
+  const m = readVolume();
+  if (m <= 0.001) return;
+  const active = turnLoop.getActiveElement();
+  if (!active.paused) return;
+  const sid = turnLoop.sessionId;
+  void active.play().then(() => {
+    if (sid !== turnSession.v || turnLoop?.getActiveElement() !== active) return;
+    const fromG = m > 0.001 && active.volume > 0.001 ? Math.min(1, active.volume / m) : 0;
+    fadeGain(active, fromG, 1, Math.min(380, TURN_FADE_IN_MS), turnSession, sid);
+  }).catch(() => {});
+}
+
+function attachTurnMusicVisibilityResume(): void {
+  if (typeof document === 'undefined') return;
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    resumeTurnMusicIfPaused();
+  });
+}
+
+attachTurnMusicVisibilityResume();
