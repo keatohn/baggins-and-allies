@@ -60,14 +60,37 @@
     padding: max(1rem, env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px)) max(1.5rem, env(safe-area-inset-bottom, 0px)) max(1rem, env(safe-area-inset-left, 0px));
     justify-content: flex-start;
     padding-top: max(2rem, env(safe-area-inset-top, 0px));
+    align-items: center;
+    text-align: center;
   }
 
   .main-menu__title {
     font-size: clamp(1.5rem, 7vw, 2.5rem);
+    width: 100%;
+    max-width: min(320px, 100%);
+    box-sizing: border-box;
+  }
+
+  .main-menu__quote {
+    margin-left: auto;
+    margin-right: auto;
   }
 
   .main-menu__actions {
     max-width: min(280px, 100%);
+    width: 100%;
+    align-self: center;
+    align-items: stretch;
+  }
+
+  .main-menu__btn {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .main-menu--loading {
+    text-align: center;
+    width: 100%;
   }
 }
 

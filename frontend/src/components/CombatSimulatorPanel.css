@@ -291,16 +291,19 @@
     display: none;
   }
 
+  /* Keep unit name + stats + stepper on one row; portrait uses a tighter stepper below */
   .combat-sim-unit-row {
-    flex-wrap: wrap;
-    align-items: flex-start;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.35rem;
   }
 
   .combat-sim-unit-main {
-    flex: 1 1 calc(100% - 40px);
+    flex: 1 1 auto;
+    min-width: 0;
     flex-direction: column;
     align-items: flex-start;
-    gap: 0.15rem;
+    gap: 0.1rem;
   }
 
   .combat-sim-unit-name-text {
@@ -319,38 +322,16 @@
   }
 
   .combat-sim-unit-row-controls {
-    flex: 1 1 100%;
+    flex: 0 0 auto;
+    flex-shrink: 0;
     justify-content: flex-end;
     margin-left: 0;
-    padding-top: 0.15rem;
+    padding-top: 0;
   }
 
   .combat-sim-unit-row--defender .combat-sim-unit-row-controls {
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 0.5rem;
-  }
-
-  .combat-sim-count-btn {
-    min-width: 44px;
-    min-height: 44px;
-    font-size: 1.35rem;
-  }
-
-  .combat-sim-input--stepper {
-    min-height: 44px;
-    min-width: 3rem;
-    font-size: 1rem;
-    flex: 1 1 4rem;
-    max-width: 5rem;
-  }
-
-  .combat-sim-defender-remove {
-    min-width: 44px;
-    min-height: 44px;
-    width: 44px;
-    height: 44px;
-    font-size: 1.35rem;
+    flex-wrap: nowrap;
+    gap: 0.35rem;
   }
 
   .combat-sim-add-defender-list {
@@ -367,24 +348,26 @@
     font-size: 0.9rem;
   }
 
+  /* Side-by-side attacker / defender shelves (stacking looked like “defenders below attackers”) */
   .combat-sim-preview-shelf-row {
-    flex-direction: column;
+    flex-direction: row;
+    align-items: stretch;
     gap: 0.5rem;
   }
 
   .combat-sim-preview-shelf {
-    min-height: 48px;
-    width: 100%;
+    min-height: 44px;
+    min-width: 0;
   }
 
   .combat-sim-preview-unit-stack {
     flex-wrap: wrap;
-    gap: 0.35rem;
+    gap: 0.25rem;
   }
 
   .combat-sim-preview-unit-group {
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
   }
 
   .combat-sim-pill {
@@ -416,6 +399,35 @@
   .combat-sim-special-unit {
     word-break: break-word;
     white-space: normal;
+  }
+}
+
+/* Narrow portrait: smaller ± / count controls so they stay on the unit row (landscape keeps default sizes) */
+@media (max-width: 640px) and (orientation: portrait) {
+  .combat-sim-count-btn {
+    min-width: 30px;
+    width: 30px;
+    min-height: 30px;
+    height: 30px;
+    font-size: 0.9rem;
+  }
+
+  .combat-sim-input--stepper {
+    width: 1.85rem;
+    min-width: 1.65rem;
+    max-width: 2.4rem;
+    min-height: 30px;
+    height: 30px;
+    font-size: 0.78rem;
+    padding: 0 0.06rem;
+  }
+
+  .combat-sim-defender-remove {
+    min-width: 30px;
+    min-height: 30px;
+    width: 30px;
+    height: 30px;
+    font-size: 1rem;
   }
 }
 
