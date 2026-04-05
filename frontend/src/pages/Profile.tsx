@@ -371,10 +371,7 @@ export default function Profile() {
         </div>
       </div>
 
-      <Link
-        to="/"
-        className="profile-page__menu-btn"
-      >
+      <Link to="/" className="page-menu-btn">
         Menu
       </Link>
     </div>

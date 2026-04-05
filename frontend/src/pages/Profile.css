@@ -1,4 +1,4 @@
-/* Single font on this screen: IM Fell English (overrides global h1=Cinzel, button=Cinzel) */
+/* Body copy: parchment font; titles and primary chrome use global Cinzel (h1, button in index.css). */
 .profile-page {
   font-family: var(--font-parchment);
   min-height: 100vh;
@@ -7,17 +7,6 @@
   padding-top: max(2rem, env(safe-area-inset-top, 0px));
   background: var(--parchment);
   box-sizing: border-box;
-}
-
-.profile-page h1,
-.profile-page button,
-.profile-page input {
-  font-family: inherit;
-}
-
-.profile-page button {
-  text-transform: none;
-  letter-spacing: normal;
 }
 
 @media (max-width: 767px) {
@@ -31,8 +20,9 @@
 }
 
 .profile-page__title {
-  font-size: 1.65rem;
-  font-weight: 600;
+  font-family: 'Cinzel', serif;
+  font-size: clamp(1.35rem, 2.5vw, 1.75rem);
+  font-weight: 700;
   color: var(--ink);
   margin-bottom: 1.5rem;
 }
@@ -119,18 +109,24 @@
 .profile-page__audio-save {
   margin-left: auto;
   padding: 0.42rem 0.85rem;
+  font-family: var(--font-parchment);
   font-size: 0.9rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
   color: var(--ink);
   background: var(--parchment-dark, #e8e0d0);
   border: 2px solid var(--ink-faded);
   border-radius: 6px;
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
+  box-shadow: none;
 }
 
 .profile-page__audio-save:hover:not(:disabled) {
   border-color: var(--gold-dark, #8b7355);
   background: rgba(139, 115, 85, 0.12);
+  box-shadow: none;
 }
 
 .profile-page__audio-save:disabled {
@@ -195,6 +191,9 @@
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
+  text-transform: none;
+  letter-spacing: normal;
+  font-family: var(--font-parchment);
 }
 
 .profile-page__username-cancel:hover:not(:disabled) {
@@ -244,18 +243,24 @@
 .profile-page__username-action {
   align-self: flex-start;
   padding: 0.45rem 1rem;
+  font-family: var(--font-parchment);
   font-size: 0.95rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
   color: var(--ink);
   background: var(--parchment-dark, #e8e0d0);
   border: 2px solid var(--ink-faded);
   border-radius: 6px;
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
+  box-shadow: none;
 }
 
 .profile-page__username-action:hover:not(:disabled) {
   border-color: var(--gold-dark, #8b7355);
   background: rgba(139, 115, 85, 0.12);
+  box-shadow: none;
 }
 
 .profile-page__username-action:disabled {
@@ -267,23 +272,7 @@
   margin-top: 0.25rem;
 }
 
-.profile-page__menu-btn {
-  display: inline-block;
+.profile-page .page-menu-btn {
   margin-top: 1.5rem;
-  padding: 0.5rem 1.25rem;
-  font-family: inherit;
-  font-size: 0.95rem;
-  font-weight: 500;
-  color: var(--ink);
-  background: var(--parchment-dark, #e8e0d0);
-  border: 2px solid var(--ink-faded);
-  border-radius: 6px;
-  text-decoration: none;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.profile-page__menu-btn:hover {
-  border-color: var(--gold-dark, #8b7355);
-  background: rgba(139, 115, 85, 0.08);
+  margin-bottom: 0;
 }

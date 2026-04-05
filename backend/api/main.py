@@ -21,11 +21,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from .database import get_db, get_db_file_path, init_db
+from .database import get_db, get_db_file_path, init_db, SessionLocal
 from .models import Game as GameModel, Player
 from .auth import (
     create_access_token,
     get_current_player,
+    get_current_admin,
     get_current_player_optional,
     hash_password,
     validate_username,
@@ -80,14 +81,22 @@ from backend.config import DEFAULT_SETUP_ID
 from backend.engine.definitions import (
     load_static_definitions,
     load_starting_setup,
-    load_setup,
-    load_specials,
-    list_setups,
     definitions_from_snapshot,
     TerritoryDefinition,
     parse_prefire_penalty_from_manifest,
-    scenario_display_from_setup_id,
 )
+from backend.setup_data import (
+    create_setup,
+    get_admin_setup_bundle,
+    list_all_setups_admin,
+    save_setup_bundle,
+    try_list_setups_menu,
+    try_load_setup,
+    try_load_specials,
+    try_load_static_definitions,
+    try_scenario_display,
+)
+from backend.setup_validation import validate_setup_payload
 from dataclasses import asdict
 from backend.engine.queries import (
     validate_action,
@@ -143,8 +152,25 @@ from backend.engine.combat_specials import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: init DB. Shutdown: nothing to do."""
+    """Startup: init DB, seed setups if empty, sync module default defs from DB when present."""
     init_db()
+    from backend.setup_data import db_has_any_setup
+
+    db = SessionLocal()
+    try:
+        global unit_defs, territory_defs, faction_defs, camp_defs, port_defs, starting_setup
+        if db_has_any_setup(db):
+            try:
+                unit_defs, territory_defs, faction_defs, camp_defs, port_defs = try_load_static_definitions(
+                    DEFAULT_SETUP_ID, db
+                )
+                su = try_load_setup(DEFAULT_SETUP_ID, db)
+                if su:
+                    starting_setup = su["starting_setup"]
+            except FileNotFoundError:
+                pass
+    finally:
+        db.close()
     yield
 
 
@@ -1178,9 +1204,80 @@ def update_profile(
 # ----- Games (create, list, join) -----
 
 @app.get("/setups")
-def get_setups():
+def get_setups(db: Session = Depends(get_db)):
     """List available game setups (id, display_name, map_asset). Use setup_id in POST /games/create."""
-    return {"setups": list_setups()}
+    return {"setups": try_list_setups_menu(db)}
+
+
+class AdminSetupPayload(BaseModel):
+    manifest: dict[str, Any]
+    units: dict[str, Any]
+    territories: dict[str, Any]
+    factions: dict[str, Any]
+    camps: dict[str, Any]
+    ports: dict[str, Any]
+    starting_setup: dict[str, Any]
+    specials: dict[str, Any]
+
+
+class AdminCreateSetupBody(BaseModel):
+    id: str = Field(..., min_length=1, max_length=127)
+    duplicate_from: str | None = None
+
+
+@app.get("/admin/setups")
+def admin_list_setups(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    return {"setups": list_all_setups_admin(db)}
+
+
+@app.post("/admin/setups")
+def admin_create_setup(
+    body: AdminCreateSetupBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Create a new setup: empty draft or duplicate of an existing id. Setup id must be unique."""
+    try:
+        out = create_setup(db, body.id.strip(), body.duplicate_from)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, **out}
+
+
+@app.get("/admin/setups/{setup_id}")
+def admin_get_setup(
+    setup_id: str,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    bundle = get_admin_setup_bundle(db, setup_id)
+    if not bundle:
+        raise HTTPException(status_code=404, detail="Setup not found")
+    return bundle
+
+
+@app.put("/admin/setups/{setup_id}")
+def admin_put_setup(
+    setup_id: str,
+    body: AdminSetupPayload,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    payload = body.model_dump()
+    manifest = dict(payload["manifest"])
+    manifest["id"] = setup_id
+    payload["manifest"] = manifest
+    errs = validate_setup_payload(payload)
+    if errs:
+        raise HTTPException(status_code=400, detail={"validation_errors": errs})
+    try:
+        save_setup_bundle(db, setup_id, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "id": setup_id}
 
 
 @app.post("/games/create")
@@ -1191,12 +1288,14 @@ def create_game(
 ):
     """Create a new game (single or multiplayer). Returns game_id and game_code (if multiplayer)."""
     setup_id = request.setup_id if request.setup_id is not None else DEFAULT_SETUP_ID
+    setup = try_load_setup(setup_id, db)
+    if not setup:
+        raise HTTPException(status_code=400, detail=f"Setup not found: {setup_id}")
     try:
-        setup = load_setup(setup_id)
+        ud, td, fd, cd, port_d = try_load_static_definitions(setup_id, db)
+        specials_defs, specials_order = try_load_specials(setup_id, db)
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    ud, td, fd, cd, port_d = load_static_definitions(setup_id=setup_id)
-    specials_defs, specials_order = load_specials(setup_id=setup_id)
     victory_criteria = setup.get("victory_criteria")
     camp_cost = setup.get("camp_cost")
     stronghold_repair_cost = setup.get("stronghold_repair_cost")
@@ -1295,7 +1394,7 @@ def _get_forfeited_player_ids(row) -> list[str]:
     return []
 
 
-def _get_scenario_from_config(row) -> dict[str, Any] | None:
+def _get_scenario_from_config(row, db: Session) -> dict[str, Any] | None:
     """Return { display_name, context } from setup manifest if config has setup_id."""
     if not getattr(row, "config", None):
         return None
@@ -1304,8 +1403,8 @@ def _get_scenario_from_config(row) -> dict[str, Any] | None:
         setup_id = config.get("setup_id")
         if not setup_id or not isinstance(setup_id, str):
             return None
-        # Read manifest directly so inactive setups still show scenario on game cards.
-        return scenario_display_from_setup_id(setup_id)
+        # DB manifest when setups are in DB; inactive setups still resolve for game cards.
+        return try_scenario_display(setup_id, db)
     except (TypeError, json.JSONDecodeError):
         pass
     return None
@@ -1418,7 +1517,7 @@ def _build_games_list(player: Player, db: Session) -> list[dict[str, Any]]:
             lobby_claims = _get_lobby_claims_from_config(r)
             lobby_factions_claimed = len(lobby_claims)
 
-        scenario = _get_scenario_from_config(r)
+        scenario = _get_scenario_from_config(r, db)
 
         # Username only from faction match or single-player lookup (no fallback to current user)
         item = {
@@ -1487,16 +1586,17 @@ def _safe_asdict_map(defs_dict):
         return {}
 
 @app.get("/definitions")
-def get_definitions():
+def get_definitions(db: Session = Depends(get_db)):
     """Get all static game definitions (default setup). Never raises."""
     try:
-        specials_defs, specials_order = load_specials(setup_id=DEFAULT_SETUP_ID)
+        ud, td, fd, cd, pd = try_load_static_definitions(DEFAULT_SETUP_ID, db)
+        specials_defs, specials_order = try_load_specials(DEFAULT_SETUP_ID, db)
         return {
-            "units": _safe_asdict_map(unit_defs),
-            "territories": _safe_asdict_map(territory_defs),
-            "factions": _safe_asdict_map(faction_defs),
-            "camps": _safe_asdict_map(camp_defs),
-            "ports": _safe_asdict_map(port_defs),
+            "units": _safe_asdict_map(ud),
+            "territories": _safe_asdict_map(td),
+            "factions": _safe_asdict_map(fd),
+            "camps": _safe_asdict_map(cd),
+            "ports": _safe_asdict_map(pd),
             "specials": specials_defs,
             "specials_order": specials_order,
         }
@@ -1524,7 +1624,7 @@ def simulate_combat(request: SimulateCombatRequest, db: Session = Depends(get_db
     else:
         setup_id = request.setup_id or DEFAULT_SETUP_ID
         try:
-            ud, td, *_ = load_static_definitions(setup_id=setup_id)
+            ud, td, *_ = try_load_static_definitions(setup_id, db)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid setup_id: {setup_id}") from e
     # Support generic terrain-only battles: "terrain:forest" etc. Use a real territory with that terrain if available, else inject synthetic.
@@ -1564,8 +1664,11 @@ def simulate_combat(request: SimulateCombatRequest, db: Session = Depends(get_db
     else:
         sid = request.setup_id or DEFAULT_SETUP_ID
         try:
-            su = load_setup(sid)
-            prefire_penalty_on = parse_prefire_penalty_from_manifest(su.get("prefire_penalty"))
+            su = try_load_setup(sid, db)
+            if su:
+                prefire_penalty_on = parse_prefire_penalty_from_manifest(su.get("prefire_penalty"))
+            else:
+                prefire_penalty_on = True
         except Exception:
             prefire_penalty_on = True
     n_trials = max(1, min(int(request.n_trials), 100_000))
@@ -1838,7 +1941,7 @@ def get_game_meta(
     if player_ids:
         for p_row in db.query(Player).filter(Player.id.in_(list(player_ids))).all():
             players_by_id[str(p_row.id)] = p_row.username
-    scenario = _get_scenario_from_config(row)
+    scenario = _get_scenario_from_config(row, db)
     ai_factions = _get_ai_factions_from_config(row)
     is_host = None
     if player is not None and row.created_by is not None:

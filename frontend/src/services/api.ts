@@ -14,10 +14,31 @@ function resolveApiBase(): string {
   if (!trimmed) return import.meta.env.DEV ? '/api' : 'http://localhost:8000';
   let base = trimmed.replace(/\/$/, '');
   if (!/^https?:\/\//i.test(base)) base = `https://${base}`;
+  try {
+    const u = new URL(base);
+    const host = u.hostname.toLowerCase();
+    const path = (u.pathname || '/').replace(/\/$/, '') || '/';
+    /* FastAPI runs at app root. Local envs often wrongly set http://localhost:8000/api — that yields 404 for /api/admin/... */
+    if ((host === 'localhost' || host === '127.0.0.1') && path === '/api') {
+      return `${u.protocol}//${u.host}`;
+    }
+  } catch {
+    /* keep base */
+  }
   return base;
 }
 
 const API_BASE = resolveApiBase();
+
+/** True when the browser calls same-origin `/api/...` and Vite proxies to the backend (normal `npm run dev`). */
+export function usesViteApiProxy(): boolean {
+  return API_BASE === '/api';
+}
+
+/** Resolved API base (e.g. `/api` in dev, or full URL from VITE_API_URL when set). */
+export function getResolvedApiBase(): string {
+  return API_BASE;
+}
 
 const AUTH_TOKEN_KEY = 'baggins_auth_token';
 
@@ -522,7 +543,9 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
           ? detail
           : Array.isArray(detail)
             ? (detail as { msg?: string }[]).map((d) => d.msg).filter(Boolean).join('; ') || message
-            : message;
+            : detail && typeof detail === 'object' && Array.isArray((detail as { validation_errors?: string[] }).validation_errors)
+              ? (detail as { validation_errors: string[] }).validation_errors.join('; ')
+              : message;
     } catch {
       if (text && text.length < 200) message = text;
     }
@@ -551,6 +574,28 @@ export interface AuthPlayer {
   /** From server when preferences exist; omitted on older API responses. */
   audio?: PlayerAudioSettings;
 }
+
+export interface AdminSetupListItem {
+  id: string;
+  display_name: string;
+  is_active?: boolean;
+  updated_at: string | null;
+}
+
+/** Full setup document for admin editor (matches backend setup JSON files). */
+export interface AdminSetupBundle {
+  id: string;
+  manifest: Record<string, unknown>;
+  units: Record<string, unknown>;
+  territories: Record<string, unknown>;
+  factions: Record<string, unknown>;
+  camps: Record<string, unknown>;
+  ports: Record<string, unknown>;
+  starting_setup: Record<string, unknown>;
+  specials: Record<string, unknown>;
+}
+
+export type AdminSetupSavePayload = Omit<AdminSetupBundle, 'id'>;
 
 export interface PatchProfileBody {
   username?: string;
@@ -694,6 +739,23 @@ export const api = {
     syncAudioFromAuthPlayer(p);
     return p;
   },
+
+  adminListSetups: () =>
+    fetchJson<{ setups: AdminSetupListItem[] }>('/admin/setups'),
+  adminGetSetup: (setupId: string) => fetchJson<AdminSetupBundle>(`/admin/setups/${encodeURIComponent(setupId)}`),
+  adminPutSetup: (setupId: string, body: AdminSetupSavePayload) =>
+    fetchJson<{ ok: boolean; id: string }>(`/admin/setups/${encodeURIComponent(setupId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  adminCreateSetup: (body: { id: string; duplicate_from?: string | null }) =>
+    fetchJson<{ ok: boolean; id: string }>('/admin/setups', {
+      method: 'POST',
+      body: JSON.stringify({
+        id: body.id.trim(),
+        duplicate_from: body.duplicate_from?.trim() || null,
+      }),
+    }),
 
   // Games (create, list, join)
   getSetups: () =>

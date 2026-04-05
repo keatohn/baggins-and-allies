@@ -127,7 +127,7 @@ export default function GameList() {
   return (
     <div className="game-list-page" data-page="load-game">
       <header className="game-list-page__header">
-        <Link to="/" className="game-list-page__menu-btn">Menu</Link>
+        <Link to="/" className="page-menu-btn">Menu</Link>
       </header>
       {games.length === 0 ? (
         <p className="game-list__empty">No games yet.</p>

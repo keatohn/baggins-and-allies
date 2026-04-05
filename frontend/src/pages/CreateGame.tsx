@@ -72,7 +72,7 @@ export default function CreateGame() {
 
   return (
     <div className="create-game-page">
-      <h1 className="create-game-page__title">Create new game</h1>
+      <h1 className="create-game-page__title">Create game</h1>
       <form className="create-game-form" onSubmit={handleSubmit}>
         {error && <p className="create-game-form__error">{error}</p>}
         <label className="create-game-form__label">
@@ -146,7 +146,7 @@ export default function CreateGame() {
           {loading ? 'Creating…' : 'Create game'}
         </button>
       </form>
-      <Link to="/" className="create-game-page__menu-btn">Menu</Link>
+      <Link to="/" className="page-menu-btn create-game-page__menu-anchor">Menu</Link>
     </div>
   );
 }

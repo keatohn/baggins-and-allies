@@ -1,10 +1,9 @@
 """
-SQLAlchemy models for players and games.
+SQLAlchemy models for players, games, and game setups.
 """
 
 from datetime import datetime
 from sqlalchemy import Boolean, Column, String, DateTime, Text, ForeignKey
-from sqlalchemy.orm import relationship
 
 from .database import Base
 
@@ -34,3 +33,20 @@ class Game(Base):
     game_state = Column(Text, nullable=False)  # JSON string of full game state
     players = Column(Text, nullable=False)  # JSON array of { "player_id": str, "faction_id": str | null }
     config = Column(Text, nullable=True)  # JSON for future options
+
+
+class Setup(Base):
+    """Authoritative setup content (was JSON under data/setups/<folder>/). id matches manifest id."""
+
+    __tablename__ = "setups"
+
+    id = Column(String(128), primary_key=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    manifest_json = Column(Text, nullable=False)
+    units_json = Column(Text, nullable=False)
+    territories_json = Column(Text, nullable=False)
+    factions_json = Column(Text, nullable=False)
+    camps_json = Column(Text, nullable=False)
+    ports_json = Column(Text, nullable=False)
+    starting_setup_json = Column(Text, nullable=False)
+    specials_json = Column(Text, nullable=False)

@@ -94,3 +94,12 @@ def get_current_player_optional(
     if not player_id:
         return None
     return db.query(Player).filter(Player.id == player_id).first()
+
+
+def get_current_admin(player: Player = Depends(get_current_player)) -> Player:
+    if not getattr(player, "is_admin", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+    return player

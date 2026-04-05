@@ -230,6 +230,16 @@ class PortDefinition:
     territory_id: str  # Which territory this port is in
 
 
+def _faction_capital_from_json(raw: Any) -> str:
+    """Board capital territory id, or "" if none (null / empty / legacy \"None\" string)."""
+    if raw is None or not isinstance(raw, str):
+        return ""
+    s = raw.strip()
+    if not s or s.lower() in ("none", "null", "n/a", "-"):
+        return ""
+    return s
+
+
 def _coerce_faction_music(raw: Any) -> str | list[str] | None:
     """Legacy single string or list of filenames for assets/audio/turn (playlist order for a turn)."""
     if raw is None:
@@ -358,7 +368,7 @@ def load_static_definitions(
             id=data["id"],
             display_name=data["display_name"],
             alliance=data["alliance"],
-            capital=data["capital"],
+            capital=_faction_capital_from_json(data.get("capital")),
             color=data["color"],
             icon=data.get("icon"),
             music=_coerce_faction_music(data.get("music")),
@@ -452,7 +462,7 @@ def definitions_from_snapshot(snapshot: dict) -> tuple[
             id=data["id"],
             display_name=data["display_name"],
             alliance=data["alliance"],
-            capital=data["capital"],
+            capital=_faction_capital_from_json(data.get("capital")),
             color=data["color"],
             icon=data.get("icon"),
             music=_coerce_faction_music(data.get("music")),

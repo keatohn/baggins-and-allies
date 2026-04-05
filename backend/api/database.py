@@ -125,6 +125,16 @@ def init_db():
     Migrations here only add missing columns (ALTER TABLE ... ADD COLUMN). They do not drop tables,
     truncate rows, or rewrite game_state — player and game data are preserved.
     """
+    # Register all models on Base before create_all (setups table, etc.)
+    from .models import Game, Player, Setup  # noqa: F401
+
     Base.metadata.create_all(bind=engine)
     _ensure_player_preferences_column()
     _ensure_is_admin_column()
+    db = SessionLocal()
+    try:
+        from backend.setup_data import seed_setups_if_empty
+
+        seed_setups_if_empty(db)
+    finally:
+        db.close()

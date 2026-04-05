@@ -49,7 +49,7 @@ export default function JoinGame() {
           {loading ? 'Joining…' : 'Join game'}
         </button>
       </form>
-      <Link to="/" className="join-game-page__menu-btn">Menu</Link>
+      <Link to="/" className="page-menu-btn join-game-page__menu-anchor">Menu</Link>
     </div>
   );
 }

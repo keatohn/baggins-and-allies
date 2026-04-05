@@ -1231,24 +1231,5 @@
     ],
     "specials": [],
     "icon": "dragon.png"
-  },
-  "": {
-    "id": "",
-    "display_name": "",
-    "faction": "",
-    "archetype": "",
-    "attack": 0,
-    "defense": 0,
-    "dice": 1,
-    "movement": 0,
-    "health": 1,
-    "transport_capacity": 0,
-    "purchasable": false,
-    "cost": {
-      "power": 0
-    },
-    "tags": [],
-    "specials": [],
-    "icon": ""
   }
 }

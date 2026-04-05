@@ -27,7 +27,7 @@ export default function MainMenu() {
           <p className="main-menu__quote">"The board is set. The pieces are moving." <span className="main-menu__quote-attribution">—Gandalf</span></p>
           <div className="main-menu__actions">
           <button type="button" className="main-menu__btn primary" onClick={() => navigate('/game/new')}>
-            Create new game
+            Create game
           </button>
           <button type="button" className="main-menu__btn" onClick={() => navigate('/games')}>
             Load game
@@ -38,6 +38,11 @@ export default function MainMenu() {
           <button type="button" className="main-menu__btn" onClick={() => navigate('/profile')}>
             Profile
           </button>
+          {player.is_admin ? (
+            <button type="button" className="main-menu__btn" onClick={() => navigate('/admin')}>
+              Admin
+            </button>
+          ) : null}
           <p className="main-menu__user">Signed in as {player.username}</p>
         </div>
         </>

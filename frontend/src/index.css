@@ -110,6 +110,34 @@ button.primary:hover:not(:disabled) {
   background: linear-gradient(180deg, var(--gold-dark) 0%, var(--gold) 100%);
 }
 
+/* Sub-page “Menu” control (Load game, Join game, Create game, Profile, Admin) — parchment, not main-menu Cinzel chrome */
+a.page-menu-btn,
+button.page-menu-btn {
+  display: inline-block;
+  margin: 0 0 1rem;
+  padding: 0.5rem 1.25rem;
+  font-family: var(--font-parchment), Georgia, serif;
+  font-size: 0.95rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--ink);
+  background: var(--parchment-dark, #e8e0d0);
+  border: 2px solid var(--ink-faded);
+  border-radius: 6px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  box-shadow: none;
+}
+
+a.page-menu-btn:hover,
+button.page-menu-btn:hover:not(:disabled) {
+  border-color: var(--gold-dark, #8b7355);
+  background: rgba(139, 115, 85, 0.08);
+  box-shadow: none;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;

@@ -91,7 +91,7 @@
         "id": "neutral",
         "display_name": "Neutral",
         "alliance": "neutral",
-        "capital": "None",
+        "capital": "",
         "color": "#888888",
         "icon": "neutral.png"
     }

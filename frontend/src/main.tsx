@@ -10,6 +10,7 @@ import CreateGame from './pages/CreateGame.tsx'
 import GameList from './pages/GameList.tsx'
 import JoinGame from './pages/JoinGame.tsx'
 import Profile from './pages/Profile.tsx'
+import Admin from './pages/Admin.tsx'
 import { playUiClickSound, startMenuAmbience, stopMenuAmbience } from './audio/gameAudio'
 import { useEffect } from 'react'
 
@@ -132,6 +133,7 @@ function MenuAmbienceController() {
       path === '/games' ||
       path === '/join' ||
       path === '/profile' ||
+      path === '/admin' ||
       path === '/game/new'
 
     if (isMenuRoute) startMenuAmbience('menu')
@@ -157,6 +159,7 @@ if (!rootEl) {
             <Route path="/games" element={<GameList />} />
             <Route path="/join" element={<JoinGame />} />
             <Route path="/profile" element={<Profile />} />
+            <Route path="/admin" element={<Admin />} />
             <Route path="/game/:gameId" element={<GameRoute />} />
           </Routes>
         </BrowserRouter>

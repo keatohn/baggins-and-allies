@@ -27,7 +27,7 @@
     align-self: center;
   }
 
-  .join-game-page__menu-btn {
+  .join-game-page__menu-anchor {
     align-self: center;
   }
 }
@@ -76,22 +76,6 @@
   margin-top: 0.5rem;
 }
 
-.join-game-page__menu-btn {
-  display: inline-block;
+.join-game-page__menu-anchor {
   margin-top: 1.5rem;
-  padding: 0.5rem 1.25rem;
-  font-size: 0.95rem;
-  font-weight: 500;
-  color: var(--ink);
-  background: var(--parchment-dark, #e8e0d0);
-  border: 2px solid var(--ink-faded);
-  border-radius: 6px;
-  text-decoration: none;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.join-game-page__menu-btn:hover {
-  border-color: var(--gold-dark, #8b7355);
-  background: rgba(139, 115, 85, 0.08);
 }
