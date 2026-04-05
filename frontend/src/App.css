@@ -261,7 +261,7 @@
   flex-shrink: 0;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 767px), (max-height: 520px) and (orientation: landscape), (max-height: 420px) {
   .combat-sim-modal-overlay {
     align-items: flex-end;
     padding: 0;
@@ -279,6 +279,25 @@
 
   .combat-sim-modal-body {
     min-height: 0;
+    padding: 0.45rem 0.5rem;
+  }
+
+  .combat-sim-modal-header {
+    padding: 0.38rem 0.55rem;
+  }
+
+  .combat-sim-modal-header h2 {
+    font-size: clamp(0.65rem, 2.35vw, 0.78rem);
+    line-height: 1.15;
+    letter-spacing: 0.03em;
+  }
+
+  .combat-sim-modal .close-btn {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    min-height: 28px;
+    font-size: 1.15rem;
   }
 }
 

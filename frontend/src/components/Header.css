@@ -928,8 +928,8 @@
     flex: 0 0 auto;
     height: 28px;
     min-height: 28px;
-    padding: 0 0.4rem;
-    font-size: 0.72rem;
+    padding: 0 0.35rem;
+    font-size: 0.62rem;
   }
 
   .header-help-btn,
@@ -970,7 +970,7 @@
   }
 
   .header-specials-sp {
-    font-size: 0.52rem;
+    font-size: 0.48rem;
   }
 
   .header-stats-btn .stats-icon {
@@ -1188,41 +1188,109 @@
   }
 }
 
-/* Game stats + unit stats modals — compact on phones */
-@media (max-width: 767px) {
+/* Header modals (stats, unit stats, specials, help) — compact on phones & short landscape */
+@media (max-width: 767px), (max-height: 520px) and (orientation: landscape), (max-height: 420px) {
   .modal.stats-modal,
-  .modal.unit-stats-modal {
+  .modal.unit-stats-modal,
+  .modal.specials-modal,
+  .modal.help-modal {
+    min-width: 0 !important;
+    width: min(100vw - 0.75rem, 36rem) !important;
+    max-width: calc(100vw - 0.75rem) !important;
     max-height: min(90dvh, 92vh) !important;
     border-width: 2px;
     border-radius: 8px;
   }
 
   .stats-modal .modal-header,
-  .unit-stats-modal .modal-header {
-    padding: 0.5rem 0.65rem;
+  .unit-stats-modal .modal-header,
+  .specials-modal .modal-header,
+  .help-modal .modal-header {
+    padding: 0.38rem 0.5rem;
   }
 
   .stats-modal .modal-header h2,
-  .unit-stats-modal .modal-header h2 {
-    font-size: clamp(0.92rem, 3.4vw, 1.1rem);
+  .unit-stats-modal .modal-header h2,
+  .specials-modal .modal-header h2,
+  .help-modal .modal-header h2 {
+    font-size: clamp(0.65rem, 2.35vw, 0.78rem);
+    line-height: 1.15;
+    letter-spacing: 0.04em;
   }
 
   .stats-modal .close-btn,
-  .unit-stats-modal .close-btn {
-    width: 30px;
-    height: 30px;
-    font-size: 1.35rem;
+  .unit-stats-modal .close-btn,
+  .specials-modal .close-btn,
+  .help-modal .close-btn {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    min-height: 28px;
+    font-size: 1.15rem;
   }
 
   .modal.stats-modal .stats-modal-body,
-  .modal.unit-stats-modal .unit-stats-modal-body {
-    padding: 0.5rem 0.45rem !important;
-    max-height: min(72dvh, 80vh) !important;
+  .modal.unit-stats-modal .unit-stats-modal-body,
+  .modal.specials-modal .specials-modal-body,
+  .modal.help-modal .help-modal-body {
+    padding: 0.45rem 0.5rem !important;
+    max-height: min(68dvh, 78vh) !important;
+  }
+
+  .modal.help-modal .help-modal-body {
+    max-height: min(72dvh, 82vh) !important;
+  }
+
+  .help-section {
+    margin-bottom: 0.85rem;
+  }
+
+  .help-section h3 {
+    font-size: clamp(0.64rem, 2.25vw, 0.76rem);
+    margin: 0 0 0.35rem;
+    line-height: 1.2;
+  }
+
+  .help-section p,
+  .help-icon-list {
+    font-size: clamp(0.58rem, 2vw, 0.7rem);
+    line-height: 1.4;
+  }
+
+  .help-icon-list {
+    padding-left: 1rem;
+  }
+
+  .help-icon-list li {
+    margin-bottom: 0.28rem;
+  }
+
+  .specials-term {
+    font-size: clamp(0.64rem, 2.25vw, 0.76rem);
+    margin-top: 0.65rem;
+    margin-bottom: 0.18rem;
+    line-height: 1.25;
+  }
+
+  .specials-term:first-child {
+    margin-top: 0;
+  }
+
+  .specials-desc {
+    margin: 0 0 0 0.65rem;
+    font-size: clamp(0.58rem, 2vw, 0.7rem);
+    line-height: 1.38;
+  }
+
+  .specials-unit-list {
+    margin: 0.35rem 0 0 0;
+    padding-left: 1rem;
+    font-size: clamp(0.55rem, 1.9vw, 0.66rem);
   }
 
   .stats-modal .header-stats-table,
   .unit-stats-modal .header-stats-table {
-    font-size: clamp(0.65rem, 2.4vw, 0.78rem);
+    font-size: clamp(0.56rem, 2vw, 0.68rem);
   }
 
   .stats-modal .header-stats-table th,
@@ -1243,12 +1311,12 @@
   }
 
   .stats-modal .stats-alliance-row td {
-    font-size: clamp(0.78rem, 2.8vw, 0.95rem);
-    padding-top: 0.45rem;
+    font-size: clamp(0.6rem, 2.1vw, 0.74rem);
+    padding-top: 0.38rem;
   }
 
   .stats-modal .stats-faction-row td {
-    font-size: clamp(0.68rem, 2.5vw, 0.82rem);
+    font-size: clamp(0.54rem, 1.9vw, 0.66rem);
   }
 
   .stats-modal .stats-faction-row .stats-col-faction {
@@ -1262,12 +1330,12 @@
   }
 
   .stats-modal .stats-placeholder {
-    font-size: clamp(0.72rem, 2.5vw, 0.85rem);
+    font-size: clamp(0.58rem, 2vw, 0.7rem);
   }
 
   .unit-stats-modal .unit-stats-faction-row td {
-    font-size: clamp(0.75rem, 2.7vw, 0.9rem);
-    padding-top: 0.4rem;
+    font-size: clamp(0.58rem, 2.1vw, 0.72rem);
+    padding-top: 0.35rem;
   }
 
   .unit-stats-modal .unit-stats-faction-icon {
@@ -1313,12 +1381,13 @@
 
   .stats-modal-key,
   .unit-stats-modal-key {
-    padding: 0.4rem 0.5rem;
-    font-size: clamp(0.62rem, 2.2vw, 0.72rem);
+    padding: 0.32rem 0.45rem;
+    font-size: clamp(0.52rem, 1.85vw, 0.62rem);
+    line-height: 1.35;
   }
 
   .unit-stats-specials-definitions {
-    padding: 0.5rem 0.55rem 0.65rem;
-    font-size: clamp(0.68rem, 2.3vw, 0.8rem);
+    padding: 0.45rem 0.5rem 0.55rem;
+    font-size: clamp(0.58rem, 2vw, 0.7rem);
   }
 }

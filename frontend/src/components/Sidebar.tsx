@@ -703,7 +703,6 @@ function Sidebar({
             {/* Pending mobilization confirmation with +/- controls */}
             {pendingMobilization && (
               <div className="move-confirm mobilization-confirm">
-                <h3>Deploy Units</h3>
                 <p className="move-details">
                   <span className="unit-name">{pendingMobilization.unitName}</span>
                   <br />
