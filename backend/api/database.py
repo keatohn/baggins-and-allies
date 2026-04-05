@@ -32,6 +32,21 @@ else:
         DB_DIR = os.path.dirname(os.path.abspath(__file__))
         DATABASE_URL = f"sqlite:///{os.path.join(DB_DIR, 'game.db')}"
 
+# On Railway, default SQLite path is on ephemeral disk — refuse unless path is explicit (volume).
+_on_railway = bool(os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("RAILWAY_PROJECT_ID"))
+_sqlite_explicit = bool((os.environ.get("SQLITE_DATABASE_PATH") or os.environ.get("SQLITE_DATABASE") or "").strip())
+if (
+    _on_railway
+    and not _raw_url
+    and DATABASE_URL.startswith("sqlite")
+    and not _sqlite_explicit
+    and os.environ.get("ALLOW_EPHEMERAL_SQLITE", "").strip().lower() not in ("1", "true", "yes")
+):
+    raise RuntimeError(
+        "Refusing to start on Railway without SQLITE_DATABASE_PATH or SQLITE_DATABASE pointing at a "
+        "mounted volume (e.g. /data/game.db). The default SQLite file is ephemeral and will lose all "
+        "data on redeploy. Set ALLOW_EPHEMERAL_SQLITE=1 only for disposable testing."
+    )
 
 # SQLite needs check_same_thread=False; Postgres does not use that arg
 _connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
@@ -60,28 +75,34 @@ def get_db_file_path() -> str | None:
     return path_part or None
 
 
-# This row is set to admin on each init (single-row UPDATE only). Other players’ is_admin is never cleared.
-ADMIN_PLAYER_EMAIL = "kjhubbs8@gmail.com"
+# Local dev default if ADMIN_PLAYER_EMAIL / ADMIN_EMAIL / ADMIN_EMAILS unset.
+_DEFAULT_ADMIN_EMAIL = "kjhubbs8@gmail.com"
 
 
-def _ensure_is_admin_column():
-    """Add players.is_admin if missing (non-destructive). Never bulk-clear admin flags.
+def _resolved_admin_emails() -> list[str]:
+    """Railway: use ADMIN_PLAYER_EMAIL (existing name), else ADMIN_EMAIL, else ADMIN_EMAILS (comma-separated)."""
+    for key in ("ADMIN_PLAYER_EMAIL", "ADMIN_EMAIL", "ADMIN_EMAILS"):
+        raw = (os.environ.get(key) or "").strip()
+        if raw:
+            return [x.strip().lower() for x in raw.split(",") if x.strip()]
+    return [_DEFAULT_ADMIN_EMAIL.lower()]
 
-    - ALTER ADD COLUMN only: existing player rows keep all other columns; new column defaults to false/0.
-    - Games / game_state are untouched (this migration does not reference them).
-    - After ensure: one UPDATE sets admin only for ADMIN_PLAYER_EMAIL so bootstrap admin stays true;
-      any other player you set true in the DB is left unchanged.
-    """
+
+def _sync_admin_column_and_flags():
+    """Ensure players.is_admin exists; clear all admins, then set is_admin only for configured emails."""
+    admins = _resolved_admin_emails()
     if DATABASE_URL.startswith("sqlite"):
         with engine.begin() as conn:
             rows = conn.execute(text("PRAGMA table_info(players)")).fetchall()
             names = {row[1] for row in rows}
             if "is_admin" not in names:
                 conn.execute(text("ALTER TABLE players ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0"))
-            conn.execute(
-                text("UPDATE players SET is_admin = 1 WHERE lower(email) = lower(:email)"),
-                {"email": ADMIN_PLAYER_EMAIL},
-            )
+            conn.execute(text("UPDATE players SET is_admin = 0"))
+            for em in admins:
+                conn.execute(
+                    text("UPDATE players SET is_admin = 1 WHERE lower(email) = :e"),
+                    {"e": em},
+                )
     else:
         with engine.begin() as conn:
             exists = conn.execute(
@@ -100,12 +121,12 @@ def _ensure_is_admin_column():
                         "ALTER TABLE players ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT false"
                     )
                 )
-            conn.execute(
-                text(
-                    "UPDATE players SET is_admin = true WHERE lower(email) = lower(:email)"
-                ),
-                {"email": ADMIN_PLAYER_EMAIL},
-            )
+            conn.execute(text("UPDATE players SET is_admin = false"))
+            for em in admins:
+                conn.execute(
+                    text("UPDATE players SET is_admin = true WHERE lower(email) = :e"),
+                    {"e": em},
+                )
 
 
 def _ensure_player_preferences_column():
@@ -132,7 +153,7 @@ def init_db():
 
     Base.metadata.create_all(bind=engine)
     _ensure_player_preferences_column()
-    _ensure_is_admin_column()
+    _sync_admin_column_and_flags()
     db = SessionLocal()
     try:
         from backend.setup_data import seed_setups_if_empty
