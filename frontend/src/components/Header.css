@@ -1190,12 +1190,21 @@
 
 /* Header modals (stats, unit stats, specials, help) — compact on phones & short landscape */
 @media (max-width: 767px), (max-height: 520px) and (orientation: landscape), (max-height: 420px) {
+  /* Stats tables: use nearly full viewport width (36rem cap left huge gutters in landscape) */
   .modal.stats-modal,
-  .modal.unit-stats-modal,
+  .modal.unit-stats-modal {
+    min-width: 0 !important;
+    width: calc(100vw - 0.75rem) !important;
+    max-width: calc(100vw - 0.75rem) !important;
+    max-height: min(90dvh, 92vh) !important;
+    border-width: 2px;
+    border-radius: 8px;
+  }
+
   .modal.specials-modal,
   .modal.help-modal {
     min-width: 0 !important;
-    width: min(100vw - 0.75rem, 36rem) !important;
+    width: min(calc(100vw - 0.75rem), 40rem) !important;
     max-width: calc(100vw - 0.75rem) !important;
     max-height: min(90dvh, 92vh) !important;
     border-width: 2px;
@@ -1230,15 +1239,25 @@
   }
 
   .modal.stats-modal .stats-modal-body,
-  .modal.unit-stats-modal .unit-stats-modal-body,
   .modal.specials-modal .specials-modal-body,
   .modal.help-modal .help-modal-body {
     padding: 0.45rem 0.5rem !important;
     max-height: min(68dvh, 78vh) !important;
   }
 
+  /* Flush sticky thead to modal title bar — no top padding on scroll box (desktop uses padding-top: 0) */
+  .modal.unit-stats-modal .unit-stats-modal-body {
+    padding: 0 0.45rem 0.45rem 0.5rem !important;
+    max-height: min(68dvh, 78vh) !important;
+  }
+
   .modal.help-modal .help-modal-body {
     max-height: min(72dvh, 82vh) !important;
+  }
+
+  .stats-modal .header-stats-table,
+  .unit-stats-modal .header-stats-table {
+    width: 100%;
   }
 
   .help-section {
