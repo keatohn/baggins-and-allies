@@ -24,6 +24,10 @@ build/
 # Environment variables
 .env
 .env.local
+frontend/.env.production
+
+# Local SQLite (dev API; recreated on startup / migrations)
+backend/api/game.db
 
 # Node (if frontend uses it)
 node_modules/
