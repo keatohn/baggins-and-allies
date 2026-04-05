@@ -1,7 +1,9 @@
 # GitHub Pages: Settings → Pages → Build and deployment → Source: GitHub Actions
 #
-# Set repo variable VITE_API_URL (Settings → Secrets and variables → Actions → Variables)
-# to your production API URL, e.g. https://your-service.up.railway.app (no trailing slash).
+# VITE_API_URL must be your BACKEND origin (e.g. Railway https://….up.railway.app), NOT bagginsandallies.com
+# or github.io — those serve the static SPA; POST /auth/* there returns 405.
+#
+# Set as a repository variable, OR under the github-pages environment (build job uses that env too).
 #
 # If the site URL is https://<user>.github.io/<repo>/ (project site), set VITE_BASE_PATH
 # to /<repo>/ and add base: process.env.VITE_BASE_PATH || '/' in vite.config.ts — see docs/PRODUCTION_DEPLOYMENT.md.
@@ -25,14 +27,32 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # So VITE_API_URL can live in the github-pages environment OR repository variables.
+    environment:
+      name: github-pages
     steps:
       - uses: actions/checkout@v4
       - name: Require VITE_API_URL
         run: |
           if [ -z "${{ vars.VITE_API_URL }}" ]; then
-            echo "::error::Set repository variable VITE_API_URL (Settings → Secrets and variables → Actions → Variables) to your Railway HTTPS API URL, e.g. https://your-service.up.railway.app"
+            echo "::error::Set VITE_API_URL (repo or github-pages environment) to your Railway API URL, e.g. https://your-service.up.railway.app"
             exit 1
           fi
+      - name: Reject static-site URL as API
+        run: |
+          u=$(printf '%s' '${{ vars.VITE_API_URL }}' | tr '[:upper:]' '[:lower:]' | sed 's:/*$::')
+          case "$u" in
+            https://bagginsandallies.com|http://bagginsandallies.com|https://www.bagginsandallies.com|http://www.bagginsandallies.com)
+              echo "::error::VITE_API_URL must be your API host (Railway .up.railway.app), not bagginsandallies.com — the SPA is static; POST there returns 405."
+              exit 1
+              ;;
+          esac
+          case "$u" in
+            *github.io|*.github.io)
+              echo "::error::VITE_API_URL must be your API backend URL, not GitHub Pages (*.github.io)."
+              exit 1
+              ;;
+          esac
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
