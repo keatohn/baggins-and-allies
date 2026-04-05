@@ -1,6 +1,7 @@
 # GitHub Pages: Settings → Pages → Build and deployment → Source: GitHub Actions
 #
-# VITE_API_URL must be your BACKEND origin (e.g. Railway https://….up.railway.app), NOT bagginsandallies.com
+# VITE_API_URL: backend host or origin (e.g. baggins-and-allies-production.up.railway.app or https://….up.railway.app)
+# Must NOT be bagginsandallies.com / github.io (static SPA only).
 # or github.io — those serve the static SPA; POST /auth/* there returns 405.
 #
 # Set as a repository variable, OR under the github-pages environment (build job uses that env too).

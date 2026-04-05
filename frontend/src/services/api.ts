@@ -4,12 +4,17 @@
 
 import { syncAudioFromAuthPlayer } from '../audio/gameAudio';
 
-/** Empty string must count as unset — otherwise fetch uses same-origin URLs and static hosts return 405 on POST. */
+/**
+ * Empty string must count as unset — otherwise fetch uses same-origin URLs and static hosts return 405 on POST.
+ * Host-only values (no scheme) are treated as relative URLs by fetch(); prepend https:// so they hit the API.
+ */
 function resolveApiBase(): string {
   const raw = import.meta.env.VITE_API_URL;
   const trimmed = typeof raw === 'string' ? raw.trim() : '';
-  if (trimmed) return trimmed.replace(/\/$/, '');
-  return import.meta.env.DEV ? '/api' : 'http://localhost:8000';
+  if (!trimmed) return import.meta.env.DEV ? '/api' : 'http://localhost:8000';
+  let base = trimmed.replace(/\/$/, '');
+  if (!/^https?:\/\//i.test(base)) base = `https://${base}`;
+  return base;
 }
 
 const API_BASE = resolveApiBase();
