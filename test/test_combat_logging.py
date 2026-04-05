@@ -95,7 +95,7 @@ def main():
         print(f"Defender rolls ({len(dice_rolls['defender'])} dice): {dice_rolls['defender']}")
 
         # Fight round (this modifies attackers/defenders lists in place)
-        result = resolve_combat_round(attackers, defenders, unit_defs, dice_rolls)
+        result, _ = resolve_combat_round(attackers, defenders, unit_defs, dice_rolls)
 
         print(f"\nAttacker hits: {result.attacker_hits}")
         print(f"Defender hits: {result.defender_hits}")

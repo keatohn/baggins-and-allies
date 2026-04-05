@@ -42,6 +42,51 @@
   color: var(--ink);
 }
 
+.forfeit-notification-toast {
+  position: fixed;
+  top: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 999;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  max-width: min(90vw, 420px);
+  padding: 0.75rem 1rem;
+  background: var(--parchment, #f5f0e6);
+  border: 1px solid var(--ink-faded, #8a8478);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font-family: var(--font-parchment);
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+
+.forfeit-notification-toast p {
+  margin: 0;
+  flex: 1;
+  line-height: 1.4;
+}
+
+.forfeit-notification-toast-close {
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--ink-light);
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.forfeit-notification-toast-close:hover {
+  color: var(--ink);
+  background: rgba(0, 0, 0, 0.06);
+}
+
 .app.loading,
 .app.error {
   align-items: center;
@@ -73,6 +118,22 @@
   flex: 1;
   display: flex;
   overflow: hidden;
+  position: relative;
+  min-height: 0;
+}
+
+/* Sidebar column uses full main height so aside can scroll internally on short viewports */
+.main-content > .sidebar-wrapper:not(.collapsed) {
+  align-self: stretch;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+}
+
+.main-content > .sidebar-wrapper:not(.collapsed) > .sidebar {
+  flex: 1;
+  min-height: 0;
 }
 
 .map-and-tray {
@@ -85,12 +146,22 @@
 
 .sidebar-wrapper {
   flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
   background: var(--parchment-light);
   border-left: 2px solid var(--ink-faded);
   position: relative;
   transition: width 0.2s ease;
+  min-width: 0;
+  min-height: 0;
+}
+
+@media (max-width: 767px) {
+  .sidebar-wrapper:not(.collapsed) {
+    max-width: min(100vw, 100%);
+  }
+
+  .sidebar-resize-handle {
+    display: none;
+  }
 }
 
 .sidebar-wrapper.collapsed {
@@ -144,6 +215,112 @@
 
 .sidebar-toggle:hover {
   background: var(--parchment);
+}
+
+@media (max-width: 767px) {
+  .sidebar-toggle {
+    left: -26px;
+    width: 24px;
+    height: 24px;
+    font-size: 0.82rem;
+    border-width: 1px;
+  }
+
+  .sidebar-wrapper.collapsed .sidebar-toggle {
+    border-width: 1px;
+  }
+}
+
+/* Combat Simulator: modal opened from header dice button */
+.combat-sim-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(1rem, env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px)) max(1rem, env(safe-area-inset-bottom, 0px)) max(1rem, env(safe-area-inset-left, 0px));
+  overflow: auto;
+  box-sizing: border-box;
+}
+
+.combat-sim-modal {
+  background: var(--parchment);
+  border: 2px solid var(--ink-faded);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px var(--shadow);
+  min-width: min(560px, 100%);
+  max-width: min(92vw, 900px);
+  width: min(92vw, 900px);
+  max-height: calc(100vh - 4rem);
+  max-height: min(calc(100dvh - 2rem), calc(100vh - 4rem));
+  min-height: min(420px, 70dvh);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+@media (max-width: 767px) {
+  .combat-sim-modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .combat-sim-modal {
+    min-width: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    border-radius: 12px 12px 0 0;
+    min-height: min(50dvh, 360px);
+    max-height: min(92dvh, 92vh) !important;
+  }
+
+  .combat-sim-modal-body {
+    min-height: 0;
+  }
+}
+
+.combat-sim-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--ink-faded);
+  flex-shrink: 0;
+}
+
+.combat-sim-modal-header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.combat-sim-modal .close-btn {
+  background: none;
+  border: none;
+  font-size: 1.6rem;
+  color: var(--ink-faded);
+  cursor: pointer;
+  padding: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.combat-sim-modal .close-btn:hover {
+  color: var(--ink);
+}
+
+.combat-sim-modal-body {
+  padding: 1rem;
+  overflow: auto;
+  flex: 1;
+  min-height: 320px;
 }
 
 .map-wrap {

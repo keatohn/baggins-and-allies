@@ -55,6 +55,22 @@
   font-size: 1rem;
 }
 
+@media (max-width: 767px) {
+  .main-menu {
+    padding: max(1rem, env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px)) max(1.5rem, env(safe-area-inset-bottom, 0px)) max(1rem, env(safe-area-inset-left, 0px));
+    justify-content: flex-start;
+    padding-top: max(2rem, env(safe-area-inset-top, 0px));
+  }
+
+  .main-menu__title {
+    font-size: clamp(1.5rem, 7vw, 2.5rem);
+  }
+
+  .main-menu__actions {
+    max-width: min(280px, 100%);
+  }
+}
+
 .main-menu__user {
   margin-top: 1.5rem;
   font-family: var(--font-parchment);

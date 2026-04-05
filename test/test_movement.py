@@ -15,6 +15,70 @@ from backend.engine.actions import move_units, end_phase
 from backend.engine.reducer import apply_action
 from backend.engine.utils import initialize_game_state, print_game_state
 from backend.engine.queries import validate_action
+from backend.engine.movement import get_reachable_territories_for_unit
+
+
+def test_non_combat_reaches_territory_with_pending_capture_owner():
+    """
+    After combat/conquest, territory.owner may still be None while pending_captures holds the capturer
+    until combat phase fully applies. Non-combat reachability must treat that hex as friendly so
+    reinforcements can be plotted (same as validation / apply).
+    """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(setup_id="1.0")
+    starting = load_starting_setup(setup_id="1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=starting,
+        camp_defs=camp_defs,
+    )
+    state.current_faction = "gondor"
+    state.phase = "non_combat_move"
+
+    dest = "minas_morgul"
+    origin = "north_ithilien"
+    # Empty conquered hex: not yet flushed to territory.owner
+    state.territories[dest].units = []
+    state.territories[dest].owner = None
+    state.pending_captures[dest] = "gondor"
+
+    units = [u for u in state.territories[origin].units if getattr(u, "remaining_movement", 0) >= 1]
+    assert units, "need a gondor unit in north_ithilien"
+    u = units[0]
+    u.remaining_movement = 2
+
+    reachable, _ = get_reachable_territories_for_unit(
+        u, origin, state, unit_defs, territory_defs, faction_defs, "non_combat_move",
+    )
+    assert dest in reachable, "pending capture should count as friendly for non-combat destinations"
+
+
+def test_non_combat_apply_accepts_pending_capture_owner():
+    """Reducer apply must use effective_territory_owner for non-combat (same as validate_action / BFS)."""
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(setup_id="1.0")
+    starting = load_starting_setup(setup_id="1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=starting,
+        camp_defs=camp_defs,
+    )
+    state.current_faction = "gondor"
+    state.phase = "non_combat_move"
+
+    dest = "minas_morgul"
+    origin = "north_ithilien"
+    state.territories[dest].units = []
+    state.territories[dest].owner = None
+    state.pending_captures[dest] = "gondor"
+
+    units = [u for u in state.territories[origin].units if getattr(u, "remaining_movement", 0) >= 1]
+    assert units, "need a gondor unit in north_ithilien"
+    u = units[0]
+    u.remaining_movement = 2
+    action = move_units("gondor", origin, dest, [u.instance_id])
+    v = validate_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert v.valid, v.error
+    state2, _ = apply_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert len(state2.pending_moves) == 1
 
 
 def test_land_combat_move():
@@ -47,6 +111,7 @@ def test_land_combat_move():
     assert len(state.pending_moves) == 1, "Should have one pending move"
     pm = state.pending_moves[0]
     assert pm.from_territory == from_territory and pm.to_territory == to_territory
+    assert pm.primary_unit_id == units[0].unit_id, "API/UI must get canonical unit_id without parsing instance ids"
     print(f"  OK: Pending move {pm.from_territory} -> {pm.to_territory}, {len(pm.unit_instance_ids)} units")
 
 

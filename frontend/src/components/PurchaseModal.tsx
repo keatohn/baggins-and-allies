@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import './PurchaseModal.css';
 
 interface UnitPurchaseInfo {
@@ -13,8 +13,10 @@ interface UnitPurchaseInfo {
   dice: number;
   /** True if this unit is naval (mobilizes to sea zone). Used to show in Sea tab. */
   isNaval?: boolean;
-  /** Number of specials (len of specials list). Shown as SP in purchase modal. */
-  specialsCount?: number;
+  /** True if siegework archetype; shown in Siege tab (after Sea). Excludes naval. */
+  isSiegework?: boolean;
+  /** Human-readable special names (from setup specials defs), shown below numeric stats. */
+  specialLabels?: string[];
   /** Home territory count for this unit type (adds to land mobilization display denominator when in cart). */
   homeTerritoryCount?: number;
 }
@@ -44,7 +46,13 @@ interface PurchaseModalProps {
   purchasedUnitsCount?: number;
   /** Power cost per camp (0 or undefined = camps not purchasable). */
   campCost?: number;
-  onPurchase: (purchases: Record<string, number>, campsCount: number) => void;
+  /** Power cost per HP to repair a stronghold (0 or undefined = repair not available). */
+  strongholdRepairCost?: number;
+  /** Strongholds owned by current faction that have currentHp < baseHp (only these show in Other tab). */
+  repairableStrongholds?: { territoryId: string; name: string; currentHp: number; baseHp: number }[];
+  /** Pending repairs (from cart) so we can init target HP when modal opens. */
+  currentRepairs?: { territory_id: string; hp_to_add: number }[];
+  onPurchase: (purchases: Record<string, number>, campsCount: number, repairs?: { territory_id: string; hp_to_add: number }[]) => void;
   onClose: () => void;
 }
 
@@ -56,7 +64,39 @@ function formatCost(cost: Record<string, number>): string {
     .join(' | ') || '0';
 }
 
-type PurchaseTab = 'land' | 'sea' | 'other';
+type PurchaseTab = 'land' | 'sea' | 'siege' | 'other';
+
+function unitPowerCost(cost: Record<string, number>): number {
+  return Object.values(cost || {}).reduce((sum, v) => sum + (Number.isFinite(v) ? v : 0), 0);
+}
+
+function compareUnitsForPurchase(a: UnitPurchaseInfo, b: UnitPurchaseInfo): number {
+  return (
+    unitPowerCost(a.cost) - unitPowerCost(b.cost)
+    || a.dice - b.dice
+    || a.attack - b.attack
+    || (a.specialLabels?.length ?? 0) - (b.specialLabels?.length ?? 0)
+    || a.name.localeCompare(b.name)
+  );
+}
+
+function UnitStatBlock({ unit }: { unit: UnitPurchaseInfo }) {
+  const labels = unit.specialLabels?.filter(Boolean) ?? [];
+  return (
+    <div className="unit-stat-stack">
+      <span className="unit-stats unit-stats--inline">
+        {unit.attack}A | {unit.defense}D | {unit.dice}R | {unit.movement}M | {unit.health}HP
+      </span>
+      <div className="unit-stats-specials-row">
+        {labels.length > 0 ? (
+          <span className="unit-stats-specials" title={labels.join(', ')}>
+            {labels.join(' · ')}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
 function PurchaseModal({
   isOpen,
@@ -73,19 +113,46 @@ function PurchaseModal({
   mobilizationSeaCapacity,
   purchasedUnitsCount: _purchasedUnitsCount = 0,
   campCost = 10,
+  strongholdRepairCost = 0,
+  repairableStrongholds = [],
+  currentRepairs = [],
   onPurchase,
   onClose,
 }: PurchaseModalProps) {
-  const landUnits = useMemo(() => availableUnits.filter(u => !u.isNaval), [availableUnits]);
-  const seaUnits = useMemo(() => availableUnits.filter(u => u.isNaval), [availableUnits]);
+  const nonNavalUnits = useMemo(() => availableUnits.filter(u => !u.isNaval), [availableUnits]);
+  const landTabUnits = useMemo(
+    () => availableUnits
+      .filter(u => !u.isNaval && !u.isSiegework)
+      .slice()
+      .sort(compareUnitsForPurchase),
+    [availableUnits]
+  );
+  const siegeUnits = useMemo(
+    () => availableUnits
+      .filter(u => !u.isNaval && u.isSiegework)
+      .slice()
+      .sort(compareUnitsForPurchase),
+    [availableUnits]
+  );
+  const seaUnits = useMemo(
+    () => availableUnits
+      .filter(u => u.isNaval)
+      .slice()
+      .sort(compareUnitsForPurchase),
+    [availableUnits]
+  );
 
   const [activeTab, setActiveTab] = useState<PurchaseTab>('land');
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [campQuantity, setCampQuantity] = useState(0);
+  /** Target HP per repairable stronghold (territoryId -> HP to have after repair). */
+  const [repairTargetHp, setRepairTargetHp] = useState<Record<string, number>>({});
+  /** Avoid resetting in-progress picks when parent re-renders (e.g. multiplayer poll updates props). */
+  const wasOpenRef = useRef(false);
 
   const landInCart = useMemo(
-    () => landUnits.reduce((s, u) => s + (quantities[u.id] || 0), 0),
-    [landUnits, quantities]
+    () => nonNavalUnits.reduce((s, u) => s + (quantities[u.id] || 0), 0),
+    [nonNavalUnits, quantities]
   );
   const seaInCart = useMemo(
     () => seaUnits.reduce((s, u) => s + (quantities[u.id] || 0), 0),
@@ -95,22 +162,43 @@ function PurchaseModal({
   // Display land denominator: camp capacity + home slots from unit types currently in cart (1 per home territory per type), capped by backend total
   const displayLandDenominator = useMemo(() => {
     const campCap = mobilizationCampLandCapacity ?? mobilizationLandCapacity ?? 0;
-    const homeSlots = landUnits
+    const homeSlots = nonNavalUnits
       .filter(u => (quantities[u.id] || 0) > 0 && (u.homeTerritoryCount ?? 0) > 0)
       .reduce((s, u) => s + (u.homeTerritoryCount ?? 0), 0);
     const withHome = campCap + homeSlots;
     return mobilizationLandCapacity != null ? Math.min(withHome, mobilizationLandCapacity) : withHome;
-  }, [mobilizationCampLandCapacity, mobilizationLandCapacity, landUnits, quantities]);
+  }, [mobilizationCampLandCapacity, mobilizationLandCapacity, nonNavalUnits, quantities]);
 
-  // Sync quantities and camps when modal opens; clamp camps to maxCamps; always open on Land tab
+  // Sync from props only on open — not when isOpen stays true and poll refreshes repairableStrongholds / etc.
   useEffect(() => {
-    if (isOpen) {
-      setActiveTab('land');
-      setQuantities(currentPurchases);
-      const clamped = maxCamps != null && maxCamps > 0 ? Math.min(currentCamps, maxCamps) : currentCamps;
-      setCampQuantity(clamped);
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      return;
     }
-  }, [isOpen, currentPurchases, currentCamps, maxCamps]);
+    if (wasOpenRef.current) return;
+    wasOpenRef.current = true;
+    setActiveTab('land');
+    setQuantities({ ...currentPurchases });
+    const clamped = maxCamps != null && maxCamps > 0 ? Math.min(currentCamps, maxCamps) : currentCamps;
+    setCampQuantity(clamped);
+    const targets: Record<string, number> = {};
+    for (const s of repairableStrongholds) {
+      const added = currentRepairs.find(r => r.territory_id === s.territoryId)?.hp_to_add ?? 0;
+      targets[s.territoryId] = Math.min(s.baseHp, s.currentHp + added);
+    }
+    setRepairTargetHp(targets);
+  }, [
+    isOpen,
+    currentPurchases,
+    currentCamps,
+    maxCamps,
+    repairableStrongholds,
+    currentRepairs,
+  ]);
+
+  useEffect(() => {
+    if (activeTab === 'siege' && siegeUnits.length === 0) setActiveTab('land');
+  }, [activeTab, siegeUnits.length]);
 
   // Total cost for units only
   const totalUnitCosts = useMemo(() => {
@@ -126,14 +214,27 @@ function PurchaseModal({
     return costs;
   }, [quantities, availableUnits]);
 
-  // Total cost including camps (power only)
+  // Total cost including camps and stronghold repairs (power only)
+  const repairCostTotal = useMemo(() => {
+    if (strongholdRepairCost <= 0) return 0;
+    let hp = 0;
+    for (const s of repairableStrongholds) {
+      const target = repairTargetHp[s.territoryId] ?? s.currentHp;
+      hp += Math.max(0, Math.min(target, s.baseHp) - s.currentHp);
+    }
+    return hp * strongholdRepairCost;
+  }, [strongholdRepairCost, repairableStrongholds, repairTargetHp]);
+
   const totalCosts = useMemo(() => {
     const costs = { ...totalUnitCosts };
     if (campCost > 0 && campQuantity > 0) {
       costs.power = (costs.power || 0) + campQuantity * campCost;
     }
+    if (repairCostTotal > 0) {
+      costs.power = (costs.power || 0) + repairCostTotal;
+    }
     return costs;
-  }, [totalUnitCosts, campQuantity, campCost]);
+  }, [totalUnitCosts, campQuantity, campCost, repairCostTotal]);
 
   // Remaining resources after units + camps
   const remainingResources = useMemo(() => {
@@ -172,9 +273,9 @@ function PurchaseModal({
         }
         if (!unit.isNaval && (mobilizationLandCapacity != null || mobilizationCampLandCapacity != null)) {
           const newQuantities = { ...prev, [unitId]: newQty };
-          const newLandInCart = landUnits.reduce((s, u) => s + (newQuantities[u.id] || 0), 0);
+          const newLandInCart = nonNavalUnits.reduce((s, u) => s + (newQuantities[u.id] || 0), 0);
           const campCap = mobilizationCampLandCapacity ?? mobilizationLandCapacity ?? 0;
-          const homeSlots = landUnits
+          const homeSlots = nonNavalUnits
             .filter(u => (newQuantities[u.id] || 0) > 0 && (u.homeTerritoryCount ?? 0) > 0)
             .reduce((s, u) => s + (u.homeTerritoryCount ?? 0), 0);
           const newLandCap = Math.min(campCap + homeSlots, mobilizationLandCapacity ?? Infinity);
@@ -210,14 +311,31 @@ function PurchaseModal({
     if (landInCart > displayLandDenominator) return;
     if (mobilizationSeaCapacity != null && seaInCart > mobilizationSeaCapacity) return;
     const campsToSubmit = maxCamps != null && maxCamps > 0 ? Math.min(campQuantity, maxCamps) : campQuantity;
-    onPurchase(quantities, campsToSubmit);
+    const repairs: { territory_id: string; hp_to_add: number }[] = [];
+    for (const s of repairableStrongholds) {
+      const target = repairTargetHp[s.territoryId] ?? s.currentHp;
+      const hpToAdd = Math.max(0, Math.min(target, s.baseHp) - s.currentHp);
+      if (hpToAdd > 0) repairs.push({ territory_id: s.territoryId, hp_to_add: hpToAdd });
+    }
+    onPurchase(quantities, campsToSubmit, repairs);
     onClose();
   };
 
   const handleCancel = () => {
     setQuantities(currentPurchases);
     setCampQuantity(currentCamps);
+    setRepairTargetHp({});
     onClose();
+  };
+
+  const handleRepairTargetChange = (territoryId: string, delta: number) => {
+    const s = repairableStrongholds.find(r => r.territoryId === territoryId);
+    if (!s) return;
+    setRepairTargetHp(prev => {
+      const current = prev[territoryId] ?? s.currentHp;
+      const next = Math.max(s.currentHp, Math.min(s.baseHp, current + delta));
+      return { ...prev, [territoryId]: next };
+    });
   };
 
   if (!isOpen) return null;
@@ -247,6 +365,15 @@ function PurchaseModal({
               Sea
             </button>
           )}
+          {siegeUnits.length > 0 && (
+            <button
+              type="button"
+              className={`purchase-tab ${activeTab === 'siege' ? 'active' : ''}`}
+              onClick={() => setActiveTab('siege')}
+            >
+              Siege
+            </button>
+          )}
           <button
             type="button"
             className={`purchase-tab ${activeTab === 'other' ? 'active' : ''}`}
@@ -269,7 +396,7 @@ function PurchaseModal({
           })}
         </div>
 
-        {(activeTab === 'land' || activeTab === 'sea') && (mobilizationCapacity != null || mobilizationLandCapacity != null || mobilizationCampLandCapacity != null || mobilizationSeaCapacity != null) && (
+        {(activeTab === 'land' || activeTab === 'sea' || activeTab === 'siege') && (mobilizationCapacity != null || mobilizationLandCapacity != null || mobilizationCampLandCapacity != null || mobilizationSeaCapacity != null) && (
           <p className="mobilization-capacity">
             {(mobilizationLandCapacity != null || mobilizationCampLandCapacity != null) && (mobilizationSeaCapacity == null || seaUnits.length === 0) ? (
               <>Land: <strong>{landInCart}/{displayLandDenominator}</strong></>
@@ -290,7 +417,7 @@ function PurchaseModal({
         {activeTab === 'land' && (
           <>
             <div className="unit-list">
-              {landUnits.map(unit => {
+              {landTabUnits.map(unit => {
                 const qty = quantities[unit.id] || 0;
                 const affordable = canAfford(unit);
                 return (
@@ -304,9 +431,7 @@ function PurchaseModal({
                       </span>
                       <div className="unit-details">
                         <span className="unit-name">{unit.name}</span>
-                        <span className="unit-stats">
-                          {unit.attack}A | {unit.defense}D | {unit.dice}R | {unit.movement}M | {unit.health}HP | {(unit.specialsCount ?? 0)}SP
-                        </span>
+                        <UnitStatBlock unit={unit} />
                       </div>
                     </div>
                     <div className="unit-cost">
@@ -322,7 +447,7 @@ function PurchaseModal({
               })}
             </div>
             <p className="unit-stats-key">
-              A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points | SP = Specials
+              A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points
             </p>
           </>
         )}
@@ -344,9 +469,7 @@ function PurchaseModal({
                       </span>
                       <div className="unit-details">
                         <span className="unit-name">{unit.name}</span>
-                        <span className="unit-stats">
-                          {unit.attack}A | {unit.defense}D | {unit.dice}R | {unit.movement}M | {unit.health}HP | {(unit.specialsCount ?? 0)}SP
-                        </span>
+                        <UnitStatBlock unit={unit} />
                       </div>
                     </div>
                     <div className="unit-cost">
@@ -362,7 +485,45 @@ function PurchaseModal({
               })}
             </div>
             <p className="unit-stats-key">
-              A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points | SP = Specials
+              A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points
+            </p>
+          </>
+        )}
+
+        {activeTab === 'siege' && (
+          <>
+            <div className="unit-list">
+              {siegeUnits.map(unit => {
+                const qty = quantities[unit.id] || 0;
+                const affordable = canAfford(unit);
+                return (
+                    <div key={unit.id} className="unit-row">
+                    <div className="unit-info">
+                      <span
+                        className="unit-icon-wrap"
+                        style={factionColor ? { ['--faction-border' as string]: factionColor } : undefined}
+                      >
+                        <img src={unit.icon} alt={unit.name} className="unit-icon" />
+                      </span>
+                      <div className="unit-details">
+                        <span className="unit-name">{unit.name}</span>
+                        <UnitStatBlock unit={unit} />
+                      </div>
+                    </div>
+                    <div className="unit-cost">
+                      <span className="cost-value">{formatCost(unit.cost)}</span>
+                    </div>
+                    <div className="quantity-controls">
+                      <button onClick={() => handleQuantityChange(unit.id, -1)} disabled={qty === 0}>−</button>
+                      <span className="quantity">{qty}</span>
+                      <button onClick={() => handleQuantityChange(unit.id, 1)} disabled={!affordable || atMobilizationCap}>+</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="unit-stats-key">
+              A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points
             </p>
           </>
         )}
@@ -387,7 +548,34 @@ function PurchaseModal({
                   <button onClick={() => handleCampChange(1)} disabled={!canAffordOneMoreCamp || atCampCap}>+</button>
                 </div>
               </div>
-            ) : (
+            ) : null}
+            {strongholdRepairCost > 0 && repairableStrongholds.length > 0
+              ? repairableStrongholds.map(s => {
+                  const target = repairTargetHp[s.territoryId] ?? s.currentHp;
+                  const canAffordMore = (remainingResources.power ?? 0) >= strongholdRepairCost;
+                  const atCap = target >= s.baseHp;
+                  return (
+                    <div key={s.territoryId} className="unit-row">
+                      <div className="unit-info">
+                        <span className="purchase-modal-camp-icon" aria-hidden title="Stronghold">🏰</span>
+                        <div className="unit-details">
+                          <span className="unit-name">Repair {s.name}</span>
+                          <span className="unit-stats">HP: {target}/{s.baseHp}</span>
+                        </div>
+                      </div>
+                      <div className="unit-cost">
+                        <span className="cost-value">{strongholdRepairCost}P</span>
+                      </div>
+                      <div className="quantity-controls">
+                        <button onClick={() => handleRepairTargetChange(s.territoryId, -1)} disabled={target <= s.currentHp}>−</button>
+                        <span className="quantity">{target}</span>
+                        <button onClick={() => handleRepairTargetChange(s.territoryId, 1)} disabled={!canAffordMore || atCap}>+</button>
+                      </div>
+                    </div>
+                  );
+                })
+              : null}
+            {campCost <= 0 && (!strongholdRepairCost || repairableStrongholds.length === 0) && (
               <p className="purchase-other-empty">No other purchases available.</p>
             )}
           </div>
@@ -398,6 +586,7 @@ function PurchaseModal({
             <span>
               {totalUnits} units
               {campQuantity > 0 && `, ${campQuantity} camp${campQuantity !== 1 ? 's' : ''}`}
+              {repairCostTotal > 0 && `, stronghold repairs`}
               {' for '}{formatCost(totalCosts)}
             </span>
           </div>

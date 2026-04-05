@@ -7,10 +7,13 @@
     "captain",
     "charging",
     "fearless",
+    "ford_crosser",
     "forest",
     "home",
     "hope",
+    "ladder",
     "mountain",
+    "ram",
     "sea_raider",
     "stealth",
     "terror"
@@ -22,7 +25,7 @@
   "anti_cavalry": {
     "name": "Anti-Cavalry",
     "display_code": "AC",
-    "description": "+1 attack/defense when enemy has cavalry"
+    "description": "For each enemy cavalry unit, one anti-cavalry unit gains +1 attack/defense"
   },
   "archer": {
     "name": "Archer",
@@ -37,7 +40,7 @@
   "captain": {
     "name": "Captain",
     "display_code": "C",
-    "description": "Grant +1 attack/defense boost to up to 3 units of the same type (infantry, archer, cavalry, etc.)"
+    "description": "Grant +1 attack/defense boost to up to 3 units of the same unit type (infantry, archer, cavalry, etc.)"
   },
   "charging": {
     "name": "Charging",
@@ -47,6 +50,10 @@
     "name": "Fearless",
     "display_code": "FL",
     "description": "Immune to terror"
+  },
+  "ford_crosser": {
+    "name": "Ford Crosser",
+    "description": "Can cross rivers at a ford and bring up to 2 units with it"
   },
   "forest": {
     "name": "Forest",
@@ -63,10 +70,20 @@
     "display_code": "HP",
     "description": "Cancels 1 terror"
   },
+  "ladder": {
+    "name": "Ladder",
+    "display_code": "L",
+    "description": "Allows up to 2 attacking infantry to bypass stronghold HP and direct hits at defending units"
+  },
   "mountain": {
     "name": "Mountain",
     "display_code": "M",
     "description": "+1 attack/defense in mountain terrain"
+  },
+  "ram": {
+    "name": "Ram",
+    "display_code": "R",
+    "description": "Roll against stronghold HP with siegeworks before standard combat rounds"
   },
   "sea_raider": {
     "name": "Sea Raider",
@@ -76,7 +93,7 @@
   "stealth": {
     "name": "Stealth",
     "display_code": "ST",
-    "description": "If everyone in attack has stealth, they prefire with a -1 attack penalty and cancel any defensive archer prefire"
+    "description": "If everyone in attack has stealth, they pre-fire with a -1 attack penalty and cancel any defensive archer prefire"
   },
   "terror": {
     "name": "Terror",

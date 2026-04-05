@@ -1,0 +1,103 @@
+{
+    "order": [
+        "aerial",
+        "anti_cavalry",
+        "archer",
+        "bombikazi",
+        "captain",
+        "charging",
+        "fearless",
+        "ford_crosser",
+        "forest",
+        "home",
+        "hope",
+        "ladder",
+        "mountain",
+        "ram",
+        "sea_raider",
+        "stealth",
+        "terror"
+    ],
+    "aerial": {
+        "name": "Aerial",
+        "description": "Fly over mountains, rivers, sea zones, and enemy territories"
+    },
+    "anti_cavalry": {
+        "name": "Anti-Cavalry",
+        "display_code": "AC",
+        "description": "For each enemy cavalry unit, one anti-cavalry unit gains +1 attack/defense"
+    },
+    "archer": {
+        "name": "Archer",
+        "display_code": "AR",
+        "description": "Defending archers pre-fire before round 1 of combat, with a -1 defense penalty except when defending a stronghold or fortress"
+    },
+    "bombikazi": {
+        "name": "Bombikazi",
+        "display_code": "B",
+        "description": "Ignite a bomb and self-destruct"
+    },
+    "captain": {
+        "name": "Captain",
+        "display_code": "C",
+        "description": "Grant +1 attack/defense boost to up to 3 units of the same unit type (infantry, archer, cavalry, etc.)"
+    },
+    "charging": {
+        "name": "Charging",
+        "description": "Conquer multiple territories in combat path"
+    },
+    "fearless": {
+        "name": "Fearless",
+        "display_code": "FL",
+        "description": "Immune to terror"
+    },
+    "ford_crosser": {
+        "name": "Ford Crosser",
+        "description": "Can cross rivers at a ford and bring up to 2 units with it"
+    },
+    "forest": {
+        "name": "Forest",
+        "display_code": "FR",
+        "description": "+1 attack/defense in forest terrain"
+    },
+    "home": {
+        "name": "Home",
+        "display_code": "HM",
+        "description": "Deploy up to 1 unit per turn in its home territory without a camp"
+    },
+    "hope": {
+        "name": "Hope",
+        "display_code": "HP",
+        "description": "Cancels 1 terror"
+    },
+    "ladder": {
+        "name": "Ladder",
+        "display_code": "L",
+        "description": "Allows up to 2 attacking infantry to bypass stronghold HP and direct hits at defending units"
+    },
+    "mountain": {
+        "name": "Mountain",
+        "display_code": "M",
+        "description": "+1 attack/defense in mountain terrain"
+    },
+    "ram": {
+        "name": "Ram",
+        "display_code": "R",
+        "description": "Roll against stronghold HP with siegeworks before standard combat rounds"
+    },
+    "sea_raider": {
+        "name": "Sea Raider",
+        "display_code": "SR",
+        "description": "+1 attack in sea raids"
+    },
+    "stealth": {
+        "name": "Stealth",
+        "display_code": "ST",
+        "description": "If everyone in attack has stealth, they pre-fire with a -1 attack penalty and cancel any defensive archer prefire"
+    },
+    "terror": {
+        "name": "Terror",
+        "display_code": "T",
+        "description": "Force 1 defending hit in round 1 of combat to re-roll (capped at 3 applied per battle)"
+    }
+}

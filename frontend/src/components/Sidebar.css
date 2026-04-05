@@ -4,8 +4,11 @@
   flex-direction: column;
   gap: 0.75rem;
   padding: 0.75rem;
-  overflow-y: auto;
   min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .panel {
@@ -13,6 +16,24 @@
   border: 1px solid var(--ink-faded);
   border-radius: 4px;
   padding: 0.75rem;
+}
+
+/* Current faction: accent borders on main sidebar panels only (not spectate, etc.) */
+.sidebar.sidebar--turn-accent {
+  --sidebar-panel-accent: var(--ink-faded);
+}
+
+.sidebar.sidebar--turn-accent .panel.actions-panel,
+.sidebar.sidebar--turn-accent .panel.territory-panel,
+.sidebar.sidebar--turn-accent .panel.event-log {
+  border-width: 2px;
+  border-color: color-mix(in srgb, var(--sidebar-panel-accent) 50%, var(--ink-faded));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--sidebar-panel-accent) 20%, transparent);
+}
+
+/* Territory: don't shrink to a sliver under flex siblings */
+.panel.territory-panel {
+  flex-shrink: 0;
 }
 
 .panel h2 {
@@ -25,17 +46,24 @@
   letter-spacing: 0.05em;
 }
 
-/* Actions Panel */
+/* Actions Panel — height follows content; only scroll inside when list is huge (generous cap) */
 .actions-panel {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  flex: 0 0 auto;
+  align-self: stretch;
 }
 
 .phase-actions {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  /* Scroll only after a large block of pending UI — avoids splitting buttons when content is short */
+  max-height: min(85vh, 48rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .phase-actions:empty {
@@ -74,6 +102,18 @@
 .move-details .move-route {
   color: var(--ink-faded);
   font-size: 0.8rem;
+}
+
+.mobilization-all-stacks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.5rem;
+}
+
+.mobilization-all-stack {
+  font-size: 0.8rem;
+  color: var(--ink);
 }
 
 .count-controls {
@@ -174,8 +214,25 @@
   background: #0d47a1;
   border-color: #002171;
 }
+
 .confirm-move-btn.naval-move-btn:hover {
   background: #1565c0;
+}
+
+/* Attack confirm: red (overrides green .confirm-move-btn base + hover) */
+.confirm-move-btn.attack-btn {
+  background: #c62828;
+  border-color: #8b1c1c;
+  font-family: 'Cinzel', serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.confirm-move-btn.attack-btn:hover {
+  background: #d32f2f;
+  border-color: #8b1c1c;
 }
 
 .attack-btn {
@@ -219,27 +276,6 @@
   background: var(--parchment-light);
 }
 
-/* TEMPORARY DEV: Ugly skip-turn button so we remember to remove it */
-.skip-turn-btn-temp {
-  margin-top: 0.5rem;
-  padding: 0.4rem 0.8rem;
-  font-family: Comic Sans MS, cursive;
-  font-size: 0.9rem;
-  font-weight: 700;
-  color: #000;
-  background: #ffeb3b;
-  border: 3px dashed #f57f17;
-  border-radius: 4px;
-  cursor: pointer;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
-}
-.skip-turn-btn-temp:hover {
-  background: #fff59d;
-  border-color: #e65100;
-}
-
 /* Pending Moves List */
 .pending-moves {
   margin-top: 0.5rem;
@@ -255,6 +291,24 @@
   margin-bottom: 0.5rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+.naval-standoff-notice {
+  border-color: #b8860b;
+}
+
+.naval-standoff-notice__text {
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--ink);
+  margin: 0 0 0.35rem;
+}
+
+.naval-standoff-notice__list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.8rem;
+  color: var(--ink);
 }
 
 .move-group {
@@ -340,12 +394,21 @@
   border-radius: 3px;
 }
 
-.battle-btn:hover {
+.battle-btn:hover:not(:disabled) {
   background: #a00000;
+}
+
+.battle-btn:disabled,
+.battle-btn.battle-btn--blocked {
+  background: #6a6a6a;
+  border-color: #4a4a4a;
+  cursor: not-allowed;
+  opacity: 0.75;
 }
 
 /* Spectate Battles panel (when !canAct and phase is combat) */
 .spectate-battles-panel {
+  flex-shrink: 0;
   margin-bottom: 0.5rem;
 }
 
@@ -377,9 +440,14 @@
 }
 
 .spectate-battle-btn:disabled {
-  cursor: default;
-  opacity: 0.7;
+  cursor: not-allowed;
+  opacity: 0.75;
   color: var(--ink-faded);
+}
+
+.spectate-battle-btn--blocked {
+  background: #d8d0c4;
+  border-style: dashed;
 }
 
 .spectate-battle-btn--active {
@@ -595,11 +663,12 @@
   padding: 0.5rem 0;
 }
 
-/* Selected territory: slightly elevated panel when it has content */
+/* Selected territory: elevated panel + room for details (no min-height when empty / “select territory”) */
 .territory-panel.has-territory {
   border-width: 2px;
   border-color: var(--ink);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  min-height: 12.5rem;
 }
 
 /* Faded territory image on the right when an asset exists for the selected territory */
@@ -620,7 +689,7 @@
   z-index: 0;
 }
 
-.territory-panel > *:not(.territory-panel-bg-image) {
+.territory-panel>*:not(.territory-panel-bg-image) {
   position: relative;
   z-index: 1;
 }
@@ -732,23 +801,81 @@
   font-size: 0.9rem;
 }
 
-/* Event Log */
+/* Event log: content-sized — avoids flex-grow eating the column while territory stays min-height */
 .event-log {
-  flex: 1;
-  min-height: 150px;
+  flex: 0 1 auto;
+  min-height: 130px;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .event-log h2 {
   flex-shrink: 0;
 }
 
-.log-entries {
-  flex: 1;
-  overflow-y: auto;
+.event-log-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
+  flex-shrink: 0;
+}
+
+.event-log-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   font-size: 0.8rem;
-  max-height: 200px;
+  color: var(--ink);
+}
+
+.event-log-filter-label {
+  font-family: var(--font-display, 'Cinzel', serif);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-light);
+  white-space: nowrap;
+}
+
+.event-log-filter-select {
+  padding: 0.35rem 0.5rem;
+  font-size: 0.8rem;
+  font-family: var(--font-parchment);
+  border: 1px solid var(--ink-faded);
+  border-radius: 4px;
+  background: var(--parchment-light, #f5f0e6);
+  color: var(--ink);
+  min-width: 0;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238a8478' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.4rem center;
+  padding-right: 1.25rem;
+}
+
+.event-log-filter-select:hover {
+  border-color: var(--ink-light);
+}
+
+.event-log-filter-select:focus {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink-faded);
+}
+
+.log-entries {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  font-size: 0.8rem;
+  /* Shorter than before: frees vertical room in the sidebar scroll for territory / actions */
+  max-height: min(200px, 30vh);
 }
 
 .log-entry {
@@ -788,6 +915,11 @@
 .phase-instruction .aerial-must-move-where {
   font-weight: 400;
   color: var(--ink-faded);
+}
+
+/* Combat phase: no battles list — sit flush above End Phase like other phases’ instruction + button gap */
+.phase-instruction.combat-phase-idle {
+  margin-bottom: 0;
 }
 
 .empty-state {
@@ -858,4 +990,267 @@
 
 .cancel-retreat:hover {
   background: var(--parchment);
+}
+
+@media (max-width: 767px) {
+  .sidebar {
+    padding: max(0.35rem, env(safe-area-inset-right, 0px)) 0.4rem max(0.5rem, env(safe-area-inset-bottom, 0px)) 0.4rem;
+    gap: 0.38rem;
+    font-size: clamp(0.72rem, 2.4vw, 0.9rem);
+  }
+
+  .actions-panel {
+    gap: 0.38rem;
+    flex-shrink: 0;
+  }
+
+  /* Cap earlier than desktop: long pending lists scroll inside Actions so territory + event log stay in reach */
+  .phase-actions {
+    gap: 0.38rem;
+    max-height: min(42vh, 20rem);
+    max-height: min(42dvh, 20rem);
+  }
+
+  /* Content-sized event log on small screens — whole sidebar scrolls; avoids flex stealing height from territory */
+  .event-log {
+    flex: 0 1 auto;
+    min-height: 100px;
+  }
+
+  .territory-panel.has-territory {
+    min-height: 6.5rem;
+  }
+
+  .sidebar .phase-instruction {
+    font-size: clamp(0.68rem, 2.3vw, 0.8rem);
+    line-height: 1.35;
+  }
+
+  /* Global buttons — extra compact */
+  .sidebar button {
+    padding: 0.3rem 0.48rem;
+    font-size: clamp(0.65rem, 2.2vw, 0.76rem);
+  }
+
+  .sidebar .count-btn {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    min-height: 24px;
+    font-size: 0.9rem;
+    padding: 0;
+  }
+
+  .sidebar .count-controls {
+    gap: 0.65rem;
+    margin: 0.5rem 0;
+  }
+
+  .sidebar .count-value {
+    font-size: 1.15rem;
+    min-width: 1.5rem;
+  }
+
+  .sidebar .max-hint {
+    font-size: 0.65rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .sidebar .charge-path-prompt {
+    font-size: 0.72rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .sidebar .confirm-move-btn,
+  .sidebar .cancel-move-btn,
+  .sidebar .attack-btn {
+    padding: 0.32rem 0.42rem;
+    font-size: clamp(0.65rem, 2.2vw, 0.76rem);
+  }
+
+  .sidebar .charge-path-btn {
+    padding: 0.32rem 0.45rem;
+    font-size: clamp(0.62rem, 2vw, 0.72rem);
+  }
+
+  .sidebar .move-confirm {
+    padding: 0.5rem;
+    margin-bottom: 0.38rem;
+    border-width: 1px;
+  }
+
+  .sidebar .move-confirm-buttons {
+    gap: 0.38rem;
+  }
+
+  .panel {
+    padding: 0.45rem;
+  }
+
+  .panel h2 {
+    font-size: clamp(0.72rem, 2.2vw, 0.85rem);
+    margin-bottom: 0.38rem;
+    letter-spacing: 0.04em;
+  }
+
+  .move-confirm h3 {
+    font-size: clamp(0.68rem, 2.3vw, 0.78rem);
+    margin-bottom: 0.38rem;
+  }
+
+  .move-details {
+    font-size: clamp(0.68rem, 2.3vw, 0.78rem);
+  }
+
+  .move-details .move-route {
+    font-size: 0.72rem;
+  }
+
+  .pending-moves h3,
+  .pending-battles h3 {
+    font-size: clamp(0.68rem, 2.2vw, 0.76rem);
+    margin-bottom: 0.38rem;
+  }
+
+  .move-group-header {
+    font-size: clamp(0.68rem, 2.2vw, 0.78rem);
+    padding: 0.18rem 0.38rem;
+  }
+
+  .pending-move-item {
+    font-size: clamp(0.65rem, 2.1vw, 0.74rem);
+    padding: 0.18rem 0.38rem;
+  }
+
+  .cancel-move-x {
+    font-size: 0.88rem;
+    padding: 0 0.18rem;
+  }
+
+  .battle-btn {
+    padding: 0.38rem;
+    font-size: clamp(0.68rem, 2.2vw, 0.78rem);
+  }
+
+  .spectate-battles-panel h2 {
+    font-size: clamp(0.72rem, 2.2vw, 0.85rem);
+  }
+
+  .spectate-battle-btn {
+    padding: 0.32rem 0.45rem;
+    font-size: clamp(0.65rem, 2.1vw, 0.75rem);
+  }
+
+  .defender-casualty-order-label {
+    font-size: 0.6rem;
+  }
+
+  .defender-pill {
+    font-size: 0.6rem;
+    padding: 0.18rem 0.35rem;
+  }
+
+  .defender-casualty-order-pills button.defender-pill {
+    font-size: 0.6rem;
+  }
+
+  /* Territory panel */
+  .territory-panel h2 {
+    padding: 0.22rem 0.38rem;
+    margin: -0.45rem -0.45rem 0.32rem -0.45rem;
+    gap: 0.28rem;
+  }
+
+  .territory-panel h2 .faction-icon {
+    width: 18px;
+    height: 18px;
+  }
+
+  .territory-name {
+    font-size: clamp(0.75rem, 2.4vw, 0.88rem);
+  }
+
+  .power-terrain {
+    font-size: clamp(0.58rem, 2.1vw, 0.72rem);
+  }
+
+  .territory-info {
+    font-size: clamp(0.65rem, 2.2vw, 0.78rem);
+    padding: 0.28rem 0;
+    line-height: 1.35;
+  }
+
+  .capital-badge,
+  .stronghold-badge {
+    font-size: clamp(0.68rem, 2.2vw, 0.78rem);
+    margin-bottom: 0.1rem;
+  }
+
+  .camp-badge {
+    font-size: clamp(0.62rem, 2vw, 0.72rem);
+    margin-bottom: 0.08rem;
+  }
+
+  .home-to-badge {
+    font-size: clamp(0.58rem, 1.9vw, 0.68rem);
+  }
+
+  .territory-unit-row {
+    font-size: clamp(0.65rem, 2.2vw, 0.75rem);
+    gap: 0.28rem;
+    padding: 0.14rem 0.25rem;
+  }
+
+  .territory-unit-icon-wrap {
+    width: 22px;
+    height: 22px;
+  }
+
+  .territory-unit-icon {
+    width: 22px;
+    height: 22px;
+  }
+
+  .territory-unit-count-badge {
+    min-width: 1rem;
+    height: 1rem;
+    font-size: 0.6rem;
+    padding: 0 0.22rem;
+  }
+
+  .units-inline,
+  .unit-movement-row {
+    font-size: clamp(0.65rem, 2.2vw, 0.75rem);
+  }
+
+  .event-log-filters {
+    gap: 0.28rem 0.4rem;
+    margin-bottom: 0.28rem;
+  }
+
+  .event-log-filter {
+    font-size: 0.65rem;
+    gap: 0.22rem;
+  }
+
+  .event-log-filter-label {
+    font-size: 0.52rem;
+    letter-spacing: 0.025em;
+  }
+
+  .event-log-filter-select {
+    padding: 0.18rem 0.32rem;
+    font-size: 0.62rem;
+    padding-right: 0.95rem;
+    background-position: right 0.22rem center;
+  }
+
+  .log-entries {
+    font-size: clamp(0.62rem, 2.1vw, 0.7rem);
+    max-height: min(140px, 26vh);
+  }
+
+  .log-entry {
+    padding: 0.18rem 0;
+  }
 }

@@ -20,6 +20,7 @@
   width: 100%;
   max-height: calc(100vh - 3rem);
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
   border-radius: 12px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
   border: 2px solid var(--gold-dark, rgba(139, 115, 85, 0.4));
@@ -54,13 +55,6 @@
   padding: 1.25rem 2rem;
 }
 
-.lobby-view__section-title {
-  font-size: 1rem;
-  font-weight: 600;
-  margin: 0 0 0.5rem 0;
-  color: var(--ink);
-}
-
 .lobby-view__scenario-name {
   margin: 0 0 0.35rem 0;
   font-size: 1rem;
@@ -92,6 +86,27 @@
   font-size: 0.9rem;
 }
 
+.lobby-view__alliance-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0;
+}
+
+.lobby-view__alliance-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.lobby-view__alliance-label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
 .lobby-view__faction-list {
   list-style: none;
   margin: 0;
@@ -115,6 +130,21 @@
 
 .lobby-view__faction-row:hover {
   border-color: var(--gold-dark, rgba(139, 115, 85, 0.4));
+}
+
+.lobby-view__faction-logo-wrap {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.lobby-view__faction-color-bar {
+  width: 10px;
+  flex-shrink: 0;
+  min-height: 40px;
+  border-radius: 0;
+  opacity: 0.8;
 }
 
 .lobby-view__faction-logo {
@@ -205,6 +235,54 @@
   background: rgba(0, 0, 0, 0.05);
   color: var(--ink-faded);
   border-color: transparent;
+}
+
+/* Single-player: segmented control — one unit, two options, pick one */
+.lobby-view__binary-pills {
+  display: inline-flex;
+  border: 2px solid var(--gold-dark, #8b7355);
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(139, 115, 85, 0.08);
+}
+
+.lobby-view__binary-pills .lobby-view__pill {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  min-width: 4.5rem;
+  padding: 0.4rem 0.85rem;
+  font-family: inherit;
+  background: transparent;
+  color: var(--ink-faded);
+  cursor: pointer;
+  border-right: 1px solid rgba(139, 115, 85, 0.35);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.lobby-view__binary-pills .lobby-view__pill:last-child {
+  border-right: none;
+}
+
+.lobby-view__binary-pills .lobby-view__pill:hover:not(:disabled) {
+  background: rgba(139, 115, 85, 0.12);
+  color: var(--ink);
+}
+
+.lobby-view__binary-pills .lobby-view__pill--selected {
+  background: var(--gold-dark, #8b7355);
+  color: #fff;
+  font-weight: 600;
+}
+
+.lobby-view__binary-pills .lobby-view__pill--selected:hover:not(:disabled) {
+  background: #7a6449;
+  color: #fff;
+}
+
+.lobby-view__binary-pills .lobby-view__pill:disabled {
+  opacity: 0.8;
+  cursor: not-allowed;
 }
 
 .lobby-view__footer {
@@ -325,4 +403,183 @@
 .lobby-view__confirm-btn:disabled {
   opacity: 0.7;
   cursor: not-allowed;
+}
+
+/* ——— Mobile: full-width panel, stacked faction actions, safe areas (desktop rules above unchanged ≥768px) ——— */
+@media (max-width: 767px) {
+  .lobby-view-overlay {
+    align-items: stretch;
+    justify-content: flex-end;
+    padding: max(0.5rem, env(safe-area-inset-top, 0px)) max(0.5rem, env(safe-area-inset-right, 0px)) max(0.5rem, env(safe-area-inset-bottom, 0px)) max(0.5rem, env(safe-area-inset-left, 0px));
+  }
+
+  .lobby-view {
+    max-width: none;
+    width: 100%;
+    max-height: min(100dvh, 100vh);
+    border-radius: 12px 12px 0 0;
+    margin: 0 auto;
+    box-sizing: border-box;
+  }
+
+  .lobby-view__header {
+    padding: 1rem 1rem 0.85rem;
+  }
+
+  .lobby-view__title {
+    font-size: clamp(1.15rem, 4.5vw, 1.75rem);
+    word-break: break-word;
+  }
+
+  .lobby-view__code {
+    font-size: 0.9rem;
+  }
+
+  .lobby-view__scenario {
+    padding: 1rem;
+  }
+
+  .lobby-view__factions {
+    padding: 0 1rem 1rem;
+  }
+
+  .lobby-view__faction-list {
+    max-width: none;
+  }
+
+  .lobby-view__alliance-shortcuts {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.65rem;
+  }
+
+  .lobby-view__alliance-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.45rem;
+  }
+
+  .lobby-view__alliance-label {
+    white-space: normal;
+  }
+
+  .lobby-view__binary-pills {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .lobby-view__binary-pills .lobby-view__pill {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 2.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Logo + name on first row; actions full width below */
+  .lobby-view__faction-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    gap: 0.5rem 0.75rem;
+    align-items: start;
+    padding: 0.65rem 0.75rem;
+  }
+
+  .lobby-view__faction-logo-wrap {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .lobby-view__faction-info {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+  }
+
+  .lobby-view__faction-actions {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    justify-self: stretch;
+  }
+
+  .lobby-view__faction-actions .lobby-view__binary-pills {
+    width: 100%;
+  }
+
+  .lobby-view__faction-actions > .lobby-view__pill {
+    width: 100%;
+    min-height: 2.75rem;
+    text-align: center;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .lobby-view__faction-actions .lobby-view__pill--taken,
+  .lobby-view__faction-actions .lobby-view__pill--disabled {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.5rem;
+  }
+
+  .lobby-view__footer {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 1rem;
+    gap: 0.75rem;
+  }
+
+  .lobby-view__start-area {
+    justify-content: stretch;
+    width: 100%;
+  }
+
+  .lobby-view__menu-btn {
+    text-align: center;
+    min-height: 2.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+
+  .lobby-view__start-btn {
+    width: 100%;
+    min-height: 2.85rem;
+    box-sizing: border-box;
+  }
+
+  .lobby-view__waiting {
+    text-align: center;
+  }
+
+  .lobby-view__confirm-overlay {
+    padding: max(0.75rem, env(safe-area-inset-top, 0px)) max(0.75rem, env(safe-area-inset-right, 0px)) max(0.75rem, env(safe-area-inset-bottom, 0px)) max(0.75rem, env(safe-area-inset-left, 0px));
+    box-sizing: border-box;
+  }
+
+  .lobby-view__confirm-box {
+    max-width: none;
+    width: min(100%, 420px);
+    margin: 0 auto;
+    max-height: min(90dvh, 90vh);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .lobby-view__confirm-actions {
+    flex-wrap: wrap;
+    justify-content: stretch;
+    gap: 0.5rem;
+  }
+
+  .lobby-view__confirm-actions .lobby-view__confirm-btn {
+    flex: 1 1 calc(50% - 0.25rem);
+    min-height: 2.75rem;
+  }
 }

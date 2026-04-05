@@ -1,9 +1,12 @@
 .header {
+  --header-faction-accent: var(--ink-faded);
   position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 1.5rem;
+  flex-wrap: nowrap;
+  min-width: 0;
+  padding: clamp(0.45rem, 0.85vw, 0.72rem) clamp(0.45rem, 1.15vw, 1.05rem);
   background-color: var(--parchment);
   background-image:
     linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, transparent 50%, rgba(0, 0, 0, 0.04) 100%),
@@ -11,34 +14,73 @@
   border-bottom: 2px solid var(--ink-faded);
   box-shadow: 0 2px 8px var(--shadow);
   z-index: 100;
-  gap: 1rem;
+  gap: clamp(0.22rem, 0.55vw, 0.55rem);
 }
 
-/* Title: to the right of stronghold bar (left-aligned), so it doesn’t overlap faction logos on narrow screens */
+/* Current faction’s turn: one solid accent line (no stacked inset bands) */
+.header.header--faction-turn {
+  border-bottom: 4px solid var(--header-faction-accent);
+  box-shadow: 0 2px 8px var(--shadow);
+}
+
+/* Title: grow with viewport; old min(20rem, 42vw) capped ~320px and clipped setup/game on laptops */
 .header-center-title {
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: 1 1 120px;
+  min-width: min(9.5rem, 28vw);
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 0.1rem;
-  margin-left: 0.25rem;
+  gap: 0.08rem;
+  margin-left: clamp(0.12rem, 0.65vw, 0.32rem);
   pointer-events: none;
+  max-width: min(46rem, calc(26vw + 14rem));
 }
 
 .header-center-title-brand {
   font-family: 'Cinzel', serif;
-  font-size: 1.5rem;
+  font-size: clamp(0.78rem, 0.85vw + 0.5rem, 1.2rem);
   font-weight: 700;
   color: var(--ink);
-  letter-spacing: 0.06em;
-  line-height: 1.2;
+  letter-spacing: 0.03em;
+  line-height: 1.15;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Second line: setup (left) · game name (right) */
+.header-center-title-subrow {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.header-center-title-setup {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-family: var(--font-parchment);
+  font-size: clamp(0.72rem, 0.55vw + 0.58rem, 0.95rem);
+  color: var(--ink-light);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.header-center-title-subsep {
+  flex: 0 0 auto;
+  color: var(--ink-faded);
+  font-size: clamp(0.65rem, 0.5vw + 0.52rem, 0.85rem);
+  user-select: none;
 }
 
 .header-center-title-game {
+  flex: 1 1 auto;
+  min-width: 0;
   font-family: var(--font-parchment);
-  font-size: 0.95rem;
+  font-size: clamp(0.72rem, 0.55vw + 0.58rem, 0.95rem);
   color: var(--ink-light);
   font-style: italic;
   line-height: 1.2;
@@ -47,36 +89,48 @@
   text-overflow: ellipsis;
 }
 
-@media (max-width: 900px) {
-  .header-center-title-brand {
-    font-size: 1.2rem;
-  }
-
-  .header-center-title-game {
-    font-size: 0.85rem;
+/* Extra headroom on very wide screens (ticker still has flex-shrink) */
+@media (min-width: 1600px) {
+  .header-center-title {
+    max-width: min(52rem, calc(22vw + 18rem));
+    min-width: 10rem;
   }
 }
 
-/* Extra horizontal breathing room between header sections */
+@media (min-width: 1900px) {
+  .header-center-title {
+    max-width: min(56rem, calc(20vw + 22rem));
+  }
+}
+
+/* Absorbing flex space here hides the title on narrow screens — turn it off below wide laptop */
+@media (max-width: 1320px) {
+  .header-spacer {
+    display: none;
+  }
+}
+
 .header-stats-btn {
-  margin-right: 0.25rem;
+  margin-right: 0.12rem;
 }
 
 .header-stronghold-bar-wrap {
-  margin-left: 1rem;
-  margin-right: 1.25rem;
+  margin-left: clamp(0.15rem, 0.75vw, 0.48rem);
+  margin-right: clamp(0.15rem, 0.75vw, 0.48rem);
 }
 
 .header-turn-ticker {
-  margin-left: 0.5rem;
+  margin-left: clamp(0.12rem, 0.65vw, 0.38rem);
 }
 
 .faction-header {
-  margin-left: 1rem;
+  margin-left: clamp(0.2rem, 0.85vw, 0.55rem);
 }
 
 .turn-status {
-  margin-left: 1rem;
+  margin-left: clamp(0.18rem, 0.8vw, 0.52rem);
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 /* Main menu link - left of stats button */
@@ -85,8 +139,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 0.6rem;
-  height: 40px;
+  padding: 0 clamp(0.45rem, 1.2vw, 0.6rem);
+  height: clamp(34px, 4.2vw, 40px);
   font-family: var(--font-parchment);
   font-size: 0.9rem;
   background: var(--parchment-dark);
@@ -102,11 +156,90 @@
   background: var(--parchment);
 }
 
+/* Help + Combat Sim: override global `button` (padding, uppercase, Cinzel) — match other header icon buttons */
+.header-help-btn,
+.header-combat-sim-btn {
+  flex: 0 0 auto;
+  width: clamp(34px, 4.2vw, 40px);
+  height: clamp(34px, 4.2vw, 40px);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--parchment-dark);
+  border: 2px solid var(--ink-faded);
+  border-radius: 4px;
+  color: var(--ink);
+  cursor: pointer;
+  font-family: var(--font-parchment);
+  font-size: 0.75rem;
+  text-transform: none;
+  letter-spacing: normal;
+  line-height: 1;
+}
+
+.header-help-btn:hover,
+.header-combat-sim-btn:hover {
+  border-color: var(--ink);
+  background: var(--parchment);
+  box-shadow: 0 1px 4px var(--shadow);
+}
+
+.header-help-icon {
+  width: clamp(24px, 3.2vw, 30px);
+  height: clamp(24px, 3.2vw, 30px);
+  flex-shrink: 0;
+  display: block;
+}
+
+.header-help-icon path {
+  stroke-width: 2.6px;
+}
+
+/* Swords emoji with die tucked in bottom-right corner (overlap) */
+.header-combat-sim-icon-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  min-width: 22px;
+  min-height: 20px;
+}
+
+.header-combat-sim-emoji {
+  font-size: 17px;
+  line-height: 1;
+  display: block;
+}
+
+.header-combat-sim-die {
+  position: absolute;
+  right: -4px;
+  bottom: -3px;
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  display: block;
+  pointer-events: none;
+}
+
+/* Dark brown die, tan pips (not header text color) */
+.header-combat-sim-die rect {
+  fill: #3d2a1f;
+  stroke: #2a1a12;
+  stroke-width: 0.9;
+}
+
+.header-combat-sim-die circle {
+  fill: #d8c9a8;
+}
+
 /* Unit Stats button - warrior icon (blacked-out gondor_soldier), same size as stats btn */
 .header-unit-stats-btn {
   flex: 0 0 auto;
-  width: 40px;
-  height: 40px;
+  width: clamp(34px, 4.2vw, 40px);
+  height: clamp(34px, 4.2vw, 40px);
   padding: 0;
   display: flex;
   align-items: center;
@@ -127,8 +260,8 @@
 /* Specials button - same tan as other buttons, black star with tan SP in the middle */
 .header-specials-btn {
   flex: 0 0 auto;
-  width: 40px;
-  height: 40px;
+  width: clamp(34px, 4.2vw, 40px);
+  height: clamp(34px, 4.2vw, 40px);
   padding: 0;
   display: flex;
   align-items: center;
@@ -146,7 +279,7 @@
 
 .header-specials-star {
   position: absolute;
-  font-size: 28px;
+  font-size: clamp(22px, 2.8vw, 28px);
   line-height: 1;
   color: #1a1a1a;
   z-index: 0;
@@ -155,7 +288,7 @@
 .header-specials-sp {
   position: relative;
   z-index: 1;
-  font-size: 0.6rem;
+  font-size: clamp(0.52rem, 0.5vw + 0.45rem, 0.6rem);
   color: #c4a574;
   text-shadow: 0 0 1px rgba(0, 0, 0, 0.3);
 }
@@ -168,8 +301,8 @@
 
 /* Blacked-out unit icon so it reads as a single-color silhouette on the button */
 .header-unit-stats-icon {
-  width: 30px;
-  height: 30px;
+  width: clamp(24px, 3.2vw, 30px);
+  height: clamp(24px, 3.2vw, 30px);
   object-fit: contain;
   filter: brightness(0);
 }
@@ -177,8 +310,8 @@
 /* Stats button - top left, bar chart icon */
 .header-stats-btn {
   flex: 0 0 auto;
-  width: 40px;
-  height: 40px;
+  width: clamp(34px, 4.2vw, 40px);
+  height: clamp(34px, 4.2vw, 40px);
   padding: 0;
   display: flex;
   align-items: center;
@@ -197,8 +330,8 @@
 }
 
 .stats-icon {
-  width: 22px;
-  height: 22px;
+  width: clamp(18px, 2.4vw, 22px);
+  height: clamp(18px, 2.4vw, 22px);
   fill: currentColor;
 }
 
@@ -210,10 +343,11 @@
 
 /* Faction name only (logo is in turn ticker) */
 .faction-header {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   display: flex;
   align-items: center;
-  padding: 0.25rem 0.6rem;
+  min-width: 0;
+  padding: clamp(0.15rem, 0.5vw, 0.25rem) clamp(0.35rem, 1vw, 0.55rem);
   border-radius: 4px;
   border: 2px solid var(--ink-faded);
   background: rgba(255, 255, 255, 0.2);
@@ -221,19 +355,23 @@
 
 .faction-header .faction-title {
   font-family: 'Cinzel', serif;
-  font-size: 1.35rem;
+  font-size: clamp(0.92rem, 1.35vw + 0.45rem, 1.35rem);
   font-weight: 600;
   color: var(--ink);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(11rem, 22vw);
 }
 
 .turn-status {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: clamp(0.28rem, 0.8vw, 0.68rem);
   font-family: var(--font-parchment);
-  font-size: 1.15rem;
+  font-size: clamp(0.72rem, 0.7vw + 0.5rem, 0.98rem);
   color: var(--ink-light);
 }
 
@@ -247,17 +385,30 @@
 
 .current-phase {
   font-style: italic;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: min(14rem, 36vw);
+}
+
+@media (max-width: 1280px) {
+  .current-phase {
+    max-width: min(11rem, 34vw);
+  }
 }
 
 .current-power {
   font-weight: 700;
   color: var(--gold-dark);
+  font-size: 0.95em;
 }
 
 /* Stats modal (same pattern as purchase/combat modals) - larger size and font */
 .stats-modal .modal-header,
 .specials-modal .modal-header,
-.unit-stats-modal .modal-header {
+.unit-stats-modal .modal-header,
+.help-modal .modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -269,7 +420,8 @@
 
 .stats-modal .modal-header h2,
 .specials-modal .modal-header h2,
-.unit-stats-modal .modal-header h2 {
+.unit-stats-modal .modal-header h2,
+.help-modal .modal-header h2 {
   font-family: 'Cinzel', serif;
   font-size: 1.55rem;
   color: var(--ink);
@@ -278,7 +430,8 @@
 
 .stats-modal .close-btn,
 .specials-modal .close-btn,
-.unit-stats-modal .close-btn {
+.unit-stats-modal .close-btn,
+.help-modal .close-btn {
   background: none;
   border: none;
   font-size: 1.6rem;
@@ -294,17 +447,70 @@
 
 .stats-modal .close-btn:hover,
 .specials-modal .close-btn:hover,
-.unit-stats-modal .close-btn:hover {
+.unit-stats-modal .close-btn:hover,
+.help-modal .close-btn:hover {
   color: var(--ink);
 }
 
 .stats-modal-body,
 .specials-modal-body,
-.unit-stats-modal-body {
+.unit-stats-modal-body,
+.help-modal-body {
   padding: 1.75rem 2rem;
   background: var(--parchment-dark);
   max-height: min(60vh, 500px);
   overflow-y: auto;
+}
+
+/* Help: taller scroll area than default stats/specials */
+.help-modal-body {
+  max-height: min(70vh, 560px);
+}
+
+/* Unit stats: keep the sticky column headers flush under the modal header when scrolling */
+.unit-stats-modal-body {
+  padding-top: 0;
+  overflow-x: auto;
+}
+
+.help-section {
+  margin-bottom: 1.25rem;
+  font-family: var(--font-parchment);
+}
+
+.help-section:last-child {
+  margin-bottom: 0;
+}
+
+.help-section h3 {
+  font-size: 1.05rem;
+  color: var(--ink);
+  margin: 0 0 0.5rem;
+}
+
+.help-section p {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--ink-light);
+  line-height: 1.45;
+}
+
+.help-icon-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.95rem;
+  color: var(--ink-light);
+  line-height: 1.5;
+}
+
+.help-icon-list li {
+  margin-bottom: 0.35rem;
+}
+
+.help-icon {
+  display: inline-block;
+  margin-right: 0.2rem;
+  font-style: normal;
 }
 
 .specials-modal-intro {
@@ -405,12 +611,29 @@
 
 .unit-stats-modal .header-stats-table th.stats-col-specials {
   text-align: left;
-  min-width: 8rem;
+  min-width: 18rem;
+  width: 22%;
 }
 
 .unit-stats-modal .header-stats-table td.stats-col-specials {
   font-size: 0.82rem;
-  max-width: 14rem;
+  max-width: none;
+  white-space: nowrap;
+}
+
+/* Make Unit Stats modal wider so SP column can fit on one line */
+.unit-stats-modal {
+  min-width: 960px;
+  max-width: min(1100px, 96vw);
+}
+
+/* Frozen (sticky) unit-stats table header row */
+.unit-stats-modal .header-stats-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background-color: var(--parchment-dark);
+  box-shadow: 0 1px 0 var(--ink-faded);
 }
 
 .stats-modal .stats-alliance-row td {
@@ -514,55 +737,31 @@
   color: var(--ink-faded);
 }
 
-/* Stronghold tug-of-war bar in header (right of stats button) */
+/* Stronghold bar — compact on laptop; scales up slightly on very wide screens */
 .header-stronghold-bar-wrap {
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.25rem;
-  width: min(100%, 280px);
+  gap: 0.1rem;
+  width: clamp(68px, 9vw, 118px);
+  min-width: 64px;
+  max-width: 132px;
 }
 
-@media (min-width: 1000px) {
+@media (min-width: 1600px) {
   .header-stronghold-bar-wrap {
-    width: 240px;
-    min-width: 200px;
-    max-width: 340px;
+    width: clamp(80px, 8vw, 150px);
+    max-width: 168px;
+    gap: 0.12rem;
   }
 }
 
-.header-stronghold-bar {
-  display: flex;
-  width: 100%;
-  height: 1.35rem;
-  border-radius: 5px;
-  overflow: hidden;
-  border: 1px solid var(--ink-faded);
-  background: var(--parchment-dark);
-}
-
-.header-stronghold-bar-good {
-  background: #f5f5f0;
-  min-width: 0;
-}
-
-.header-stronghold-bar-neutral {
-  background: #888;
-  min-width: 0;
-}
-
-.header-stronghold-bar-evil {
-  background: #2a2a2a;
-  min-width: 0;
-}
-
-.header-stronghold-bar-label {
-  font-family: var(--font-parchment);
-  font-size: 0.7rem;
-  color: var(--ink-faded);
-  white-space: nowrap;
+@media (max-width: 900px) {
+  .header-stronghold-bar-wrap {
+    margin-left: 0.35rem;
+    margin-right: 0.35rem;
+  }
 }
 
 /* Turn order ticker: faction-colored border like name box; solid gold ring with orange glow on current */
@@ -570,17 +769,17 @@
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  height: 50px;
-  padding: 0 0.5rem;
+  gap: clamp(0.18rem, 0.45vw, 0.36rem);
+  height: clamp(40px, 4.5vw, 50px);
+  padding: 0 clamp(0.28rem, 0.85vw, 0.48rem);
   border: 2px solid var(--ink-faded);
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.15);
 }
 
 .header-turn-ticker-slot {
-  width: 35px;
-  height: 35px;
+  width: clamp(28px, 3.2vw, 35px);
+  height: clamp(28px, 3.2vw, 35px);
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -633,10 +832,222 @@
   display: block;
 }
 
+@media (max-width: 1280px) {
+  .header-turn-ticker {
+    height: clamp(38px, 5vw, 44px);
+    gap: 0.2rem;
+    padding: 0 0.32rem;
+  }
+
+  .header-turn-ticker-slot {
+    width: clamp(26px, 3.5vw, 30px);
+    height: clamp(26px, 3.5vw, 30px);
+  }
+}
+
+@media (max-width: 1024px) {
+  .faction-header .faction-title {
+    font-size: clamp(0.85rem, 1.5vw + 0.5rem, 1.35rem);
+    max-width: min(10rem, 28vw);
+  }
+
+  .turn-status {
+    font-size: clamp(0.68rem, 0.95vw + 0.45rem, 0.9rem);
+    gap: 0.38rem;
+  }
+
+  .header {
+    padding: 0.5rem 0.62rem;
+    gap: 0.32rem;
+  }
+
+  .header-stronghold-bar-wrap {
+    width: clamp(64px, 11vw, 100px);
+    min-width: 60px;
+  }
+}
+
+/* Tablet / small laptop: keep title + chart readable */
+@media (max-width: 900px) {
+  .header-center-title {
+    flex: 1 1 120px;
+    min-width: min(10rem, 36vw);
+    max-width: min(36rem, calc(42vw + 8rem));
+  }
+
+  .header-stronghold-bar-wrap {
+    width: clamp(64px, 22vw, 140px);
+    min-width: 60px;
+  }
+}
+
+/*
+ * Mobile portrait: keep everything on one row — scroll horizontally.
+ * (Landscape keeps separate compact rules below.)
+ */
+@media (max-width: 900px) and (orientation: portrait) {
+  .header {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 0.26rem;
+    padding: 0.38rem max(0.42rem, env(safe-area-inset-right, 0px)) 0.38rem max(0.42rem, env(safe-area-inset-left, 0px));
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(139, 115, 85, 0.95) rgba(61, 41, 20, 0.1);
+  }
+
+  /* Horizontal scrollbar slightly visible (Firefox + Chrome; iOS may still overlay until drag) */
+  .header::-webkit-scrollbar {
+    height: 5px;
+  }
+
+  .header::-webkit-scrollbar-track {
+    background: rgba(61, 41, 20, 0.1);
+    border-radius: 999px;
+    margin: 0 0.25rem;
+  }
+
+  .header::-webkit-scrollbar-thumb {
+    background: rgba(139, 115, 85, 0.75);
+    border-radius: 999px;
+  }
+
+  .header::-webkit-scrollbar-thumb:hover {
+    background: var(--ink-faded);
+  }
+
+  .header-spacer {
+    display: none;
+  }
+
+  .header-menu-btn {
+    flex: 0 0 auto;
+    height: 28px;
+    min-height: 28px;
+    padding: 0 0.4rem;
+    font-size: 0.72rem;
+  }
+
+  .header-help-btn,
+  .header-combat-sim-btn,
+  .header-specials-btn,
+  .header-unit-stats-btn,
+  .header-stats-btn {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    min-height: 28px;
+  }
+
+  .header-help-icon {
+    width: 18px;
+    height: 18px;
+  }
+
+  .header-unit-stats-icon {
+    width: 20px;
+    height: 20px;
+  }
+
+  .header-combat-sim-emoji {
+    font-size: 13px;
+  }
+
+  .header-combat-sim-die {
+    width: 9px;
+    height: 9px;
+    right: -3px;
+    bottom: -2px;
+  }
+
+  .header-specials-star {
+    font-size: 22px;
+  }
+
+  .header-specials-sp {
+    font-size: 0.52rem;
+  }
+
+  .header-stats-btn .stats-icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .header-stronghold-bar-wrap {
+    flex: 0 0 auto;
+    width: clamp(84px, 30vw, 176px);
+    min-width: 84px;
+    margin-left: 0.18rem;
+    margin-right: 0.18rem;
+  }
+
+  .header-stronghold-bar-wrap .stronghold-alliance-bar__segments {
+    height: 0.95rem;
+  }
+
+  .header-stronghold-bar-wrap .stronghold-alliance-bar__label {
+    font-size: 0.52rem;
+  }
+
+  .header-center-title {
+    flex: 0 0 auto;
+    min-width: min(11rem, 42vw);
+    max-width: 12rem;
+    margin-left: 0.14rem;
+  }
+
+  .header-center-title-brand {
+    font-size: clamp(0.72rem, 2.6vw, 0.88rem);
+  }
+
+  .header-center-title-game {
+    font-size: clamp(0.65rem, 2.4vw, 0.8rem);
+  }
+
+  .header-turn-ticker {
+    flex: 0 0 auto;
+    margin-left: 0.18rem;
+    height: 36px;
+    min-height: 36px;
+    padding: 0 0.3rem;
+    gap: 0.22rem;
+  }
+
+  .header-turn-ticker-slot {
+    width: 26px;
+    height: 26px;
+  }
+
+  .faction-header {
+    flex: 0 0 auto;
+    margin-left: 0.2rem;
+    padding: 0.15rem 0.45rem;
+  }
+
+  .faction-header .faction-title {
+    font-size: clamp(0.72rem, 2.8vw, 1rem);
+  }
+
+  .turn-status {
+    flex: 0 0 auto;
+    margin-left: 0.2rem;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+    font-size: clamp(0.64rem, 2.4vw, 0.82rem);
+    gap: 0.28rem;
+  }
+}
+
 /* Stats modal - overlay uses .modal-overlay (same as PurchaseModal) for centering */
 .stats-modal,
 .specials-modal,
-.unit-stats-modal {
+.unit-stats-modal,
+.help-modal {
   background: var(--parchment);
   border: 3px solid var(--ink-faded);
   border-radius: 8px;
@@ -646,4 +1057,268 @@
   max-height: 90vh;
   display: flex;
   flex-direction: column;
+}
+
+@media (min-width: 1024px) {
+  .stats-modal,
+  .specials-modal {
+    min-width: 640px;
+    max-width: min(980px, 94vw);
+  }
+
+  .stats-modal-body,
+  .specials-modal-body {
+    max-height: min(74vh, 680px);
+  }
+
+  .unit-stats-modal-body {
+    max-height: min(72vh, 620px);
+  }
+
+  .stats-modal .header-stats-table,
+  .stats-modal .header-stats-table th,
+  .stats-modal .header-stats-table td {
+    font-size: 1.32rem;
+  }
+
+  .stats-modal .stats-alliance-row td {
+    font-size: 1.38rem;
+  }
+
+  .stats-modal .stats-faction-row td {
+    font-size: 1.24rem;
+  }
+
+  .stats-modal .stats-placeholder {
+    font-size: 1.1rem;
+  }
+
+  .specials-modal-intro {
+    font-size: 1.08rem;
+  }
+
+  .specials-term {
+    font-size: 1.1rem;
+  }
+
+  .specials-desc {
+    font-size: 1.05rem;
+  }
+
+  .specials-unit-list {
+    font-size: 0.98rem;
+  }
+}
+
+/* Help: wide readable column (overrides generic max-width from .modal) */
+.help-modal {
+  width: min(950px, 96vw);
+  max-width: min(950px, 100vw);
+  min-width: min(520px, 96vw);
+}
+
+@media (max-width: 900px) and (orientation: landscape) {
+  .header {
+    padding: 0.42rem 0.55rem;
+    gap: 0.3rem;
+  }
+
+  .header-menu-btn,
+  .header-help-btn,
+  .header-combat-sim-btn,
+  .header-specials-btn,
+  .header-unit-stats-btn,
+  .header-stats-btn {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+  }
+
+  .header-unit-stats-icon,
+  .header-help-icon {
+    width: 24px;
+    height: 24px;
+  }
+
+  .header-combat-sim-emoji {
+    font-size: 14px;
+  }
+
+  .header-center-title-brand {
+    font-size: 0.9rem;
+  }
+
+  .header-center-title-game {
+    font-size: 0.72rem;
+  }
+
+  .header-stronghold-bar-wrap {
+    width: 148px;
+    margin-left: 0.28rem;
+    margin-right: 0.28rem;
+  }
+
+  .header-stronghold-bar-wrap .stronghold-alliance-bar__segments {
+    height: 0.95rem;
+  }
+
+  .header-stronghold-bar-wrap .stronghold-alliance-bar__label {
+    font-size: 0.52rem;
+  }
+
+  .header-turn-ticker {
+    height: 38px;
+    gap: 0.22rem;
+    padding: 0 0.3rem;
+  }
+
+  .header-turn-ticker-slot {
+    width: 25px;
+    height: 25px;
+  }
+
+  .faction-header .faction-title {
+    font-size: 0.95rem;
+  }
+
+  .turn-status {
+    font-size: 0.78rem;
+    gap: 0.38rem;
+  }
+}
+
+/* Game stats + unit stats modals — compact on phones */
+@media (max-width: 767px) {
+  .modal.stats-modal,
+  .modal.unit-stats-modal {
+    max-height: min(90dvh, 92vh) !important;
+    border-width: 2px;
+    border-radius: 8px;
+  }
+
+  .stats-modal .modal-header,
+  .unit-stats-modal .modal-header {
+    padding: 0.5rem 0.65rem;
+  }
+
+  .stats-modal .modal-header h2,
+  .unit-stats-modal .modal-header h2 {
+    font-size: clamp(0.92rem, 3.4vw, 1.1rem);
+  }
+
+  .stats-modal .close-btn,
+  .unit-stats-modal .close-btn {
+    width: 30px;
+    height: 30px;
+    font-size: 1.35rem;
+  }
+
+  .modal.stats-modal .stats-modal-body,
+  .modal.unit-stats-modal .unit-stats-modal-body {
+    padding: 0.5rem 0.45rem !important;
+    max-height: min(72dvh, 80vh) !important;
+  }
+
+  .stats-modal .header-stats-table,
+  .unit-stats-modal .header-stats-table {
+    font-size: clamp(0.65rem, 2.4vw, 0.78rem);
+  }
+
+  .stats-modal .header-stats-table th,
+  .stats-modal .header-stats-table td,
+  .unit-stats-modal .header-stats-table th,
+  .unit-stats-modal .header-stats-table td {
+    padding: 0.28rem 0.4rem;
+  }
+
+  .stats-modal .header-stats-table th.stats-col-faction,
+  .unit-stats-modal .header-stats-table th.stats-col-unit {
+    min-width: 0;
+  }
+
+  .stats-modal .header-stats-table th.stats-col-num,
+  .unit-stats-modal .header-stats-table th.stats-col-num {
+    min-width: 1.75rem;
+  }
+
+  .stats-modal .stats-alliance-row td {
+    font-size: clamp(0.78rem, 2.8vw, 0.95rem);
+    padding-top: 0.45rem;
+  }
+
+  .stats-modal .stats-faction-row td {
+    font-size: clamp(0.68rem, 2.5vw, 0.82rem);
+  }
+
+  .stats-modal .stats-faction-row .stats-col-faction {
+    padding-left: 0.4rem;
+    gap: 0.35rem;
+  }
+
+  .stats-modal .stats-faction-icon {
+    width: 15px;
+    height: 15px;
+  }
+
+  .stats-modal .stats-placeholder {
+    font-size: clamp(0.72rem, 2.5vw, 0.85rem);
+  }
+
+  .unit-stats-modal .unit-stats-faction-row td {
+    font-size: clamp(0.75rem, 2.7vw, 0.9rem);
+    padding-top: 0.4rem;
+  }
+
+  .unit-stats-modal .unit-stats-faction-icon {
+    width: 18px;
+    height: 18px;
+  }
+
+  .unit-stats-modal .unit-stats-unit-row td {
+    font-size: clamp(0.65rem, 2.4vw, 0.78rem);
+    padding-left: 0.85rem;
+  }
+
+  .unit-stats-modal .unit-stats-unit-row .stats-col-unit {
+    padding-left: 0.85rem;
+    gap: 0.35rem;
+  }
+
+  .unit-stats-modal .unit-stats-unit-row .stats-col-unit .unit-name-text {
+    font-size: clamp(0.64rem, 2.3vw, 0.76rem);
+  }
+
+  .unit-stats-modal .unit-stats-unit-icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .unit-stats-modal .header-stats-table th.stats-col-specials {
+    min-width: 5.5rem;
+    width: auto;
+    max-width: 42vw;
+  }
+
+  .unit-stats-modal .header-stats-table td.stats-col-specials {
+    font-size: clamp(0.58rem, 2.1vw, 0.68rem);
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.25;
+  }
+
+  .unit-stats-modal .unit-stats-unit-row td.stats-col-num.stats-col-specials {
+    font-size: clamp(0.58rem, 2.1vw, 0.68rem);
+  }
+
+  .stats-modal-key,
+  .unit-stats-modal-key {
+    padding: 0.4rem 0.5rem;
+    font-size: clamp(0.62rem, 2.2vw, 0.72rem);
+  }
+
+  .unit-stats-specials-definitions {
+    padding: 0.5rem 0.55rem 0.65rem;
+    font-size: clamp(0.68rem, 2.3vw, 0.8rem);
+  }
 }

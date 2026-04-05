@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../services/api';
 import type { GameListItem, AuthPlayer } from '../services/api';
+import StrongholdAllianceBar from '../components/StrongholdAllianceBar';
 import './GameList.css';
 
 const DELETE_CONFIRM_PHRASE = 'DELETE GAME';
@@ -20,6 +21,11 @@ function formatCreatedAt(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+function truncateUsername(username: string, maxChars: number = 12): string {
+  if (username.length <= maxChars) return username;
+  return `${username.slice(0, maxChars)}...`;
 }
 
 export default function GameList() {
@@ -120,8 +126,9 @@ export default function GameList() {
 
   return (
     <div className="game-list-page" data-page="load-game">
-      <h1 className="game-list-page__title">Your games</h1>
-      <Link to="/" className="game-list-page__menu-btn">Menu</Link>
+      <header className="game-list-page__header">
+        <Link to="/" className="game-list-page__menu-btn">Menu</Link>
+      </header>
       {games.length === 0 ? (
         <p className="game-list__empty">No games yet.</p>
       ) : (
@@ -139,7 +146,15 @@ export default function GameList() {
                   <h3 className="game-list__name">{g.name}</h3>
                   {g.status === 'lobby' ? (
                     <div className="game-list__turn-info">
-                      <span className="game-list__turn-meta game-list__turn-meta--lobby">Lobby</span>
+                      <span className="game-list__turn-meta game-list__turn-meta--lobby">
+                        Lobby
+                        {g.scenario?.display_name && (
+                          <>
+                            <span className="game-list__meta-sep">|</span>
+                            <span>{g.scenario.display_name}</span>
+                          </>
+                        )}
+                      </span>
                       <span className="game-list__lobby-stats">
                         {g.lobby_players ?? 0} {(g.lobby_players ?? 0) === 1 ? 'Player' : 'Players'} | {g.lobby_factions_claimed ?? 0}/{g.lobby_factions_total ?? 0} Factions
                       </span>
@@ -160,11 +175,18 @@ export default function GameList() {
                           )}
                           <span className="game-list__faction-name">{g.current_faction_display_name ?? g.current_faction ?? '—'}</span>
                           {g.current_player_username != null && g.current_player_username !== '' && (
-                            <span className="game-list__player-name"> | {g.current_player_username}</span>
+                            <span className="game-list__player-name" title={g.current_player_username}>
+                              {' | '}
+                              {truncateUsername(g.current_player_username)}
+                            </span>
                           )}
                         </span>
                       )}
                       <span className="game-list__turn-meta">
+                        {g.scenario?.display_name && <span>{g.scenario.display_name}</span>}
+                        {g.scenario?.display_name && (g.turn_number != null || g.phase) && (
+                          <span className="game-list__meta-sep">|</span>
+                        )}
                         {g.turn_number != null && <span>Turn {g.turn_number}</span>}
                         {g.turn_number != null && g.phase && <span className="game-list__meta-sep">|</span>}
                         {g.phase && <span>{formatPhase(g.phase)}</span>}
@@ -175,44 +197,36 @@ export default function GameList() {
                     </div>
                   )}
                 </div>
-                {g.status !== 'lobby' && (() => {
-                  const fs = g.faction_stats;
-                  const good = fs?.alliances?.['good']?.strongholds ?? 0;
-                  const evil = fs?.alliances?.['evil']?.strongholds ?? 0;
-                  const neutral = fs?.neutral_strongholds ?? 0;
-                  const total = good + neutral + evil || 1;
-                  return (
-                    <div className="game-list__stronghold-bar-wrap">
-                      <div className="game-list__stronghold-bar">
-                        <div className="game-list__stronghold-bar-good" style={{ width: `${(good / total) * 100}%` }} />
-                        <div className="game-list__stronghold-bar-neutral" style={{ width: `${(neutral / total) * 100}%` }} />
-                        <div className="game-list__stronghold-bar-evil" style={{ width: `${(evil / total) * 100}%` }} />
-                      </div>
-                      <span className="game-list__stronghold-bar-label">Good {good} · Evil {evil}</span>
-                    </div>
-                  );
-                })()}
-                {g.game_code != null && g.status !== 'lobby' && (
-                  <button
-                    type="button"
-                    className="game-list__forfeit-btn"
-                    onClick={(e) => handleForfeitClick(e, g.id)}
-                    title="Forfeit and leave game"
-                    aria-label="Forfeit"
-                  >
-                    Forfeit
-                  </button>
+                {g.status !== 'lobby' && g.faction_stats && (
+                  <div className="game-list__stronghold-bar-wrap">
+                    <StrongholdAllianceBar factionStats={g.faction_stats} variant="gameList" />
+                  </div>
                 )}
-                {isHost(g) && (
-                  <button
-                    type="button"
-                    className="game-list__delete-btn"
-                    onClick={(e) => handleDeleteClick(e, g.id)}
-                    title="Delete game"
-                    aria-label="Delete game"
-                  >
-                    Delete
-                  </button>
+                {((g.game_code != null && g.status !== 'lobby') || isHost(g)) && (
+                  <div className="game-list__card-actions">
+                    {g.game_code != null && g.status !== 'lobby' && (
+                      <button
+                        type="button"
+                        className="game-list__forfeit-btn"
+                        onClick={(e) => handleForfeitClick(e, g.id)}
+                        title="Forfeit and leave game"
+                        aria-label="Forfeit"
+                      >
+                        Forfeit
+                      </button>
+                    )}
+                    {isHost(g) && (
+                      <button
+                        type="button"
+                        className="game-list__delete-btn"
+                        onClick={(e) => handleDeleteClick(e, g.id)}
+                        title="Delete game"
+                        aria-label="Delete game"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             </li>

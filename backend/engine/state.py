@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from copy import deepcopy
 from typing import Any
 
+from backend.engine.definitions import parse_prefire_penalty_from_manifest
+
 
 def _ensure_str_list(value: Any) -> list[str]:
     """Ensure value is a list of strings (for camps_standing, mobilization_camps from DB)."""
@@ -160,6 +162,10 @@ class PendingMove:
     move_type: str | None = None
     # Load only: assign passengers to this boat instance in the destination sea zone (must exist and have capacity)
     load_onto_boat_instance_id: str | None = None
+    # Canonical unit_id of the first declared unit (for UIs). Instance-id string parsing is unreliable.
+    primary_unit_id: str = ""
+    # Combat move: sail away from sea with mobilized intruders instead of initiating naval combat.
+    avoid_forced_naval_combat: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -173,6 +179,10 @@ class PendingMove:
         out["move_type"] = self.move_type
         if self.load_onto_boat_instance_id:
             out["load_onto_boat_instance_id"] = self.load_onto_boat_instance_id
+        if self.primary_unit_id:
+            out["primary_unit_id"] = self.primary_unit_id
+        if self.avoid_forced_naval_combat:
+            out["avoid_forced_naval_combat"] = True
         return out
 
     @classmethod
@@ -190,6 +200,9 @@ class PendingMove:
             mt = None
         load_boat = data.get("load_onto_boat_instance_id")
         load_onto_boat_instance_id = str(load_boat).strip() if load_boat else None
+        pu = data.get("primary_unit_id")
+        primary_unit_id = str(pu).strip() if pu else ""
+        afnc = bool(data.get("avoid_forced_naval_combat"))
         return cls(
             from_territory=str(data.get("from_territory") or ""),
             to_territory=str(data.get("to_territory") or ""),
@@ -198,6 +211,8 @@ class PendingMove:
             charge_through=[str(x) for x in ct],
             move_type=mt,
             load_onto_boat_instance_id=load_onto_boat_instance_id or None,
+            primary_unit_id=primary_unit_id,
+            avoid_forced_naval_combat=afnc,
         )
 
 
@@ -251,13 +266,18 @@ class TerritoryState:
     original_owner: str | None = None
     # Individual unit instances
     units: list[Unit] = field(default_factory=list)
+    # Stronghold current HP (only for territories that are strongholds). None = use base from territory def; not reset on conquest.
+    stronghold_current_health: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "owner": self.owner,
             "original_owner": self.original_owner,
             "units": [u.to_dict() for u in self.units],
         }
+        if self.stronghold_current_health is not None:
+            out["stronghold_current_health"] = self.stronghold_current_health
+        return out
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TerritoryState":
@@ -266,10 +286,18 @@ class TerritoryState:
         units_raw = data.get("units") or []
         if not isinstance(units_raw, list):
             units_raw = []
+        # Accept new or legacy key for backwards compatibility
+        current_hp = data.get("stronghold_current_health", data.get("stronghold_hp"))
+        if current_hp is not None:
+            try:
+                current_hp = int(current_hp)
+            except (TypeError, ValueError):
+                current_hp = None
         return cls(
             owner=data.get("owner"),
             original_owner=data.get("original_owner"),
             units=[Unit.from_dict(u) for u in units_raw if isinstance(u, dict)],
+            stronghold_current_health=current_hp,
         )
 
 
@@ -287,6 +315,7 @@ class CombatRoundResult:
     defenders_remaining: int  # count after this round
     is_archer_prefire: bool = False  # True when this entry is defender archer prefire before round 1
     is_stealth_prefire: bool = False  # True when this entry is attacker stealth prefire before round 1
+    is_siegeworks_round: bool = False  # True when this entry is the dedicated siegeworks round (only siegework units rolled)
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -304,6 +333,8 @@ class CombatRoundResult:
             out["is_archer_prefire"] = True
         if self.is_stealth_prefire:
             out["is_stealth_prefire"] = True
+        if self.is_siegeworks_round:
+            out["is_siegeworks_round"] = True
         return out
 
     @classmethod
@@ -331,6 +362,7 @@ class CombatRoundResult:
             defenders_remaining=_int(data.get("defenders_remaining"), 0),
             is_archer_prefire=_bool(data.get("is_archer_prefire"), False),
             is_stealth_prefire=_bool(data.get("is_stealth_prefire"), False),
+            is_siegeworks_round=_bool(data.get("is_siegeworks_round"), False),
         )
 
 
@@ -355,6 +387,18 @@ class ActiveCombat:
     # Attacker choices (persist through rounds of this battle; reset each new battle)
     casualty_order_attacker: str = "best_unit"  # "best_unit" | "best_attack"
     must_conquer: bool = False
+    # At battle start (for one-line combat summary: who was lost)
+    initial_attacker_instance_ids: list[str] = field(default_factory=list)
+    initial_defender_instance_ids: list[str] = field(default_factory=list)
+    # Cumulative hits received by each side for the whole battle (not reset per round)
+    cumulative_hits_received_by_attacker: int = 0
+    cumulative_hits_received_by_defender: int = 0
+    # From ladder siegework: infantry on ladders (capacity = sum of ladder units' transport_capacity); hits bypass stronghold
+    ladder_infantry_instance_ids: list[str] = field(default_factory=list)
+    # Number of ladder siege units (for UI ×N); not derivable from infantry count when capacity varies
+    ladder_equipment_count: int = 0
+    # Attacker chose to detonate bomb(s) in the siegeworks round (initiate_combat); if False, bombs skip siege and survive
+    fuse_bomb: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -364,6 +408,10 @@ class ActiveCombat:
             "round_number": self.round_number,
             "combat_log": [r.to_dict() for r in self.combat_log],
         }
+        if self.initial_attacker_instance_ids:
+            out["initial_attacker_instance_ids"] = self.initial_attacker_instance_ids
+        if self.initial_defender_instance_ids:
+            out["initial_defender_instance_ids"] = self.initial_defender_instance_ids
         if not self.attackers_have_rolled:
             out["attackers_have_rolled"] = False
         if self.sea_zone_id:
@@ -372,6 +420,14 @@ class ActiveCombat:
             out["casualty_order_attacker"] = self.casualty_order_attacker
         if self.must_conquer:
             out["must_conquer"] = True
+        out["cumulative_hits_received_by_attacker"] = self.cumulative_hits_received_by_attacker
+        out["cumulative_hits_received_by_defender"] = self.cumulative_hits_received_by_defender
+        if self.ladder_infantry_instance_ids:
+            out["ladder_infantry_instance_ids"] = self.ladder_infantry_instance_ids
+        if self.ladder_equipment_count:
+            out["ladder_equipment_count"] = self.ladder_equipment_count
+        if not self.fuse_bomb:
+            out["fuse_bomb"] = False
         return out
 
     @classmethod
@@ -399,6 +455,29 @@ class ActiveCombat:
         if casualty_order_attacker not in ("best_unit", "best_attack"):
             casualty_order_attacker = "best_unit"
         must_conquer = bool(data.get("must_conquer", False))
+        init_att = data.get("initial_attacker_instance_ids")
+        init_def = data.get("initial_defender_instance_ids")
+        init_att = [str(x) for x in init_att] if isinstance(init_att, list) else []
+        init_def = [str(x) for x in init_def] if isinstance(init_def, list) else []
+        try:
+            cum_att = int(data.get("cumulative_hits_received_by_attacker", 0))
+        except (TypeError, ValueError):
+            cum_att = 0
+        try:
+            cum_def = int(data.get("cumulative_hits_received_by_defender", 0))
+        except (TypeError, ValueError):
+            cum_def = 0
+        ladder_infantry = data.get("ladder_infantry_instance_ids")
+        if not isinstance(ladder_infantry, list):
+            ladder_infantry = []
+        ladder_infantry = [str(x) for x in ladder_infantry]
+        try:
+            ladder_eq = int(data.get("ladder_equipment_count", 0))
+        except (TypeError, ValueError):
+            ladder_eq = 0
+        fuse_bomb = data.get("fuse_bomb", True)
+        if not isinstance(fuse_bomb, bool):
+            fuse_bomb = True
         return cls(
             attacker_faction=str(data.get("attacker_faction") or ""),
             territory_id=str(data.get("territory_id") or ""),
@@ -409,6 +488,13 @@ class ActiveCombat:
             sea_zone_id=sea_zone_id,
             casualty_order_attacker=casualty_order_attacker,
             must_conquer=must_conquer,
+            initial_attacker_instance_ids=init_att,
+            initial_defender_instance_ids=init_def,
+            cumulative_hits_received_by_attacker=cum_att,
+            cumulative_hits_received_by_defender=cum_def,
+            ladder_infantry_instance_ids=ladder_infantry,
+            ladder_equipment_count=max(0, ladder_eq),
+            fuse_bomb=fuse_bomb,
         )
 
 
@@ -453,6 +539,10 @@ class GameState:
     )
     # Camp purchase cost (from setup manifest). Used in purchase phase.
     camp_cost: int = 0  # From setup manifest; 0 = not set / no camp purchase
+    # Stronghold repair cost per HP (from setup manifest). Used in purchase phase.
+    stronghold_repair_cost: int = 0  # From setup manifest; 0 = not set / no repair
+    # Stealth/archer prefire: when True (default), prefire rolls use -1 to hit stat; when False, no penalty.
+    prefire_penalty: bool = True
     # Faction territories at start of their turn (set when turn starts). Used for camp placement options.
     faction_territories_at_turn_start: dict[str, list[str]] = field(default_factory=dict)
     # Purchased camps this turn: list of {territory_options: [tid, ...], placed_territory_id: None | str}
@@ -465,6 +555,13 @@ class GameState:
     turn_order: list[str] = field(default_factory=list)
     # Boat instance IDs that received a load during combat_move and must attack (naval combat or sea raid) before phase end.
     loaded_naval_must_attack_instance_ids: list[str] = field(default_factory=list)
+    # Boats that mobilized into a sea zone that already had hostile enemy naval units (defenders must fight or leave).
+    naval_mobilization_intruder_instance_ids: list[str] = field(default_factory=list)
+    # Immutable snapshot: territory_id -> original owner faction at game creation (starting_setup territory_owners).
+    # Used for liberation when per-territory original_owner was missing from older saves.
+    starting_territory_owners: dict[str, str] = field(default_factory=dict)
+    # Defender boats that sailed away this combat_move instead of fighting mobilized intruders (clears forced obligation).
+    avoided_forced_naval_combat_instance_ids: list[str] = field(default_factory=list)
     # Defender casualty order per territory (territory_id -> "best_unit" | "best_defense"). Default at create: best_defense for strongholds/capitals/camps/ports.
     territory_defender_casualty_order: dict[str, str] = field(default_factory=dict)
     # After applying offload in combat_move: land territory_id -> sea_zone_id (so combat_territories can include sea_zone_id for initiate).
@@ -509,14 +606,19 @@ class GameState:
             "map_asset": self.map_asset,
             "victory_criteria": self.victory_criteria,
             "camp_cost": self.camp_cost,
+            "stronghold_repair_cost": getattr(self, "stronghold_repair_cost", 0),
+            "prefire_penalty": getattr(self, "prefire_penalty", True),
             "faction_territories_at_turn_start": self.faction_territories_at_turn_start,
             "pending_camps": self.pending_camps,
             "pending_camp_placements": [p.to_dict() for p in self.pending_camp_placements],
             "dynamic_camps": self.dynamic_camps,
             "turn_order": self.turn_order,
             "loaded_naval_must_attack_instance_ids": getattr(self, "loaded_naval_must_attack_instance_ids", []),
+            "naval_mobilization_intruder_instance_ids": getattr(self, "naval_mobilization_intruder_instance_ids", []),
+            "avoided_forced_naval_combat_instance_ids": getattr(self, "avoided_forced_naval_combat_instance_ids", []),
             "territory_defender_casualty_order": getattr(self, "territory_defender_casualty_order", {}),
             "territory_sea_raid_from": getattr(self, "territory_sea_raid_from", {}),
+            "starting_territory_owners": dict(getattr(self, "starting_territory_owners", {}) or {}),
         }
 
     @classmethod
@@ -570,6 +672,8 @@ class GameState:
                 PendingMobilization.from_dict(pm) for pm in (data.get("pending_mobilizations") or []) if isinstance(pm, dict)
             ],
             loaded_naval_must_attack_instance_ids=_ensure_str_list(data.get("loaded_naval_must_attack_instance_ids")),
+            naval_mobilization_intruder_instance_ids=_ensure_str_list(data.get("naval_mobilization_intruder_instance_ids")),
+            avoided_forced_naval_combat_instance_ids=_ensure_str_list(data.get("avoided_forced_naval_combat_instance_ids")),
             territory_defender_casualty_order=dict(data.get("territory_defender_casualty_order") or {}) if isinstance(data.get("territory_defender_casualty_order"), dict) else {},
             territory_sea_raid_from=dict(data.get("territory_sea_raid_from") or {}) if isinstance(data.get("territory_sea_raid_from"), dict) else {},
             winner=data.get("winner"),
@@ -578,6 +682,8 @@ class GameState:
                 data.get("victory_criteria") or data.get("victory_strongholds")
             ),
             camp_cost=int(data["camp_cost"]) if data.get("camp_cost") is not None else 0,
+            stronghold_repair_cost=int(data["stronghold_repair_cost"]) if data.get("stronghold_repair_cost") is not None else 0,
+            prefire_penalty=parse_prefire_penalty_from_manifest(data.get("prefire_penalty")),
             faction_territories_at_turn_start=_ensure_faction_territories_at_turn_start(
                 data.get("faction_territories_at_turn_start")
             ),
@@ -588,6 +694,9 @@ class GameState:
             ],
             dynamic_camps=dict(data.get("dynamic_camps") or {}) if isinstance(data.get("dynamic_camps"), dict) else {},
             turn_order=list(data.get("turn_order") or []) if isinstance(data.get("turn_order"), list) else [],
+            starting_territory_owners=dict(data.get("starting_territory_owners") or {})
+            if isinstance(data.get("starting_territory_owners"), dict)
+            else {},
         )
 
     def to_json(self, indent: int = 2) -> str:

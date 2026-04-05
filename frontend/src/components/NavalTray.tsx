@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   DndContext,
   useDraggable,
@@ -7,9 +7,9 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import type { DragEndEvent } from '@dnd-kit/core';
+import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent } from 'react';
 import './NavalTray.css';
 
 export interface BoatPassenger {
@@ -26,6 +26,8 @@ export interface BoatInTray {
   name: string;
   icon: string;
   passengers: BoatPassenger[];
+  /** Max passengers this boat can carry (from unit definition). */
+  transportCapacity: number;
 }
 
 export interface PendingLoadPassenger {
@@ -54,8 +56,22 @@ interface NavalTrayProps {
 
 const TRAY_PASSENGER_PREFIX = 'naval-tray-passenger-';
 const TRAY_BOAT_PREFIX = 'naval-tray-boat-';
+const TAP_MOVE_THRESH_SQ = 100; // 10px, match GameMap tap-to-move (touch / coarse pointer only)
 
-function DraggablePassengerIcon({
+function useCoarsePointer(): boolean {
+  return useSyncExternalStore(
+    (onStoreChange) => {
+      const mq = window.matchMedia('(pointer: coarse)');
+      mq.addEventListener('change', onStoreChange);
+      return () => mq.removeEventListener('change', onStoreChange);
+    },
+    () => window.matchMedia('(pointer: coarse)').matches,
+    () => false,
+  );
+}
+
+/** Fine pointer: same as pre–mobile-pass implementation (img + dnd-kit only). */
+function DraggablePassengerIconFine({
   instanceId,
   name,
   icon,
@@ -88,16 +104,123 @@ function DraggablePassengerIcon({
   );
 }
 
+/** Coarse pointer: tap-to-select + drag between boats. */
+function DraggablePassengerIconCoarse({
+  instanceId,
+  name,
+  icon,
+  isTapSelected,
+  onTapToggle,
+}: {
+  instanceId: string;
+  name: string;
+  icon: string;
+  isTapSelected: boolean;
+  onTapToggle: () => void;
+}) {
+  const tapStartRef = useRef<{ x: number; y: number } | null>(null);
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `${TRAY_PASSENGER_PREFIX}${instanceId}`,
+    data: { type: 'naval-tray-passenger' as const, instanceId },
+  });
+  const style: CSSProperties = {
+    transform: CSS.Translate.toString(transform),
+    opacity: isDragging ? 0.6 : 1,
+    cursor: isDragging ? 'grabbing' : 'grab',
+    touchAction: 'none',
+  };
+
+  const rawListeners = listeners as Record<string, ((e: PointerEvent) => void) | undefined> | undefined;
+  const mergedListeners = useMemo(
+    () => ({
+      ...rawListeners,
+      onPointerDown: (e: PointerEvent) => {
+        tapStartRef.current = { x: e.clientX, y: e.clientY };
+        rawListeners?.onPointerDown?.(e);
+      },
+      onPointerUp: (e: PointerEvent) => {
+        rawListeners?.onPointerUp?.(e);
+        const s = tapStartRef.current;
+        tapStartRef.current = null;
+        if (!s) return;
+        const dx = e.clientX - s.x;
+        const dy = e.clientY - s.y;
+        if (dx * dx + dy * dy >= TAP_MOVE_THRESH_SQ) return;
+        onTapToggle();
+      },
+    }),
+    [rawListeners, onTapToggle],
+  );
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`naval-tray-passenger-draggable naval-tray-passenger-icon-wrap ${isTapSelected ? 'naval-tray-passenger-icon-wrap--selected' : ''}`}
+      style={style}
+      {...mergedListeners}
+      {...attributes}
+      title={name}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e: KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onTapToggle();
+        }
+      }}
+    >
+      <img
+        src={icon}
+        alt={name}
+        className="naval-tray-passenger-icon naval-tray-passenger-icon--draggable"
+        draggable={false}
+      />
+    </div>
+  );
+}
+
+function DraggablePassengerIcon(props: {
+  instanceId: string;
+  name: string;
+  icon: string;
+  coarsePointer: boolean;
+  isTapSelected: boolean;
+  onTapToggle: () => void;
+}) {
+  if (!props.coarsePointer) {
+    return (
+      <DraggablePassengerIconFine instanceId={props.instanceId} name={props.name} icon={props.icon} />
+    );
+  }
+  return (
+    <DraggablePassengerIconCoarse
+      instanceId={props.instanceId}
+      name={props.name}
+      icon={props.icon}
+      isTapSelected={props.isTapSelected}
+      onTapToggle={props.onTapToggle}
+    />
+  );
+}
+
 function DroppableBoatCard({
   boat,
   factionColor,
   allocatedPassengers,
   isAllocationMode,
+  coarsePointer,
+  allocationTapPassengerId,
+  onAssignPassengerToBoat,
+  onPassengerTapToggle,
 }: {
   boat: BoatInTray;
   factionColor: string;
   allocatedPassengers: PendingLoadPassenger[];
   isAllocationMode: boolean;
+  coarsePointer: boolean;
+  allocationTapPassengerId: string | null;
+  onAssignPassengerToBoat: (targetBoatId: string) => void;
+  onPassengerTapToggle: (instanceId: string) => void;
 }) {
   const confirmedPassengers = boat.passengers.filter((p): p is BoatPassenger & { instanceId: string } => !!p.instanceId);
 
@@ -120,7 +243,15 @@ function DroppableBoatCard({
           />
         ))}
         {allocatedPassengers.map((p) => (
-          <DraggablePassengerIcon key={p.instanceId} instanceId={p.instanceId} name={p.name} icon={p.icon} />
+          <DraggablePassengerIcon
+            key={p.instanceId}
+            instanceId={p.instanceId}
+            name={p.name}
+            icon={p.icon}
+            coarsePointer={coarsePointer}
+            isTapSelected={coarsePointer && allocationTapPassengerId === p.instanceId}
+            onTapToggle={() => onPassengerTapToggle(p.instanceId)}
+          />
         ))}
       </div>
       <img
@@ -137,15 +268,41 @@ function DroppableBoatCard({
   const className = [
     'naval-tray-boat-card',
     isAllocationMode && isOver ? 'naval-tray-boat-card--drop-over' : '',
+    coarsePointer && isAllocationMode && allocationTapPassengerId ? 'naval-tray-boat-card--awaiting-tap' : '',
   ]
     .filter(Boolean)
     .join(' ');
 
+  const handleBoatCardClick = (e: MouseEvent) => {
+    if (!coarsePointer || !isAllocationMode || !allocationTapPassengerId) return;
+    if ((e.target as HTMLElement).closest('.naval-tray-passenger-draggable')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onAssignPassengerToBoat(boat.boatInstanceId);
+  };
+
+  const tapAssignActive = coarsePointer && isAllocationMode && allocationTapPassengerId;
+
   return (
-    <div ref={setNodeRef} className={className} style={{ borderColor: factionColor }}>
-      <div className="naval-tray-boat-card-inner naval-tray-boat-card-inner--no-drag">
-        {boatCardContent}
-      </div>
+    <div
+      ref={setNodeRef}
+      className={className}
+      style={{ borderColor: factionColor }}
+      onClick={handleBoatCardClick}
+      role={tapAssignActive ? 'button' : undefined}
+      tabIndex={tapAssignActive ? 0 : undefined}
+      onKeyDown={
+        tapAssignActive
+          ? (e: KeyboardEvent) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onAssignPassengerToBoat(boat.boatInstanceId);
+              }
+            }
+          : undefined
+      }
+    >
+      <div className="naval-tray-boat-card-inner naval-tray-boat-card-inner--no-drag">{boatCardContent}</div>
     </div>
   );
 }
@@ -244,23 +401,27 @@ function NavalTray({
   loadAllocation,
   onLoadAllocationChange,
 }: NavalTrayProps) {
+  const coarsePointer = useCoarsePointer();
+
   const isAllocationMode =
     Boolean(loadAllocation && Object.keys(loadAllocation).length > 0 && pendingLoadPassengers.length > 0) &&
     Boolean(onLoadAllocationChange);
 
-  const handleDragEnd = useCallback(
-    (event: DragEndEvent) => {
-      const { active, over } = event;
-      if (!over || !loadAllocation || !onLoadAllocationChange) return;
-      const activeId = active.id as string;
-      if (!activeId.startsWith(TRAY_PASSENGER_PREFIX)) return;
-      const instanceId = activeId.slice(TRAY_PASSENGER_PREFIX.length);
-      const overId = over.id as string;
-      if (!overId.startsWith(TRAY_BOAT_PREFIX)) return;
-      const targetBoatId = overId.slice(TRAY_BOAT_PREFIX.length);
+  const [allocationTapPassengerId, setAllocationTapPassengerId] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!isOpen) setAllocationTapPassengerId(null);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!coarsePointer) setAllocationTapPassengerId(null);
+  }, [coarsePointer]);
+
+  const reassignPassengerToBoat = useCallback(
+    (instanceId: string, targetBoatId: string) => {
+      if (!loadAllocation || !onLoadAllocationChange) return;
       const currentBoatId = Object.keys(loadAllocation).find((bid) =>
-        (loadAllocation[bid] ?? []).includes(instanceId)
+        (loadAllocation[bid] ?? []).includes(instanceId),
       );
       if (currentBoatId === targetBoatId) return;
 
@@ -276,13 +437,51 @@ function NavalTray({
         }
       }
       if (!next[targetBoatId]) next[targetBoatId] = [instanceId];
+      for (const boat of boats) {
+        const cap = boat.transportCapacity ?? 0;
+        const confirmed = boat.passengers.filter((p): p is BoatPassenger & { instanceId: string } => !!p.instanceId).length;
+        const alloc = (next[boat.boatInstanceId] ?? []).length;
+        if (confirmed + alloc > cap) return;
+      }
       onLoadAllocationChange(next);
     },
-    [loadAllocation, onLoadAllocationChange]
+    [loadAllocation, onLoadAllocationChange, boats],
+  );
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || !loadAllocation || !onLoadAllocationChange) return;
+      const activeId = active.id as string;
+      if (!activeId.startsWith(TRAY_PASSENGER_PREFIX)) return;
+      const instanceId = activeId.slice(TRAY_PASSENGER_PREFIX.length);
+      const overId = over.id as string;
+      if (!overId.startsWith(TRAY_BOAT_PREFIX)) return;
+      const targetBoatId = overId.slice(TRAY_BOAT_PREFIX.length);
+      reassignPassengerToBoat(instanceId, targetBoatId);
+    },
+    [loadAllocation, onLoadAllocationChange, reassignPassengerToBoat],
+  );
+
+  const handleAllocationDragStart = useCallback((_event: DragStartEvent) => {
+    setAllocationTapPassengerId(null);
+  }, []);
+
+  const onPassengerTapToggle = useCallback((instanceId: string) => {
+    setAllocationTapPassengerId((prev) => (prev === instanceId ? null : instanceId));
+  }, []);
+
+  const onAssignPassengerToBoat = useCallback(
+    (targetBoatId: string) => {
+      if (!allocationTapPassengerId) return;
+      reassignPassengerToBoat(allocationTapPassengerId, targetBoatId);
+      setAllocationTapPassengerId(null);
+    },
+    [allocationTapPassengerId, reassignPassengerToBoat],
   );
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+    useSensor(PointerSensor, { activationConstraint: { distance: coarsePointer ? 10 : 8 } }),
   );
 
   if (!isOpen) return null;
@@ -304,6 +503,10 @@ function NavalTray({
               factionColor={factionColor}
               allocatedPassengers={allocatedPassengers}
               isAllocationMode={true}
+              coarsePointer={coarsePointer}
+              allocationTapPassengerId={allocationTapPassengerId}
+              onAssignPassengerToBoat={onAssignPassengerToBoat}
+              onPassengerTapToggle={onPassengerTapToggle}
             />
           );
         })
@@ -341,8 +544,13 @@ function NavalTray({
           ×
         </button>
       </div>
+      {isAllocationMode && coarsePointer && (
+        <p className="naval-tray-allocation-hint">
+          Tap a unit, then tap a boat to assign. Or drag a unit onto a boat.
+        </p>
+      )}
       {isAllocationMode ? (
-        <DndContext onDragEnd={handleDragEnd} sensors={sensors}>
+        <DndContext onDragStart={handleAllocationDragStart} onDragEnd={handleDragEnd} sensors={sensors}>
           {boatList}
         </DndContext>
       ) : (

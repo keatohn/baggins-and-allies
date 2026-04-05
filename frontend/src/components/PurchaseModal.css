@@ -24,7 +24,11 @@
 }
 
 .purchase-modal {
-  width: 560px;
+  width: min(720px, 94vw);
+  max-width: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-height: min(92vh, 900px);
 }
 
 .purchase-modal-tabs {
@@ -58,9 +62,9 @@
 }
 
 .purchase-modal-camp-icon {
-  font-size: 1.75rem;
-  width: 40px;
-  height: 40px;
+  font-size: 2rem;
+  width: 48px;
+  height: 48px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -178,7 +182,7 @@
 .purchase-modal .unit-list {
   padding: 1rem;
   overflow-y: auto;
-  max-height: 400px;
+  max-height: min(520px, 58vh);
   border: none;
   margin: 0;
 }
@@ -204,12 +208,12 @@
 
 .unit-icon-wrap {
   display: inline-flex;
-  width: 40px;
-  height: 40px;
+  width: 48px;
+  height: 48px;
   align-items: center;
   justify-content: center;
   background: var(--parchment-light);
-  border: 2px solid var(--faction-border, var(--ink-faded));
+  border: 3px solid var(--faction-border, var(--ink-faded));
   border-radius: 4px;
   padding: 2px;
   box-sizing: border-box;
@@ -224,8 +228,8 @@
 }
 
 .unit-icon {
-  width: 40px;
-  height: 40px;
+  width: 48px;
+  height: 48px;
   object-fit: contain;
   background: var(--parchment-light);
   border: 2px solid var(--ink-faded);
@@ -237,27 +241,54 @@
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
+  min-width: 0;
+}
+
+.unit-stat-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.unit-stats-specials-row {
+  font-size: 0.78rem;
+  line-height: 1.35;
+  min-height: calc(0.78rem * 1.35);
 }
 
 .unit-name {
   font-family: 'Cinzel', serif;
+  font-size: 1.05rem;
   font-weight: 600;
   color: var(--ink);
 }
 
 .unit-stats {
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   color: var(--ink-faded);
   font-family: monospace;
 }
 
+.unit-stats-specials {
+  display: block;
+  font-size: inherit;
+  line-height: inherit;
+  color: var(--ink-faded);
+  color: color-mix(in srgb, var(--ink-faded) 82%, var(--parchment));
+  font-family: var(--font-parchment);
+  white-space: normal;
+  word-break: break-word;
+}
+
 .unit-cost {
-  width: 50px;
+  width: 56px;
   text-align: center;
 }
 
 .cost-value {
   font-family: 'Cinzel', serif;
+  font-size: 1.02rem;
   font-weight: 700;
   color: var(--gold-dark);
 }
@@ -318,4 +349,280 @@
 .modal-actions {
   display: flex;
   gap: 0.75rem;
+}
+
+/* ——— Mobile / narrow viewports ——— */
+@media (max-width: 767px) {
+  .modal-overlay:has(.purchase-modal) {
+    padding: max(0.35rem, env(safe-area-inset-top, 0px)) max(0.35rem, env(safe-area-inset-right, 0px)) max(0.35rem, env(safe-area-inset-bottom, 0px)) max(0.35rem, env(safe-area-inset-left, 0px));
+    align-items: flex-end;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+
+  .modal.purchase-modal {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    max-height: min(94dvh, 94vh) !important;
+    border-radius: 10px 10px 0 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    box-sizing: border-box;
+  }
+
+  .purchase-modal .modal-header {
+    padding: 0.65rem 0.85rem;
+    padding-top: max(0.65rem, env(safe-area-inset-top, 0px));
+    flex-shrink: 0;
+  }
+
+  .purchase-modal .close-btn {
+    min-width: 44px;
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+
+  .purchase-modal .modal-header h2 {
+    font-size: clamp(1rem, 4vw, 1.25rem);
+  }
+
+  .purchase-modal-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 0.5rem;
+    gap: 0;
+    scrollbar-width: thin;
+    flex-shrink: 0;
+  }
+
+  .purchase-tab {
+    padding: 0.5rem 0.85rem;
+    font-size: 0.82rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .purchase-modal .resources-display {
+    padding: 0.6rem 0.75rem;
+    flex-shrink: 0;
+  }
+
+  /* Keep PP / resources on one line — scroll if needed */
+  .purchase-modal .resource-row {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    gap: 0.35rem 0.5rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    padding-bottom: 2px;
+  }
+
+  .purchase-modal .resource-label {
+    min-width: 0;
+    flex-shrink: 0;
+    font-size: 0.7rem;
+    text-align: left;
+  }
+
+  .purchase-modal .resource-value,
+  .purchase-modal .resource-remaining {
+    font-size: 0.82rem;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .purchase-modal .resource-separator {
+    flex-shrink: 0;
+  }
+
+  .purchase-modal .mobilization-capacity {
+    margin: 0.3rem 0.45rem 0.45rem;
+    font-size: clamp(0.68rem, 2.8vw, 0.88rem);
+    line-height: 1.3;
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  /* Scrollable unit list: capped height so long rosters scroll; short lists stay compact */
+  .purchase-modal .unit-list {
+    flex: 0 1 auto;
+    min-height: min(120px, 20vh);
+    max-height: min(52dvh, 56vh);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 0.55rem 0.7rem;
+  }
+
+  .purchase-modal .unit-stats-key {
+    font-size: clamp(0.56rem, 2.4vw, 0.65rem);
+    line-height: 1.35;
+    padding: 0.35rem 0.65rem;
+    flex-shrink: 0;
+  }
+
+  /* One row: [icon + name/stats] | [cost] | [− qty +]; icon/top-aligned when specials wrap */
+  .purchase-modal .unit-row {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    gap: 0.4rem;
+    padding: 0.5rem 0.2rem;
+  }
+
+  .purchase-modal .unit-info {
+    flex: 1 1 0;
+    min-width: 0;
+    align-items: flex-start;
+  }
+
+  .purchase-modal .unit-icon-wrap {
+    flex-shrink: 0;
+    margin-top: 0.12rem;
+  }
+
+  .purchase-modal .unit-stat-stack {
+    min-width: 0;
+    max-width: 100%;
+    gap: 0.06rem;
+  }
+
+  .purchase-modal .unit-cost,
+  .purchase-modal .quantity-controls {
+    align-self: center;
+    margin-top: 0;
+  }
+
+  .purchase-modal .unit-name {
+    font-size: clamp(0.72rem, 2.6vw, 0.88rem);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+
+  .purchase-modal .unit-stats {
+    font-size: clamp(0.58rem, 2.6vw, 0.68rem);
+    word-break: break-word;
+  }
+
+  /* Land/sea/siege stat strip: keep on one line, scroll horizontally if needed */
+  .purchase-modal .unit-stats--inline {
+    font-size: clamp(0.52rem, 2.4vw, 0.62rem);
+    letter-spacing: -0.02em;
+    white-space: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+    scrollbar-width: thin;
+    padding-bottom: 2px;
+    display: block;
+    word-break: normal;
+  }
+
+  .purchase-modal .unit-stats-specials-row {
+    font-size: clamp(0.55rem, 2.2vw, 0.65rem);
+    line-height: 1.35;
+    min-height: 1.35em;
+    max-width: 100%;
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+
+  .purchase-modal .unit-stats-specials {
+    font-size: inherit;
+    line-height: inherit;
+    max-width: 100%;
+  }
+
+  .purchase-modal .unit-details {
+    min-width: 0;
+  }
+
+  .purchase-modal .unit-cost {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 2.25rem;
+    text-align: right;
+  }
+
+  .purchase-modal .unit-cost .cost-value {
+    white-space: nowrap;
+    display: inline-block;
+  }
+
+  .purchase-modal .quantity-controls {
+    flex: 0 0 auto;
+    margin-left: 0;
+    gap: 0.35rem;
+  }
+
+  .purchase-modal .quantity-controls button {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    font-size: 1.05rem;
+    line-height: 1;
+    touch-action: manipulation;
+    border-radius: 6px;
+  }
+
+  .purchase-modal .modal-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+    padding: 0.75rem 0.85rem;
+    padding-bottom: max(0.75rem, calc(0.5rem + env(safe-area-inset-bottom, 0px)));
+    flex-shrink: 0;
+  }
+
+  .purchase-modal .purchase-summary {
+    font-size: 0.76rem;
+    text-align: center;
+  }
+
+  .purchase-modal .cost-value {
+    font-size: clamp(0.62rem, 2.2vw, 0.72rem);
+    line-height: 1.2;
+  }
+
+  .purchase-modal .quantity {
+    min-width: 1.5rem;
+    width: auto;
+    font-size: 0.8rem;
+    padding: 0 0.15rem;
+  }
+
+  .purchase-modal .purchase-modal-camp-icon {
+    font-size: 1.35rem;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+  }
+
+  .purchase-modal .unit-icon-wrap,
+  .purchase-modal .unit-icon-wrap .unit-icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .purchase-modal .modal-actions {
+    flex-direction: column;
+    width: 100%;
+    gap: 0.5rem;
+  }
+
+  .purchase-modal .modal-actions button {
+    width: 100%;
+    min-height: 2.75rem;
+    justify-content: center;
+  }
 }

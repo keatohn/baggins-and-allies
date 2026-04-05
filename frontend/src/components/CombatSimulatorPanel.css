@@ -1,0 +1,1392 @@
+.combat-sim-panel {
+  padding: 0;
+  font-size: 0.9rem;
+  background: transparent;
+  min-width: 100%;
+  max-width: 100%;
+  overflow-y: auto;
+}
+
+.combat-sim-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.combat-sim-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.combat-sim-close {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 0.7rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #5d4e37;
+  border: 1px solid #c9a227;
+  border-radius: 3px;
+  color: #f4e4bc;
+  cursor: pointer;
+}
+
+.combat-sim-close:hover {
+  background: #c9a227;
+  color: #2c1810;
+}
+
+.combat-sim-pill-row {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.combat-sim-pill {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  background: var(--parchment);
+  color: var(--ink);
+  border: 2px solid var(--ink-faded);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.combat-sim-pill:hover {
+  border-color: var(--ink);
+  background: var(--parchment-dark);
+}
+
+.combat-sim-pill--active {
+  background: var(--ink);
+  color: var(--parchment);
+  border-color: var(--ink);
+}
+
+.combat-sim-pill-row--inline {
+  margin-bottom: 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.combat-sim-pill--small {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.combat-sim-options-row {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 0.75rem;
+  align-items: flex-start;
+}
+
+.combat-sim-options-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.combat-sim-option-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.combat-sim-option-name {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--ink);
+  min-width: 6rem;
+}
+
+.combat-sim-checkbox-wrap {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.combat-sim-checkbox {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: #5d4e37;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+
+.combat-sim-retreat-row .combat-sim-option-name {
+  min-width: 0;
+}
+
+.combat-sim-retreat-row {
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.combat-sim-retreat-row .combat-sim-checkbox-wrap {
+  flex-shrink: 0;
+}
+
+.combat-sim-retreat-label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.combat-sim-retreat-input {
+  width: 2.5rem;
+  padding: 0.25rem 0.35rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--ink-faded);
+  border-radius: 4px;
+  background: var(--parchment);
+  color: var(--ink);
+}
+
+.combat-sim-retreat-input::placeholder {
+  color: var(--ink-faded);
+}
+
+.combat-sim-retreat-suffix {
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+
+.combat-sim-options-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-light);
+}
+
+.combat-sim-pct-pill {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.combat-sim-label {
+  display: block;
+  margin-top: 0.5rem;
+  margin-bottom: 0.2rem;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.combat-sim-dropdowns-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Faction + attacking territory stacked; swap + defender sit to the right on wide layouts */
+.combat-sim-attacker-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1 1 200px;
+  min-width: min(100%, 220px);
+}
+
+.combat-sim-attacker-stack > .combat-sim-field {
+  flex: 0 0 auto;
+  min-width: 0;
+  width: 100%;
+}
+
+.combat-sim-attacker-stack > .combat-sim-field:first-child .combat-sim-label {
+  margin-top: 0;
+}
+
+.combat-sim-field--attacking-territory .combat-sim-label {
+  margin-top: 0.45rem;
+}
+
+.combat-sim-swap-wrap {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  padding-bottom: 0;
+}
+
+.combat-sim-swap-btn {
+  width: 2.25rem;
+  height: 2.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--ink);
+  background: var(--parchment);
+  border: 2px solid var(--ink-faded);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.combat-sim-swap-btn:hover:not(:disabled) {
+  background: var(--parchment-dark);
+  border-color: var(--ink);
+}
+
+.combat-sim-swap-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.combat-sim-field {
+  flex: 1;
+  min-width: 160px;
+}
+
+/* Defender territory field only (direct child of row; attacker fields live inside .combat-sim-attacker-stack) */
+.combat-sim-dropdowns-row > .combat-sim-field {
+  flex: 1 1 200px;
+  min-width: min(160px, 100%);
+}
+
+@media (max-width: 640px) {
+  .combat-sim-attacker-stack {
+    flex: 1 1 100%;
+    min-width: 100%;
+  }
+
+  .combat-sim-dropdowns-row > .combat-sim-field {
+    flex: 1 1 100%;
+    min-width: 100%;
+  }
+
+  .combat-sim-options-row {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .combat-sim-units-row {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .combat-sim-attack-defense-section::before {
+    display: none;
+  }
+
+  .combat-sim-unit-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .combat-sim-unit-main {
+    flex: 1 1 calc(100% - 40px);
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.15rem;
+  }
+
+  .combat-sim-unit-name-text {
+    white-space: normal;
+    word-break: break-word;
+    overflow: visible;
+    text-overflow: unset;
+    font-size: 0.9rem;
+    line-height: 1.25;
+  }
+
+  .combat-sim-unit-stat {
+    font-size: 0.75rem;
+    line-height: 1.3;
+    font-weight: 500;
+  }
+
+  .combat-sim-unit-row-controls {
+    flex: 1 1 100%;
+    justify-content: flex-end;
+    margin-left: 0;
+    padding-top: 0.15rem;
+  }
+
+  .combat-sim-unit-row--defender .combat-sim-unit-row-controls {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.5rem;
+  }
+
+  .combat-sim-count-btn {
+    min-width: 44px;
+    min-height: 44px;
+    font-size: 1.35rem;
+  }
+
+  .combat-sim-input--stepper {
+    min-height: 44px;
+    min-width: 3rem;
+    font-size: 1rem;
+    flex: 1 1 4rem;
+    max-width: 5rem;
+  }
+
+  .combat-sim-defender-remove {
+    min-width: 44px;
+    min-height: 44px;
+    width: 44px;
+    height: 44px;
+    font-size: 1.35rem;
+  }
+
+  .combat-sim-add-defender-list {
+    left: 0;
+    right: 0;
+    min-width: 0;
+    width: 100%;
+    max-width: none;
+    max-height: min(50vh, 16rem);
+  }
+
+  .combat-sim-add-defender-option {
+    padding: 0.65rem 0.85rem;
+    font-size: 0.9rem;
+  }
+
+  .combat-sim-preview-shelf-row {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .combat-sim-preview-shelf {
+    min-height: 48px;
+    width: 100%;
+  }
+
+  .combat-sim-preview-unit-stack {
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .combat-sim-preview-unit-group {
+    width: 36px;
+    height: 36px;
+  }
+
+  .combat-sim-pill {
+    min-height: 44px;
+    padding: 0.4rem 1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .combat-sim-pill--small {
+    min-height: 40px;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.82rem;
+  }
+
+  .combat-sim-swap-btn {
+    width: 44px;
+    height: 44px;
+    font-size: 1.35rem;
+  }
+
+  .combat-sim-select {
+    min-height: 44px;
+    padding: 0.5rem 0.6rem;
+    font-size: 1rem;
+  }
+
+  .combat-sim-special-unit {
+    word-break: break-word;
+    white-space: normal;
+  }
+}
+
+.combat-sim-select {
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--ink-faded);
+  border-radius: 4px;
+  background: var(--parchment);
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.combat-sim-logos-section {
+  margin-top: 0.5rem;
+}
+
+.combat-sim-logos-row {
+  display: flex;
+  gap: 0;
+  align-items: stretch;
+  min-height: 48px;
+}
+
+.combat-sim-logos-col {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 48px;
+}
+
+.combat-sim-logos-vs {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 0.75rem;
+  flex-shrink: 0;
+}
+
+.combat-sim-vs-text {
+  font-family: 'Cinzel', serif;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #5d4e37;
+}
+
+.combat-sim-faction-logo {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+}
+
+.combat-sim-divider {
+  margin: 0.5rem 0;
+  border: none;
+  border-top: 1px solid var(--ink-faded);
+}
+
+.combat-sim-attack-defense-section {
+  position: relative;
+}
+
+.combat-sim-attack-defense-section::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0.5rem;
+  bottom: 0.5rem;
+  width: 1px;
+  margin-left: -0.5px;
+  background: var(--ink-faded);
+  pointer-events: none;
+}
+
+.combat-sim-units-row {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 0.5rem;
+  align-items: flex-start;
+}
+
+.combat-sim-units-col {
+  flex: 1;
+  min-width: 0;
+}
+
+.combat-sim-units-header {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 0;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--ink-faded);
+}
+
+.combat-sim-units {
+  margin-top: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.combat-sim-unit-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.combat-sim-unit-icon-wrap {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  margin-top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--parchment-dark);
+}
+
+.combat-sim-unit-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+.combat-sim-unit-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.4rem;
+}
+
+.combat-sim-unit-name-text {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--ink);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.combat-sim-unit-stat {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink-faded);
+}
+
+.combat-sim-unit-row-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.combat-sim-count-stepper {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--ink-faded);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--parchment);
+}
+
+.combat-sim-count-btn {
+  min-width: 1.65rem;
+  width: 1.65rem;
+  min-height: 1.55rem;
+  height: 1.55rem;
+  padding: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--ink);
+  background: var(--parchment-dark);
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.combat-sim-count-btn:hover:not(:disabled) {
+  background: var(--ink-faded);
+  color: var(--parchment);
+}
+
+.combat-sim-count-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.combat-sim-input {
+  padding: 0.35rem 0.4rem;
+  border: 1px solid var(--ink-faded);
+  border-radius: 4px;
+  background: var(--parchment);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: center;
+  color: var(--ink);
+}
+
+.combat-sim-input--stepper {
+  width: 2.25rem;
+  min-width: 2rem;
+  max-width: 3.5rem;
+  flex: 0 0 auto;
+  min-height: 1.55rem;
+  height: 1.55rem;
+  padding: 0.15rem 0.15rem;
+  border: none;
+  border-left: 1px solid var(--ink-faded);
+  border-right: 1px solid var(--ink-faded);
+  border-radius: 0;
+  -moz-appearance: textfield;
+}
+
+.combat-sim-input--stepper::-webkit-outer-spin-button,
+.combat-sim-input--stepper::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.combat-sim-unit-count-badge {
+  flex-shrink: 0;
+  min-width: 1.5rem;
+  text-align: right;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+
+.combat-sim-defender-remove {
+  flex-shrink: 0;
+  min-width: 1.55rem;
+  min-height: 1.55rem;
+  width: 1.55rem;
+  height: 1.55rem;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: #c00;
+  background: transparent;
+  border: 1px solid rgba(204, 0, 0, 0.45);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.combat-sim-defender-remove:hover {
+  background: #c00;
+  color: var(--parchment);
+}
+
+.combat-sim-territory-units .combat-sim-unit-row--readonly,
+.combat-sim-unit-row--readonly {
+  padding: 0.1rem 0;
+}
+
+.combat-sim-divider--thin {
+  margin: 0.35rem 0;
+  border: none;
+  border-top: 1px solid var(--ink-faded);
+}
+
+.combat-sim-add-defender-wrap {
+  position: relative;
+  margin-top: 0.5rem;
+}
+
+.combat-sim-add-defender-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+  color: var(--ink);
+  background: transparent;
+  border: 1px dashed var(--ink-faded);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.combat-sim-add-defender-btn:hover {
+  background: var(--parchment-light);
+  border-color: var(--ink);
+}
+
+.combat-sim-add-defender-btn:hover .combat-sim-add-defender-faction {
+  color: var(--ink);
+}
+
+.combat-sim-add-defender-plus {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.combat-sim-add-defender-list {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  margin: 0.25rem 0 0 0;
+  padding: 0.25rem 0;
+  min-width: 12rem;
+  max-height: 12rem;
+  overflow-y: auto;
+  list-style: none;
+  background: var(--parchment);
+  border: 1px solid var(--ink-faded);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+}
+
+.combat-sim-add-defender-option {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.combat-sim-add-defender-option:hover {
+  background: var(--ink-faded);
+  color: var(--parchment);
+}
+
+.combat-sim-add-defender-option:hover .combat-sim-add-defender-faction {
+  color: var(--parchment);
+}
+
+.combat-sim-add-defender-faction {
+  font-size: 0.8rem;
+  color: var(--ink-faded);
+}
+
+.combat-sim-error {
+  margin: 0.5rem 0 0 0;
+  color: #a00;
+  font-size: 0.85rem;
+}
+
+.combat-sim-actions {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.combat-sim-clear {
+  flex-shrink: 0;
+  padding: 0.5rem 1rem;
+  min-width: 5rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  background: var(--parchment);
+  color: var(--ink);
+  border: 2px solid var(--ink-faded);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.combat-sim-clear:hover {
+  background: var(--ink-faded);
+  color: var(--parchment);
+}
+
+.combat-sim-calculate-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.combat-sim-calculate {
+  width: 100%;
+  min-width: 0;
+  padding: 0.5rem 0.75rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  letter-spacing: 0.05em;
+  background: var(--gold-dark);
+  color: var(--parchment);
+  border: 2px solid var(--gold);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.combat-sim-calculate:hover:not(:disabled) {
+  background: var(--gold);
+  color: var(--ink);
+}
+
+.combat-sim-calculate:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.combat-sim-progress-track {
+  height: 6px;
+  background: var(--ink-faded);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.combat-sim-progress-fill {
+  height: 100%;
+  background: var(--gold);
+  border-radius: 3px;
+  transition: width 0.12s ease-out;
+}
+
+.combat-sim-lower {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--ink-faded);
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+}
+
+.combat-sim-lower-left {
+  flex: 0 0 40%;
+  min-width: 0;
+  max-width: 40%;
+}
+
+.combat-sim-terrain-specials-box {
+  padding: 0.75rem;
+  background: var(--parchment-light);
+  border: 1px solid var(--ink-faded);
+  border-radius: 6px;
+  min-width: 0;
+}
+
+.combat-sim-terrain-specials-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--ink-faded);
+}
+
+.combat-sim-terrain-specials-header .combat-sim-specials-title {
+  margin: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.combat-sim-terrain {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+  flex-shrink: 0;
+}
+
+.combat-sim-specials {
+  margin-top: 0;
+}
+
+.combat-sim-specials-title {
+  margin: 0 0 0.5rem 0;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--ink-faded);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.combat-sim-specials-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.combat-sim-archer-note {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  color: var(--ink-light);
+  font-style: italic;
+}
+
+.combat-sim-special-group {
+  font-size: 0.9rem;
+}
+
+.combat-sim-special-title {
+  font-weight: 600;
+  color: var(--ink);
+  margin-right: 0.5rem;
+  display: inline-block;
+}
+
+.combat-sim-special-units {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-top: 0.25rem;
+  margin-left: 0;
+}
+
+.combat-sim-special-unit {
+  font-size: 0.75rem;
+  color: var(--ink);
+  display: block;
+}
+
+/* Units in battle – mini combat shelves (effective stat, icons, counts, special codes) */
+.combat-sim-units-in-battle-box {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background: var(--parchment-light);
+  border: 1px solid var(--ink-faded);
+  border-radius: 6px;
+  min-width: 0;
+}
+
+.combat-sim-units-in-battle-title {
+  margin: 0 0 0.5rem 0;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--ink-faded);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.combat-sim-units-in-battle-header-row {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.35rem;
+}
+
+.combat-sim-units-in-battle-header-row .combat-sim-units-in-battle-side-label {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.combat-sim-units-in-battle-row {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.combat-sim-units-in-battle-col {
+  flex: 1;
+  min-width: 0;
+}
+
+.combat-sim-units-in-battle-side-label {
+  font-family: 'Cinzel', serif;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--ink);
+  margin-bottom: 0.35rem;
+  text-align: center;
+}
+
+.combat-sim-preview-shelf-row {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.35rem;
+  align-items: stretch;
+}
+
+.combat-sim-preview-shelf-row .combat-sim-preview-shelf {
+  flex: 1;
+  min-width: 0;
+}
+
+.combat-sim-preview-shelves {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.combat-sim-preview-shelf {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 4px;
+  min-height: 44px;
+}
+
+.combat-sim-preview-stat-label {
+  font-family: 'Cinzel', serif;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--ink);
+  min-width: 26px;
+  width: 26px;
+  height: 26px;
+  text-align: center;
+  line-height: 26px;
+  background: var(--parchment);
+  border: 2px solid var(--ink-faded);
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.combat-sim-preview-unit-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.combat-sim-preview-unit-group {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  background: var(--parchment);
+  border: 2px solid var(--ink-faded);
+  border-radius: 4px;
+  overflow: visible;
+  flex-shrink: 0;
+}
+
+.combat-sim-preview-unit-group img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.combat-sim-preview-specials-badge {
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  min-width: 10px;
+  height: 10px;
+  padding: 0 1px;
+  background: rgba(0, 0, 0, 0.75);
+  color: var(--parchment);
+  font-family: 'Cinzel', serif;
+  font-size: 0.45rem;
+  font-weight: 700;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0 0 3px 0;
+  letter-spacing: -0.5px;
+  z-index: 1;
+}
+
+.combat-sim-preview-unit-count {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  min-width: 14px;
+  height: 14px;
+  background: var(--ink);
+  color: var(--parchment);
+  font-family: 'Cinzel', serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  padding: 0 2px;
+}
+
+.combat-sim-lower-right {
+  flex: 1 1 60%;
+  min-width: 200px;
+}
+
+.combat-sim-results {
+  padding: 0.75rem;
+  background: var(--parchment-light);
+  border: 1px solid var(--ink-faded);
+  border-radius: 6px;
+  min-width: 200px;
+  max-width: 100%;
+}
+
+.combat-sim-percentiles {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: var(--parchment-light);
+  border: 1px solid var(--ink-faded);
+  border-radius: 6px;
+  min-width: 200px;
+  max-width: 100%;
+}
+
+.combat-sim-percentiles-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 0.7rem;
+  color: var(--ink);
+}
+
+.combat-sim-percentiles-table th,
+.combat-sim-percentiles-table td {
+  padding: 0.2rem 0.4rem;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.combat-sim-percentiles-table th:first-child,
+.combat-sim-percentiles-table td:first-child {
+  width: 22%;
+}
+
+.combat-sim-percentiles-table th:nth-child(2),
+.combat-sim-percentiles-table td:nth-child(2) {
+  width: 14%;
+}
+
+.combat-sim-percentiles-table th:nth-child(3),
+.combat-sim-percentiles-table td:nth-child(3) {
+  width: 32%;
+}
+
+.combat-sim-percentiles-table th:nth-child(4),
+.combat-sim-percentiles-table td:nth-child(4) {
+  width: 32%;
+}
+
+.combat-sim-percentiles-th-label {
+  padding-right: 0.75rem;
+}
+
+.combat-sim-percentiles-th {
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--ink-faded);
+}
+
+.combat-sim-percentiles-td-label {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+  padding-right: 0.5rem;
+}
+
+.combat-sim-percentile-pill {
+  display: inline-block;
+  padding: 0.15rem 0.35rem;
+  border-radius: 999px;
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.3);
+  font-size: 0.68rem;
+  font-weight: 500;
+}
+
+.combat-sim-percentiles-td {
+  font-size: 0.7rem;
+  color: var(--ink);
+}
+
+.combat-sim-percentiles-table td:nth-child(3),
+.combat-sim-percentiles-table td:nth-child(4) {
+  font-size: 0.62rem;
+}
+
+.combat-sim-results-top-row th {
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--ink-faded);
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--ink);
+  text-align: left;
+}
+
+.combat-sim-results-rounds-th {
+  text-align: left;
+}
+
+.combat-sim-results-top-row .combat-sim-results-th {
+  text-align: center;
+}
+
+.combat-sim-results-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+
+.combat-sim-results-table th,
+.combat-sim-results-table td {
+  padding: 0.25rem 0.5rem;
+  text-align: left;
+}
+
+/* Column 1: row labels – same font size for all, leave room so A col doesn’t sit on the text */
+.combat-sim-results-table th:first-child,
+.combat-sim-results-table td:first-child {
+  width: 55%;
+  padding-right: 2.5rem;
+  box-sizing: border-box;
+}
+
+.combat-sim-results-table tbody td:first-child {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.combat-sim-results-th-label {
+  white-space: nowrap;
+}
+
+.combat-sim-results-th {
+  font-weight: 600;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+
+/* Columns 2 & 3: Attack and Defense – centered so headers align with values below */
+.combat-sim-results-table th:nth-child(2),
+.combat-sim-results-table td:nth-child(2),
+.combat-sim-results-table th:nth-child(3),
+.combat-sim-results-table td:nth-child(3) {
+  width: 22.5%;
+  min-width: 0;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.combat-sim-results-td-label {
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.combat-sim-results-td {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+
+.combat-sim-results-td-variance {
+  font-size: 0.75rem;
+}
+
+.combat-sim-dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.35rem 1.25rem;
+  font-size: 0.95rem;
+}
+
+.combat-sim-dl dt {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.combat-sim-dl dd {
+  margin: 0;
+  text-align: right;
+  color: var(--ink);
+}
+
+.combat-sim-muted {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-faded);
+}
+
+/* After “Calculate”: results + percentiles must fit narrow modals / phones */
+@media (max-width: 767px) {
+  .combat-sim-lower {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+
+  .combat-sim-lower-left {
+    flex: 1 1 auto;
+    max-width: none;
+    width: 100%;
+  }
+
+  .combat-sim-lower-right {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .combat-sim-results,
+  .combat-sim-percentiles {
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.5rem;
+  }
+
+  .combat-sim-results-table {
+    font-size: 0.8rem;
+    table-layout: auto;
+  }
+
+  .combat-sim-results-table th:first-child,
+  .combat-sim-results-table td:first-child {
+    width: auto;
+    max-width: 58%;
+    padding-right: 0.5rem;
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  .combat-sim-results-table tbody td:first-child {
+    white-space: normal;
+  }
+
+  .combat-sim-results-table th:nth-child(2),
+  .combat-sim-results-table td:nth-child(2),
+  .combat-sim-results-table th:nth-child(3),
+  .combat-sim-results-table td:nth-child(3) {
+    width: auto;
+  }
+
+  .combat-sim-percentiles-table {
+    font-size: 0.62rem;
+    table-layout: auto;
+  }
+
+  .combat-sim-percentiles-table th:first-child,
+  .combat-sim-percentiles-table td:first-child {
+    width: auto;
+  }
+
+  .combat-sim-percentiles-th {
+    font-size: 0.75rem;
+  }
+
+  .combat-sim-dl {
+    grid-template-columns: 1fr;
+    gap: 0.2rem 0.5rem;
+    font-size: 0.85rem;
+  }
+
+  .combat-sim-dl dd {
+    text-align: left;
+  }
+
+  .combat-sim-percentiles-td-label {
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  .combat-sim-percentiles-td:nth-child(3),
+  .combat-sim-percentiles-td:nth-child(4) {
+    white-space: normal;
+    word-break: break-word;
+    hyphens: auto;
+  }
+}

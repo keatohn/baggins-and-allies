@@ -1,9 +1,14 @@
-# Railway backend deploy: use Dockerfile in repo root
+# Railway config-as-code: https://docs.railway.com/guides/config-as-code
+# After connecting the repo, set variables in the Railway dashboard (see docs/PRODUCTION_DEPLOYMENT.md).
+
 [build]
-builder = "dockerfile"
-dockerfilePath = "Dockerfile.backend"
+builder = "RAILPACK"
 
 [deploy]
 startCommand = "uvicorn backend.api.main:app --host 0.0.0.0 --port $PORT"
-restartPolicyType = "on_failure"
-restartPolicyMaxRetries = 10
+healthcheckPath = "/"
+healthcheckTimeout = 120
+# Scale to zero when idle (~10 min no outbound traffic) to reduce usage. See:
+# https://docs.railway.com/reference/app-sleeping
+sleepApplication = true
+restartPolicyType = "ON_FAILURE"

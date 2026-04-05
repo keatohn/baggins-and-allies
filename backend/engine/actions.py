@@ -38,6 +38,22 @@ def purchase_units(
     )
 
 
+def repair_stronghold(
+    faction: str,
+    repairs: list[dict],  # [{"territory_id": str, "hp_to_add": int}, ...]
+) -> Action:
+    """
+    Purchase stronghold repairs during purchase phase.
+    Each entry: territory_id (must be owned stronghold with current_hp < base), hp_to_add (capped at base - current).
+    Cost = sum(hp_to_add) * stronghold_repair_cost (power). Does not count toward mobilization capacity.
+    """
+    return Action(
+        type="repair_stronghold",
+        faction=faction,
+        payload={"repairs": repairs},
+    )
+
+
 def move_units(
     faction: str,
     territory_from: str,
@@ -46,6 +62,8 @@ def move_units(
     charge_through: list[str] | None = None,  # Cavalry: empty enemy territory IDs to conquer (order)
     move_type: str | None = None,  # "load" | "offload" | "sail" for sea transport; None = normal move
     load_onto_boat_instance_id: str | None = None,  # Load: assign passengers only to this boat in destination sea zone
+    sail_to_offload_land_territory_id: str | None = None,  # sea→sea sail only: land hex you will offload/raid onto (server-only)
+    avoid_forced_naval_combat: bool = False,
 ) -> Action:
     """
     Move units from one territory to another.
@@ -53,6 +71,7 @@ def move_units(
     charge_through: for cavalry charging, list of empty enemy territory IDs passed through (conquered when move is applied).
     move_type: "load" = land units boarding adjacent sea (cost 1 to passengers); "offload" = land units disembarking to adjacent land (cost 0); "sail" = boats moving with passengers (cost 0 to passengers, path cost to drivers). Omit for normal land moves.
     load_onto_boat_instance_id: when loading to sea, assign moved passengers only to this boat (must exist in destination and have capacity).
+    sail_to_offload_land_territory_id: when move_type=sail and sailing to position for sea raid/offload, the target land (matches UI drop target).
     """
     payload = {
         "from": territory_from,
@@ -65,6 +84,10 @@ def move_units(
         payload["move_type"] = move_type
     if load_onto_boat_instance_id:
         payload["load_onto_boat_instance_id"] = load_onto_boat_instance_id
+    if sail_to_offload_land_territory_id:
+        payload["sail_to_offload_land_territory_id"] = sail_to_offload_land_territory_id
+    if avoid_forced_naval_combat:
+        payload["avoid_forced_naval_combat"] = True
     return Action(
         type="move_units",
         faction=faction,
@@ -79,7 +102,9 @@ def initiate_combat(
     dice_rolls: dict[str, list[int]],
     terror_applied: bool = False,
     terror_final_defender_hits: int | None = None,
+    terror_reroll_count: int | None = None,
     sea_zone_id: str | None = None,  # For sea raid: attackers are in this sea zone, target is territory_id (land)
+    fuse_bomb: bool = True,
 ) -> Action:
     """
     Initiate combat in a contested territory.
@@ -110,8 +135,12 @@ def initiate_combat(
         payload["terror_applied"] = True
     if terror_final_defender_hits is not None:
         payload["terror_final_defender_hits"] = terror_final_defender_hits
+    if terror_reroll_count is not None:
+        payload["terror_reroll_count"] = terror_reroll_count
     if sea_zone_id:
         payload["sea_zone_id"] = sea_zone_id
+    if not fuse_bomb:
+        payload["fuse_bomb"] = False
     return Action(type="initiate_combat", faction=faction, payload=payload)
 
 
@@ -121,6 +150,7 @@ def continue_combat(
     dice_rolls: dict[str, list[int]],
     terror_applied: bool = False,
     terror_final_defender_hits: int | None = None,
+    terror_reroll_count: int | None = None,
     casualty_order: str | None = None,  # "best_unit" | "best_attack" for this round
     must_conquer: bool | None = None,
 ) -> Action:
@@ -136,6 +166,8 @@ def continue_combat(
         payload["terror_applied"] = True
     if terror_final_defender_hits is not None:
         payload["terror_final_defender_hits"] = terror_final_defender_hits
+    if terror_reroll_count is not None:
+        payload["terror_reroll_count"] = terror_reroll_count
     if casualty_order is not None:
         payload["casualty_order"] = casualty_order
     if must_conquer is not None:
@@ -299,5 +331,5 @@ def end_turn(faction: str) -> Action:
 
 
 def skip_turn(faction: str) -> Action:
-    """Force end current faction's turn from any phase. Used by forfeit when a player leaves on their turn. Advances to next faction; existing logic skips factions with no capital and no units (turn_skipped event). Remove only the Skip Turn button in the UI for production; keep this action and endpoint."""
+    """Force end current faction's turn from any phase. Used by forfeit when a player leaves on their turn."""
     return Action(type="skip_turn", faction=faction, payload={})

@@ -16,6 +16,8 @@ interface DraggableUnitProps {
   showAerialMustMove?: boolean;
   /** Boat in sea zone that loaded this combat move: must attack (naval combat or sea raid) before ending phase */
   showNavalMustAttack?: boolean;
+  /** Defender fleet in a sea zone where an enemy mobilized in: must fight or sail away */
+  showForcedNavalStandoff?: boolean;
   /** Naval unit: use larger token on map (1.5×) */
   isNaval?: boolean;
   /** Passenger count to show on boat token (sea transport). */
@@ -35,6 +37,7 @@ function DraggableUnit({
   factionColor,
   showAerialMustMove = false,
   showNavalMustAttack = false,
+  showForcedNavalStandoff = false,
   isNaval = false,
   passengerCount = 0,
   instanceIds,
@@ -66,14 +69,16 @@ function DraggableUnit({
     ? `${unitDef.name} ×${count} — Must move to friendly territory before ending phase`
     : showNavalMustAttack
       ? `${unitDef.name} ×${count} — Must attack (naval combat or sea raid) before ending phase`
-      : passengerCount > 0
+      : showForcedNavalStandoff
+        ? `${unitDef.name} ×${count} — Enemy fleet mobilized here: fight in combat phase or sail away this phase`
+        : passengerCount > 0
         ? `${unitDef.name} (${passengerCount} aboard)`
         : `${unitDef.name} ×${count}`;
 
   return (
     <div
       ref={setNodeRef}
-      className={`unit-token ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${disabled ? 'disabled' : ''} ${showAerialMustMove ? 'aerial-must-move' : ''} ${showNavalMustAttack ? 'naval-must-attack' : ''} ${isNaval ? 'unit-token--naval' : ''}`}
+      className={`unit-token ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${disabled ? 'disabled' : ''} ${showAerialMustMove ? 'aerial-must-move' : ''} ${showNavalMustAttack || showForcedNavalStandoff ? 'naval-must-attack' : ''} ${isNaval ? 'unit-token--naval' : ''}`}
       style={style}
       title={title}
       {...listeners}
@@ -89,8 +94,16 @@ function DraggableUnit({
           ⚠️
         </span>
       )}
-      {showNavalMustAttack && !showAerialMustMove && (
-        <span className="unit-token-caution" title="Must attack (naval combat or sea raid) before ending phase" aria-hidden>
+      {(showNavalMustAttack || showForcedNavalStandoff) && !showAerialMustMove && (
+        <span
+          className="unit-token-caution"
+          title={
+            showNavalMustAttack
+              ? 'Must attack (naval combat or sea raid) before ending phase'
+              : 'Enemy fleet mobilized here — fight in combat phase or sail away'
+          }
+          aria-hidden
+        >
           ⚠️
         </span>
       )}

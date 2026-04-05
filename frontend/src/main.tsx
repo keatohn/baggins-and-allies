@@ -10,6 +10,60 @@ import CreateGame from './pages/CreateGame.tsx'
 import GameList from './pages/GameList.tsx'
 import JoinGame from './pages/JoinGame.tsx'
 import Profile from './pages/Profile.tsx'
+import { playUiClickSound, startMenuAmbience, stopMenuAmbience } from './audio/gameAudio'
+import { useEffect } from 'react'
+
+const CLICKABLE_SELECTOR = [
+  'button',
+  'a[href]',
+  '[role="button"]',
+  '[role="tab"]',
+  '[role="menuitem"]',
+  // No checkbox/radio/range: situational toggles and repeated pointerdown while dragging sliders.
+  '[data-sfx-click="true"]',
+].join(', ')
+
+function isActiveGameRoute(pathname: string): boolean {
+  return pathname.startsWith('/game/') && pathname !== '/game/new'
+}
+
+function isMajorInGameClick(target: Element): boolean {
+  if (target.closest('.actions-panel')) {
+    // Explicitly exclude "minor" actions in the Actions tab.
+    if (
+      target.closest(
+        '.move-confirm .confirm-move-btn, .cancel-move-btn, .cancel-move-x, .confirm-no, .cancel-retreat, .charge-path-btn, .confirm-dialog',
+      )
+    ) {
+      return false
+    }
+    return Boolean(
+      target.closest(
+        '.actions-panel #btn-purchase, .actions-panel .primary, .actions-panel .confirm-yes, .actions-panel .battle-btn, .actions-panel .retreat-option',
+      ),
+    )
+  }
+  return Boolean(
+    target.closest('[data-sfx-click="true"]') ||
+      target.closest('.header'),
+  )
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener(
+    'pointerdown',
+    (event) => {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      if (!target.closest(CLICKABLE_SELECTOR)) return
+      const pathname = window.location.pathname || ''
+      if (isActiveGameRoute(pathname) && !isMajorInGameClick(target)) return
+      if (target.closest('[data-no-ui-click-sfx]')) return
+      playUiClickSound()
+    },
+    { capture: true },
+  )
+}
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null }
@@ -66,6 +120,27 @@ function GameRoute() {
   return <App gameId={gameId} initialState={initialState} />
 }
 
+function MenuAmbienceController() {
+  const location = useLocation()
+
+  useEffect(() => {
+    const path = location.pathname
+    const isMenuRoute =
+      path === '/' ||
+      path === '/login' ||
+      path === '/register' ||
+      path === '/games' ||
+      path === '/join' ||
+      path === '/profile' ||
+      path === '/game/new'
+
+    if (isMenuRoute) startMenuAmbience('menu')
+    else stopMenuAmbience()
+  }, [location.pathname])
+
+  return null
+}
+
 const rootEl = document.getElementById('root')
 if (!rootEl) {
   document.body.innerHTML = '<div style="padding:2rem;font-family:system-ui;">Root element #root not found.</div>'
@@ -74,6 +149,7 @@ if (!rootEl) {
     <StrictMode>
       <AppErrorBoundary>
         <BrowserRouter>
+          <MenuAmbienceController />
           <Routes>
             <Route path="/" element={<MainMenu />} />
             <Route path="/login" element={<Login />} />

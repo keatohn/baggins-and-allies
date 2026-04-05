@@ -1,0 +1,63 @@
+id (str),display_name (str),faction (str),archetype (str),attack (int),defense (int),rolls (int),moves (int),health (int),transport (int),purchasable (bool),cost (dict) power (dict key int),tags (list),specials (list),home_territory_ids (list),icon (str)
+hobbit,Hobbit,free peoples,infantry,1,1,1,1,1,0,TRUE,3,"land, transportable","fearless, home",the_shire,hobbit.png
+laketown_archer,Lake-Town Archer,free peoples,archer,1,2,1,1,1,0,TRUE,3,"land, transportable","archer, home",esgaroth,laketown_archer.png
+dwarf_warrior,Dwarf Warrior,free peoples,infantry,2,3,1,1,1,0,TRUE,4,"land, transportable","home, mountain",iron_hills,dwarf_warrior.png
+galadhrim_archer,Galadhrim Archer,free peoples,archer,3,3,1,1,1,0,TRUE,5,"land, transportable","archer, forest",,galadhrim_archer.png
+rivendell_warrior,Rivendell Warrior,free peoples,cavalry,4,4,1,1,1,0,TRUE,5,"land, transportable",,,rivendell_warrior.png
+mirkwood_elf,Mirkwood Elf,free peoples,archer,3,2,1,1,1,0,TRUE,5,"land, transportable","archer, forest, home, stealth",thranduils_halls,mirkwood_elf.png
+rivendell_knight,Rivendell Knight,free peoples,cavalry,5,5,1,2,1,0,TRUE,7,land,charging,,rivendell_knight.png
+lindon_ship,Lindon Ship,free peoples,naval,3,3,1,2,1,2,TRUE,8,naval,naval,,lindon_ship.png
+ent,Ent,free peoples,monster,6,6,1,1,2,0,TRUE,14,land,"fearless, forest, home, ram",fangorn,ent.png
+eagle,Eagle,free peoples,aerial,6,6,1,4,1,0,TRUE,15,land,"aerial, fearless, hope",,eagle.png
+gondor_archer,Gondor Archer,gondor,archer,1,2,1,1,1,0,TRUE,3,"land, transportable",archer,,gondor_archer.png
+gondor_soldier,Gondor Soldier,gondor,infantry,2,2,1,1,1,0,TRUE,3,"land, transportable",,,gondor_soldier.png
+citadel_guard,Citadel Guard,gondor,infantry,2,4,1,1,1,0,TRUE,4,"land, transportable",anti_cavalry,,citadel_guard.png
+ithilien_ranger,Ithilien Ranger,gondor,archer,3,2,1,1,1,0,TRUE,5,"land, transportable","archer, home, forest, stealth","north_ithilien,south_ithilien",ithilien_ranger.png
+gondor_knight,Gondor Knight,gondor,cavalry,5,4,1,2,1,0,TRUE,6,land,charging,,gondor_knight.png
+captain_of_gondor,Captain of Gondor,gondor,infantry,4,4,1,1,1,0,TRUE,6,"land, transportable","captain, fearless",,captain_of_gondor.png
+gondor_ship,Gondor Ship,gondor,naval,3,3,1,2,1,2,TRUE,8,naval,naval,,gondor_ship.png
+trebuchet,Trebuchet,gondor,siegework,0,6,4,0,1,0,TRUE,10,land,,,trebuchet.png
+siege_ladder,Siege Ladder,isengard,siegework,0,0,0,1,1,2,TRUE,3,land,ladder,,siege_ladder.png
+dunland_wildman,Dunland Wildman,isengard,infantry,2,1,1,1,1,0,TRUE,3,"land, transportable",home,south_dunland,dunland_wildman.png
+uruk_crossbowman,Uruk Crossbowman,isengard,archer,2,2,1,1,1,0,TRUE,3,"land, transportable",archer,,uruk_crossbowman.png
+urukhai_warrior,Uruk-hai Warrior,isengard,infantry,3,2,1,1,1,0,TRUE,3,"land, transportable, climbs_ladder",,,urukhai_warrior.png
+uruk_pikeman,Uruk Pikeman,isengard,infantry,2,4,1,1,1,0,TRUE,4,"land, transportable, climbs_ladder",anti_cavalry,,uruk_pikeman.png
+berserker,Berserker,isengard,infantry,5,3,1,1,1,0,TRUE,5,"land, transportable, climbs_ladder",bombikazi,,berserker.png
+isengard_warg_rider,Isengard Warg Rider,isengard,cavalry,6,3,1,2,1,0,TRUE,6,land,charging,,isengard_warg_rider.png
+battering_ram,Battering Ram,isengard,siegework,5,0,3,1,1,0,TRUE,6,land,ram,,battering_ram.png
+bomb,Bomb,isengard,siegework,6,0,6,1,1,0,TRUE,14,"land, bomb, self_destruct",,,bomb.png
+orc_warrior,Orc Warrior,mordor,infantry,2,1,1,1,1,0,TRUE,2,"land, transportable",,,orc_warrior.png
+haradrim_archer,Haradrim Archer,mordor,archer,1,2,1,1,1,0,TRUE,3,"land, transportable","archer, home",haradwaith,haradrim_archer.png
+corsair_of_umbar,Corsair of Umbar,mordor,infantry,2,1,1,1,1,0,TRUE,3,"land, transportable","home, sea_raider",umbar,corsair_of_umbar.png
+black_uruk,Black Uruk,mordor,infantry,3,2,1,1,1,0,TRUE,3,"land, transportable",,,black_uruk.png
+easterling_pikeman,Easterling Pikeman,mordor,infantry,2,4,1,1,1,0,TRUE,4,"land, transportable","anti_cavalry, home","dorwinion,rhun_hills",easterling_pikeman.png
+mordor_warg_rider,Mordor Warg Rider,mordor,cavalry,5,3,1,2,1,0,TRUE,6,land,charging,,mordor_warg_rider.png
+black_ship,Black Ship,mordor,naval,3,3,1,2,1,2,TRUE,8,naval,naval,,black_ship.png
+grond,Grond,mordor,siegework,5,0,5,1,1,0,TRUE,10,land,ram,,grond.png
+armored_troll,Armored Troll,mordor,monster,6,5,1,1,2,0,TRUE,12,land,ram,,armored_troll.png
+catapult,Catapult,mordor,siegework,5,1,3,1,1,0,TRUE,12,land,terror,,catapult.png
+nazgul,Nazgûl,mordor,aerial,6,4,1,4,1,0,TRUE,14,land,"aerial, terror",,nazgul.png
+war_mumakil,War Mûmakil,mordor,monster,6,4,2,1,2,2,TRUE,20,land,"ford_crosser, home, ram",haradwaith,war_mumakil.png
+rohan_peasant,Rohan Peasant,rohan,infantry,1,1,1,1,1,0,TRUE,2,"land, transportable",home,"eastfold,westfold",rohan_peasant.png
+rohirrim_archer,Rohirrim Archer,rohan,archer,1,2,1,1,1,0,TRUE,3,"land, transportable",archer,,rohirrim_archer.png
+rohirrim_soldier,Rohirrim Soldier,rohan,infantry,2,2,1,1,1,0,TRUE,3,"land, transportable",,,rohirrim_soldier.png
+royal_guard,Royal Guard,rohan,infantry,2,4,1,1,1,0,TRUE,4,"land, transportable",anti_cavalry,,royal_guard.png
+rohirrim_archer_rider,Rohirrim Archer Rider,rohan,cavalry,3,3,1,2,1,0,TRUE,5,land,"archer, charging",,rohirrim_archer_rider.png
+rider_of_rohan,Rider of Rohan,rohan,cavalry,4,4,1,2,1,0,TRUE,5,land,charging,,rider_of_rohan.png
+marshal_of_the_riddermark,Marshal of the Riddermark,rohan,cavalry,6,5,1,2,1,0,TRUE,9,land,"captain, charging, fearless",,marshal_of_the_riddermark.png
+goblin,Goblin,neutral,infantry,0,1,1,0,1,0,TRUE,0,land,,,goblin.png
+spider,Spider,neutral,monster,0,1,1,0,1,0,TRUE,0,land,,,spider.png
+barrowwight,Barrow-wight,neutral,monster,0,2,1,0,1,0,TRUE,1,land,,,barrowwight.png
+cave_troll,Cave Troll,neutral,monster,0,4,1,0,1,0,TRUE,2,land,,,cave_troll.png
+dragon,Dragon,neutral,monster,0,7,2,0,3,0,TRUE,17,land,,,dragon.png
+,,,,,,,,,,,,,,,.png
+,,,,,,,,,,,,,,,.png
+,,,,,,,,,,,,,,,.png
+,,,,,,,,,,,,,,,.png
+,,,,,,,,,,,,,,,.png
+,,,,,,,,,,,,,,,.png
+,,,,,,,,,,,,,,,.png
+,,,,,,,,,,,,,,,.png
+,,,,,,,,,,,,,,,.png
+,,,,,,,,,,,,,,,.png
+,,,,,,,,,,,,,,,.png

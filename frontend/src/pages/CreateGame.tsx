@@ -14,7 +14,7 @@ export default function CreateGame() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Only show scenarios that have context in the manifest (backend also returns only these; frontend filter as safety)
+  // Backend returns only is_active + context scenarios; frontend filter matches that contract
   const scenariosWithContext = setups.filter(
     (s) => s.context && typeof s.context === 'object' && Object.keys(s.context).length > 0
   );

@@ -70,6 +70,10 @@ export interface PendingMove {
   phase: 'combat_move' | 'non_combat_move'; // Which phase this move was declared in
   /** "load" | "offload" | "sail" for sea transport */
   move_type?: string | null;
+  unit_instance_ids?: string[];
+  load_onto_boat_instance_id?: string | null;
+  /** From server: canonical unit_id for this declaration (do not parse instance id strings). */
+  primary_unit_id?: string;
 }
 
 export interface PendingMobilization {
@@ -117,10 +121,18 @@ export interface MapTransform {
   scale: number;
 }
 
-// Event types for logging
+// Event types for logging (backend-enriched events include payload with turn_number, phase, faction, message)
 export interface GameEvent {
   id: string;
   type: string;
   message: string;
   timestamp: number;
+  /** Present when event came from backend; used for filtering by turn/phase/faction */
+  payload?: {
+    turn_number?: number;
+    phase?: string;
+    faction?: string;
+    message?: string;
+    [key: string]: unknown;
+  };
 }

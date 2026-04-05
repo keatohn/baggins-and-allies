@@ -1,0 +1,27 @@
+{
+    "id": "wotr_1.1",
+    "display_name": "War of the Ring",
+    "is_active": true,
+    "map_asset": "wotr_map_1.1",
+    "context": {
+        "year": "TA 3019",
+        "map": "Middle-earth",
+        "faction_count": 5,
+        "factions": [
+            "Free Peoples",
+            "Isengard",
+            "Rohan",
+            "Mordor",
+            "Gondor"
+        ]
+    },
+    "victory_criteria": {
+        "strongholds": {
+            "good": 10,
+            "evil": 8
+        }
+    },
+    "camp_cost": 10,
+    "stronghold_repair_cost": 2,
+    "prefire_penalty": false
+}

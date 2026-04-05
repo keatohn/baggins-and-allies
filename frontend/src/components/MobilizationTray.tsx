@@ -22,6 +22,7 @@ interface MobilizationTrayProps {
   pendingCamps: PendingCamp[];
   faction: FactionId;
   factionColor: string;
+  canMobilizeAll?: boolean;
   selectedUnitId: string | null;
   selectedCampIndex: number | null;
   onSelectUnit: (unitId: string | null) => void;
@@ -115,12 +116,50 @@ function DraggableCampItem({
   );
 }
 
+function DraggableMobilizeAllButton({
+  factionColor,
+  activeDragId,
+  disabled,
+}: {
+  factionColor: string;
+  activeDragId?: string | null;
+  disabled: boolean;
+}) {
+  const dragId = 'mobilize-all';
+  const isActiveDrag = activeDragId === dragId;
+  const { attributes, listeners, setNodeRef, transform } = useDraggable({
+    id: dragId,
+    data: { type: 'mobilization-all' },
+    disabled,
+  });
+
+  const style: CSSProperties = {
+    transform: isActiveDrag ? undefined : CSS.Translate.toString(transform),
+    opacity: isActiveDrag ? 0 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`mobilize-all-btn${isActiveDrag ? ' dragging-source' : ''}`}
+      style={{ ...style, borderColor: factionColor }}
+      title="Mobilize all remaining stacks to a single destination"
+      {...attributes}
+      {...listeners}
+      aria-label="Mobilize all stacks"
+    >
+      <span className="mobilize-all-label">All</span>
+    </div>
+  );
+}
+
 function MobilizationTray({
   isOpen,
   purchases,
   pendingCamps = [],
   faction: _faction,
   factionColor,
+  canMobilizeAll = false,
   selectedUnitId,
   selectedCampIndex,
   onSelectUnit,
@@ -136,6 +175,15 @@ function MobilizationTray({
       {!hasItems && (
         <div className="tray-header">
           <span>No more units to mobilize.</span>
+        </div>
+      )}
+      {canMobilizeAll && purchases.length > 1 && (
+        <div className="tray-mobilize-all-row">
+          <DraggableMobilizeAllButton
+            factionColor={factionColor}
+            activeDragId={activeDragId}
+            disabled={!canMobilizeAll}
+          />
         </div>
       )}
       <div className="tray-units">

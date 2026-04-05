@@ -4,7 +4,10 @@ Events describe what happened during action processing.
 """
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from backend.engine.state import GameState
 
 
 @dataclass
@@ -37,6 +40,7 @@ INCOME_COLLECTED = "income_collected"
 
 # Movement events
 UNITS_MOVED = "units_moved"
+CAMP_PLACED = "camp_placed"
 
 # Combat events
 COMBAT_STARTED = "combat_started"
@@ -137,20 +141,31 @@ def income_collected(
     })
 
 
+def camp_placed(faction: str, territory_id: str) -> GameEvent:
+    return GameEvent(CAMP_PLACED, {"faction": faction, "territory_id": territory_id})
+
+
 def units_moved(
     faction: str,
     from_territory: str,
     to_territory: str,
     unit_ids: list[str],
     phase: str,
+    move_type: str | None = None,
+    load_boat_count: int | None = None,
 ) -> GameEvent:
-    return GameEvent(UNITS_MOVED, {
+    payload: dict = {
         "faction": faction,
         "from_territory": from_territory,
         "to_territory": to_territory,
         "unit_ids": unit_ids,
         "phase": phase,
-    })
+    }
+    if move_type in ("load", "offload", "sail"):
+        payload["move_type"] = move_type
+    if move_type == "load" and load_boat_count is not None:
+        payload["load_boat_count"] = load_boat_count
+    return GameEvent(UNITS_MOVED, payload)
 
 
 def combat_started(
@@ -189,7 +204,11 @@ def combat_round_resolved(
     defender_hits_by_unit_type: dict[str, int] | None = None,
     is_archer_prefire: bool = False,
     is_stealth_prefire: bool = False,
+    is_siegeworks_round: bool = False,
     terror_applied: bool = False,
+    terror_reroll_count: int | None = None,
+    attacker_dice_siegework_split: dict[int, dict[str, dict]] | None = None,
+    ladder_infantry_instance_ids: list[str] | None = None,
 ) -> GameEvent:
     """
     Emit combat round resolved event.
@@ -208,14 +227,23 @@ def combat_round_resolved(
     - attackers_remaining / defenders_remaining: counts after this round.
     - attacker_units_at_start / defender_units_at_start: REQUIRED. Snapshot of every
       unit at round start (before dice), with effective_attack/effective_defense and
-      specials (terror, terrain_mountain, etc.). Each item: instance_id, unit_id,
-      display_name, attack, defense, effective_attack, effective_defense, health,
-      remaining_health, remaining_movement, is_archer, faction, terror,
-      terrain_mountain, terrain_forest, captain_bonus, anti_cavalry.
+      specials from compute_battle_specials_and_modifiers (combat_specials.py). Each item:
+      instance_id, unit_id, display_name, attack, defense, effective_attack,
+      effective_defense, health, remaining_health, remaining_movement, is_archer, faction,
+      terror, terrain_mountain, terrain_forest, captain_bonus, anti_cavalry, sea_raider,
+      archer (defender, archer prefire round only), stealth (attacker stealth prefire round only),
+      bombikazi, fearless, hope,
+      ram (attacker units with ram special; only true on dedicated siegeworks round snapshots),
+      siegework_archetype.
     - attacker_hits_by_unit_type / defender_hits_by_unit_type: hits per unit type
       (stack) for hit badges.
     - is_archer_prefire: true when this is defender archer prefire (before round 1).
+    - is_siegeworks_round: true when this is the dedicated siegeworks round (only siegework units rolled).
+    - attacker_dice_siegework_split: optional per-stat { ram: {rolls, hits}, flex: {rolls, hits} } for UI (ram vs overflow).
     - terror_applied: true when terror forced defender re-rolls (round 1 only).
+    - terror_reroll_count: number of defender dice re-rolled due to terror (round 1 only).
+    - ladder_infantry_instance_ids: attacker infantry on ladders for this round (at round start).
+      UI must use this with attacker_dice ladder segments; live active_combat list changes between rounds.
     """
     payload: dict = {
         "territory": territory,
@@ -241,8 +269,22 @@ def combat_round_resolved(
         payload["is_archer_prefire"] = True
     if is_stealth_prefire:
         payload["is_stealth_prefire"] = True
+    if is_siegeworks_round:
+        payload["is_siegeworks_round"] = True
+    if attacker_dice_siegework_split is not None:
+        payload["attacker_dice_siegework_split"] = {
+            str(k): {
+                "ram": v["ram"],
+                "flex": v["flex"],
+            }
+            for k, v in attacker_dice_siegework_split.items()
+        }
     if terror_applied:
         payload["terror_applied"] = True
+    if terror_reroll_count is not None:
+        payload["terror_reroll_count"] = terror_reroll_count
+    if ladder_infantry_instance_ids is not None:
+        payload["ladder_infantry_instance_ids"] = list(ladder_infantry_instance_ids)
     return GameEvent(COMBAT_ROUND_RESOLVED, payload)
 
 
@@ -254,8 +296,14 @@ def combat_ended(
     surviving_attacker_ids: list[str],
     surviving_defender_ids: list[str],
     total_rounds: int,
+    *,
+    attacker_casualty_ids: list[str] | None = None,
+    defender_casualty_ids: list[str] | None = None,
+    retreat_to: str | None = None,
+    outcome: str | None = None,  # "conquer" | "victory" | "retreat" | "defeat"
+    liberated_for: str | None = None,
 ) -> GameEvent:
-    return GameEvent(COMBAT_ENDED, {
+    payload: dict[str, Any] = {
         "territory": territory,
         "winner": winner,
         "attacker_faction": attacker_faction,
@@ -263,7 +311,18 @@ def combat_ended(
         "surviving_attacker_ids": surviving_attacker_ids,
         "surviving_defender_ids": surviving_defender_ids,
         "total_rounds": total_rounds,
-    })
+    }
+    if attacker_casualty_ids is not None:
+        payload["attacker_casualty_ids"] = attacker_casualty_ids
+    if defender_casualty_ids is not None:
+        payload["defender_casualty_ids"] = defender_casualty_ids
+    if retreat_to is not None:
+        payload["retreat_to"] = retreat_to
+    if outcome is not None:
+        payload["outcome"] = outcome
+    if liberated_for is not None:
+        payload["liberated_for"] = liberated_for
+    return GameEvent(COMBAT_ENDED, payload)
 
 
 def units_retreated(
@@ -343,3 +402,52 @@ def victory(
         "strongholds_required": strongholds_required,
         "controlled_strongholds": controlled_strongholds,
     })
+
+
+def _faction_from_payload(event_type: str, payload: dict[str, Any]) -> str:
+    """Derive the acting faction for log filtering from event payload."""
+    if "faction" in payload:
+        return str(payload["faction"])
+    if event_type in ("combat_started", "combat_ended", "combat_round_resolved"):
+        return str(payload.get("attacker_faction", ""))
+    if event_type == "territory_captured":
+        return str(payload.get("new_owner", ""))
+    return ""
+
+
+# Event types that get debug_only=True: useful for debugging but hidden in production event log.
+_DEBUG_ONLY_EVENT_TYPES = frozenset({
+    "turn_started",
+    "turn_ended",
+    "turn_skipped",
+    "phase_changed",
+    "income_calculated",
+    "income_collected",
+    "territory_captured",
+})
+
+
+def enrich_event(
+    event: "GameEvent",
+    state: "GameState",
+    unit_defs: dict[str, Any],
+    territory_defs: dict[str, Any],
+    faction_defs: dict[str, Any] | None = None,
+) -> None:
+    """
+    Mutate event.payload to add turn_number, phase, faction, message, and debug_only.
+    debug_only=True events are omitted from the client event log UI.
+    """
+    from backend.engine.event_messages import build_message
+
+    payload = event.payload
+    payload["turn_number"] = state.turn_number
+    payload["phase"] = state.phase
+    if "faction" not in payload:
+        payload["faction"] = _faction_from_payload(event.type, payload)
+    msg = build_message(
+        event.type, payload, unit_defs, territory_defs, faction_defs or {}
+    )
+    payload["message"] = msg
+    if event.type in _DEBUG_ONLY_EVENT_TYPES:
+        payload["debug_only"] = True

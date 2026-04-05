@@ -2,6 +2,14 @@
   min-width: 360px;
 }
 
+@media (max-width: 767px) {
+  .lobby-modal {
+    min-width: 0;
+    width: min(100%, 90vw);
+    max-width: 100%;
+  }
+}
+
 .lobby-modal-body {
   padding: 1.5rem 1.75rem;
   font-family: var(--font-parchment);

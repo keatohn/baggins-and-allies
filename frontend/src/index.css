@@ -22,6 +22,12 @@
   --gold-light: #ddb83d;
   --gold-dark: #a07d1c;
   --shadow: rgba(61, 41, 20, 0.3);
+
+  /* Responsive typography: scale down on narrow viewports, cap on wide */
+  --font-size-base: clamp(0.8125rem, 1.5vw + 0.65rem, 1rem);
+  --font-size-sm: clamp(0.75rem, 1.2vw + 0.55rem, 0.875rem);
+  --font-size-lg: clamp(0.9rem, 1.8vw + 0.6rem, 1.1rem);
+  --space-touch: clamp(0.5rem, 2vmin, 0.75rem);
 }
 
 * {
@@ -35,6 +41,8 @@ body {
   background: var(--parchment);
   color: var(--ink);
   min-height: 100vh;
+  min-height: 100dvh;
+  cursor: url('/assets/cursor/ring_cursor.svg') 16 16, auto;
 }
 
 h1,
@@ -48,8 +56,8 @@ h6 {
 
 button {
   font-family: 'Cinzel', serif;
-  font-size: 0.9rem;
-  padding: 0.6rem 1rem;
+  font-size: clamp(0.8rem, 1.2vw + 0.6rem, 0.9rem);
+  padding: var(--space-touch) clamp(0.75rem, 2vw, 1rem);
   background: linear-gradient(180deg, var(--parchment) 0%, var(--parchment-dark) 100%);
   border: 2px solid var(--ink-faded);
   border-radius: 3px;
@@ -58,6 +66,28 @@ button {
   transition: all 0.2s ease;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+button,
+a[href],
+/* Exclude map drag handles: dnd-kit sets role=button on unit tokens; .all-stacks-drag-btn matches [class*='btn']. */
+[role='button']:not(.unit-token):not(.all-stacks-drag-btn),
+[role='tab'],
+[role='menuitem'],
+/* Exclude map drag targets (dnd-kit tabIndex) — keep Sting for chrome/nav only */
+[tabindex]:not([tabindex='-1']):not(.all-stacks-drag-btn):not(.unit-token),
+input[type='button'],
+input[type='submit'],
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'],
+summary,
+[class*='btn']:not(.all-stacks-drag-btn),
+[class*='button'],
+[style*='cursor:pointer'],
+[style*='cursor: pointer'],
+[data-sfx-click='true'] {
+  cursor: url('/assets/cursor/sting_pointer.svg') 4 4, pointer !important;
 }
 
 button:hover:not(:disabled) {
@@ -96,4 +126,35 @@ button.primary:hover:not(:disabled) {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--ink-light);
+}
+
+/* Modals: safe areas + full-width on narrow viewports (overrides fixed min-widths from feature CSS) */
+@media (max-width: 767px) {
+  .modal-overlay {
+    padding: max(0.35rem, env(safe-area-inset-top, 0px)) max(0.35rem, env(safe-area-inset-right, 0px)) max(0.35rem, env(safe-area-inset-bottom, 0px)) max(0.35rem, env(safe-area-inset-left, 0px));
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+
+  .modal.stats-modal,
+  .modal.specials-modal,
+  .modal.unit-stats-modal,
+  .modal.help-modal,
+  .modal.purchase-modal,
+  .modal.lobby-modal,
+  .modal.combat-modal {
+    min-width: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: min(92dvh, 92vh) !important;
+    border-radius: 8px;
+  }
+
+  .stats-modal-body,
+  .specials-modal-body,
+  .unit-stats-modal-body,
+  .help-modal-body {
+    max-height: min(55dvh, 420px) !important;
+  }
 }

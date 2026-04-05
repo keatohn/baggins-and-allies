@@ -22,6 +22,65 @@ def get_unit_faction(unit: Unit, unit_defs: dict[str, UnitDefinition]) -> str | 
     return ud.faction if ud else None
 
 
+def effective_territory_owner(state: GameState, territory_id: str) -> str | None:
+    """
+    Owner for move / alliance checks when pending_captures has not been flushed to territory.owner yet.
+
+    Captures from combat_move apply and combat resolution set pending_captures; territory.owner is updated
+    only when the combat phase ends. Without this, non_combat_move treats those hexes as ownable neutral
+    (owner None) and excludes them from reachable destinations even though units already hold the territory.
+    """
+    pc = getattr(state, "pending_captures", None) or {}
+    if territory_id in pc:
+        return pc[territory_id]
+    t = state.territories.get(territory_id)
+    return t.owner if t else None
+
+
+def effective_original_owner(
+    territory_id: str,
+    territory: TerritoryState,
+    state: GameState,
+) -> str | None:
+    """
+    Starting-setup original owner for liberation checks.
+    Uses territory.original_owner, or state.starting_territory_owners when the per-territory
+    field was missing from older persisted game JSON.
+    """
+    o = getattr(territory, "original_owner", None)
+    if o:
+        return o
+    snap = getattr(state, "starting_territory_owners", None) or {}
+    if isinstance(snap, dict):
+        return snap.get(territory_id) or None
+    return None
+
+
+def backfill_liberation_metadata(state: GameState, starting_setup: dict | None) -> None:
+    """
+    When loading a game from DB: fill starting_territory_owners and any missing original_owner
+    on territories from starting_setup.territory_owners so allied liberation always resolves.
+    """
+    if not isinstance(starting_setup, dict):
+        return
+    to_map = starting_setup.get("territory_owners")
+    if not isinstance(to_map, dict):
+        return
+    normalized: dict[str, str] = {
+        str(tid): str(own) for tid, own in to_map.items() if own and str(tid).strip()
+    }
+    if not normalized:
+        return
+    if not getattr(state, "starting_territory_owners", None):
+        state.starting_territory_owners = dict(normalized)
+    for tid, owner in normalized.items():
+        if tid not in state.territories:
+            continue
+        ts = state.territories[tid]
+        if getattr(ts, "original_owner", None) is None:
+            ts.original_owner = owner
+
+
 def is_land_unit(unit_def: UnitDefinition | None) -> bool:
     """True if the unit is land (not aerial). Aerial units cannot conquer territory by themselves."""
     if not unit_def:
@@ -44,6 +103,23 @@ def is_aerial_unit(unit_def: UnitDefinition | None) -> bool:
     return False
 
 
+def is_siegework_archetype(unit_def: UnitDefinition | None) -> bool:
+    """True if unit is siegework archetype (rolls only in siegeworks round; cannot conquer alone)."""
+    return bool(unit_def and getattr(unit_def, "archetype", "") == "siegework")
+
+
+def can_conquer_territory_as_attacker(unit_def: UnitDefinition | None) -> bool:
+    """
+    True if this attacker could hold the territory after winning (land, not aerial-only, not siegework-only).
+    Mirrors aerial: siegework engines cannot conquer by themselves.
+    """
+    if not is_land_unit(unit_def):
+        return False
+    if is_siegework_archetype(unit_def):
+        return False
+    return True
+
+
 def has_unit_special(unit_def: UnitDefinition | None, special: str) -> bool:
     """True if the unit has the given special (in tags or specials list)."""
     if not unit_def:
@@ -51,6 +127,37 @@ def has_unit_special(unit_def: UnitDefinition | None, special: str) -> bool:
     tags = getattr(unit_def, "tags", []) or []
     specials = getattr(unit_def, "specials", []) or []
     return special in tags or special in specials
+
+
+def archer_prefire_eligible(unit_def: UnitDefinition | None) -> bool:
+    """Defender units with the archer special (tags or specials) roll archer prefire."""
+    return has_unit_special(unit_def, "archer")
+
+
+def has_unit_tag(unit_def: UnitDefinition | None, tag: str) -> bool:
+    """True if the unit has the given tag (tags list only; use for e.g. self_destruct)."""
+    if not unit_def:
+        return False
+    tags = getattr(unit_def, "tags", []) or []
+    return tag in tags
+
+
+def faction_owns_capital(
+    state: GameState,
+    faction_id: str,
+    faction_defs: dict[str, FactionDefinition],
+) -> bool:
+    """True if this faction's capital territory exists on the board and is owned by them."""
+    faction_def = faction_defs.get(faction_id)
+    if not faction_def:
+        return False
+    capital = getattr(faction_def, "capital", None)
+    if not capital:
+        return False
+    capital_state = state.territories.get(capital)
+    if not capital_state:
+        return False
+    return capital_state.owner == faction_id
 
 
 def unitstack_to_units(
@@ -98,6 +205,8 @@ def initialize_game_state(
     camp_defs: dict[str, CampDefinition] | None = None,
     victory_criteria: dict[str, Any] | None = None,
     camp_cost: int | None = None,
+    stronghold_repair_cost: int | None = None,
+    prefire_penalty: bool | None = None,
 ) -> GameState:
     """
     Create an initial game state with all factions and territories set up.
@@ -185,6 +294,15 @@ def initialize_game_state(
         first_faction: [tid for tid, ts in territories.items() if ts.owner == first_faction]
     }
     camp_cost_val = camp_cost if camp_cost is not None else 0
+    stronghold_repair_cost_val = stronghold_repair_cost if stronghold_repair_cost is not None else 0
+    prefire_penalty_val = True if prefire_penalty is None else bool(prefire_penalty)
+    starting_territory_owners: dict[str, str] = {
+        tid: o for tid, o in (
+            (tid, ts.original_owner)
+            for tid, ts in territories.items()
+            if getattr(ts, "original_owner", None)
+        )
+    }
     # Create game state (need it for unit ID generation)
     state = GameState(
         turn_number=1,
@@ -199,8 +317,11 @@ def initialize_game_state(
         mobilization_camps=initial_mobilization_camps,
         victory_criteria=vc,
         camp_cost=camp_cost_val,
+        stronghold_repair_cost=stronghold_repair_cost_val,
+        prefire_penalty=prefire_penalty_val,
         faction_territories_at_turn_start=faction_territories_at_turn_start,
         turn_order=turn_order,
+        starting_territory_owners=starting_territory_owners,
     )
 
     # Add starting units if provided
@@ -365,11 +486,13 @@ def generate_dice_rolls_for_units(
     unit_defs: dict[str, UnitDefinition],
     seed: int | None = None,
     effective_dice_override: dict[str, int] | None = None,
+    exclude_archetypes: set[str] | None = None,
 ) -> list[int]:
     """
     Generate dice rolls for a list of Unit instances.
     Each unit rolls based on its unit definition's 'dice' attribute,
     or effective_dice_override[instance_id] when provided (e.g. bombikazi: 0 for paired bombikazi, 0 for unpaired bomb).
+    When exclude_archetypes is set (e.g. {"siegework"}), those units get no dice — they only roll in the siegeworks round.
 
     Returns:
         List of dice rolls (1 to DICE_SIDES per roll)
@@ -377,9 +500,12 @@ def generate_dice_rolls_for_units(
     if seed is not None:
         random.seed(seed)
 
+    skip = exclude_archetypes or set()
     rolls = []
     for unit in units:
         unit_def = unit_defs.get(unit.unit_id)
+        if unit_def and getattr(unit_def, "archetype", "") in skip:
+            continue
         dice_count = (
             effective_dice_override.get(unit.instance_id, getattr(unit_def, "dice", 1))
             if effective_dice_override is not None
@@ -395,6 +521,8 @@ def generate_combat_rolls_for_units(
     defender_units: list[Unit],
     unit_defs: dict[str, UnitDefinition],
     seed: int | None = None,
+    attacker_effective_dice_override: dict[str, int] | None = None,
+    exclude_archetypes: set[str] | None = None,
 ) -> dict[str, list[int]]:
     """
     Generate dice rolls for both sides of a combat using Unit instances.
@@ -404,15 +532,24 @@ def generate_combat_rolls_for_units(
         defender_units: Defending Unit instances
         unit_defs: Unit definitions
         seed: Optional random seed (applies to both sides)
+        attacker_effective_dice_override: Optional instance_id -> dice count for attackers (e.g. bombikazi)
+        exclude_archetypes: Archetypes that do not roll in this phase (e.g. siegework outside the siegeworks round).
 
     Returns:
         Dict with "attacker" and "defender" roll lists
     """
-    attacker_rolls = generate_dice_rolls_for_units(attacker_units, unit_defs, seed)
+    attacker_rolls = generate_dice_rolls_for_units(
+        attacker_units, unit_defs, seed,
+        effective_dice_override=attacker_effective_dice_override,
+        exclude_archetypes=exclude_archetypes,
+    )
 
     # Use a different seed for defender if seed was provided
     defender_seed = seed + 1 if seed is not None else None
-    defender_rolls = generate_dice_rolls_for_units(defender_units, unit_defs, defender_seed)
+    defender_rolls = generate_dice_rolls_for_units(
+        defender_units, unit_defs, defender_seed,
+        exclude_archetypes=exclude_archetypes,
+    )
 
     return {
         "attacker": attacker_rolls,

@@ -2,6 +2,8 @@
  * API service for communicating with the Baggins & Allies game backend.
  */
 
+import { syncAudioFromAuthPlayer } from '../audio/gameAudio';
+
 const API_BASE =
   import.meta.env.VITE_API_URL ??
   (import.meta.env.DEV ? '/api' : 'http://localhost:8000');
@@ -19,6 +21,12 @@ export function setAuthToken(token: string | null): void {
 
 // ===== Types =====
 
+/** Persisted event from backend (type + payload with message, turn_number, phase, faction, debug_only). */
+export interface PersistedEvent {
+  type: string;
+  payload: Record<string, unknown>;
+}
+
 export interface GameStateResponse {
   game_id: string;
   state: ApiGameState;
@@ -30,6 +38,10 @@ export interface GameStateResponse {
   definitions?: Definitions;
   /** True if the authenticated player is assigned to the current faction (can perform actions). */
   can_act?: boolean;
+  /** Setup id used for this game (e.g. wotr_exp_1.0). Pass to combat sim so backend uses same unit definitions. */
+  setup_id?: string | null;
+  /** Full game event log (oldest first). Used for persistent, filterable history. */
+  event_log?: PersistedEvent[];
 }
 
 export interface ApiPendingMove {
@@ -39,6 +51,7 @@ export interface ApiPendingMove {
   phase: string;
   /** "load" | "offload" | "sail" for sea transport; omitted for normal moves */
   move_type?: string | null;
+  load_onto_boat_instance_id?: string | null;
 }
 
 export interface ApiPendingMobilization {
@@ -62,6 +75,8 @@ export interface ApiFactionStats {
   alliances: Record<string, FactionStatEntry>;
   /** Strongholds with no owner (e.g. Moria). Shown as gray segment in header bar. */
   neutral_strongholds?: number;
+  /** From setup victory_criteria.strongholds: marker positions on the alliance stronghold bar (good / evil thresholds). */
+  stronghold_victory?: { good?: number; evil?: number };
 }
 
 export interface ApiGameState {
@@ -90,12 +105,23 @@ export interface ApiGameState {
   dynamic_camps?: Record<string, string>;
   /** Defender casualty order per territory: "best_unit" | "best_defense". */
   territory_defender_casualty_order?: Record<string, string>;
+  /** From setup manifest (purchase phase). */
+  camp_cost?: number;
+  /** Power cost per stronghold HP repaired (from setup manifest). */
+  stronghold_repair_cost?: number;
+  /**
+   * Territory captures queued until combat phase ends (owner on each territory may still be stale).
+   * Client should treat these hexes as owned by the capturer for highlights / move fallback BFS.
+   */
+  pending_captures?: Record<string, string>;
 }
 
 export interface ApiTerritory {
   owner: string | null;
   original_owner: string | null;
   units: ApiUnit[];
+  /** Stronghold current HP (only for strongholds). Omitted = full (base from def). */
+  stronghold_current_health?: number | null;
 }
 
 export interface ApiUnit {
@@ -122,6 +148,9 @@ export interface ApiActiveCombat {
   combat_log: ApiCombatRound[];
   /** False only after defender archer prefire until round 1 is run; retreat disallowed until then. */
   attackers_have_rolled?: boolean;
+  /** Running totals for combat modal; may be number or string from persistence. */
+  cumulative_hits_received_by_attacker?: number | string;
+  cumulative_hits_received_by_defender?: number | string;
 }
 
 export interface ApiCombatRound {
@@ -186,11 +215,17 @@ export interface AvailableActionsResponse {
   purchased_units_count?: number;
   /** Power cost to purchase one camp (0 = camps not purchasable). */
   camp_cost?: number;
+  /** Power cost per HP to repair a stronghold (0 = repair not available). */
+  stronghold_repair_cost?: number;
   moveable_units?: ApiMoveableUnit[];
   /** Aerial units in enemy territory that must move to friendly before ending non-combat move phase. */
   aerial_units_must_move?: { territory_id: string; unit_id: string; instance_id: string }[];
   /** Boat instance IDs that received a load this combat move and must attack before ending phase (per boat, not per sea zone). */
   loaded_naval_must_attack_instance_ids?: string[];
+  /** Defender boats sharing a sea with an enemy fleet that mobilized in: fight (combat phase) or sail away (avoid_forced_naval_combat). */
+  forced_naval_combat_instance_ids?: string[];
+  /** Sea zones where forced_naval_combat applies (for Actions panel). */
+  forced_naval_standoff_sea_zone_ids?: string[];
   combat_territories?: ApiCombatTerritory[];
   /** Sea raid options: land territories attackable from a friendly sea zone (no enemies there). */
   sea_raid_targets?: { territory_id: string; sea_zone_id: string }[];
@@ -246,7 +281,14 @@ export interface ApiMobilizeOptions {
   pending_units: ApiUnitStack[];
   capacity?: {
     total_capacity: number;
-    territories: { territory_id: string; power: number }[];
+    territories: { territory_id: string; power: number; home_unit_capacity?: Record<string, number> }[];
+    /** Ports (naval pool + optional home_unit_capacity for land units whose home is this territory). */
+    port_territories?: {
+      territory_id: string;
+      power: number;
+      sea_zone_ids?: string[];
+      home_unit_capacity?: Record<string, number>;
+    }[];
     sea_zones?: { sea_zone_id: string; power: number }[];
   };
   total_capacity?: number;
@@ -299,9 +341,7 @@ export interface ApiUnitDefinition {
   transport_capacity?: number;
   downgrade_to?: string | null;
   specials?: string[];
-  /** Single home territory (backward compat). */
-  home_territory_id?: string | null;
-  /** Multiple home territories (deploy 1 per territory per mobilization). */
+  /** Home territories list (deploy 1 per territory per mobilization). Use this only; do not use singular key. */
   home_territory_ids?: string[] | null;
 }
 
@@ -322,6 +362,101 @@ export interface ApiFactionDefinition {
   color: string;
   capital: string;
   icon?: string;
+  /** Turn music in assets/audio/turn; stem(s) with .mp3/.ogg fallbacks. One file or ordered list (playlist cycles until turn changes). Omitted = use faction id. */
+  music?: string | string[];
+}
+
+export interface SimulateCombatPercentileOutcome {
+  percentile: number;  // 5, 25, 50, 75, 95
+  winner: string;
+  conquered: boolean;
+  retreat: boolean;
+  attacker_casualties: Record<string, number>;
+  defender_casualties: Record<string, number>;
+}
+
+/** From backend combat_specials engine when sim runs. Single source of truth for specials/shelves. */
+export interface BattleContextSpecialEntry {
+  side: string;
+  unit_id: string;
+  unit_name: string;
+  count: number;
+}
+
+export interface BattleContextStackEntry {
+  unit_id: string;
+  name: string;
+  icon: string;
+  count: number;
+  special_codes: string[];
+  faction_id: string;
+}
+
+export interface BattleContextShelf {
+  stat_value: number;
+  stacks: BattleContextStackEntry[];
+}
+
+export interface BattleContext {
+  terrain_label?: string;
+  specials_in_battle?: Record<string, BattleContextSpecialEntry[]>;
+  effective_attacker_shelves?: BattleContextShelf[];
+  effective_defender_shelves?: BattleContextShelf[];
+}
+
+export interface SimulateCombatResponse {
+  n_trials: number;
+  attacker_wins: number;
+  defender_wins: number;
+  attacker_survives: number;
+  defender_survives: number;
+  retreats: number;
+  conquers: number;
+  p_attacker_win: number;
+  p_defender_win: number;
+  p_attacker_survives: number;
+  p_defender_survives: number;
+  p_retreat: number;
+  p_conquer: number;
+  rounds_mean: number;
+  rounds_p50: number;
+  rounds_p90: number;
+  attacker_casualties_mean: Record<string, number>;
+  defender_casualties_mean: Record<string, number>;
+  attacker_casualties_total_mean: number;
+  defender_casualties_total_mean: number;
+  attacker_casualties_p90: Record<string, number>;
+  defender_casualties_p90: Record<string, number>;
+  attacker_prefire_hits_mean?: number | null;  // null when that prefire type didn't run (e.g. no stealth / no archers)
+  defender_prefire_hits_mean?: number | null;
+  attacker_siegework_hits_mean?: number | null;  // null when no trial had attacker siegework dice
+  defender_siegework_hits_mean?: number | null;  // null when no trial had defender siegework dice
+  attacker_casualty_cost_mean?: number;  // mean power cost of attacker casualties across trials
+  defender_casualty_cost_mean?: number;  // mean power cost of defender casualties across trials
+  /** Predictable / Moderate / Unpredictable (CV of casualty cost across trials). */
+  attacker_casualty_cost_variance_category?: 'Predictable' | 'Moderate' | 'Unpredictable';
+  defender_casualty_cost_variance_category?: 'Predictable' | 'Moderate' | 'Unpredictable';
+  percentile_outcomes?: SimulateCombatPercentileOutcome[];
+  battle_context?: BattleContext | null;  // from backend engine when Calc runs; drives specials + units-in-battle
+  /** When false, stealth/archer prefire use full stat (no -1). Omitted/true = penalty on. */
+  prefire_penalty?: boolean;
+  /** Per-trial outcomes when include_outcomes=true (for chunked merge). */
+  outcomes?: Array<{
+    winner: string;
+    conquered: boolean;
+    retreat: boolean;
+    rounds: number;
+    attacker_casualties: Record<string, number>;
+    defender_casualties: Record<string, number>;
+    /** Present when server returns per-trial outcomes; required for accurate chunked merge. */
+    attacker_survived?: boolean;
+    defender_survived?: boolean;
+    attacker_siegework_hits?: number;
+    defender_siegework_hits?: number;
+    siegework_round_applicable?: boolean;
+    siegework_attacker_dice?: number;
+    siegework_defender_dice?: number;
+  }> | null;
 }
 
 // ===== API Functions =====
@@ -387,10 +522,35 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 // Auth types
+export interface PlayerAudioSettings {
+  menu_music_volume?: number;
+  game_music_volume?: number;
+  music_volume?: number;
+  sfx_volume?: number;
+  muted?: boolean;
+  master_volume?: number;
+}
+
 export interface AuthPlayer {
   id: string;
   email: string;
   username: string;
+  /** Site admin; default false for new accounts. */
+  is_admin?: boolean;
+  /** From server when preferences exist; omitted on older API responses. */
+  audio?: PlayerAudioSettings;
+}
+
+export interface PatchProfileBody {
+  username?: string;
+  audio?: {
+    menu_music_volume?: number;
+    game_music_volume?: number;
+    music_volume?: number;
+    sfx_volume?: number;
+    master_volume?: number;
+    muted?: boolean;
+  };
 }
 
 export interface AuthResponse {
@@ -402,6 +562,8 @@ export interface GameMeta {
   id: string;
   name: string;
   game_code: string | null;
+  /** True for multiplayer (join-by-code) games; false for single-player. Use to enable polling. */
+  is_multiplayer?: boolean;
   status: string;
   created_at: string | null;
   /** Host (creator) player id; only they can start the game. */
@@ -413,6 +575,14 @@ export interface GameMeta {
   player_usernames?: Record<string, string>;
   /** Lobby: scenario chosen at create (display_name + context from manifest). */
   scenario?: { display_name: string; context?: Record<string, unknown> } | null;
+  /** Faction IDs controlled by AI (single-player or fill slots). When current_faction is in this list, call POST /games/{id}/ai-step to advance. */
+  ai_factions?: string[];
+  /** Player IDs who forfeited; their turns are auto-skipped. Used for forfeit notification toast. */
+  forfeited_player_ids?: string[];
+  /** True if the previous host forfeited and a new host was assigned. */
+  host_forfeited?: boolean;
+  /** True if the authenticated user is the current host (only present when request is authenticated). */
+  is_host?: boolean;
 }
 
 export interface GameListItem {
@@ -437,6 +607,8 @@ export interface GameListItem {
   lobby_factions_claimed?: number | null;
   /** Lobby only: total factions (turn order length). */
   lobby_factions_total?: number | null;
+  /** Setup display name from manifest when game config has setup_id (same shape as lobby meta). */
+  scenario?: { display_name: string; context?: Record<string, unknown> } | null;
 }
 
 /** Setup/scenario from GET /setups (manifest id, display_name, map_asset, optional context for UX). */
@@ -488,11 +660,29 @@ async function authFetchJson<T>(url: string, body: object): Promise<T> {
 
 export const api = {
   // Auth (with timeout so we don't hang if backend is down)
-  register: (email: string, username: string, password: string) =>
-    authFetchJson<AuthResponse>('/auth/register', { email, username, password }),
-  login: (email: string, password: string) =>
-    authFetchJson<AuthResponse>('/auth/login', { email, password }),
-  authMe: () => fetchJson<AuthPlayer>('/auth/me'),
+  register: async (email: string, username: string, password: string) => {
+    const res = await authFetchJson<AuthResponse>('/auth/register', { email, username, password });
+    syncAudioFromAuthPlayer(res.player);
+    return res;
+  },
+  login: async (email: string, password: string) => {
+    const res = await authFetchJson<AuthResponse>('/auth/login', { email, password });
+    syncAudioFromAuthPlayer(res.player);
+    return res;
+  },
+  authMe: async () => {
+    const p = await fetchJson<AuthPlayer>('/auth/me');
+    syncAudioFromAuthPlayer(p);
+    return p;
+  },
+  updateMyProfile: async (body: PatchProfileBody) => {
+    const p = await fetchJson<AuthPlayer>('/auth/me', {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+    syncAudioFromAuthPlayer(p);
+    return p;
+  },
 
   // Games (create, list, join)
   getSetups: () =>
@@ -531,6 +721,41 @@ export const api = {
   // Get static definitions
   getDefinitions: () => fetchJson<Definitions>('/definitions'),
 
+  /** Run combat simulation (Monte Carlo). Default 10000 trials. Pass game_id when in a game so backend uses that game's definitions. include_outcomes: true returns per-trial data for chunked merge. */
+  simulateCombat: (params: {
+    attacker_stacks: { unit_id: string; count: number }[];
+    defender_stacks: { unit_id: string; count: number }[];
+    territory_id: string;
+    game_id?: string | null;
+    setup_id?: string | null;
+    n_trials?: number;
+    seed?: number;
+    include_outcomes?: boolean;
+    options?: {
+      casualty_order_attacker?: string;
+      casualty_order_defender?: string;
+      must_conquer?: boolean;
+      /** Land combat: Sea Raider special +attack only; not naval combat */
+      is_sea_raid?: boolean;
+      retreat_when_attacker_units_le?: number | null;
+      stronghold_initial_hp?: number | null;
+    };
+  }) =>
+    fetchJson<SimulateCombatResponse>('/simulate-combat', {
+      method: 'POST',
+      body: JSON.stringify({
+        attacker_stacks: params.attacker_stacks,
+        defender_stacks: params.defender_stacks,
+        territory_id: params.territory_id,
+        game_id: params.game_id ?? undefined,
+        setup_id: params.setup_id ?? undefined,
+        n_trials: params.n_trials ?? 10000,
+        seed: params.seed ?? 8,
+        include_outcomes: params.include_outcomes ?? false,
+        options: params.options ?? undefined,
+      }),
+    }),
+
   // Create a new game (legacy in-memory, no auth)
   createGameLegacy: (gameId: string) =>
     fetchJson<GameStateResponse>('/games', {
@@ -563,6 +788,13 @@ export const api = {
       body: JSON.stringify({ game_id: gameId }),
     }),
 
+  // Purchase stronghold repairs (purchase phase; cost per HP from setup; does not count toward mobilization)
+  repairStronghold: (gameId: string, repairs: { territory_id: string; hp_to_add: number }[]) =>
+    fetchJson<ActionResponse>(`/games/${gameId}/repair-stronghold`, {
+      method: 'POST',
+      body: JSON.stringify({ game_id: gameId, repairs }),
+    }),
+
   // Place a purchased camp on a territory (mobilization phase) — immediate. Prefer queueCampPlacement.
   placeCamp: (gameId: string, campIndex: number, territoryId: string) =>
     fetchJson<ActionResponse>(`/games/${gameId}/place-camp`, {
@@ -587,7 +819,7 @@ export const api = {
   // Move units (declares a pending move). chargeThrough for cavalry charging (empty enemy territories to conquer).
   // loadOntoBoatInstanceId: when loading to sea, assign passengers only to this boat.
   // offloadSeaZoneId: when moving sea->land and multiple sea zones can offload, send the chosen one (after need_offload_sea_choice).
-  move: (gameId: string, fromTerritory: string, toTerritory: string, unitInstanceIds: string[], chargeThrough?: string[], loadOntoBoatInstanceId?: string | null, offloadSeaZoneId?: string | null) => {
+  move: (gameId: string, fromTerritory: string, toTerritory: string, unitInstanceIds: string[], chargeThrough?: string[], loadOntoBoatInstanceId?: string | null, offloadSeaZoneId?: string | null, avoidForcedNavalCombat?: boolean) => {
     const ids = Array.from(unitInstanceIds, (id: unknown) =>
       typeof id === 'string' ? id : (id != null && typeof id === 'object' && 'instance_id' in id ? String((id as { instance_id: unknown }).instance_id) : '')
     ).filter(Boolean);
@@ -626,6 +858,9 @@ export const api = {
     if (offloadSeaZoneId != null && offloadSeaZoneId !== '') {
       body.offload_sea_zone_id = String(offloadSeaZoneId);
     }
+    if (avoidForcedNavalCombat) {
+      body.avoid_forced_naval_combat = true;
+    }
     return fetchJson<ActionResponse>(`/games/${gameId}/move`, {
       method: 'POST',
       body: JSON.stringify(body),
@@ -646,13 +881,19 @@ export const api = {
     }),
   
   // Initiate combat (seaZoneId required for sea raid: attackers in sea zone, target = territoryId land)
-  initiateCombat: (gameId: string, territoryId: string, seaZoneId?: string) =>
+  initiateCombat: (
+    gameId: string,
+    territoryId: string,
+    seaZoneId?: string,
+    options?: { fuse_bomb?: boolean },
+  ) =>
     fetchJson<ActionResponse>(`/games/${gameId}/combat/initiate`, {
       method: 'POST',
       body: JSON.stringify({
         game_id: gameId,
         territory_id: territoryId,
         ...(seaZoneId != null && seaZoneId !== '' && { sea_zone_id: seaZoneId }),
+        ...(options?.fuse_bomb === false ? { fuse_bomb: false } : {}),
       }),
     }),
   
@@ -687,7 +928,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ game_id: gameId, destination, units }),
     }),
-  
+
+  /** Run one AI action for the current faction (when it is an AI faction). Any player in the game can call. */
+  aiStep: (gameId: string) =>
+    fetchJson<ActionResponse & { action_type?: string }>(`/games/${gameId}/ai-step`, {
+      method: 'POST',
+    }),
+
   // End phase
   endPhase: (gameId: string) =>
     fetchJson<ActionResponse>(`/games/${gameId}/end-phase`, {
@@ -698,13 +945,6 @@ export const api = {
   // End turn
   endTurn: (gameId: string) =>
     fetchJson<ActionResponse>(`/games/${gameId}/end-turn`, {
-      method: 'POST',
-      body: JSON.stringify({ game_id: gameId }),
-    }),
-
-  /** Force end current faction's turn (advances to next; empty factions get turn_skipped). Used by forfeit when player leaves on their turn. Remove only the Skip Turn button for production; keep this endpoint. */
-  skipTurn: (gameId: string) =>
-    fetchJson<ActionResponse>(`/games/${gameId}/skip-turn`, {
       method: 'POST',
       body: JSON.stringify({ game_id: gameId }),
     }),

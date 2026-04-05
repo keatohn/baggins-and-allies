@@ -3,7 +3,7 @@ SQLAlchemy models for players and games.
 """
 
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey
+from sqlalchemy import Boolean, Column, String, DateTime, Text, ForeignKey
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -16,7 +16,10 @@ class Player(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     username = Column(String(64), unique=True, nullable=False, index=True)  # display name, no spaces/special
     password_hash = Column(String(255), nullable=False)
+    is_admin = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # JSON string: preferences, e.g. { "audio": { "menu_music_volume": 0.5, "game_music_volume": 0.25, "sfx_volume": 0.25, "muted": false } }
+    preferences = Column(Text, nullable=True)
 
 
 class Game(Base):

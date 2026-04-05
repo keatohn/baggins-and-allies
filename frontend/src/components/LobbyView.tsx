@@ -1,7 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import api, { type GameMeta, type AuthPlayer, type Definitions } from '../services/api';
 import './LobbyView.css';
+
+const ALLIANCE_ORDER = ['good', 'evil'];
 
 const LOBBY_POLL_MS = 3000;
 
@@ -24,6 +26,7 @@ export default function LobbyView({
 }: LobbyViewProps) {
   const [player, setPlayer] = useState<AuthPlayer | null>(null);
   const [claimingFactionId, setClaimingFactionId] = useState<string | null>(null);
+  const [claimingAlliance, setClaimingAlliance] = useState<string | null>(null);
   const [claimError, setClaimError] = useState<string | null>(null);
   const [startConfirmOpen, setStartConfirmOpen] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -62,6 +65,44 @@ export default function LobbyView({
     }
   };
 
+  /** Factions in turn order grouped by alliance (for single-player "set all" row). */
+  const alliancesWithFactions = useMemo(() => {
+    const order = turnOrder.length ? turnOrder : Object.keys(definitions?.factions ?? {});
+    const factions = definitions?.factions ?? {};
+    const map: Record<string, string[]> = {};
+    for (const fid of order) {
+      const alliance = (factions[fid] as { alliance?: string } | undefined)?.alliance ?? 'neutral';
+      if (!map[alliance]) map[alliance] = [];
+      map[alliance].push(fid);
+    }
+    const result: { alliance: string; factionIds: string[] }[] = [];
+    for (const a of ALLIANCE_ORDER) {
+      if (map[a]?.length) result.push({ alliance: a, factionIds: map[a] });
+    }
+    for (const a of Object.keys(map).sort()) {
+      if (!ALLIANCE_ORDER.includes(a)) result.push({ alliance: a, factionIds: map[a] });
+    }
+    return result;
+  }, [definitions?.factions, turnOrder]);
+
+  const handleSetAlliance = async (allianceKey: string, claim: boolean) => {
+    const entry = alliancesWithFactions.find((e) => e.alliance === allianceKey);
+    if (!entry?.factionIds.length) return;
+    setClaimError(null);
+    setClaimingAlliance(allianceKey);
+    try {
+      for (const fid of entry.factionIds) {
+        await api.claimFaction(gameId, fid, claim);
+      }
+      await refreshMeta();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Claim failed';
+      setClaimError(msg === 'Not Found' ? 'Game not found or server error. Try refreshing the page.' : msg);
+    } finally {
+      setClaimingAlliance(null);
+    }
+  };
+
   const handleStartClick = () => setStartConfirmOpen(true);
   const handleStartConfirmCancel = () => setStartConfirmOpen(false);
   const handleStartConfirmOk = async () => {
@@ -81,8 +122,12 @@ export default function LobbyView({
 
   const factions = definitions?.factions ?? {};
   const order = turnOrder.length ? turnOrder : Object.keys(factions);
-  const allFactionsClaimed = order.length > 0 && order.every((fid) => lobbyClaims[fid]);
+  const isSinglePlayer = !meta.game_code;
+  const allFactionsClaimed = isSinglePlayer
+    ? order.length > 0 && order.some((fid) => lobbyClaims[fid])
+    : order.length > 0 && order.every((fid) => lobbyClaims[fid]);
   const myClaimedAlliance = (() => {
+    if (isSinglePlayer) return null;
     for (const fid of order) {
       if (lobbyClaims[fid] === String(player?.id)) {
         const f = factions[fid] as { alliance?: string } | undefined;
@@ -92,14 +137,15 @@ export default function LobbyView({
     return null;
   })();
 
-  const scenario = meta.scenario;
-  const context = scenario?.context as { year?: string; map?: string; factions?: string[] } | undefined;
+  const playerDisplayName = (player != null && meta.player_usernames?.[String(player.id)]) ?? 'You';
 
   return (
     <div className="lobby-view-overlay">
       <div className="lobby-view">
         <header className="lobby-view__header">
-          <h1 className="lobby-view__title">Lobby: {meta.name}</h1>
+          <h1 className="lobby-view__title">
+            {isSinglePlayer ? 'Single player' : 'Lobby'}: {meta.name}
+          </h1>
           {meta.game_code && (
             <p className="lobby-view__code">
               JOIN CODE: <strong className="lobby-view__code-value">{meta.game_code}</strong>
@@ -107,35 +153,53 @@ export default function LobbyView({
           )}
         </header>
 
-        {scenario && (
-          <section className="lobby-view__scenario">
-            <h2 className="lobby-view__section-title">Scenario</h2>
-            <p className="lobby-view__scenario-name">{scenario.display_name}</p>
-            {(context?.year || context?.map || (context?.factions?.length)) && (
-              <p className="lobby-view__scenario-desc">
-                {[context?.year, context?.map].filter(Boolean).join(' · ')}
-                {Array.isArray(context?.factions) && context.factions.length > 0 && (
-                  <span className="lobby-view__scenario-factions">
-                    {' · '}{context.factions.join(', ')}
-                  </span>
-                )}
-              </p>
-            )}
-          </section>
-        )}
-
-        <section className="lobby-view__factions">
-          <h2 className="lobby-view__section-title">Factions</h2>
+        <section className="lobby-view__factions" aria-label="Faction assignments">
           {claimError && (
             <p className="lobby-view__error" role="alert">
               {claimError}
             </p>
           )}
+          {isSinglePlayer && alliancesWithFactions.length > 0 && (
+            <div className="lobby-view__alliance-shortcuts">
+              {alliancesWithFactions.map(({ alliance, factionIds }) => {
+                const allMe = factionIds.every((fid) => lobbyClaims[fid] === String(player?.id));
+                const allComputer = factionIds.every((fid) => !lobbyClaims[fid]);
+                const loading = claimingAlliance === alliance;
+                const label = alliance === 'good' ? 'Good' : alliance === 'evil' ? 'Evil' : alliance;
+                return (
+                  <div key={alliance} className="lobby-view__alliance-row" role="group" aria-label={`Set all ${label} factions`}>
+                    <span className="lobby-view__alliance-label">Set all {label}</span>
+                    <div className="lobby-view__binary-pills">
+                      <button
+                        type="button"
+                        className={`lobby-view__pill lobby-view__pill--you ${allMe ? 'lobby-view__pill--selected' : ''}`}
+                        onClick={() => handleSetAlliance(alliance, true)}
+                        disabled={loading}
+                        aria-pressed={allMe}
+                      >
+                        {loading ? '…' : playerDisplayName}
+                      </button>
+                      <button
+                        type="button"
+                        className={`lobby-view__pill lobby-view__pill--computer ${allComputer ? 'lobby-view__pill--selected' : ''}`}
+                        onClick={() => handleSetAlliance(alliance, false)}
+                        disabled={loading}
+                        aria-pressed={allComputer}
+                      >
+                        {loading ? '…' : 'Computer'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <ul className="lobby-view__faction-list">
             {order.map((fid) => {
-              const f = factions[fid] as { display_name?: string; icon?: string; alliance?: string } | undefined;
+              const f = factions[fid] as { display_name?: string; icon?: string; alliance?: string; color?: string } | undefined;
               const displayName = f?.display_name ?? fid;
               const icon = f?.icon ?? `${fid}.png`;
+              const factionColor = f?.color ?? undefined;
               const claimantId = lobbyClaims[fid];
               const claimantName = claimantId ? (playerUsernames[claimantId] ?? 'Player') : null;
               const isClaimedByMe = claimantId === String(player?.id);
@@ -143,24 +207,54 @@ export default function LobbyView({
               const alliance = f?.alliance ?? 'neutral';
               const canClaim =
                 !isClaimedByOther &&
-                (myClaimedAlliance == null || myClaimedAlliance === alliance);
+                (isSinglePlayer || myClaimedAlliance == null || myClaimedAlliance === alliance);
               const loading = claimingFactionId === fid;
 
               return (
                 <li key={fid} className="lobby-view__faction-row">
-                  <div className="lobby-view__faction-logo">
-                    <img src={`/assets/factions/${icon}`} alt="" />
+                  <div className="lobby-view__faction-logo-wrap">
+                    {factionColor && (
+                      <div
+                        className="lobby-view__faction-color-bar"
+                        style={{ backgroundColor: factionColor }}
+                        aria-hidden
+                      />
+                    )}
+                    <div className="lobby-view__faction-logo">
+                      <img src={`/assets/factions/${icon}`} alt="" />
+                    </div>
                   </div>
                   <div className="lobby-view__faction-info">
                     <span className="lobby-view__faction-name">{displayName}</span>
-                    {claimantName && (
+                    {!isSinglePlayer && claimantName && (
                       <span className="lobby-view__faction-claimant">
                         {isClaimedByMe ? 'You' : claimantName}
                       </span>
                     )}
                   </div>
                   <div className="lobby-view__faction-actions">
-                    {isClaimedByMe ? (
+                    {isSinglePlayer ? (
+                      <div className="lobby-view__binary-pills" role="group" aria-label={`${displayName}: you or computer`}>
+                        <button
+                          type="button"
+                          className={`lobby-view__pill lobby-view__pill--you ${isClaimedByMe ? 'lobby-view__pill--selected' : ''}`}
+                          onClick={() => handleClaim(fid, true)}
+                          disabled={loading}
+                          aria-pressed={isClaimedByMe}
+                        >
+                          {loading && isClaimedByMe ? '…' : playerDisplayName}
+                        </button>
+                        <button
+                          type="button"
+                          className={`lobby-view__pill lobby-view__pill--computer ${!isClaimedByMe ? 'lobby-view__pill--selected' : ''}`}
+                          onClick={() => handleClaim(fid, false)}
+                          disabled={loading}
+                          aria-pressed={!isClaimedByMe}
+                        >
+                          {loading && !isClaimedByMe ? '…' : 'Computer'}
+                        </button>
+                      </div>
+                    ) : isClaimedByMe ? (
                       <button
                         type="button"
                         className="lobby-view__pill lobby-view__pill--claimed"
@@ -204,7 +298,7 @@ export default function LobbyView({
                 className="lobby-view__start-btn primary"
                 onClick={handleStartClick}
                 disabled={!allFactionsClaimed}
-                title={!allFactionsClaimed ? 'Claim all factions to start' : undefined}
+                title={!allFactionsClaimed ? (isSinglePlayer ? 'Assign yourself to at least one faction to start' : 'Claim all factions to start') : undefined}
               >
                 Start game
               </button>
@@ -212,8 +306,9 @@ export default function LobbyView({
                   <div className="lobby-view__confirm-overlay" role="dialog" aria-modal="true">
                     <div className="lobby-view__confirm-box">
                       <p className="lobby-view__confirm-text">
-                        Are you sure you want to start the game? Players cannot join and faction
-                        assignments cannot be modified once the game has started.
+                        {isSinglePlayer
+                          ? 'Start the game? Faction assignments cannot be changed after this.'
+                          : 'Are you sure you want to start the game? Players cannot join and faction assignments cannot be modified once the game has started.'}
                       </p>
                       <div className="lobby-view__confirm-actions">
                         <button

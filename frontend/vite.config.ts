@@ -34,6 +34,8 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true, // Fail if 5173 is in use so you always use the same URL
+    // Allow same-network devices (phone, tablet) to open http://<this-machine-LAN-IP>:5173
+    host: true,
     // Single /api proxy so path /games (SPA route) is not forwarded; only /api/* hits the backend (with header).
     proxy: {
       '/api': {

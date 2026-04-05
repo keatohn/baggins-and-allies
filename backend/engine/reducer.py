@@ -7,15 +7,26 @@ Returns (new_state, events) where events describe what happened.
 from copy import deepcopy
 from backend.engine.state import GameState, UnitStack, TerritoryState, Unit, ActiveCombat, CombatRoundResult, PendingMove, PendingMobilization, PendingCampPlacement
 from backend.engine.actions import Action
-from backend.engine.definitions import UnitDefinition, TerritoryDefinition, FactionDefinition, CampDefinition, PortDefinition
+from backend.engine.definitions import UnitDefinition, TerritoryDefinition, FactionDefinition, CampDefinition, PortDefinition, is_transportable
 from backend.engine.combat import (
     get_attacker_effective_dice_and_bombikazi_self_destruct,
+    get_bombikazi_pairing,
+    get_ladder_infantry_instance_ids,
+    get_siegework_dice_counts,
+    get_siegework_attacker_rolling_units,
+    get_siegework_round_attacker_display_units,
+    get_siegework_round_defender_display_units,
+    SIEGEWORK_SPECIAL_LADDER,
     resolve_combat_round,
     resolve_archer_prefire,
     resolve_stealth_prefire,
+    resolve_siegeworks_round,
+    _is_siegework_unit,
     RoundResult,
     group_dice_by_stat,
-    ARCHETYPE_ARCHER,
+    group_siegework_attacker_dice_ram_and_flex,
+    group_attacker_dice_with_ladder_segments,
+    sort_attackers_for_ladder_dice_order,
     ARCHETYPE_CAVALRY,
     calculate_required_dice,
     compute_terrain_stat_modifiers,
@@ -29,20 +40,62 @@ from backend.engine.movement import (
     calculate_movement_cost,
     movement_cost_along_path,
     get_shortest_path,
+    ford_shortcut_requires_escort_lead,
+    land_move_ford_escort_cost_for_instances,
+    pending_ford_crosser_lead_move_from_origin,
+    remaining_ford_escort_slots,
     _is_sea_zone,
+    _sea_zone_has_hostile_enemy_boats,
+    are_sea_zones_directly_adjacent,
+    expand_sea_offload_instance_ids,
+    remaining_load_slots_on_boat,
+    remaining_sea_load_passenger_slots,
+    resolve_territory_key_in_state,
+    resolve_unit_for_move_declaration,
+    instance_allowed_in_new_move_from_territory,
+    sea_land_adjacent_for_offload,
+    get_forced_naval_combat_instance_ids,
 )
 from backend.engine.queries import (
     _get_retreat_adjacent_ids,
     _territory_is_friendly_for_retreat,
     get_aerial_units_must_move,
+    get_contested_territories,
     _sea_zone_adjacent_to_owned_port,
     _port_power_for_sea_zone,
     get_mobilization_capacity,
+    _home_territory_ids,
     _is_naval_unit,
+    participates_in_sea_hex_naval_combat,
     _territory_has_port,
     _total_pending_mobilization_to_port,
+    validate_move_as_sea_offload_if_applicable,
+    validate_sail_move_for_offload_sea_raid,
+    valid_camp_placement_territory_ids,
 )
-from backend.engine.utils import unitstack_to_units, get_unit_faction, is_land_unit, has_unit_special
+from backend.engine.utils import (
+    unitstack_to_units,
+    get_unit_faction,
+    is_land_unit,
+    is_aerial_unit,
+    has_unit_special,
+    archer_prefire_eligible,
+    can_conquer_territory_as_attacker,
+    faction_owns_capital,
+    effective_territory_owner,
+    effective_original_owner,
+)
+
+
+def _prefire_stat_delta(state: GameState) -> int:
+    """Manifest prefire_penalty True (default): -1 on stealth/archer prefire; False: 0."""
+    return -1 if getattr(state, "prefire_penalty", True) else 0
+from backend.engine.combat_specials import (
+    BattleSpecialsResult,
+    compute_battle_specials_and_modifiers,
+    empty_round_special_payload,
+    specials_flags_for_round_payload,
+)
 from backend.engine.events import (
     GameEvent,
     phase_changed,
@@ -62,7 +115,62 @@ from backend.engine.events import (
     unit_destroyed,
     units_mobilized,
     victory,
+    enrich_event,
+    camp_placed,
 )
+
+
+def _passengers_aboard_on_boat(
+    boat: Unit,
+    container_units: list,
+    unit_defs: dict[str, UnitDefinition],
+) -> int:
+    if not boat.instance_id or not _is_naval_unit(unit_defs.get(boat.unit_id)):
+        return 0
+    return sum(
+        1 for u in container_units
+        if getattr(u, "loaded_onto", None) == boat.instance_id
+    )
+
+
+def _unit_id_from_instance_id_pattern(instance_id: str, faction_ids: list[str]) -> str | None:
+    """
+    Reverse GameState.generate_unit_instance_id: "{faction}_{unit_id}_{counter}".
+    unit_id may contain underscores (e.g. morgul_orc). Counter is numeric suffix after last underscore.
+    """
+    for fid in sorted(faction_ids, key=len, reverse=True):
+        prefix = fid + "_"
+        if not instance_id.startswith(prefix):
+            continue
+        rest = instance_id[len(prefix) :]
+        parts = rest.rsplit("_", 1)
+        if len(parts) != 2 or not parts[1].isdigit():
+            continue
+        return parts[0]
+    return None
+
+
+def _land_combat_unit_side(
+    unit: Unit,
+    attacker_faction: str,
+    attacker_alliance: str | None,
+    unit_defs: dict[str, UnitDefinition],
+    faction_defs: dict[str, FactionDefinition],
+) -> str | None:
+    """
+    Land / sea-raid-land combat roster: must stay identical between initiate_combat and continue_combat.
+    attacker = attacking faction's units; defender = other faction with a different alliance;
+    None = bystander (no faction on unit def, or allied non-attacker sharing attacker's alliance).
+    """
+    uo = get_unit_faction(unit, unit_defs)
+    if uo is None:
+        return None
+    if uo == attacker_faction:
+        return "attacker"
+    ua = getattr(faction_defs.get(uo), "alliance", None)
+    if ua != attacker_alliance:
+        return "defender"
+    return None
 
 
 def _build_round_unit_display(
@@ -72,13 +180,16 @@ def _build_round_unit_display(
     is_attacker: bool,
     faction: str,
     territory_def: TerritoryDefinition | None,
-    terrain_mods: dict[str, int],
-    captain_mods: dict[str, int],
-    anticav_mods: dict[str, int],
+    spec_result: BattleSpecialsResult,
+    attacker_effective_attack_override: dict[str, int] | None = None,
+    passenger_aboard: int = 0,
 ) -> dict:
-    """Build one unit dict for combat_round_resolved payload. Shape must match events.py docstring (UI contract)."""
+    """Build one unit dict for combat_round_resolved payload. Special booleans from combat_specials engine (events.py UI contract)."""
+    sp = empty_round_special_payload() if not unit_def else specials_flags_for_round_payload(
+        unit.instance_id, is_attacker, spec_result
+    )
     if not unit_def:
-        return {
+        out_missing = {
             "instance_id": unit.instance_id,
             "unit_id": unit.unit_id,
             "display_name": unit.unit_id,
@@ -91,38 +202,62 @@ def _build_round_unit_display(
             "remaining_movement": getattr(unit, "remaining_movement", 0),
             "is_archer": False,
             "faction": faction,
-            "terror": False,
-            "terrain_mountain": False,
-            "terrain_forest": False,
-            "captain_bonus": False,
-            "anti_cavalry": False,
+            **sp,
+            "siegework_archetype": False,
         }
+        if passenger_aboard > 0:
+            out_missing["passenger_count"] = passenger_aboard
+        return out_missing
     base_attack = getattr(unit_def, "attack", 0)
     base_defense = getattr(unit_def, "defense", 0)
-    tags = getattr(unit_def, "tags", []) or []
     archetype = getattr(unit_def, "archetype", "")
-    is_archer = archetype == ARCHETYPE_ARCHER or "archer" in tags
-    terrain_type = (getattr(territory_def, "terrain_type", None) or "").lower() if territory_def else ""
-    has_terrain = unit.instance_id in terrain_mods and terrain_mods[unit.instance_id]
-    return {
+    is_archer = archer_prefire_eligible(unit_def)
+    ov = attacker_effective_attack_override or {}
+    eff_att = (
+        ov[unit.instance_id]
+        if is_attacker and unit.instance_id in ov
+        else base_attack + stat_mod
+    )
+    out = {
         "instance_id": unit.instance_id,
         "unit_id": unit.unit_id,
         "display_name": getattr(unit_def, "display_name", unit.unit_id),
         "attack": base_attack,
         "defense": base_defense,
-        "effective_attack": base_attack + stat_mod if is_attacker else None,
+        "effective_attack": eff_att if is_attacker else None,
         "effective_defense": base_defense + stat_mod if not is_attacker else None,
         "health": getattr(unit_def, "health", 1),
         "remaining_health": unit.remaining_health,
         "remaining_movement": getattr(unit, "remaining_movement", 0),
         "is_archer": is_archer,
         "faction": faction,
-        "terror": is_attacker and has_unit_special(unit_def, "terror"),
-        "terrain_mountain": has_terrain and terrain_type in ("mountain", "mountains"),
-        "terrain_forest": has_terrain and terrain_type == "forest",
-        "captain_bonus": unit.instance_id in captain_mods and captain_mods[unit.instance_id] > 0,
-        "anti_cavalry": unit.instance_id in anticav_mods and anticav_mods[unit.instance_id] > 0,
+        **sp,
+        "siegework_archetype": archetype == "siegework",
     }
+    if passenger_aboard > 0:
+        out["passenger_count"] = passenger_aboard
+    return out
+
+
+def _is_naval_combat_attacker_hit_rules(
+    attacker_units: list[Unit],
+    sea_zone_id: str | None,
+    territory_is_sea: bool,
+    unit_defs: dict[str, UnitDefinition],
+) -> bool:
+    """
+    When True, defender hits may only target naval/aerial attackers (passengers on transports are protected).
+    Sea raid land attackers fight on land — use normal land rules so infantry/cavalry take hits.
+    Pure sea-hex combat still uses naval rules.
+    """
+    if territory_is_sea:
+        return True
+    if not sea_zone_id or not attacker_units:
+        return False
+    return all(
+        _is_naval_unit(unit_defs.get(u.unit_id)) or is_aerial_unit(unit_defs.get(u.unit_id))
+        for u in attacker_units
+    )
 
 
 def _normalize_unit_health_for_combat(
@@ -166,24 +301,6 @@ def _territory_has_port(
     return False
 
 
-def _faction_owns_capital(
-    state: GameState,
-    faction_id: str,
-    faction_defs: dict[str, FactionDefinition],
-) -> bool:
-    """Check if a faction owns their capital territory."""
-    faction_def = faction_defs.get(faction_id)
-    if not faction_def:
-        return False
-    capital = getattr(faction_def, "capital", None)
-    if not capital:
-        return False
-    capital_state = state.territories.get(capital)
-    if not capital_state:
-        return False
-    return capital_state.owner == faction_id
-
-
 def _faction_unit_count(
     state: GameState,
     faction_id: str,
@@ -205,7 +322,7 @@ SET_TERRITORY_DEFENDER_CASUALTY_ORDER = "set_territory_defender_casualty_order"
 # Phase rules: which action types are allowed in which phases
 # Note: During active combat, only continue_combat and retreat are allowed
 PHASE_ALLOWED_ACTIONS = {
-    "purchase": ["purchase_units", "purchase_camp", SET_TERRITORY_DEFENDER_CASUALTY_ORDER, "end_phase", "skip_turn"],
+    "purchase": ["purchase_units", "purchase_camp", "repair_stronghold", SET_TERRITORY_DEFENDER_CASUALTY_ORDER, "end_phase", "skip_turn"],
     "combat_move": ["move_units", "cancel_move", SET_TERRITORY_DEFENDER_CASUALTY_ORDER, "end_phase", "skip_turn"],
     "combat": ["initiate_combat", "continue_combat", "retreat", SET_TERRITORY_DEFENDER_CASUALTY_ORDER, "end_phase", "skip_turn"],
     "non_combat_move": ["move_units", "cancel_move", SET_TERRITORY_DEFENDER_CASUALTY_ORDER, "end_phase", "skip_turn"],
@@ -314,6 +431,10 @@ def apply_action(
             new_state, action, camp_defs or {}, territory_defs)
         events.extend(evts)
 
+    elif action_type == "repair_stronghold":
+        new_state, evts = _handle_repair_stronghold(new_state, action, territory_defs)
+        events.extend(evts)
+
     elif action_type == "place_camp":
         new_state, evts = _handle_place_camp(new_state, action, camp_defs or {})
         events.extend(evts)
@@ -344,7 +465,7 @@ def apply_action(
 
     elif action_type == "continue_combat":
         new_state, evts = _handle_continue_combat(
-            new_state, action, unit_defs, territory_defs)
+            new_state, action, unit_defs, territory_defs, faction_defs)
         events.extend(evts)
 
     elif action_type == "retreat":
@@ -386,6 +507,10 @@ def apply_action(
         else:
             raise ValueError(f"Unknown action type: {action_type or getattr(action, 'type', '?')}")
 
+    # Enrich every event with turn_number, phase, faction, and human-readable message
+    for e in events:
+        enrich_event(e, state, unit_defs, territory_defs, faction_defs)
+
     return new_state, events
 
 
@@ -415,7 +540,7 @@ def _handle_purchase_units(
         raise ValueError(f"Unknown faction: {faction_id}")
 
     # Check capital ownership - cannot purchase if capital is captured
-    if not _faction_owns_capital(state, faction_id, faction_defs):
+    if not faction_owns_capital(state, faction_id, faction_defs):
         raise ValueError(f"Cannot purchase units: {faction_id}'s capital has been captured")
 
     # Validate all purchases and calculate total cost
@@ -558,6 +683,61 @@ def _handle_purchase_camp(
     return state, events
 
 
+def _handle_repair_stronghold(
+    state: GameState,
+    action: Action,
+    territory_defs: dict[str, TerritoryDefinition],
+) -> tuple[GameState, list[GameEvent]]:
+    """Apply stronghold repairs: deduct power, increase territory.stronghold_current_health (capped at base)."""
+    events: list[GameEvent] = []
+    faction_id = action.faction
+    repairs = action.payload.get("repairs") or []
+    if not repairs:
+        return state, events
+
+    repair_cost_per_hp = getattr(state, "stronghold_repair_cost", 0)
+    if repair_cost_per_hp <= 0:
+        raise ValueError("Stronghold repair is not available in this setup")
+    power = state.faction_resources.get(faction_id, {}).get("power", 0)
+    total_hp = 0
+    for r in repairs:
+        if not isinstance(r, dict):
+            continue
+        hp_to_add = r.get("hp_to_add", 0)
+        try:
+            hp_to_add = int(hp_to_add)
+        except (TypeError, ValueError):
+            continue
+        if hp_to_add <= 0:
+            continue
+        tid = r.get("territory_id")
+        if not tid or tid not in state.territories:
+            continue
+        territory = state.territories[tid]
+        if territory.owner != faction_id:
+            continue
+        tdef = territory_defs.get(tid)
+        if not tdef or not getattr(tdef, "is_stronghold", False):
+            continue
+        base_hp = getattr(tdef, "stronghold_base_health", 0) or 0
+        if base_hp <= 0:
+            continue
+        current = getattr(territory, "stronghold_current_health", None)
+        current = current if current is not None else base_hp
+        actual_add = min(hp_to_add, base_hp - current)
+        if actual_add <= 0:
+            continue
+        territory.stronghold_current_health = current + actual_add
+        total_hp += actual_add
+    total_cost = total_hp * repair_cost_per_hp
+    if total_cost > 0:
+        if power < total_cost:
+            raise ValueError(f"Insufficient power for repairs: need {total_cost}, have {power}")
+        state.faction_resources[faction_id]["power"] = power - total_cost
+        events.append(resources_changed(faction_id, "power", power, power - total_cost, "stronghold_repair"))
+    return state, events
+
+
 def _handle_place_camp(
     state: GameState,
     action: Action,
@@ -595,6 +775,7 @@ def _handle_place_camp(
     state.pending_camps[camp_index]["placed_territory_id"] = territory_id
 
     # mobilization_camps is fixed at turn start; newly placed camp only counts next turn
+    events.append(camp_placed(faction_id, territory_id))
     return state, events
 
 
@@ -674,8 +855,60 @@ def _apply_pending_camp_placements(
         state.dynamic_camps[camp_id] = territory_id
         state.camps_standing.append(camp_id)
         state.pending_camps[camp_index]["placed_territory_id"] = territory_id
+        fac = state.current_faction or ""
+        if fac:
+            events.append(camp_placed(fac, territory_id))
     state.pending_camp_placements = []
     return state, events
+
+
+def _load_boat_count_for_message(
+    from_id: str,
+    to_id: str,
+    unit_instance_ids: list[str],
+    state: GameState,
+    unit_defs: dict[str, UnitDefinition],
+    faction_id: str,
+    load_onto_boat_instance_id: str | None,
+) -> int:
+    """How many distinct transport boats receive passengers from this load declaration (for event log wording)."""
+    if load_onto_boat_instance_id:
+        return 1
+    from_t = state.territories.get(from_id)
+    to_t = state.territories.get(to_id)
+    if not from_t or not to_t:
+        return 1
+
+    def _is_naval(ud: UnitDefinition | None) -> bool:
+        if not ud:
+            return False
+        return getattr(ud, "archetype", "") == "naval" or "naval" in getattr(ud, "tags", [])
+
+    units_by_id = {u.instance_id: u for u in from_t.units}
+    passengers_n = 0
+    for iid in unit_instance_ids:
+        u = units_by_id.get(iid)
+        if u and is_land_unit(unit_defs.get(u.unit_id)):
+            passengers_n += 1
+    if passengers_n == 0:
+        return 1
+
+    naval_units = sorted(
+        [u for u in to_t.units if get_unit_faction(u, unit_defs) == faction_id and _is_naval(unit_defs.get(u.unit_id))],
+        key=lambda u: u.instance_id,
+    )
+    boats_used: set[str] = set()
+    idx = 0
+    for boat in naval_units:
+        cap = getattr(unit_defs.get(boat.unit_id), "transport_capacity", 0) or 0
+        existing_on_boat = sum(1 for u in to_t.units if getattr(u, "loaded_onto", None) == boat.instance_id)
+        slots = max(0, cap - existing_on_boat)
+        for _ in range(slots):
+            if idx >= passengers_n:
+                break
+            boats_used.add(boat.instance_id)
+            idx += 1
+    return max(1, len(boats_used))
 
 
 def _handle_move_units(
@@ -696,6 +929,8 @@ def _handle_move_units(
     events: list[GameEvent] = []
     from_id = action.payload.get("from") or action.payload.get("from_territory") or ""
     to_id = action.payload.get("to") or action.payload.get("to_territory") or ""
+    from_id = resolve_territory_key_in_state(state, str(from_id).strip(), territory_defs)
+    to_id = resolve_territory_key_in_state(state, str(to_id).strip(), territory_defs)
     unit_instance_ids = action.payload.get("unit_instance_ids", [])
     faction_id = action.faction
 
@@ -709,20 +944,54 @@ def _handle_move_units(
     if len(unit_instance_ids) == 0:
         raise ValueError("No units specified to move")
 
+    unit_instance_ids = expand_sea_offload_instance_ids(
+        state,
+        from_id,
+        to_id,
+        list(unit_instance_ids),
+        unit_defs,
+        territory_defs,
+        faction_id,
+    )
+    if len(unit_instance_ids) == 0:
+        raise ValueError("No units specified to move")
+
     # Build a lookup of units in source territory by instance_id
     units_by_id = {unit.instance_id: unit for unit in from_territory.units}
+    from_def_m = territory_defs.get(from_id)
+    to_def_m = territory_defs.get(to_id)
+    sea_to_land_move = (
+        from_def_m
+        and to_def_m
+        and _is_sea_zone(from_def_m)
+        and not _is_sea_zone(to_def_m)
+    )
+    sea_to_sea_move = (
+        from_def_m
+        and to_def_m
+        and _is_sea_zone(from_def_m)
+        and _is_sea_zone(to_def_m)
+    )
 
-    # Check which units are already in pending moves
-    already_pending = set()
-    for pm in state.pending_moves:
-        already_pending.update(pm.unit_instance_ids)
-
-    # Validate all units exist in source territory and belong to the faction
+    # Validate all units exist (on origin sea, or still on land if load into this sea is pending) and belong to the faction
     units_to_move = []
     for instance_id in unit_instance_ids:
-        if instance_id in already_pending:
+        if not instance_allowed_in_new_move_from_territory(
+            state, instance_id, from_id, state.phase, territory_defs
+        ):
             raise ValueError(f"Unit {instance_id} already has a pending move")
-        unit = units_by_id.get(instance_id)
+        if sea_to_land_move:
+            unit = resolve_unit_for_move_declaration(
+                state, from_id, instance_id, state.phase, territory_defs
+            )
+        elif sea_to_sea_move:
+            unit = units_by_id.get(instance_id)
+            if not unit:
+                unit = resolve_unit_for_move_declaration(
+                    state, from_id, instance_id, state.phase, territory_defs
+                )
+        else:
+            unit = units_by_id.get(instance_id)
         if not unit:
             raise ValueError(f"Unit {instance_id} not found in {from_id}")
         # Validate unit belongs to the faction (use unit def: faction from unit def; instance_id can contain underscores)
@@ -730,6 +999,7 @@ def _handle_move_units(
         if not unit_def or unit_def.faction != faction_id:
             raise ValueError(f"Unit {instance_id} does not belong to {faction_id}")
         units_to_move.append(unit)
+        units_by_id[unit.instance_id] = unit
 
     charge_through = action.payload.get("charge_through")
     if charge_through is not None and not isinstance(charge_through, list):
@@ -737,22 +1007,127 @@ def _handle_move_units(
     charge_through = [str(t) for t in charge_through if str(t) != to_id] if charge_through else []
     # Destination must never be in charge_through (we only pass through; destination can have units)
 
+    sea_offload_vr = validate_move_as_sea_offload_if_applicable(
+        state,
+        from_id,
+        to_id,
+        units_to_move,
+        unit_defs,
+        territory_defs,
+        faction_defs,
+        faction_id,
+        charge_through,
+    )
+    if sea_offload_vr is not None and not sea_offload_vr.valid:
+        raise ValueError(sea_offload_vr.error or "Invalid sea offload / sea raid move")
+    sea_offload_ok = sea_offload_vr is not None and sea_offload_vr.valid
+
     all_charge_routes: list[dict[str, list[list[str]]]] = []
     can_reach_list: list[bool] = []
-    for unit in units_to_move:
-        reachable, charge_routes = get_reachable_territories_for_unit(
-            unit,
-            from_id,
-            state,
-            unit_defs,
-            territory_defs,
-            faction_defs,
-            state.phase,
-        )
-        all_charge_routes.append(charge_routes)
-        can_reach_list.append(to_id in reachable)
+    ford_pending_exclude = set(unit_instance_ids)
+    same_move_has_ford_crosser = any(
+        has_unit_special(unit_defs.get(u.unit_id), "ford_crosser") for u in units_to_move
+    )
+    if not sea_offload_ok:
+        for unit in units_to_move:
+            reachable, charge_routes = get_reachable_territories_for_unit(
+                unit,
+                from_id,
+                state,
+                unit_defs,
+                territory_defs,
+                faction_defs,
+                state.phase,
+                None,
+                ford_pending_exclude,
+                same_move_has_ford_crosser,
+            )
+            all_charge_routes.append(charge_routes)
+            can_reach_list.append(to_id in reachable)
 
-    if not all(can_reach_list):
+    # Land → sea: transportable land = embark (enforce boat/zone capacity). All-aerial = combat entry into sea
+    # (naval battle), not load — same adjacent-sea reachability makes all(can_reach_list) True for both.
+    if not sea_offload_ok and all(can_reach_list):
+        from_def_chk = territory_defs.get(from_id)
+        to_def_chk = territory_defs.get(to_id)
+        if (
+            from_def_chk
+            and to_def_chk
+            and not _is_sea_zone(from_def_chk)
+            and _is_sea_zone(to_def_chk)
+            and units_to_move
+        ):
+            all_transportable_land = all(
+                is_land_unit(unit_defs.get(u.unit_id)) and is_transportable(unit_defs.get(u.unit_id))
+                for u in units_to_move
+            )
+            all_aerial = all(is_aerial_unit(unit_defs.get(u.unit_id)) for u in units_to_move)
+            if all_transportable_land:
+                to_territory = state.territories.get(to_id)
+                if to_territory:
+                    load_onto_decl = (action.payload.get("load_onto_boat_instance_id") or "").strip() or None
+                    if load_onto_decl:
+                        boat_slots = remaining_load_slots_on_boat(
+                            state, to_id, load_onto_decl, faction_id, unit_defs, territory_defs, state.phase
+                        )
+                        if len(units_to_move) > boat_slots:
+                            raise ValueError(
+                                f"Boat {load_onto_decl} has only {boat_slots} passenger slot(s) left in {to_id} "
+                                f"(onboard + pending loads), cannot load {len(units_to_move)}"
+                            )
+                    else:
+                        zone_slots = remaining_sea_load_passenger_slots(
+                            state, to_id, faction_id, unit_defs, territory_defs, state.phase
+                        )
+                        if len(units_to_move) > zone_slots:
+                            raise ValueError(
+                                f"Not enough transport capacity in {to_id}: {len(units_to_move)} passengers but only "
+                                f"{zone_slots} slot(s) left (including pending loads this phase)"
+                            )
+            elif all_aerial:
+                pass
+            else:
+                raise ValueError("Only transportable land units can load into a sea zone")
+
+        if (
+            from_def_chk
+            and to_def_chk
+            and not _is_sea_zone(from_def_chk)
+            and not _is_sea_zone(to_def_chk)
+            and units_to_move
+        ):
+            ford_cost = land_move_ford_escort_cost_for_instances(
+                from_id, to_id, unit_instance_ids, state, unit_defs, territory_defs
+            )
+            if ford_cost > 0:
+                okey = resolve_territory_key_in_state(state, from_id, territory_defs)
+                dkey = resolve_territory_key_in_state(state, to_id, territory_defs)
+                needs_lead = ford_shortcut_requires_escort_lead(okey, dkey, territory_defs)
+                if needs_lead and not any(
+                    has_unit_special(unit_defs.get(u.unit_id), "ford_crosser") for u in units_to_move
+                ):
+                    if not pending_ford_crosser_lead_move_from_origin(
+                        state, from_id, state.phase, unit_defs, territory_defs
+                    ):
+                        raise ValueError(
+                            "Declare a ford crosser's move across this ford before other units may use escort capacity."
+                        )
+                ford_rem = remaining_ford_escort_slots(
+                    state,
+                    from_id,
+                    faction_id,
+                    unit_defs,
+                    territory_defs,
+                    state.phase,
+                    ford_pending_exclude,
+                )
+                if ford_cost > ford_rem:
+                    raise ValueError(
+                        f"Not enough ford escort capacity: need {ford_cost} slot(s) but only {ford_rem} remain "
+                        f"(ford crossers' transport_capacity in {from_id}, minus pending moves)"
+                    )
+
+    if not all(can_reach_list) and not sea_offload_ok:
         path = get_shortest_path(from_id, to_id, territory_defs)
         path_includes_sea = path and any(
             _is_sea_zone(territory_defs.get(tid)) for tid in path
@@ -761,52 +1136,58 @@ def _handle_move_units(
         from_sea = _is_sea_zone(territory_defs.get(from_id))
         drivers = [u for u, cr in zip(units_to_move, can_reach_list) if cr]
         passengers = [u for u, cr in zip(units_to_move, can_reach_list) if not cr]
-        # Offload: sea -> land, stack has naval (stay) + land (move); no driver needs to reach land
-        if from_sea and not dest_is_sea and not drivers and passengers:
-            land_adj = getattr(territory_defs.get(to_id), "adjacent", []) or []
-            sea_adj = getattr(territory_defs.get(from_id), "adjacent", []) or []
-            if from_id not in land_adj and to_id not in sea_adj:
-                raise ValueError(
-                    f"Territory {to_id} is not adjacent to sea zone {from_id} (cannot offload there)"
-                )
-            for u in passengers:
-                ud = unit_defs.get(u.unit_id)
-                if not is_land_unit(ud):
-                    raise ValueError(f"Unit {u.instance_id} cannot be carried (only land units offload)")
-                if not getattr(ud, "transportable", True):
-                    raise ValueError(f"Unit {u.instance_id} cannot be transported")
-            naval_capacity = sum(
-                getattr(unit_defs.get(u.unit_id), "transport_capacity", 0) or 0
-                for u in units_to_move
-                if (getattr(unit_defs.get(u.unit_id), "archetype", "") == "naval"
-                    or "naval" in getattr(unit_defs.get(u.unit_id), "tags", []))
+        sail_land_raw = (action.payload.get("sail_to_offload_land_territory_id") or "").strip()
+        move_type_payload = (action.payload.get("move_type") or "").strip()
+        if (
+            sail_land_raw
+            and move_type_payload == "sail"
+            and from_sea
+            and dest_is_sea
+        ):
+            vr = validate_sail_move_for_offload_sea_raid(
+                state,
+                from_id,
+                to_id,
+                sail_land_raw,
+                units_to_move,
+                unit_instance_ids,
+                unit_defs,
+                territory_defs,
+                faction_defs,
+                faction_id,
+                state.phase,
             )
-            if len(passengers) > naval_capacity:
-                raise ValueError(
-                    f"Too many passengers ({len(passengers)}) for transport capacity ({naval_capacity})"
-                )
+            if not vr.valid:
+                raise ValueError(vr.error or "Invalid sail for sea raid/offload")
         # Load: land -> sea, stack is all land; boats already in destination sea zone provide capacity
         elif not from_sea and dest_is_sea and not drivers and passengers:
             for u in passengers:
                 ud = unit_defs.get(u.unit_id)
                 if not is_land_unit(ud):
                     raise ValueError(f"Unit {u.instance_id} cannot be carried (only land units can be passengers)")
-                if not getattr(ud, "transportable", True):
-                    raise ValueError(f"Unit {u.instance_id} cannot be transported (transportable=false)")
-                if u.remaining_movement < 1:
-                    raise ValueError(f"Unit {u.instance_id} needs 1 movement to load (has {u.remaining_movement})")
+                if not is_transportable(ud):
+                    raise ValueError(f"Unit {u.instance_id} cannot be transported (no transportable tag)")
             to_territory = state.territories.get(to_id)
             if to_territory:
-                naval_capacity = sum(
-                    getattr(unit_defs.get(u.unit_id), "transport_capacity", 0) or 0
-                    for u in to_territory.units
-                    if get_unit_faction(u, unit_defs) == faction_id
-                    and (getattr(unit_defs.get(u.unit_id), "archetype", "") == "naval" or "naval" in getattr(unit_defs.get(u.unit_id), "tags", []))
-                )
-                if len(passengers) > naval_capacity:
-                    raise ValueError(
-                        f"Too many passengers ({len(passengers)}) for transport capacity in {to_id} ({naval_capacity})"
+                load_onto_decl = (action.payload.get("load_onto_boat_instance_id") or "").strip() or None
+                if load_onto_decl:
+                    boat_slots = remaining_load_slots_on_boat(
+                        state, to_id, load_onto_decl, faction_id, unit_defs, territory_defs, state.phase
                     )
+                    if len(passengers) > boat_slots:
+                        raise ValueError(
+                            f"Boat {load_onto_decl} has only {boat_slots} passenger slot(s) left in {to_id} "
+                            f"(onboard + pending loads), cannot load {len(passengers)}"
+                        )
+                else:
+                    zone_slots = remaining_sea_load_passenger_slots(
+                        state, to_id, faction_id, unit_defs, territory_defs, state.phase
+                    )
+                    if len(passengers) > zone_slots:
+                        raise ValueError(
+                            f"Not enough transport capacity in {to_id}: {len(passengers)} passengers but only "
+                            f"{zone_slots} slot(s) left (including pending loads this phase)"
+                        )
         elif path_includes_sea or dest_is_sea:
             if not drivers:
                 raise ValueError(
@@ -818,9 +1199,9 @@ def _handle_move_units(
                     raise ValueError(
                         f"Unit {u.instance_id} cannot be carried (only land units can be passengers)"
                     )
-                if not getattr(ud, "transportable", True):
+                if not is_transportable(ud):
                     raise ValueError(
-                        f"Unit {u.instance_id} cannot be transported (transportable=false)"
+                        f"Unit {u.instance_id} cannot be transported (no transportable tag)"
                     )
             naval_capacity = sum(
                 getattr(unit_defs.get(u.unit_id), "transport_capacity", 0) or 0
@@ -859,22 +1240,53 @@ def _handle_move_units(
                 f"Invalid charge_through for {to_id}: must be one of the valid charging routes"
             )
 
-    # Sea transport move_type: from payload or infer from from/to. Sea->land is offload by definition.
+    # Non-combat move: destination must be friendly, allied, or pass-through neutral only (never enemy, never ownable neutral).
+    # Use effective_territory_owner (same as pathfinding / validate_action) so pending_captures matches conquer-before-flush.
+    if state.phase == "non_combat_move":
+        to_territory = state.territories.get(to_id)
+        if to_territory:
+            eff_o = effective_territory_owner(state, to_id)
+            if eff_o is not None and eff_o != faction_id:
+                our_fd = faction_defs.get(faction_id)
+                owner_fd = faction_defs.get(eff_o)
+                our_alliance = getattr(our_fd, "alliance", "") if our_fd else ""
+                owner_alliance = getattr(owner_fd, "alliance", "") if owner_fd else ""
+                if owner_alliance != our_alliance:
+                    raise ValueError(
+                        f"Non-combat move cannot target enemy territory {to_id} (owner={eff_o})"
+                    )
+            elif eff_o is None:
+                to_def = territory_defs.get(to_id)
+                if to_def and getattr(to_def, "ownable", True):
+                    raise ValueError(
+                        f"Non-combat move cannot target ownable neutral territory {to_id} (conquest is combat move only)"
+                    )
+
+    # Sea transport move_type: infer from from/to. Land→sea with only aerial = combat entry (move_type aerial),
+    # even if the client sent move_type load (embark is transportable land only).
     move_type = action.payload.get("move_type")
-    if move_type not in ("load", "offload", "sail"):
-        from_def = territory_defs.get(from_id)
-        to_def = territory_defs.get(to_id)
-        from_sea = _is_sea_zone(from_def) or (
-            isinstance(from_id, str) and from_id and "sea_zone" in from_id.lower()
-        )
-        to_sea = _is_sea_zone(to_def) or (
-            isinstance(to_id, str) and to_id and "sea_zone" in to_id.lower()
-        )
-        if not from_sea and to_sea:
+    from_def_mt = territory_defs.get(from_id)
+    to_def_mt = territory_defs.get(to_id)
+    from_sea_mt = _is_sea_zone(from_def_mt) or (
+        isinstance(from_id, str) and from_id and "sea_zone" in from_id.lower()
+    )
+    to_sea_mt = _is_sea_zone(to_def_mt) or (
+        isinstance(to_id, str) and to_id and "sea_zone" in to_id.lower()
+    )
+    all_aerial_movers = bool(units_to_move) and all(
+        is_aerial_unit(unit_defs.get(u.unit_id)) for u in units_to_move
+    )
+    if not from_sea_mt and to_sea_mt and all_aerial_movers:
+        move_type = "aerial"
+    elif from_sea_mt and not to_sea_mt and all_aerial_movers:
+        # Sea→land with only flyers: not naval offload (pending move must not show as offload).
+        move_type = "aerial"
+    elif move_type not in ("load", "offload", "sail", "aerial", "land"):
+        if not from_sea_mt and to_sea_mt:
             move_type = "load"
-        elif from_sea and not to_sea:
+        elif from_sea_mt and not to_sea_mt:
             move_type = "offload"
-        elif from_sea and to_sea:
+        elif from_sea_mt and to_sea_mt:
             move_type = "sail"
         else:
             path = get_shortest_path(from_id, to_id, territory_defs)
@@ -889,6 +1301,37 @@ def _handle_move_units(
                 move_type = "aerial" if any_aerial else "land"
 
     load_onto_boat_instance_id = (action.payload.get("load_onto_boat_instance_id") or "").strip() or None
+    primary_unit_id = str(units_to_move[0].unit_id) if units_to_move else ""
+    avoid_forced_naval = bool(action.payload.get("avoid_forced_naval_combat"))
+    if avoid_forced_naval:
+        if state.phase != "combat_move":
+            raise ValueError("avoid_forced_naval_combat is only valid during combat_move")
+        if not sea_to_sea_move:
+            raise ValueError("avoid_forced_naval_combat requires a sea-to-sea sail")
+        if from_id == to_id:
+            raise ValueError("avoid_forced_naval_combat requires a different destination sea zone")
+        forced = set(
+            get_forced_naval_combat_instance_ids(
+                state, faction_id, unit_defs, territory_defs, faction_defs
+            )
+        )
+        naval_moving = {
+            u.instance_id for u in units_to_move if _is_naval_unit(unit_defs.get(u.unit_id))
+        }
+        if not naval_moving.issubset(forced):
+            raise ValueError(
+                "avoid_forced_naval_combat only applies to boats that must fight or leave the mobilization standoff"
+            )
+        if _sea_zone_has_hostile_enemy_boats(
+            state, to_id, faction_id, unit_defs, faction_defs, territory_defs
+        ):
+            raise ValueError(
+                "Cannot use avoid_forced_naval_combat to sail into a sea zone with hostile enemy boats"
+            )
+        if not are_sea_zones_directly_adjacent(territory_defs, from_id, to_id):
+            raise ValueError(
+                "avoid_forced_naval_combat: you may only sail to an adjacent sea zone (1 hex), regardless of movement allowance"
+            )
     pending_move = PendingMove(
         from_territory=from_id,
         to_territory=to_id,
@@ -897,11 +1340,10 @@ def _handle_move_units(
         charge_through=charge_through,
         move_type=move_type,
         load_onto_boat_instance_id=load_onto_boat_instance_id,
+        primary_unit_id=primary_unit_id,
+        avoid_forced_naval_combat=avoid_forced_naval,
     )
     state.pending_moves.append(pending_move)
-
-    # Emit movement event (declared, not yet executed)
-    events.append(units_moved(faction_id, from_id, to_id, unit_instance_ids, state.phase))
 
     return state, events
 
@@ -928,15 +1370,34 @@ def _apply_pending_moves(
     # Charge-through edges below are for cavalry only; these sea edges are separate.
     def _effective_move_type(m: PendingMove) -> str | None:
         mt = getattr(m, "move_type", None)
-        if mt in ("load", "offload", "sail"):
+        # Preserve land/aerial (combat moves); do not treat aerial as load when inferring from hex shape.
+        if mt in ("load", "offload", "sail", "land", "aerial"):
             return mt
-        from_def = territory_defs.get(m.from_territory)
-        to_def = territory_defs.get(m.to_territory)
+        raw_from = str(getattr(m, "from_territory", "") or "").strip()
+        raw_to = str(getattr(m, "to_territory", "") or "").strip()
+        fk = resolve_territory_key_in_state(state, raw_from, territory_defs)
+        tk = resolve_territory_key_in_state(state, raw_to, territory_defs)
+        from_def = territory_defs.get(fk)
+        to_def = territory_defs.get(tk)
         from_sea = _is_sea_zone(from_def)
         to_sea = _is_sea_zone(to_def)
         if not from_sea and to_sea:
+            from_terr = state.territories.get(fk)
+            ids = list(getattr(m, "unit_instance_ids", None) or [])
+            if from_terr and ids:
+                by_id = {u.instance_id: u for u in from_terr.units}
+                movers = [by_id[i] for i in ids if i in by_id]
+                if movers and all(is_aerial_unit(unit_defs.get(u.unit_id)) for u in movers):
+                    return "aerial"
             return "load"
         if from_sea and not to_sea:
+            from_terr = state.territories.get(fk)
+            ids = list(getattr(m, "unit_instance_ids", None) or [])
+            if from_terr and ids:
+                by_id = {u.instance_id: u for u in from_terr.units}
+                movers = [by_id[i] for i in ids if i in by_id]
+                if movers and all(is_aerial_unit(unit_defs.get(u.unit_id)) for u in movers):
+                    return "aerial"
             return "offload"
         if from_sea and to_sea:
             return "sail"
@@ -953,8 +1414,17 @@ def _apply_pending_moves(
         return 3
 
     # Use a deterministic key (not id(m)) so deepcopy(state) produces the same apply order as real state.
-    def _move_key(m) -> tuple:
-        return (m.from_territory, m.to_territory, tuple(m.unit_instance_ids))
+    # Normalize to str/tuple[str] so sorted(succ[...]) never compares bool vs list across moves.
+    def _move_key(m) -> tuple[str, str, tuple[str, ...]]:
+        raw_ids = getattr(m, "unit_instance_ids", None) or []
+        if not isinstance(raw_ids, list):
+            raw_ids = []
+        safe_ids = tuple(str(x) for x in raw_ids)
+        return (
+            str(getattr(m, "from_territory", "") or ""),
+            str(getattr(m, "to_territory", "") or ""),
+            safe_ids,
+        )
 
     def _charge_through_order(moves: list) -> list:
         keys = [_move_key(m) for m in moves]
@@ -1008,9 +1478,13 @@ def _apply_pending_moves(
     boat_instance_ids_that_attacked: set[str] = set()
 
     for pending_move in moves_to_apply:
-        from_id = pending_move.from_territory
-        to_id = pending_move.to_territory
-        unit_instance_ids = pending_move.unit_instance_ids
+        from_id = resolve_territory_key_in_state(
+            state, str(pending_move.from_territory or "").strip(), territory_defs
+        )
+        to_id = resolve_territory_key_in_state(
+            state, str(pending_move.to_territory or "").strip(), territory_defs
+        )
+        unit_instance_ids = list(pending_move.unit_instance_ids)
         charge_through = getattr(pending_move, "charge_through", None) or []
         charge_through = [t for t in charge_through if t != to_id]
         # Destination must never be in charge_through (only via-territories are checked for empty)
@@ -1019,12 +1493,63 @@ def _apply_pending_moves(
         to_territory = state.territories.get(to_id)
 
         if not from_territory or not to_territory:
-            continue  # Skip invalid moves
+            if phase == "combat_move":
+                raise ValueError(
+                    f"Cannot apply pending combat move: missing territory "
+                    f"(from={pending_move.from_territory!r} -> {from_id!r}, "
+                    f"to={pending_move.to_territory!r} -> {to_id!r})"
+                )
+            continue  # Skip invalid moves (non-combat: defensive)
+
+        # Same expansion as move declaration: client/DB may store only boat IDs; without this,
+        # ids_to_move filters to land units → empty → pending move is consumed and passengers never offload.
+        from_def_exp = territory_defs.get(from_id)
+        to_def_exp = territory_defs.get(to_id)
+        if (
+            from_def_exp
+            and to_def_exp
+            and _is_sea_zone(from_def_exp)
+            and not _is_sea_zone(to_def_exp)
+            and getattr(state, "current_faction", None)
+        ):
+            unit_instance_ids = expand_sea_offload_instance_ids(
+                state,
+                from_id,
+                to_id,
+                unit_instance_ids,
+                unit_defs,
+                territory_defs,
+                state.current_faction,
+            )
+
+        # Non-combat: never apply a move into enemy territory or ownable neutral (defensive guard)
+        if phase == "non_combat_move":
+            faction_id_check = None
+            if unit_instance_ids:
+                first_unit = next((u for u in from_territory.units if u.instance_id == unit_instance_ids[0]), None)
+                faction_id_check = get_unit_faction(first_unit, unit_defs) if first_unit else None
+            to_eff = effective_territory_owner(state, to_id)
+            if to_eff is not None and faction_id_check and to_eff != faction_id_check:
+                our_fd = faction_defs.get(faction_id_check)
+                owner_fd = faction_defs.get(to_eff)
+                if not our_fd or not owner_fd or getattr(owner_fd, "alliance", "") != getattr(our_fd, "alliance", ""):
+                    continue  # Skip invalid move: would place units in enemy territory
+            if to_eff is None:
+                to_def = territory_defs.get(to_id)
+                if to_def and getattr(to_def, "ownable", True):
+                    continue  # Skip: cannot move into ownable neutral in non-combat
 
         # Build lookup of units in source (need for faction_id and moves)
         units_by_id = {u.instance_id: u for u in from_territory.units}
         moving_units = [units_by_id[i] for i in unit_instance_ids if i in units_by_id]
-        force_has_ground = any(is_land_unit(unit_defs.get(u.unit_id)) for u in moving_units)
+        all_movers_aerial = bool(moving_units) and all(
+            is_aerial_unit(unit_defs.get(u.unit_id)) for u in moving_units
+        )
+        # Conquest (charge-through hexes, combat_move capture): need a unit that can hold territory,
+        # not aerial-only or siegework-only stacks (ladders/rams alone cannot conquer).
+        force_can_conquer_territory = any(
+            can_conquer_territory_as_attacker(unit_defs.get(u.unit_id)) for u in moving_units
+        )
 
         # Cavalry charging: conquer only empty enemy/unowned via-territories (never friendly/allied)
         faction_id = None
@@ -1055,8 +1580,8 @@ def _apply_pending_moves(
                                     territories_to_capture.append(tid)
                 # Only conquer via-territories that are unowned or enemy (never friendly/allied)
                 for tid in territories_to_capture:
-                    if not force_has_ground:
-                        continue  # Aerial-only forces cannot conquer
+                    if not force_can_conquer_territory:
+                        continue  # Aerial-only / siegework-only cannot conquer
                     t = state.territories.get(tid)
                     tdef = territory_defs.get(tid)
                     if not t or not tdef or not getattr(tdef, "ownable", True):
@@ -1076,8 +1601,22 @@ def _apply_pending_moves(
 
         # Calculate the movement cost (distance) to destination.
         # When charging through territories, use the actual path: from_id -> charge_through[0] -> ... -> to_id.
-        # For sea transport: load = 1 per passenger, offload = 0, sail = distance for drivers and 0 for passengers.
+        # Sea transport movement: load = 0 (passengers and boat); sail = distance for naval drivers only, 0 for passengers;
+        # offload = 1 for land passengers going ashore, 0 for boats (boats stay in sea).
         move_type = getattr(pending_move, "move_type", None)
+        if move_type is None:
+            move_type = _effective_move_type(pending_move)
+        # Sea→land with only flyers must apply as aerial (not offload/land); stale JSON may use wrong move_type.
+        from_def_norm = territory_defs.get(from_id)
+        to_def_norm = territory_defs.get(to_id)
+        if (
+            from_def_norm
+            and to_def_norm
+            and _is_sea_zone(from_def_norm)
+            and not _is_sea_zone(to_def_norm)
+            and all_movers_aerial
+        ):
+            move_type = "aerial"
         any_aerial = False
         for iid in unit_instance_ids:
             u = units_by_id.get(iid)
@@ -1096,14 +1635,45 @@ def _apply_pending_moves(
                 )
         else:
             distance = calculate_movement_cost(from_id, to_id, territory_defs, is_aerial=any_aerial)
+        # Offload / aerial sea→land: single step; BFS can return None if only one side lists the edge.
+        if (
+            distance is None
+            and move_type in ("offload", "aerial")
+            and from_def_norm
+            and to_def_norm
+            and _is_sea_zone(from_def_norm)
+            and not _is_sea_zone(to_def_norm)
+            and sea_land_adjacent_for_offload(from_id, to_id, territory_defs)
+        ):
+            distance = 1
         if distance is None:
+            if move_type == "offload":
+                raise ValueError(
+                    f"Cannot apply pending sea offload: no valid path from {from_id} to {to_id}"
+                )
+            if phase == "combat_move":
+                raise ValueError(
+                    f"Cannot apply pending combat move: no valid path from {from_id} to {to_id} "
+                    f"(move_type={move_type!r})"
+                )
             continue  # Skip if no path
+
+        if (
+            move_type == "sail"
+            and phase == "combat_move"
+            and getattr(pending_move, "avoid_forced_naval_combat", False)
+        ):
+            if not are_sea_zones_directly_adjacent(territory_defs, from_id, to_id):
+                raise ValueError(
+                    "avoid_forced_naval_combat requires adjacent sea zones (1 hex); pending move is invalid"
+                )
+            distance = 1
 
         # Per-unit movement cost for sea transport
         if move_type == "load":
-            cost_per_unit = 1
-        elif move_type == "offload":
             cost_per_unit = 0
+        elif move_type == "offload":
+            cost_per_unit = None  # per-unit: land passengers 1, naval (boats in list) 0
         elif move_type == "sail":
             # Drivers pay distance, passengers pay 0
             def _is_driver(ud):
@@ -1123,6 +1693,13 @@ def _apply_pending_moves(
             if move_type == "sail":
                 ud = unit_defs.get(unit.unit_id)
                 unit_cost = distance if _is_driver(ud) else 0
+            elif move_type == "offload":
+                ud = unit_defs.get(unit.unit_id)
+                unit_cost = (
+                    1
+                    if ud and is_land_unit(ud) and not _is_naval_unit(ud)
+                    else 0
+                )
             else:
                 unit_cost = cost_per_unit
             if unit_cost > unit.remaining_movement:
@@ -1149,20 +1726,54 @@ def _apply_pending_moves(
                     f"Charge path cannot pass through {tid}: territory has units (charging only through empty enemy/unowned or through friendly/allied)"
                 )
 
-        # Offload (sea -> land): ONLY land units move to land; boats stay in sea. move_type is always set at creation (API + reducer).
-        # Defensive: if from is sea and to is land, only move land units even if move_type was wrong.
+        # Offload (sea -> land): ONLY land units (passengers) move to land; boats stay in sea. Naval units cannot go on land.
+        # Aerial sea→land (move_type aerial): movers are flyers, not embarked land — do not use the passenger filter.
+        # move_type is always set at creation (API + reducer). Defensive: if from is sea and to is land, only move land units.
         from_sea = _is_sea_zone(territory_defs.get(from_id))
         to_land = territory_defs.get(to_id) and not _is_sea_zone(territory_defs.get(to_id))
         ids_to_move = list(unit_instance_ids)
-        if move_type == "offload" or (from_sea and to_land):
+        # Naval offload: only land passengers leave the boat. All-aerial stacks are never filtered here.
+        if (move_type == "offload" or (from_sea and to_land)) and not all_movers_aerial:
             ids_to_move = [
                 iid for iid in unit_instance_ids
-                if units_by_id.get(iid) and is_land_unit(unit_defs.get(units_by_id[iid].unit_id))
+                if units_by_id.get(iid)
+                and is_land_unit(unit_defs.get(units_by_id[iid].unit_id))
+                and not _is_naval_unit(unit_defs.get(units_by_id[iid].unit_id))
             ]
             if ids_to_move and phase == "combat_move":
                 if not hasattr(state, "territory_sea_raid_from") or state.territory_sea_raid_from is None:
                     state.territory_sea_raid_from = {}
                 state.territory_sea_raid_from[to_id] = from_id
+            elif phase == "combat_move" and not ids_to_move:
+                boat_ids_in_move = {
+                    iid for iid in unit_instance_ids
+                    if (uu := units_by_id.get(iid)) and _is_naval_unit(unit_defs.get(uu.unit_id))
+                }
+                stranded = [
+                    u for u in from_territory.units
+                    if is_land_unit(unit_defs.get(u.unit_id))
+                    and not _is_naval_unit(unit_defs.get(u.unit_id))
+                    and getattr(u, "loaded_onto", None)
+                    and getattr(u, "loaded_onto") in boat_ids_in_move
+                ]
+                if stranded:
+                    raise ValueError(
+                        "Pending sea offload/raid would move no land units ashore, but passengers remain "
+                        f"on boats in this move (from={from_id}, to={to_id}). "
+                        f"stored_instance_ids={list(pending_move.unit_instance_ids)!r} "
+                        f"after_expand={unit_instance_ids!r}."
+                    )
+        load_boat_count_for_event: int | None = None
+        if move_type == "load":
+            load_boat_count_for_event = _load_boat_count_for_message(
+                from_id,
+                to_id,
+                list(unit_instance_ids),
+                state,
+                unit_defs,
+                state.current_faction or "",
+                getattr(pending_move, "load_onto_boat_instance_id", None) or None,
+            )
         # Move each unit and deduct movement cost
         for instance_id in ids_to_move:
             unit = units_by_id.get(instance_id)
@@ -1171,10 +1782,24 @@ def _apply_pending_moves(
                 if move_type == "sail":
                     ud = unit_defs.get(unit.unit_id)
                     unit_cost = distance if _is_driver(ud) else 0
+                elif move_type == "offload":
+                    unit_cost = 1  # ids_to_move are land passengers only
                 else:
                     unit_cost = cost_per_unit
                 unit.remaining_movement -= unit_cost
                 to_territory.units.append(unit)
+
+        if (
+            phase == "combat_move"
+            and move_type == "sail"
+            and getattr(pending_move, "avoid_forced_naval_combat", False)
+        ):
+            avoided = list(getattr(state, "avoided_forced_naval_combat_instance_ids", None) or [])
+            for iid in ids_to_move:
+                u = units_by_id.get(iid)
+                if u and _is_naval_unit(unit_defs.get(u.unit_id)) and iid not in avoided:
+                    avoided.append(iid)
+            state.avoided_forced_naval_combat_instance_ids = avoided
 
         # Sea transport: assign loaded_onto on load, clear on offload
         if move_type == "load":
@@ -1211,11 +1836,18 @@ def _apply_pending_moves(
                 idx = 0
                 for boat in naval_units:
                     cap = getattr(unit_defs.get(boat.unit_id), "transport_capacity", 0) or 0
-                    for _ in range(cap):
+                    existing_on_boat = sum(1 for u in to_territory.units if getattr(u, "loaded_onto", None) == boat.instance_id)
+                    slots = max(0, cap - existing_on_boat)
+                    for _ in range(slots):
                         if idx >= len(passengers):
                             break
                         passengers[idx].loaded_onto = boat.instance_id
                         idx += 1
+                if idx < len(passengers):
+                    raise ValueError(
+                        f"Not enough transport capacity in {to_id} for {len(passengers)} passengers "
+                        f"({len(passengers) - idx} unassigned after filling boats)"
+                    )
         elif move_type == "offload":
             # Clear loaded_onto for units we moved to land (same object refs in to_territory)
             for u in to_territory.units:
@@ -1261,8 +1893,8 @@ def _apply_pending_moves(
                             boat_instance_ids_that_attacked.add(iid)
 
         # Check if this is combat_move into territory we capture (undefended enemy or empty unowned)
-        # Aerial-only forces cannot conquer: require at least one land unit
-        if unit_instance_ids and faction_id and phase == "combat_move" and force_has_ground:
+        # Aerial-only / siegework-only cannot conquer: require at least one conquering-capable unit
+        if unit_instance_ids and faction_id and phase == "combat_move" and force_can_conquer_territory:
             to_owner = to_territory.owner
             to_def = territory_defs.get(to_id)
             if not to_def or not getattr(to_def, "ownable", True):
@@ -1285,6 +1917,20 @@ def _apply_pending_moves(
                     ]
                     if not enemy_units:
                         state.pending_captures[to_id] = faction_id
+
+        event_faction = state.current_faction or faction_id or ""
+        ids_for_log = ids_to_move if ids_to_move else list(unit_instance_ids)
+        events.append(
+            units_moved(
+                event_faction,
+                from_id,
+                to_id,
+                ids_for_log,
+                phase,
+                move_type=move_type,
+                load_boat_count=load_boat_count_for_event if move_type == "load" else None,
+            )
+        )
 
     # Post-pass: clear loaded_naval_must_attack_instance_ids for any boat that attacked (sea raid or naval combat)
     if phase == "combat_move" and boat_instance_ids_that_attacked and getattr(state, "loaded_naval_must_attack_instance_ids", []):
@@ -1311,6 +1957,29 @@ def get_state_after_pending_moves(
     return state_copy
 
 
+def get_state_after_combat_moves_scenario(
+    state: GameState,
+    unit_defs: dict[str, UnitDefinition],
+    territory_defs: dict[str, TerritoryDefinition],
+    faction_defs: dict[str, FactionDefinition],
+    additional_pending_moves: list[PendingMove] | None = None,
+) -> GameState:
+    """
+    Deepcopy state, optionally append extra combat_move pending entries, then apply every
+    combat_move pending move (same ordering, charge-through inference, and captures as phase end).
+    Use for AI/simulation: forecast outcome of queued combat moves plus hypothetical candidates.
+    """
+    state_copy = deepcopy(state)
+    if additional_pending_moves:
+        state_copy.pending_moves = list(state_copy.pending_moves or []) + list(
+            additional_pending_moves
+        )
+    _apply_pending_moves(
+        state_copy, "combat_move", unit_defs, territory_defs, faction_defs
+    )
+    return state_copy
+
+
 def _handle_cancel_move(
     state: GameState,
     action: Action,
@@ -1325,19 +1994,7 @@ def _handle_cancel_move(
     if move_index < 0 or move_index >= len(state.pending_moves):
         raise ValueError(f"Invalid move index: {move_index}")
     
-    # Remove the move at the specified index
-    cancelled_move = state.pending_moves.pop(move_index)
-    
-    # Emit event
-    events.append(GameEvent(
-        type="move_cancelled",
-        payload={
-            "from_territory": cancelled_move.from_territory,
-            "to_territory": cancelled_move.to_territory,
-            "unit_instance_ids": cancelled_move.unit_instance_ids,
-        }
-    ))
-    
+    state.pending_moves.pop(move_index)
     return state, events
 
 
@@ -1353,7 +2010,7 @@ def _handle_mobilize_units(
     """
     Queue a mobilization: add to pending_mobilizations and deduct from faction_purchased_units.
     Actual deployment happens at end of mobilization phase.
-    Land: destination must be an owned territory with a standing camp.
+    Land: destination must be an owned territory with a standing camp, a port, or a home territory for the unit type (cap 1 per unit type per phase).
     Naval: destination must be a sea zone adjacent to an owned port (boats are produced in the adjacent sea).
     """
     events: list[GameEvent] = []
@@ -1364,7 +2021,7 @@ def _handle_mobilize_units(
     if not units_to_mobilize:
         raise ValueError("No units specified to mobilize")
 
-    if not _faction_owns_capital(state, faction_id, faction_defs):
+    if not faction_owns_capital(state, faction_id, faction_defs):
         raise ValueError(f"Cannot mobilize units: {faction_id}'s capital has been captured")
 
     dest_territory = state.territories.get(destination_id)
@@ -1409,21 +2066,24 @@ def _handle_mobilize_units(
         if dest_territory.owner != faction_id:
             raise ValueError(f"Cannot mobilize to {destination_id}: not owned by {faction_id}")
         has_camp = _territory_has_standing_camp(state, destination_id, camp_defs)
-        has_port = _territory_has_port(destination_id, port_defs)
-        if not has_camp and not has_port:
-            raise ValueError(
-                f"Land units can only mobilize to a territory with a standing camp or a port; {destination_id} has neither"
-            )
+        is_home_for = {}
+        for uid, ud in unit_defs.items():
+            if getattr(ud, "faction", None) != faction_id:
+                continue
+            if has_unit_special(ud, "home") and destination_id in _home_territory_ids(ud):
+                is_home_for[uid] = True
+        # Land never deploys to a port *as* a port (naval pool). Camps OK; home units OK (e.g. Corsair → Umbar even though Umbar has a port).
+        if not has_camp:
+            for ureq in units_to_mobilize:
+                uid = ureq.get("unit_id")
+                if not is_home_for.get(uid):
+                    raise ValueError(
+                        f"Land units can only mobilize to a standing camp or a home territory for that unit type; "
+                        f"{destination_id} is not valid for {uid}"
+                    )
         power_production = dest_def.produces.get("power", 0)
         total_mobilizing = sum(u.get("count", 0) for u in units_to_mobilize)
-        if has_port:
-            total_for_port = _total_pending_mobilization_to_port(state, destination_id, territory_defs, port_defs)
-            if total_for_port + total_mobilizing > power_production:
-                raise ValueError(
-                    f"Cannot mobilize {total_mobilizing} more to {destination_id}: "
-                    f"port shared pool already {total_for_port}, capacity is {power_production}"
-                )
-        else:
+        if has_camp:
             already_pending = sum(
                 sum(item.get("count", 0) for item in pm.units)
                 for pm in state.pending_mobilizations
@@ -1433,6 +2093,29 @@ def _handle_mobilize_units(
                 raise ValueError(
                     f"Cannot mobilize {total_mobilizing} more units to {destination_id}: "
                     f"already {already_pending} pending, capacity is {power_production}"
+                )
+        else:
+            # Home deployment (including port + home, e.g. Umbar for Corsair): single unit type, cap 1 per type per phase
+            unit_ids_in_batch = {u.get("unit_id") for u in units_to_mobilize}
+            if len(unit_ids_in_batch) != 1:
+                raise ValueError(
+                    "When mobilizing to a home territory, all units must be the same type"
+                )
+            unit_id = next(iter(unit_ids_in_batch))
+            if not is_home_for.get(unit_id):
+                raise ValueError(
+                    f"{destination_id} is not a home territory for {unit_id}"
+                )
+            already_pending = sum(
+                u.get("count", 0)
+                for pm in state.pending_mobilizations
+                if pm.destination == destination_id
+                for u in pm.units
+                if u.get("unit_id") == unit_id
+            )
+            if already_pending + total_mobilizing > 1:
+                raise ValueError(
+                    f"At most 1 {unit_id} can be mobilized to home territory {destination_id} per phase (already {already_pending} pending)"
                 )
 
     purchased_units = state.faction_purchased_units.get(faction_id, [])
@@ -1468,9 +2151,18 @@ def _apply_pending_mobilizations(
     faction_id = state.current_faction
 
     for pending in state.pending_mobilizations:
-        dest_territory = state.territories.get(pending.destination)
+        dest_key = resolve_territory_key_in_state(
+            state, str(pending.destination or "").strip(), territory_defs
+        )
+        dest_territory = state.territories.get(dest_key)
         if not dest_territory:
             continue
+        dest_def = territory_defs.get(dest_key)
+        had_hostile_naval_before = False
+        if dest_def and _is_sea_zone(dest_def):
+            had_hostile_naval_before = _sea_zone_has_hostile_enemy_boats(
+                state, dest_key, faction_id, unit_defs, faction_defs, territory_defs
+            )
         mobilized_info = []
         for unit_request in pending.units:
             unit_id = unit_request.get("unit_id")
@@ -1484,6 +2176,11 @@ def _apply_pending_mobilizations(
             dest_territory.units.extend(units_to_add)
             for u in units_to_add:
                 mobilized_info.append({"unit_id": u.unit_id, "instance_id": u.instance_id})
+                if had_hostile_naval_before and _is_naval_unit(unit_defs.get(u.unit_id)):
+                    nm = list(getattr(state, "naval_mobilization_intruder_instance_ids", None) or [])
+                    if u.instance_id not in nm:
+                        nm.append(u.instance_id)
+                    state.naval_mobilization_intruder_instance_ids = nm
         if mobilized_info:
             events.append(units_mobilized(faction_id, pending.destination, mobilized_info))
 
@@ -1544,6 +2241,9 @@ def _handle_initiate_combat(
     territory_id = action.payload.get("territory_id")
     sea_zone_id = action.payload.get("sea_zone_id")
     dice_rolls = action.payload.get("dice_rolls", {})
+    fuse_bomb = action.payload.get("fuse_bomb", True)
+    if not isinstance(fuse_bomb, bool):
+        fuse_bomb = True
 
     # Validate no active combat
     if state.active_combat is not None:
@@ -1575,23 +2275,26 @@ def _handle_initiate_combat(
         attacker_territory = sea_zone
         _normalize_unit_health_for_combat(sea_zone.units, unit_defs)
         _normalize_unit_health_for_combat(territory.units, unit_defs)
-        # Sea raid: only land units (passengers) fight; boats stay in sea zone.
+        # Sea raid: only land units (passengers) fight; boats stay in sea zone. Naval units cannot attack land.
         # After phase end, land units may already be on territory (offloaded); use them then.
         attacker_units = [
             deepcopy(u) for u in sea_zone.units
-            if get_unit_faction(u, unit_defs) == attacker_faction and is_land_unit(unit_defs.get(u.unit_id))
+            if get_unit_faction(u, unit_defs) == attacker_faction
+            and is_land_unit(unit_defs.get(u.unit_id))
+            and not _is_naval_unit(unit_defs.get(u.unit_id))
         ]
         if not attacker_units:
             attacker_units = [
                 deepcopy(u) for u in territory.units
-                if get_unit_faction(u, unit_defs) == attacker_faction and is_land_unit(unit_defs.get(u.unit_id))
+                if get_unit_faction(u, unit_defs) == attacker_faction
+                and is_land_unit(unit_defs.get(u.unit_id))
+                and not _is_naval_unit(unit_defs.get(u.unit_id))
             ]
             if attacker_units:
                 attacker_territory = territory  # Attackers already offloaded to land
         defender_units = [
             deepcopy(u) for u in territory.units
-            if get_unit_faction(u, unit_defs) is not None
-            and getattr(faction_defs.get(get_unit_faction(u, unit_defs)), "alliance", "") != attacker_alliance
+            if _land_combat_unit_side(u, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "defender"
         ]
         attacker_units.sort(key=lambda u: u.instance_id)
         defender_units.sort(key=lambda u: u.instance_id)
@@ -1600,14 +2303,24 @@ def _handle_initiate_combat(
         if not defender_units:
             # Sea raid conquer: empty land; move only land units (passengers) to territory, boats stay in sea zone
             for u in sea_zone.units[:]:
-                if get_unit_faction(u, unit_defs) == attacker_faction and is_land_unit(unit_defs.get(u.unit_id)):
+                ud = unit_defs.get(u.unit_id)
+                if (get_unit_faction(u, unit_defs) == attacker_faction
+                        and is_land_unit(ud)
+                        and not _is_naval_unit(ud)):
                     sea_zone.units.remove(u)
                     setattr(u, "loaded_onto", None)
                     territory.units.append(u)
             state.pending_captures[territory_id] = attacker_faction
             landed_ids = [u.instance_id for u in territory.units if get_unit_faction(u, unit_defs) == attacker_faction]
             events.append(combat_started(territory_id, attacker_faction, landed_ids, territory.owner or "neutral", []))
-            events.append(combat_ended(territory_id, "attacker", attacker_faction, territory.owner, landed_ids, [], 0))
+            events.append(combat_ended(
+                territory_id, "attacker", attacker_faction, territory.owner,
+                landed_ids, [], 0,
+                outcome="conquer",
+                liberated_for=_liberation_beneficiary_if_allied_original(
+                    territory_id, territory, attacker_faction, faction_defs, state,
+                ),
+            ))
             return state, events
     else:
         _normalize_unit_health_for_combat(territory.units, unit_defs)
@@ -1616,15 +2329,17 @@ def _handle_initiate_combat(
         territory_def = territory_defs.get(territory_id)
         is_naval_combat = territory_def and getattr(territory_def, "terrain_type", "").lower() == "sea"
         for unit in territory.units:
-            unit_owner = get_unit_faction(unit, unit_defs)
-            if is_naval_combat and not _is_naval_unit(unit_defs.get(unit.unit_id)):
-                continue  # In sea zones only naval units participate in combat
-            if unit_owner == attacker_faction:
+            if is_naval_combat and not participates_in_sea_hex_naval_combat(
+                unit, unit_defs.get(unit.unit_id)
+            ):
+                continue  # Sea combat: ships only; passengers (loaded_onto) do not fight
+            side = _land_combat_unit_side(
+                unit, attacker_faction, attacker_alliance, unit_defs, faction_defs,
+            )
+            if side == "attacker":
                 attacker_units.append(deepcopy(unit))
-            elif unit_owner is not None:
-                unit_alliance = getattr(faction_defs.get(unit_owner), "alliance", None)
-                if unit_alliance != attacker_alliance:
-                    defender_units.append(deepcopy(unit))
+            elif side == "defender":
+                defender_units.append(deepcopy(unit))
         attacker_units.sort(key=lambda u: u.instance_id)
         defender_units.sort(key=lambda u: u.instance_id)
         if len(attacker_units) == 0:
@@ -1647,6 +2362,13 @@ def _handle_initiate_combat(
         state.loaded_naval_must_attack_instance_ids = [
             bid for bid in state.loaded_naval_must_attack_instance_ids if bid not in attacker_boat_ids
         ]
+
+    if not sea_zone_id:
+        tdef_nav = territory_defs.get(territory_id)
+        if tdef_nav and getattr(tdef_nav, "terrain_type", "").lower() == "sea":
+            in_sea = {u.instance_id for u in territory.units}
+            nm = list(getattr(state, "naval_mobilization_intruder_instance_ids", None) or [])
+            state.naval_mobilization_intruder_instance_ids = [i for i in nm if i not in in_sea]
 
     # Emit combat started event
     events.append(combat_started(
@@ -1677,11 +2399,22 @@ def _handle_initiate_combat(
         and all(has_unit_special(unit_defs.get(u.unit_id), "stealth") for u in attacker_units)
     )
     if all_attackers_have_stealth:
+        pd_prefire = _prefire_stat_delta(state)
+        spec_stealth = compute_battle_specials_and_modifiers(
+            attacker_units,
+            defender_units,
+            territory_def,
+            unit_defs,
+            is_sea_raid=bool(sea_zone_id),
+            archer_prefire_applicable=False,
+            stealth_prefire_applicable=True,
+        )
         attacker_units_at_start_stealth = [
             _build_round_unit_display(
                 u, unit_defs.get(u.unit_id),
-                -1 + attacker_mods.get(u.instance_id, 0), True, attacker_faction,
-                territory_def, terrain_att, captain_att, anticav_att,
+                pd_prefire + attacker_mods.get(u.instance_id, 0), True, attacker_faction,
+                territory_def, spec_stealth,
+                passenger_aboard=_passengers_aboard_on_boat(u, attacker_territory.units, unit_defs),
             )
             for u in attacker_units
         ]
@@ -1689,7 +2422,8 @@ def _handle_initiate_combat(
             _build_round_unit_display(
                 u, unit_defs.get(u.unit_id),
                 defender_mods.get(u.instance_id, 0), False, defender_faction,
-                territory_def, terrain_def, captain_def, anticav_def,
+                territory_def, spec_stealth,
+                passenger_aboard=_passengers_aboard_on_boat(u, territory.units, unit_defs),
             )
             for u in defender_units
         ]
@@ -1697,9 +2431,10 @@ def _handle_initiate_combat(
         round_result = resolve_stealth_prefire(
             attacker_units, defender_units, unit_defs, prefire_attacker_rolls,
             stat_modifiers_attacker_extra=attacker_mods,
+            prefire_penalty_delta=pd_prefire,
         )
         stealth_stat_modifiers = {
-            u.instance_id: -1 + attacker_mods.get(u.instance_id, 0) for u in attacker_units
+            u.instance_id: pd_prefire + attacker_mods.get(u.instance_id, 0) for u in attacker_units
         }
         attacker_dice_grouped_stealth = group_dice_by_stat(
             attacker_units, prefire_attacker_rolls, unit_defs, is_attacker=True,
@@ -1757,7 +2492,10 @@ def _handle_initiate_combat(
             state, end_events = _resolve_combat_end(
                 state, attacker_faction, territory_id,
                 end_round_result, [prefire_log_entry], territory_defs, unit_defs,
+                faction_defs,
                 sea_zone_id=sea_zone_id,
+                initial_attacker_instance_ids=attacker_instance_ids,
+                initial_defender_instance_ids=defender_instance_ids,
             )
             events.extend(end_events)
             return state, events
@@ -1772,31 +2510,272 @@ def _handle_initiate_combat(
             sea_zone_id=sea_zone_id,
             casualty_order_attacker="best_unit",
             must_conquer=False,
+            initial_attacker_instance_ids=attacker_instance_ids,
+            initial_defender_instance_ids=defender_instance_ids,
+            cumulative_hits_received_by_attacker=0,
+            cumulative_hits_received_by_defender=round_result.attacker_hits,
+            fuse_bomb=fuse_bomb,
         )
         return state, events
 
-    # Check if defender has archers -> run prefire before round 1 (archetype "archer" or "archer" in tags)
-    def _is_archer(unit_def) -> bool:
-        if not unit_def:
-            return False
-        if getattr(unit_def, "archetype", "") == ARCHETYPE_ARCHER:
-            return True
-        return "archer" in getattr(unit_def, "tags", []) or []
+    combat_log_prefix: list[CombatRoundResult] = []
+
+    # Check if defender has archer special -> prefire before round 1
     defender_archer_units = [
         u for u in defender_units
-        if _is_archer(unit_defs.get(u.unit_id))
+        if archer_prefire_eligible(unit_defs.get(u.unit_id))
     ]
-    if defender_archer_units:
-        # Prefire: only defender archers roll (at defense-1, or defense+0 when stronghold/fortress); hits applied to attackers only
-        archer_prefire_penalty = 0 if (
-            getattr(territory_def, "is_stronghold", False)
-            or (getattr(territory_def, "terrain_type", "").lower() == "fortress")
-        ) else -1
+    defender_casualty_order = getattr(state, "territory_defender_casualty_order", {}).get(territory_id, "best_unit")
+
+    # Dedicated siegeworks round first when applicable (independent of archer prefire; precedes it).
+    defender_territory_is_stronghold_early = bool(territory_def and getattr(territory_def, "is_stronghold", False))
+    territory_is_sea_for_sh = _is_sea_zone(territory_defs.get(territory_id))
+    defender_stronghold_hp_cur_sw: int | None = None
+    if not territory_is_sea_for_sh and territory_def:
+        base_hp_sw = getattr(territory_def, "stronghold_base_health", 0) or 0
+        if getattr(territory_def, "is_stronghold", False) and base_hp_sw > 0:
+            cur_sw = getattr(territory, "stronghold_current_health", None)
+            defender_stronghold_hp_cur_sw = cur_sw if cur_sw is not None else base_hp_sw
+    siegework_att_dice_init, siegework_def_dice_init = get_siegework_dice_counts(
+        attacker_units, defender_units, unit_defs, defender_territory_is_stronghold_early,
+        defender_stronghold_hp=defender_stronghold_hp_cur_sw,
+        fuse_bomb=fuse_bomb,
+    )
+    siege_needed_at_start = (
+        siegework_att_dice_init > 0
+        or siegework_def_dice_init > 0
+    )
+    _initiate_ladder_infantry_ids: list[str] = []
+    _initiate_ladder_equipment_count = 0
+
+    if siege_needed_at_start:
+        _, _, att_attack_ov_siege = get_attacker_effective_dice_and_bombikazi_self_destruct(
+            attacker_units, unit_defs,
+            use_paired_fused_siegework_rules=fuse_bomb,
+        )
+        attacker_id_to_type_health_sw = {u.instance_id: (u.unit_id, u.base_health) for u in attacker_units}
+        defender_id_to_type_health_sw = {u.instance_id: (u.unit_id, u.base_health) for u in defender_units}
+
+        def hits_by_unit_type_sw(casualties: list[str], wounded: list[str], id_map: dict) -> dict[str, int]:
+            out: dict[str, int] = {}
+            for iid in casualties:
+                tup = id_map.get(iid)
+                if tup:
+                    uid, health = tup
+                    out[uid] = out.get(uid, 0) + health
+            for iid in wounded:
+                tup = id_map.get(iid)
+                if tup:
+                    uid = tup[0]
+                    out[uid] = out.get(uid, 0) + 1
+            return out
+
+        spec_sw = compute_battle_specials_and_modifiers(
+            attacker_units,
+            defender_units,
+            territory_def,
+            unit_defs,
+            is_sea_raid=bool(sea_zone_id),
+            archer_prefire_applicable=False,
+            ram_applicable=True,
+        )
+        disp_att_sw = get_siegework_round_attacker_display_units(
+            attacker_units, unit_defs, defender_territory_is_stronghold_early,
+            defender_stronghold_hp=defender_stronghold_hp_cur_sw,
+            fuse_bomb=fuse_bomb,
+        )
+        disp_def_sw = get_siegework_round_defender_display_units(defender_units, unit_defs)
+        # Siegeworks UI: only units that belong on shelves this round (rolling + ladder gear + ram when
+        # applicable, etc.) — not the full battle roster.
+        attacker_units_at_start_sw = [
+            _build_round_unit_display(
+                u, unit_defs.get(u.unit_id),
+                attacker_mods.get(u.instance_id, 0), True, attacker_faction,
+                territory_def, spec_sw,
+                attacker_effective_attack_override=att_attack_ov_siege,
+                passenger_aboard=_passengers_aboard_on_boat(u, attacker_territory.units, unit_defs),
+            )
+            for u in disp_att_sw
+        ]
+        defender_units_at_start_sw = [
+            _build_round_unit_display(
+                u, unit_defs.get(u.unit_id),
+                defender_mods.get(u.instance_id, 0), False, defender_faction,
+                territory_def, spec_sw,
+                passenger_aboard=_passengers_aboard_on_boat(u, territory.units, unit_defs),
+            )
+            for u in disp_def_sw
+        ]
+        att_rolling_sw = get_siegework_attacker_rolling_units(
+            attacker_units, unit_defs, defender_territory_is_stronghold_early,
+            defender_stronghold_hp=defender_stronghold_hp_cur_sw,
+            fuse_bomb=fuse_bomb,
+        )
+        def_sw_units = [u for u in defender_units if _is_siegework_unit(unit_defs.get(u.unit_id))]
+        round_result_sw, defender_stronghold_hp_after_sw, ladder_count_sw = resolve_siegeworks_round(
+            attacker_units, defender_units, unit_defs, dice_rolls,
+            stat_modifiers_attacker=attacker_mods or None,
+            stat_modifiers_defender=defender_mods or None,
+            casualty_order_attacker="best_unit",
+            casualty_order_defender=defender_casualty_order,
+            defender_stronghold_hp=defender_stronghold_hp_cur_sw,
+            defender_territory_is_stronghold=defender_territory_is_stronghold_early,
+            fuse_bomb=fuse_bomb,
+        )
+        ladder_ids_sw = get_ladder_infantry_instance_ids(attacker_units, unit_defs)
+        _initiate_ladder_infantry_ids = ladder_ids_sw
+        _initiate_ladder_equipment_count = ladder_count_sw
+        if defender_stronghold_hp_after_sw is not None:
+            territory.stronghold_current_health = defender_stronghold_hp_after_sw
+        siege_att_rolls = dice_rolls.get("attacker", [])
+        siege_def_rolls = dice_rolls.get("defender", [])
+        siege_att_dice_grouped = group_dice_by_stat(
+            att_rolling_sw, siege_att_rolls, unit_defs, is_attacker=True,
+            stat_modifiers=attacker_mods or None,
+        ) if att_rolling_sw else {}
+        siege_att_dice_split_sw = (
+            group_siegework_attacker_dice_ram_and_flex(
+                att_rolling_sw, siege_att_rolls, unit_defs,
+                stat_modifiers=attacker_mods or None,
+            )
+            if att_rolling_sw else None
+        )
+        siege_def_dice_grouped = group_dice_by_stat(
+            def_sw_units, siege_def_rolls, unit_defs, is_attacker=False,
+            stat_modifiers=defender_mods or None,
+        ) if def_sw_units else {}
+        attacker_hits_by_type_sw = hits_by_unit_type_sw(
+            round_result_sw.attacker_casualties, round_result_sw.attacker_wounded, attacker_id_to_type_health_sw
+        )
+        defender_hits_by_type_sw = hits_by_unit_type_sw(
+            round_result_sw.defender_casualties, round_result_sw.defender_wounded, defender_id_to_type_health_sw
+        )
+        events.append(combat_round_resolved(
+            territory_id, 0,
+            siege_att_dice_grouped, siege_def_dice_grouped,
+            round_result_sw.attacker_hits, round_result_sw.defender_hits,
+            round_result_sw.attacker_casualties, round_result_sw.defender_casualties,
+            round_result_sw.attacker_wounded, round_result_sw.defender_wounded,
+            len(round_result_sw.surviving_attacker_ids), len(round_result_sw.surviving_defender_ids),
+            attacker_units_at_start_sw,
+            defender_units_at_start_sw,
+            attacker_hits_by_unit_type=attacker_hits_by_type_sw,
+            defender_hits_by_unit_type=defender_hits_by_type_sw,
+            is_siegeworks_round=True,
+            attacker_dice_siegework_split=siege_att_dice_split_sw,
+        ))
+        for casualty_id in round_result_sw.attacker_casualties:
+            unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
+            events.append(unit_destroyed(casualty_id, unit_type, attacker_faction, territory_id, "combat"))
+        for casualty_id in round_result_sw.defender_casualties:
+            unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
+            events.append(unit_destroyed(casualty_id, unit_type, defender_faction, territory_id, "combat"))
+        passenger_att_sw = _remove_casualties(attacker_territory, round_result_sw.attacker_casualties, unit_defs)
+        passenger_def_sw = _remove_casualties(territory, round_result_sw.defender_casualties, unit_defs)
+        for pid in passenger_att_sw:
+            unit_type = pid.split("_")[1] if "_" in pid else "unknown"
+            events.append(unit_destroyed(pid, unit_type, attacker_faction, territory_id, "combat"))
+        for pid in passenger_def_sw:
+            unit_type = pid.split("_")[1] if "_" in pid else "unknown"
+            events.append(unit_destroyed(pid, unit_type, defender_faction, territory_id, "combat"))
+        _sync_survivor_health(territory, attacker_units, defender_units, attacker_territory=attacker_territory if sea_zone_id else None)
+        attacker_units[:] = [u for u in attacker_units if u.instance_id in round_result_sw.surviving_attacker_ids]
+        bomb_pair_casualties_sw: list[str] = []
+        if fuse_bomb:
+            paired_bombikazi_sw, paired_bombs_sw = get_bombikazi_pairing(attacker_units, unit_defs)
+            bomb_pair_casualties_sw = list(paired_bombikazi_sw | paired_bombs_sw)
+        if bomb_pair_casualties_sw:
+            attacker_units[:] = [u for u in attacker_units if u.instance_id not in bomb_pair_casualties_sw]
+            passenger_att_bomb_sw = _remove_casualties(attacker_territory, bomb_pair_casualties_sw, unit_defs)
+            for iid in bomb_pair_casualties_sw:
+                unit_type = iid.split("_")[1] if "_" in iid else "unknown"
+                events.append(unit_destroyed(iid, unit_type, attacker_faction, territory_id, "combat"))
+            for pid in passenger_att_bomb_sw:
+                unit_type = pid.split("_")[1] if "_" in pid else "unknown"
+                events.append(unit_destroyed(pid, unit_type, attacker_faction, territory_id, "combat"))
+        siege_log_entry = CombatRoundResult(
+            round_number=0,
+            attacker_rolls=dice_rolls.get("attacker", []),
+            defender_rolls=dice_rolls.get("defender", []),
+            attacker_hits=round_result_sw.attacker_hits,
+            defender_hits=round_result_sw.defender_hits,
+            attacker_casualties=round_result_sw.attacker_casualties + bomb_pair_casualties_sw,
+            defender_casualties=round_result_sw.defender_casualties,
+            attackers_remaining=len(attacker_units),
+            defenders_remaining=len(round_result_sw.surviving_defender_ids),
+            is_siegeworks_round=True,
+        )
+        combat_log_prefix = [siege_log_entry]
+
+        if round_result_sw.attackers_eliminated or round_result_sw.defenders_eliminated:
+            state, end_events = _resolve_combat_end(
+                state, attacker_faction, territory_id,
+                round_result_sw, combat_log_prefix, territory_defs, unit_defs,
+                faction_defs,
+                sea_zone_id=sea_zone_id,
+                initial_attacker_instance_ids=attacker_instance_ids,
+                initial_defender_instance_ids=defender_instance_ids,
+            )
+            events.extend(end_events)
+            return state, events
+        if len(attacker_units) == 0:
+            end_round_result_sw = RoundResult(
+                attacker_hits=round_result_sw.attacker_hits,
+                defender_hits=round_result_sw.defender_hits,
+                attacker_casualties=round_result_sw.attacker_casualties,
+                defender_casualties=round_result_sw.defender_casualties,
+                attacker_wounded=round_result_sw.attacker_wounded,
+                defender_wounded=round_result_sw.defender_wounded,
+                surviving_attacker_ids=[],
+                surviving_defender_ids=round_result_sw.surviving_defender_ids,
+                attackers_eliminated=True,
+                defenders_eliminated=round_result_sw.defenders_eliminated,
+            )
+            state, end_events = _resolve_combat_end(
+                state, attacker_faction, territory_id,
+                end_round_result_sw, combat_log_prefix, territory_defs, unit_defs,
+                faction_defs,
+                sea_zone_id=sea_zone_id,
+                initial_attacker_instance_ids=attacker_instance_ids,
+                initial_defender_instance_ids=defender_instance_ids,
+            )
+            events.extend(end_events)
+            return state, events
+
+        # Siegework round is finished for this action. Further rounds always use continue_combat
+        # (archer prefire if any, then standard rounds) — never resolve round 1 in the same initiate,
+        # or siege-only dice_rolls would be reused and defenders could get no rolls incorrectly.
+        archer_prefire_follows = bool(defender_archer_units)
+        state.active_combat = ActiveCombat(
+            attacker_faction=attacker_faction,
+            territory_id=territory_id,
+            attacker_instance_ids=[u.instance_id for u in attacker_units],
+            round_number=0,
+            combat_log=combat_log_prefix,
+            attackers_have_rolled=False if archer_prefire_follows else True,
+            sea_zone_id=sea_zone_id,
+            casualty_order_attacker="best_unit",
+            must_conquer=False,
+            initial_attacker_instance_ids=attacker_instance_ids,
+            initial_defender_instance_ids=defender_instance_ids,
+            cumulative_hits_received_by_attacker=round_result_sw.defender_hits,
+            cumulative_hits_received_by_defender=round_result_sw.attacker_hits,
+            ladder_infantry_instance_ids=ladder_ids_sw,
+            ladder_equipment_count=ladder_count_sw,
+            fuse_bomb=fuse_bomb,
+        )
+        return state, events
+
+    # Defender archer prefire only when battle did not open with a siegeworks round (no combat_log_prefix).
+    if defender_archer_units and not combat_log_prefix:
+        # Prefire: only defender archers roll at defense-1 (or defense+0 if manifest disables penalty); hits to attackers only
+        archer_prefire_penalty = _prefire_stat_delta(state)
         prefire_defender_rolls = dice_rolls.get("defender", [])
         round_result = resolve_archer_prefire(
             attacker_units, defender_archer_units, unit_defs, prefire_defender_rolls,
             stat_modifiers_defender_extra=defender_mods,
             territory_def=territory_def,
+            prefire_penalty_delta=archer_prefire_penalty,
         )
         # Group defender dice for UI (archers at defense-1 or defense+0, merged with terrain)
         archer_stat_modifiers = {
@@ -1819,8 +2798,32 @@ def _handle_initiate_combat(
             defenders_remaining=len(defender_units),  # no defender casualties in prefire
             is_archer_prefire=True,
         )
-        # Units at start of round for frontend (prefire: no attackers rolling; defenders = archers only)
-        attacker_units_at_start_prefire: list[dict] = []
+        spec_archer_prefire = compute_battle_specials_and_modifiers(
+            attacker_units,
+            defender_units,
+            territory_def,
+            unit_defs,
+            is_sea_raid=bool(sea_zone_id),
+            archer_prefire_applicable=True,
+        )
+        _, _, att_attack_ov_prefire = get_attacker_effective_dice_and_bombikazi_self_destruct(
+            attacker_units, unit_defs
+        )
+        # Full rosters at round start (only archers roll; attackers may take hits with no dice).
+        attacker_units_at_start_prefire = [
+            _build_round_unit_display(
+                u,
+                unit_defs.get(u.unit_id),
+                attacker_mods.get(u.instance_id, 0),
+                True,
+                attacker_faction,
+                territory_def,
+                spec_archer_prefire,
+                attacker_effective_attack_override=att_attack_ov_prefire,
+                passenger_aboard=_passengers_aboard_on_boat(u, attacker_territory.units, unit_defs),
+            )
+            for u in attacker_units
+        ]
         defender_units_at_start_prefire = [
             _build_round_unit_display(
                 u,
@@ -1829,11 +2832,10 @@ def _handle_initiate_combat(
                 False,
                 defender_faction,
                 territory_def,
-                terrain_def,
-                captain_def,
-                anticav_def,
+                spec_archer_prefire,
+                passenger_aboard=_passengers_aboard_on_boat(u, territory.units, unit_defs),
             )
-            for u in defender_archer_units
+            for u in defender_units
         ]
         events.append(combat_round_resolved(
             territory_id, 0,
@@ -1876,7 +2878,10 @@ def _handle_initiate_combat(
             state, end_events = _resolve_combat_end(
                 state, attacker_faction, territory_id,
                 end_round_result, [prefire_log_entry], territory_defs, unit_defs,
+                faction_defs,
                 sea_zone_id=sea_zone_id,
+                initial_attacker_instance_ids=[u.instance_id for u in attacker_units],
+                initial_defender_instance_ids=defender_instance_ids,
             )
             events.extend(end_events)
             return state, events
@@ -1892,33 +2897,52 @@ def _handle_initiate_combat(
             sea_zone_id=sea_zone_id,
             casualty_order_attacker="best_unit",
             must_conquer=False,
+            initial_attacker_instance_ids=[u.instance_id for u in attacker_units],
+            initial_defender_instance_ids=defender_instance_ids,
+            cumulative_hits_received_by_attacker=round_result.defender_hits,
+            cumulative_hits_received_by_defender=0,
+            fuse_bomb=fuse_bomb,
         )
         return state, events
 
     # No archers: run round 1 as usual (with terrain modifiers)
-    att_effective_dice, att_self_destruct = get_attacker_effective_dice_and_bombikazi_self_destruct(
-        attacker_units, unit_defs
+    att_effective_dice, att_self_destruct, att_attack_override = get_attacker_effective_dice_and_bombikazi_self_destruct(
+        attacker_units, unit_defs,
+        use_paired_fused_siegework_rules=True,
     )
     attacker_dice_grouped = group_dice_by_stat(
         attacker_units, dice_rolls.get("attacker", []), unit_defs, is_attacker=True,
         stat_modifiers=attacker_mods or None,
         effective_dice_override=att_effective_dice,
+        effective_stat_override=att_attack_override or None,
+        exclude_archetypes_from_rolling={"siegework"},
     )
     defender_dice_grouped = group_dice_by_stat(
         defender_units, dice_rolls.get("defender", []), unit_defs, is_attacker=False,
         stat_modifiers=defender_mods or None,
+        exclude_archetypes_from_rolling={"siegework"},
     )
 
     # Build instance_id -> (unit_id, base_health) before combat modifies units (for hit badges)
     attacker_id_to_type_health = {u.instance_id: (u.unit_id, u.base_health) for u in attacker_units}
     defender_id_to_type_health = {u.instance_id: (u.unit_id, u.base_health) for u in defender_units}
 
+    spec_round = compute_battle_specials_and_modifiers(
+        attacker_units,
+        defender_units,
+        territory_def,
+        unit_defs,
+        is_sea_raid=bool(sea_zone_id),
+        archer_prefire_applicable=False,
+    )
     # Units at start of round for frontend (before combat modifies anything)
     attacker_units_at_start_init = [
         _build_round_unit_display(
             u, unit_defs.get(u.unit_id),
             attacker_mods.get(u.instance_id, 0), True, attacker_faction,
-            territory_def, terrain_att, captain_att, anticav_att,
+            territory_def, spec_round,
+            attacker_effective_attack_override=att_attack_override,
+            passenger_aboard=_passengers_aboard_on_boat(u, attacker_territory.units, unit_defs),
         )
         for u in attacker_units
     ]
@@ -1926,28 +2950,46 @@ def _handle_initiate_combat(
         _build_round_unit_display(
             u, unit_defs.get(u.unit_id),
             defender_mods.get(u.instance_id, 0), False, defender_faction,
-            territory_def, terrain_def, captain_def, anticav_def,
+            territory_def, spec_round,
+            passenger_aboard=_passengers_aboard_on_boat(u, territory.units, unit_defs),
         )
         for u in defender_units
     ]
 
-    defender_casualty_order = getattr(state, "territory_defender_casualty_order", {}).get(territory_id, "best_unit")
     territory_is_sea = _is_sea_zone(territory_defs.get(territory_id))
-    is_naval_combat_attacker = bool(sea_zone_id) or territory_is_sea
+    is_naval_combat_attacker = _is_naval_combat_attacker_hit_rules(
+        attacker_units, sea_zone_id, territory_is_sea, unit_defs,
+    )
     is_naval_combat_defender = territory_is_sea
-    round_result = resolve_combat_round(
+    # Stronghold soaks attacker hits first (land strongholds only)
+    defender_stronghold_hp: int | None = None
+    if not territory_is_sea and territory_def:
+        base_hp = getattr(territory_def, "stronghold_base_health", 0) or 0
+        if getattr(territory_def, "is_stronghold", False) and base_hp > 0:
+            ts = territory
+            current = getattr(ts, "stronghold_current_health", None)
+            defender_stronghold_hp = current if current is not None else base_hp
+    defender_territory_is_stronghold = bool(territory_def and getattr(territory_def, "is_stronghold", False))
+    round_result, defender_stronghold_hp_after = resolve_combat_round(
         attacker_units, defender_units, unit_defs, dice_rolls,
         stat_modifiers_attacker=attacker_mods or None,
         stat_modifiers_defender=defender_mods or None,
         defender_hits_override=action.payload.get("terror_final_defender_hits"),
         attacker_effective_dice_override=att_effective_dice,
+        attacker_effective_attack_override=att_attack_override or None,
         bombikazi_self_destruct_ids=att_self_destruct,
         casualty_order_attacker="best_unit",
         casualty_order_defender=defender_casualty_order,
         must_conquer=False,
         is_naval_combat_attacker=is_naval_combat_attacker,
         is_naval_combat_defender=is_naval_combat_defender,
+        defender_stronghold_hp=defender_stronghold_hp,
+        defender_territory_is_stronghold=defender_territory_is_stronghold,
+        exclude_archetypes_from_rolling=["siegework"],
+        attacker_ladder_instance_ids=set(_initiate_ladder_infantry_ids),
     )
+    if defender_stronghold_hp_after is not None:
+        territory.stronghold_current_health = defender_stronghold_hp_after
 
     # Hits per unit type this round (for UI hit badges): casualties add base_health each, wounded add 1
     def _hits_by_unit_type(casualties: list[str], wounded: list[str], id_map: dict) -> dict[str, int]:
@@ -1995,6 +3037,7 @@ def _handle_initiate_combat(
         attacker_hits_by_unit_type=attacker_hits_by_type,
         defender_hits_by_unit_type=defender_hits_by_type,
         terror_applied=action.payload.get("terror_applied", False),
+        terror_reroll_count=action.payload.get("terror_reroll_count"),
     ))
 
     for casualty_id in round_result.attacker_casualties:
@@ -2014,11 +3057,18 @@ def _handle_initiate_combat(
         events.append(unit_destroyed(pid, unit_type, defender_faction, territory_id, "combat"))
     _sync_survivor_health(territory, attacker_units, defender_units, attacker_territory=attacker_territory if sea_zone_id else None)
 
+    full_combat_log_init = combat_log_prefix + [combat_log_entry]
+    prefix_cum_att = sum(r.defender_hits for r in combat_log_prefix)
+    prefix_cum_def = sum(r.attacker_hits for r in combat_log_prefix)
+
     if round_result.attackers_eliminated or round_result.defenders_eliminated:
         state, end_events = _resolve_combat_end(
             state, attacker_faction, territory_id,
-            round_result, [combat_log_entry], territory_defs, unit_defs,
+            round_result, full_combat_log_init, territory_defs, unit_defs,
+            faction_defs,
             sea_zone_id=sea_zone_id,
+            initial_attacker_instance_ids=attacker_instance_ids,
+            initial_defender_instance_ids=defender_instance_ids,
         )
         events.extend(end_events)
         return state, events
@@ -2028,10 +3078,17 @@ def _handle_initiate_combat(
         territory_id=territory_id,
         attacker_instance_ids=round_result.surviving_attacker_ids,
         round_number=1,
-        combat_log=[combat_log_entry],
+        combat_log=full_combat_log_init,
         sea_zone_id=sea_zone_id,
         casualty_order_attacker="best_unit",
         must_conquer=False,
+        initial_attacker_instance_ids=attacker_instance_ids,
+        initial_defender_instance_ids=defender_instance_ids,
+        cumulative_hits_received_by_attacker=prefix_cum_att + round_result.defender_hits,
+        cumulative_hits_received_by_defender=prefix_cum_def + round_result.attacker_hits,
+        ladder_infantry_instance_ids=_initiate_ladder_infantry_ids,
+        ladder_equipment_count=_initiate_ladder_equipment_count,
+        fuse_bomb=fuse_bomb,
     )
     return state, events
 
@@ -2041,6 +3098,7 @@ def _handle_continue_combat(
     action: Action,
     unit_defs: dict[str, UnitDefinition],
     territory_defs: dict[str, TerritoryDefinition],
+    faction_defs: dict[str, FactionDefinition],
 ) -> tuple[GameState, list[GameEvent]]:
     """
     Continue an active combat with another round.
@@ -2054,14 +3112,33 @@ def _handle_continue_combat(
     dice_rolls = action.payload.get("dice_rolls", {})
     combat = state.active_combat
     sea_zone_id = getattr(combat, "sea_zone_id", None)
+    fuse_bomb = getattr(combat, "fuse_bomb", True)
+    if not isinstance(fuse_bomb, bool):
+        fuse_bomb = True
+    had_siegeworks_in_battle = any(
+        getattr(r, "is_siegeworks_round", False) for r in (combat.combat_log or [])
+    )
+    use_paired_fused_siegework_rules = (not had_siegeworks_in_battle) or fuse_bomb
 
     # Get the contested territory (land) and where attackers live (same or sea zone for sea raid; after offload, they're on territory)
     territory = state.territories[combat.territory_id]
     surviving_attacker_ids = set(combat.attacker_instance_ids)
     if sea_zone_id:
         sea_zone = state.territories.get(sea_zone_id)
-        in_sea = [u for u in (sea_zone.units if sea_zone else []) if u.instance_id in surviving_attacker_ids] if sea_zone else []
-        attacker_territory = (state.territories.get(sea_zone_id) if in_sea else territory) if sea_zone else territory
+        land_attackers_on_land = [
+            u.instance_id for u in territory.units
+            if u.instance_id in surviving_attacker_ids
+            and is_land_unit(unit_defs.get(u.unit_id))
+            and not _is_naval_unit(unit_defs.get(u.unit_id))
+        ]
+        if land_attackers_on_land:
+            attacker_territory = territory
+        else:
+            in_sea = [
+                u for u in (sea_zone.units if sea_zone else [])
+                if u.instance_id in surviving_attacker_ids
+            ]
+            attacker_territory = sea_zone if in_sea else territory
     else:
         attacker_territory = territory
 
@@ -2069,20 +3146,39 @@ def _handle_continue_combat(
     _normalize_unit_health_for_combat(attacker_territory.units, unit_defs)
     _normalize_unit_health_for_combat(territory.units, unit_defs)
 
-    # Separate attackers and defenders; sort by instance_id so roll assignment matches API
+    # Separate attackers and defenders — same rules as initiate_combat (not merely "not in attacker ids")
+    attacker_faction = combat.attacker_faction
+    attacker_alliance = getattr(faction_defs.get(attacker_faction), "alliance", None)
     attacker_units = sorted(
-        [deepcopy(u) for u in attacker_territory.units if u.instance_id in surviving_attacker_ids],
+        [
+            deepcopy(u) for u in attacker_territory.units
+            if u.instance_id in surviving_attacker_ids
+            and _land_combat_unit_side(u, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "attacker"
+        ],
         key=lambda u: u.instance_id,
     )
     defender_units = sorted(
-        [deepcopy(u) for u in territory.units if u.instance_id not in surviving_attacker_ids],
+        [
+            deepcopy(u) for u in territory.units
+            if _land_combat_unit_side(u, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "defender"
+        ],
         key=lambda u: u.instance_id,
     )
+
+    territory_def = territory_defs.get(combat.territory_id)
+    if territory_def and _is_sea_zone(territory_def):
+        attacker_units = [
+            u for u in attacker_units
+            if participates_in_sea_hex_naval_combat(u, unit_defs.get(u.unit_id))
+        ]
+        defender_units = [
+            u for u in defender_units
+            if participates_in_sea_hex_naval_combat(u, unit_defs.get(u.unit_id))
+        ]
 
     defender_faction = territory.owner or (get_unit_faction(defender_units[0], unit_defs) if defender_units else "neutral")
 
     # Terrain + anti-cavalry + captain bonuses (merged; recomputed every round)
-    territory_def = territory_defs.get(combat.territory_id)
     terrain_att, terrain_def = compute_terrain_stat_modifiers(
         territory_def, attacker_units, defender_units, unit_defs
     )
@@ -2098,66 +3194,52 @@ def _handle_continue_combat(
     attacker_mods = merge_stat_modifiers(terrain_att, anticav_att, captain_att, sea_raider_att)
     defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
 
-    att_effective_dice, att_self_destruct = get_attacker_effective_dice_and_bombikazi_self_destruct(
-        attacker_units, unit_defs
+    att_effective_dice, att_self_destruct, att_attack_override = get_attacker_effective_dice_and_bombikazi_self_destruct(
+        attacker_units, unit_defs,
+        use_paired_fused_siegework_rules=use_paired_fused_siegework_rules,
     )
-    # Compute grouped dice BEFORE combat (units get modified during resolution)
-    attacker_dice_grouped = group_dice_by_stat(
-        attacker_units, dice_rolls.get("attacker", []), unit_defs, is_attacker=True,
-        stat_modifiers=attacker_mods or None,
-        effective_dice_override=att_effective_dice,
-    )
+    # Re-evaluate which infantry are currently "on ladders" for this round.
+    # Ladder equipment (siegeworks) can be destroyed between rounds, so the
+    # available capacity (and thus which climbers are laddered) can change.
+    ladder_ids_list_combat = get_ladder_infantry_instance_ids(attacker_units, unit_defs)
+    ladder_ids_combat = set(ladder_ids_list_combat)
+    combat.ladder_infantry_instance_ids = ladder_ids_list_combat
+    combat.ladder_equipment_count = len([
+        u for u in attacker_units
+        if _is_siegework_unit(unit_defs.get(u.unit_id))
+        and has_unit_special(unit_defs.get(u.unit_id), SIEGEWORK_SPECIAL_LADDER)
+    ])
+
+    if ladder_ids_combat:
+        sort_attackers_for_ladder_dice_order(
+            attacker_units, unit_defs, ladder_ids_combat,
+            attacker_mods, att_attack_override or None,
+        )
+        attacker_dice_grouped = group_attacker_dice_with_ladder_segments(
+            attacker_units, dice_rolls.get("attacker", []), unit_defs, ladder_ids_combat,
+            stat_modifiers=attacker_mods or None,
+            effective_dice_override=att_effective_dice,
+            effective_stat_override=att_attack_override or None,
+            exclude_archetypes_from_rolling={"siegework"},
+        )
+    else:
+        attacker_dice_grouped = group_dice_by_stat(
+            attacker_units, dice_rolls.get("attacker", []), unit_defs, is_attacker=True,
+            stat_modifiers=attacker_mods or None,
+            effective_dice_override=att_effective_dice,
+            effective_stat_override=att_attack_override or None,
+            exclude_archetypes_from_rolling={"siegework"},
+        )
     defender_dice_grouped = group_dice_by_stat(
         defender_units, dice_rolls.get("defender", []), unit_defs, is_attacker=False,
         stat_modifiers=defender_mods or None,
+        exclude_archetypes_from_rolling={"siegework"},
     )
 
     # Build instance_id -> (unit_id, base_health) before combat modifies units
     attacker_id_to_type_health = {u.instance_id: (u.unit_id, u.base_health) for u in attacker_units}
     defender_id_to_type_health = {u.instance_id: (u.unit_id, u.base_health) for u in defender_units}
 
-    # Units at start of round for frontend (before combat modifies anything)
-    attacker_units_at_start = [
-        _build_round_unit_display(
-            u, unit_defs.get(u.unit_id),
-            attacker_mods.get(u.instance_id, 0), True, combat.attacker_faction,
-            territory_def, terrain_att, captain_att, anticav_att,
-        )
-        for u in attacker_units
-    ]
-    defender_units_at_start = [
-        _build_round_unit_display(
-            u, unit_defs.get(u.unit_id),
-            defender_mods.get(u.instance_id, 0), False, defender_faction,
-            territory_def, terrain_def, captain_def, anticav_def,
-        )
-        for u in defender_units
-    ]
-
-    # Attacker may update casualty order and must_conquer before this round
-    if "casualty_order" in action.payload and action.payload["casualty_order"] in ("best_unit", "best_attack"):
-        combat.casualty_order_attacker = action.payload["casualty_order"]
-    if "must_conquer" in action.payload and isinstance(action.payload["must_conquer"], bool):
-        combat.must_conquer = action.payload["must_conquer"]
-    defender_casualty_order = getattr(state, "territory_defender_casualty_order", {}).get(combat.territory_id, "best_unit")
-    territory_is_sea = _is_sea_zone(territory_defs.get(combat.territory_id))
-    is_naval_combat_attacker = bool(sea_zone_id) or territory_is_sea
-    is_naval_combat_defender = territory_is_sea
-    round_result = resolve_combat_round(
-        attacker_units, defender_units, unit_defs, dice_rolls,
-        stat_modifiers_attacker=attacker_mods or None,
-        stat_modifiers_defender=defender_mods or None,
-        defender_hits_override=action.payload.get("terror_final_defender_hits"),
-        attacker_effective_dice_override=att_effective_dice,
-        bombikazi_self_destruct_ids=att_self_destruct,
-        casualty_order_attacker=combat.casualty_order_attacker,
-        casualty_order_defender=defender_casualty_order,
-        must_conquer=combat.must_conquer,
-        is_naval_combat_attacker=is_naval_combat_attacker,
-        is_naval_combat_defender=is_naval_combat_defender,
-    )
-
-    # Hits per unit type this round (for UI hit badges): casualties add base_health each, wounded add 1
     def hits_by_unit_type(casualties: list[str], wounded: list[str], id_map: dict) -> dict[str, int]:
         out: dict[str, int] = {}
         for iid in casualties:
@@ -2172,6 +3254,402 @@ def _handle_continue_combat(
                 out[uid] = out.get(uid, 0) + 1
         return out
 
+    spec_continue = compute_battle_specials_and_modifiers(
+        attacker_units,
+        defender_units,
+        territory_def,
+        unit_defs,
+        is_sea_raid=bool(sea_zone_id),
+        archer_prefire_applicable=False,
+    )
+    # Units at start of round for frontend (before combat modifies anything)
+    attacker_units_at_start = [
+        _build_round_unit_display(
+            u, unit_defs.get(u.unit_id),
+            attacker_mods.get(u.instance_id, 0), True, combat.attacker_faction,
+            territory_def, spec_continue,
+            attacker_effective_attack_override=att_attack_override,
+            passenger_aboard=_passengers_aboard_on_boat(u, attacker_territory.units, unit_defs),
+        )
+        for u in attacker_units
+    ]
+    defender_units_at_start = [
+        _build_round_unit_display(
+            u, unit_defs.get(u.unit_id),
+            defender_mods.get(u.instance_id, 0), False, defender_faction,
+            territory_def, spec_continue,
+            passenger_aboard=_passengers_aboard_on_boat(u, territory.units, unit_defs),
+        )
+        for u in defender_units
+    ]
+
+    # Attacker may update casualty order and must_conquer before this round
+    if "casualty_order" in action.payload and action.payload["casualty_order"] in ("best_unit", "best_attack"):
+        combat.casualty_order_attacker = action.payload["casualty_order"]
+    if "must_conquer" in action.payload and isinstance(action.payload["must_conquer"], bool):
+        combat.must_conquer = action.payload["must_conquer"]
+    defender_casualty_order = getattr(state, "territory_defender_casualty_order", {}).get(combat.territory_id, "best_unit")
+    territory_is_sea = _is_sea_zone(territory_defs.get(combat.territory_id))
+    is_naval_combat_attacker = _is_naval_combat_attacker_hit_rules(
+        attacker_units, sea_zone_id, territory_is_sea, unit_defs,
+    )
+    is_naval_combat_defender = territory_is_sea
+    # Stronghold soaks attacker hits first (land strongholds only)
+    defender_stronghold_hp_cur: int | None = None
+    if not territory_is_sea and territory_def:
+        base_hp = getattr(territory_def, "stronghold_base_health", 0) or 0
+        if getattr(territory_def, "is_stronghold", False) and base_hp > 0:
+            ts = territory
+            current = getattr(ts, "stronghold_current_health", None)
+            defender_stronghold_hp_cur = current if current is not None else base_hp
+
+    # Dedicated siegeworks round: siegework (excl. ladder) + ram attackers vs stronghold; between prefire and round 1
+    defender_territory_is_stronghold = bool(territory_def and getattr(territory_def, "is_stronghold", False))
+    siegework_att_dice, siegework_def_dice = get_siegework_dice_counts(
+        attacker_units, defender_units, unit_defs, defender_territory_is_stronghold,
+        defender_stronghold_hp=defender_stronghold_hp_cur,
+        fuse_bomb=fuse_bomb,
+    )
+    siegeworks_pending = (
+        combat.round_number == 0
+        and not any(getattr(r, "is_siegeworks_round", False) for r in combat.combat_log)
+        and (
+            siegework_att_dice > 0
+            or siegework_def_dice > 0
+        )
+    )
+    if siegeworks_pending:
+        spec_siege_ram = compute_battle_specials_and_modifiers(
+            attacker_units,
+            defender_units,
+            territory_def,
+            unit_defs,
+            is_sea_raid=bool(sea_zone_id),
+            archer_prefire_applicable=False,
+            ram_applicable=True,
+        )
+        att_rolling = get_siegework_attacker_rolling_units(
+            attacker_units, unit_defs, defender_territory_is_stronghold,
+            defender_stronghold_hp=defender_stronghold_hp_cur,
+            fuse_bomb=fuse_bomb,
+        )
+        def_sw = [u for u in defender_units if _is_siegework_unit(unit_defs.get(u.unit_id))]
+        # Run siegeworks round with provided dice (client sends only siegework unit dice)
+        round_result, defender_stronghold_hp_after, ladder_count = resolve_siegeworks_round(
+            attacker_units, defender_units, unit_defs, dice_rolls,
+            stat_modifiers_attacker=attacker_mods or None,
+            stat_modifiers_defender=defender_mods or None,
+            casualty_order_attacker=combat.casualty_order_attacker,
+            casualty_order_defender=defender_casualty_order,
+            defender_stronghold_hp=defender_stronghold_hp_cur,
+            defender_territory_is_stronghold=defender_territory_is_stronghold,
+            fuse_bomb=fuse_bomb,
+        )
+        combat.ladder_infantry_instance_ids = get_ladder_infantry_instance_ids(
+            attacker_units, unit_defs,
+        )
+        combat.ladder_equipment_count = ladder_count
+        if defender_stronghold_hp_after is not None:
+            territory.stronghold_current_health = defender_stronghold_hp_after
+        # Build dice grouped for event (siegework units only; use pre-round lists)
+        siege_att_rolls = dice_rolls.get("attacker", [])
+        siege_def_rolls = dice_rolls.get("defender", [])
+        siege_att_dice_grouped = group_dice_by_stat(
+            att_rolling, siege_att_rolls, unit_defs, is_attacker=True,
+            stat_modifiers=attacker_mods or None,
+        ) if att_rolling else {}
+        siege_att_dice_split_continue = (
+            group_siegework_attacker_dice_ram_and_flex(
+                att_rolling, siege_att_rolls, unit_defs,
+                stat_modifiers=attacker_mods or None,
+            )
+            if att_rolling else None
+        )
+        siege_def_dice_grouped = group_dice_by_stat(
+            def_sw, siege_def_rolls, unit_defs, is_attacker=False,
+            stat_modifiers=defender_mods or None,
+        ) if def_sw else {}
+        attacker_hits_by_type_sw = hits_by_unit_type(
+            round_result.attacker_casualties, round_result.attacker_wounded, attacker_id_to_type_health
+        )
+        defender_hits_by_type_sw = hits_by_unit_type(
+            round_result.defender_casualties, round_result.defender_wounded, defender_id_to_type_health
+        )
+        disp_att_siege = get_siegework_round_attacker_display_units(
+            attacker_units, unit_defs, defender_territory_is_stronghold,
+            defender_stronghold_hp=defender_stronghold_hp_cur,
+            fuse_bomb=fuse_bomb,
+        )
+        disp_def_siege = get_siegework_round_defender_display_units(defender_units, unit_defs)
+        attacker_units_at_start_siege_evt = [
+            _build_round_unit_display(
+                u, unit_defs.get(u.unit_id),
+                attacker_mods.get(u.instance_id, 0), True, combat.attacker_faction,
+                territory_def, spec_siege_ram,
+                attacker_effective_attack_override=att_attack_override,
+                passenger_aboard=_passengers_aboard_on_boat(u, attacker_territory.units, unit_defs),
+            )
+            for u in disp_att_siege
+        ]
+        defender_units_at_start_siege_evt = [
+            _build_round_unit_display(
+                u, unit_defs.get(u.unit_id),
+                defender_mods.get(u.instance_id, 0), False, defender_faction,
+                territory_def, spec_siege_ram,
+                passenger_aboard=_passengers_aboard_on_boat(u, territory.units, unit_defs),
+            )
+            for u in disp_def_siege
+        ]
+        events.append(combat_round_resolved(
+            combat.territory_id, 0,
+            siege_att_dice_grouped, siege_def_dice_grouped,
+            round_result.attacker_hits, round_result.defender_hits,
+            round_result.attacker_casualties, round_result.defender_casualties,
+            round_result.attacker_wounded, round_result.defender_wounded,
+            len(round_result.surviving_attacker_ids), len(round_result.surviving_defender_ids),
+            attacker_units_at_start_siege_evt,
+            defender_units_at_start_siege_evt,
+            attacker_hits_by_unit_type=attacker_hits_by_type_sw,
+            defender_hits_by_unit_type=defender_hits_by_type_sw,
+            is_siegeworks_round=True,
+            attacker_dice_siegework_split=siege_att_dice_split_continue,
+        ))
+        for casualty_id in round_result.attacker_casualties:
+            unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
+            events.append(unit_destroyed(casualty_id, unit_type, combat.attacker_faction, combat.territory_id, "combat"))
+        for casualty_id in round_result.defender_casualties:
+            unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
+            events.append(unit_destroyed(casualty_id, unit_type, defender_faction, combat.territory_id, "combat"))
+        passenger_att = _remove_casualties(attacker_territory, round_result.attacker_casualties, unit_defs)
+        passenger_def = _remove_casualties(territory, round_result.defender_casualties, unit_defs)
+        for pid in passenger_att:
+            unit_type = pid.split("_")[1] if "_" in pid else "unknown"
+            events.append(unit_destroyed(pid, unit_type, combat.attacker_faction, combat.territory_id, "combat"))
+        for pid in passenger_def:
+            unit_type = pid.split("_")[1] if "_" in pid else "unknown"
+            events.append(unit_destroyed(pid, unit_type, defender_faction, combat.territory_id, "combat"))
+        _sync_survivor_health(territory, attacker_units, defender_units, attacker_territory=attacker_territory if sea_zone_id else None)
+        # "bomb" tag: paired bomb + bombikazi destroyed after siegeworks when fuse_bomb
+        attacker_units[:] = [u for u in attacker_units if u.instance_id in round_result.surviving_attacker_ids]
+        bomb_pair_casualties: list[str] = []
+        if fuse_bomb:
+            paired_bombikazi, paired_bombs = get_bombikazi_pairing(attacker_units, unit_defs)
+            bomb_pair_casualties = list(paired_bombikazi | paired_bombs)
+        if bomb_pair_casualties:
+            attacker_units[:] = [u for u in attacker_units if u.instance_id not in bomb_pair_casualties]
+            passenger_att_bomb = _remove_casualties(attacker_territory, bomb_pair_casualties, unit_defs)
+            for iid in bomb_pair_casualties:
+                unit_type = iid.split("_")[1] if "_" in iid else "unknown"
+                events.append(unit_destroyed(iid, unit_type, combat.attacker_faction, combat.territory_id, "combat"))
+            for pid in passenger_att_bomb:
+                unit_type = pid.split("_")[1] if "_" in pid else "unknown"
+                events.append(unit_destroyed(pid, unit_type, combat.attacker_faction, combat.territory_id, "combat"))
+        siege_log_entry = CombatRoundResult(
+            round_number=0,
+            attacker_rolls=dice_rolls.get("attacker", []),
+            defender_rolls=dice_rolls.get("defender", []),
+            attacker_hits=round_result.attacker_hits,
+            defender_hits=round_result.defender_hits,
+            attacker_casualties=round_result.attacker_casualties + bomb_pair_casualties,
+            defender_casualties=round_result.defender_casualties,
+            attackers_remaining=len(attacker_units),
+            defenders_remaining=len(round_result.surviving_defender_ids),
+            is_siegeworks_round=True,
+        )
+        combat.combat_log.append(siege_log_entry)
+        combat.cumulative_hits_received_by_attacker += round_result.defender_hits
+        combat.cumulative_hits_received_by_defender += round_result.attacker_hits
+        combat.attacker_instance_ids = [u.instance_id for u in attacker_units]
+        if round_result.attackers_eliminated or round_result.defenders_eliminated:
+            state, end_events = _resolve_combat_end(
+                state, combat.attacker_faction, combat.territory_id,
+                round_result, combat.combat_log, territory_defs, unit_defs,
+                faction_defs,
+                sea_zone_id=sea_zone_id,
+                initial_attacker_instance_ids=combat.initial_attacker_instance_ids or None,
+                initial_defender_instance_ids=combat.initial_defender_instance_ids or None,
+            )
+            events.extend(end_events)
+            state.active_combat = None
+            return state, events
+        if len(combat.attacker_instance_ids) == 0:
+            # All remaining attackers were bomb + paired bombikazi (self-destructed after siegeworks)
+            end_round_result = RoundResult(
+                attacker_hits=round_result.attacker_hits,
+                defender_hits=round_result.defender_hits,
+                attacker_casualties=round_result.attacker_casualties,
+                defender_casualties=round_result.defender_casualties,
+                attacker_wounded=round_result.attacker_wounded,
+                defender_wounded=round_result.defender_wounded,
+                surviving_attacker_ids=[],
+                surviving_defender_ids=round_result.surviving_defender_ids,
+                attackers_eliminated=True,
+                defenders_eliminated=round_result.defenders_eliminated,
+            )
+            state, end_events = _resolve_combat_end(
+                state, combat.attacker_faction, combat.territory_id,
+                end_round_result, combat.combat_log, territory_defs, unit_defs,
+                faction_defs,
+                sea_zone_id=sea_zone_id,
+                initial_attacker_instance_ids=combat.initial_attacker_instance_ids or None,
+                initial_defender_instance_ids=combat.initial_defender_instance_ids or None,
+            )
+            events.extend(end_events)
+            state.active_combat = None
+            return state, events
+        return state, events
+
+    defender_archer_units_continue = [
+        u for u in defender_units
+        if archer_prefire_eligible(unit_defs.get(u.unit_id))
+    ]
+    archer_prefire_pending = (
+        combat.round_number == 0
+        and not any(getattr(r, "is_archer_prefire", False) for r in combat.combat_log)
+        and not any(getattr(r, "is_stealth_prefire", False) for r in combat.combat_log)
+        and bool(defender_archer_units_continue)
+    )
+    if archer_prefire_pending:
+        archer_prefire_penalty_c = _prefire_stat_delta(state)
+        prefire_defender_rolls_c = dice_rolls.get("defender", [])
+        round_result_ar = resolve_archer_prefire(
+            attacker_units, defender_archer_units_continue, unit_defs, prefire_defender_rolls_c,
+            stat_modifiers_defender_extra=defender_mods,
+            territory_def=territory_def,
+            prefire_penalty_delta=archer_prefire_penalty_c,
+        )
+        archer_stat_modifiers_c = {
+            u.instance_id: archer_prefire_penalty_c + defender_mods.get(u.instance_id, 0)
+            for u in defender_archer_units_continue
+        }
+        defender_dice_grouped_ar = group_dice_by_stat(
+            defender_archer_units_continue, prefire_defender_rolls_c, unit_defs, is_attacker=False,
+            stat_modifiers=archer_stat_modifiers_c,
+        )
+        prefire_log_entry_ar = CombatRoundResult(
+            round_number=0,
+            attacker_rolls=[],
+            defender_rolls=prefire_defender_rolls_c,
+            attacker_hits=0,
+            defender_hits=round_result_ar.defender_hits,
+            attacker_casualties=round_result_ar.attacker_casualties,
+            defender_casualties=[],
+            attackers_remaining=len(round_result_ar.surviving_attacker_ids),
+            defenders_remaining=len(defender_units),
+            is_archer_prefire=True,
+        )
+        spec_archer_c = compute_battle_specials_and_modifiers(
+            attacker_units,
+            defender_units,
+            territory_def,
+            unit_defs,
+            is_sea_raid=bool(sea_zone_id),
+            archer_prefire_applicable=True,
+        )
+        attacker_units_at_start_ar = [
+            _build_round_unit_display(
+                u,
+                unit_defs.get(u.unit_id),
+                attacker_mods.get(u.instance_id, 0),
+                True,
+                combat.attacker_faction,
+                territory_def,
+                spec_archer_c,
+                attacker_effective_attack_override=att_attack_override,
+                passenger_aboard=_passengers_aboard_on_boat(u, attacker_territory.units, unit_defs),
+            )
+            for u in attacker_units
+        ]
+        defender_units_at_start_ar = [
+            _build_round_unit_display(
+                u,
+                unit_defs.get(u.unit_id),
+                archer_prefire_penalty_c + defender_mods.get(u.instance_id, 0),
+                False,
+                defender_faction,
+                territory_def,
+                spec_archer_c,
+                passenger_aboard=_passengers_aboard_on_boat(u, territory.units, unit_defs),
+            )
+            for u in defender_units
+        ]
+        events.append(combat_round_resolved(
+            combat.territory_id, 0,
+            {}, defender_dice_grouped_ar,
+            0, round_result_ar.defender_hits,
+            round_result_ar.attacker_casualties, [],
+            round_result_ar.attacker_wounded, [],
+            len(round_result_ar.surviving_attacker_ids), len(defender_units),
+            attacker_units_at_start_ar,
+            defender_units_at_start_ar,
+            is_archer_prefire=True,
+        ))
+        for casualty_id in round_result_ar.attacker_casualties:
+            unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
+            events.append(unit_destroyed(casualty_id, unit_type, combat.attacker_faction, combat.territory_id, "combat"))
+        passenger_att_ar = _remove_casualties(attacker_territory, round_result_ar.attacker_casualties, unit_defs)
+        passenger_def_ar = _remove_casualties(territory, round_result_ar.defender_casualties, unit_defs)
+        for pid in passenger_att_ar:
+            unit_type = pid.split("_")[1] if "_" in pid else "unknown"
+            events.append(unit_destroyed(pid, unit_type, combat.attacker_faction, combat.territory_id, "combat"))
+        for pid in passenger_def_ar:
+            unit_type = pid.split("_")[1] if "_" in pid else "unknown"
+            events.append(unit_destroyed(pid, unit_type, defender_faction, combat.territory_id, "combat"))
+        _sync_survivor_health(territory, attacker_units, defender_units, attacker_territory=attacker_territory if sea_zone_id else None)
+        combat.combat_log.append(prefire_log_entry_ar)
+        combat.cumulative_hits_received_by_attacker += round_result_ar.defender_hits
+        combat.attacker_instance_ids = round_result_ar.surviving_attacker_ids
+        combat.attackers_have_rolled = False
+        if round_result_ar.attackers_eliminated:
+            end_round_result_ar = RoundResult(
+                attacker_hits=0,
+                defender_hits=round_result_ar.defender_hits,
+                attacker_casualties=round_result_ar.attacker_casualties,
+                defender_casualties=[],
+                attacker_wounded=[],
+                defender_wounded=[],
+                surviving_attacker_ids=[],
+                surviving_defender_ids=[u.instance_id for u in defender_units],
+                attackers_eliminated=True,
+                defenders_eliminated=False,
+            )
+            state, end_events = _resolve_combat_end(
+                state, combat.attacker_faction, combat.territory_id,
+                end_round_result_ar, combat.combat_log, territory_defs, unit_defs,
+                faction_defs,
+                sea_zone_id=sea_zone_id,
+                initial_attacker_instance_ids=combat.initial_attacker_instance_ids or None,
+                initial_defender_instance_ids=combat.initial_defender_instance_ids or None,
+            )
+            events.extend(end_events)
+            state.active_combat = None
+            return state, events
+        return state, events
+
+    # Normal round 1 or later: all units roll except siegework (excluded); ladder bypass applies
+    defender_territory_is_stronghold = bool(territory_def and getattr(territory_def, "is_stronghold", False))
+    round_result, defender_stronghold_hp_after = resolve_combat_round(
+        attacker_units, defender_units, unit_defs, dice_rolls,
+        stat_modifiers_attacker=attacker_mods or None,
+        stat_modifiers_defender=defender_mods or None,
+        defender_hits_override=action.payload.get("terror_final_defender_hits"),
+        attacker_effective_dice_override=att_effective_dice,
+        attacker_effective_attack_override=att_attack_override or None,
+        bombikazi_self_destruct_ids=att_self_destruct,
+        casualty_order_attacker=combat.casualty_order_attacker,
+        casualty_order_defender=defender_casualty_order,
+        must_conquer=combat.must_conquer,
+        is_naval_combat_attacker=is_naval_combat_attacker,
+        is_naval_combat_defender=is_naval_combat_defender,
+        defender_stronghold_hp=defender_stronghold_hp_cur,
+        defender_territory_is_stronghold=defender_territory_is_stronghold,
+        exclude_archetypes_from_rolling=["siegework"],
+        attacker_ladder_instance_ids=ladder_ids_combat,
+    )
+    if defender_stronghold_hp_after is not None:
+        territory.stronghold_current_health = defender_stronghold_hp_after
+
+    # Hits per unit type this round (for UI hit badges)
     attacker_hits_by_type = hits_by_unit_type(
         round_result.attacker_casualties, round_result.attacker_wounded, attacker_id_to_type_health
     )
@@ -2206,6 +3684,8 @@ def _handle_continue_combat(
         attacker_hits_by_unit_type=attacker_hits_by_type,
         defender_hits_by_unit_type=defender_hits_by_type,
         terror_applied=action.payload.get("terror_applied", False) if new_round_number == 1 else False,
+        terror_reroll_count=action.payload.get("terror_reroll_count") if new_round_number == 1 else None,
+        ladder_infantry_instance_ids=ladder_ids_list_combat,
     ))
 
     # Emit unit destroyed events for casualties
@@ -2227,8 +3707,10 @@ def _handle_continue_combat(
         events.append(unit_destroyed(pid, unit_type, defender_faction, combat.territory_id, "combat"))
     _sync_survivor_health(territory, attacker_units, defender_units, attacker_territory=attacker_territory if sea_zone_id else None)
 
-    # Update combat log
+    # Update combat log and cumulative hits
     combat.combat_log.append(combat_log_entry)
+    combat.cumulative_hits_received_by_attacker += round_result.defender_hits
+    combat.cumulative_hits_received_by_defender += round_result.attacker_hits
     combat.round_number = new_round_number
     combat.attacker_instance_ids = round_result.surviving_attacker_ids
     combat.attackers_have_rolled = True  # round 1 (or later) has been run
@@ -2244,7 +3726,10 @@ def _handle_continue_combat(
             combat.combat_log,
             territory_defs,
             unit_defs,
+            faction_defs,
             sea_zone_id=sea_zone_id,
+            initial_attacker_instance_ids=combat.initial_attacker_instance_ids or None,
+            initial_defender_instance_ids=combat.initial_defender_instance_ids or None,
         )
         events.extend(end_events)
         state.active_combat = None
@@ -2274,6 +3759,9 @@ def _handle_retreat(
     if not combat.attackers_have_rolled:
         raise ValueError("Cannot retreat until attackers have rolled (after archer or stealth prefire, click Continue first)")
 
+    if getattr(combat, "sea_zone_id", None):
+        raise ValueError("Retreat is not allowed during a sea raid")
+
     retreat_to = action.payload.get("retreat_to")
     if not retreat_to:
         raise ValueError("Must specify retreat_to territory")
@@ -2282,48 +3770,43 @@ def _handle_retreat(
     if not retreat_territory:
         raise ValueError(f"Invalid retreat territory: {retreat_to}")
 
-    sea_zone_id = getattr(combat, "sea_zone_id", None)
-    # For sea raid, retreat_to may be the same sea zone (attackers stay); no need for friendly land
-    if not sea_zone_id:
-        if not _territory_is_friendly_for_retreat(retreat_territory, combat.attacker_faction, faction_defs, unit_defs):
-            raise ValueError(
-                f"Cannot retreat to {retreat_to} - must be allied territory")
-    elif retreat_to != sea_zone_id:
-        raise ValueError(f"Sea raid retreat must be to the same sea zone ({sea_zone_id})")
-
-    # For sea raid, attackers stay in sea zone (no move). Otherwise move to retreat territory.
-    if not sea_zone_id:
-        # Must be adjacent: ground-only if any retreating unit is land, else allow aerial_adjacent
-        retreat_adjacent = _get_retreat_adjacent_ids(state, territory_defs, unit_defs)
-        if retreat_to not in retreat_adjacent:
-            raise ValueError(
-                f"Cannot retreat to {retreat_to} - not adjacent to {combat.territory_id}")
-
-        # Move surviving attackers from contested territory to retreat territory
-        combat_territory = state.territories[combat.territory_id]
-        surviving_ids = set(combat.attacker_instance_ids)
-        units_to_move = [
-            u for u in combat_territory.units
-            if u.instance_id in surviving_ids
-        ]
-        combat_territory.units = [
-            u for u in combat_territory.units
-            if u.instance_id not in surviving_ids
-        ]
-        retreat_territory.units.extend(units_to_move)
+    if not _territory_is_friendly_for_retreat(retreat_territory, combat.attacker_faction, faction_defs, unit_defs):
+        raise ValueError(
+            f"Cannot retreat to {retreat_to} - must be allied territory")
 
     surviving_ids = set(combat.attacker_instance_ids)
+    # Must be adjacent: ground-only if any retreating unit is land, else allow aerial_adjacent
+    retreat_adjacent = _get_retreat_adjacent_ids(state, territory_defs, unit_defs)
+    if retreat_to not in retreat_adjacent:
+        raise ValueError(
+            f"Cannot retreat to {retreat_to} - not adjacent to {combat.territory_id}")
+
+    # Move surviving attackers from contested territory to retreat territory.
+    combat_territory = state.territories[combat.territory_id]
+    units_to_move = [
+        u for u in combat_territory.units
+        if u.instance_id in surviving_ids
+    ]
+    combat_territory.units = [
+        u for u in combat_territory.units
+        if u.instance_id not in surviving_ids
+    ]
+    retreat_territory.units.extend(units_to_move)
+    retreated_ids = [u.instance_id for u in units_to_move]
+
     # Emit retreat event (for sea raid, retreat_to is not used for move but still required for API)
     events.append(units_retreated(
         combat.attacker_faction,
         combat.territory_id,
         retreat_to,
-        list(surviving_ids),
+        retreated_ids,
     ))
 
     # Emit combat ended event (defender wins by default on retreat)
     territory = state.territories[combat.territory_id]
     defender_ids = [u.instance_id for u in territory.units]
+    att_cas = list(set(combat.initial_attacker_instance_ids or []) - set(combat.attacker_instance_ids))
+    def_cas = list(set(combat.initial_defender_instance_ids or []) - set(defender_ids))
     events.append(combat_ended(
         combat.territory_id,
         "defender",
@@ -2331,7 +3814,11 @@ def _handle_retreat(
         territory.owner,
         [],  # No surviving attackers in territory
         defender_ids,
-        combat.round_number,
+        len(combat.combat_log),
+        attacker_casualty_ids=att_cas,
+        defender_casualty_ids=def_cas,
+        retreat_to=retreat_to,
+        outcome="retreat",
     ))
 
     # Clear active combat and sea-raid origin for this territory
@@ -2415,6 +3902,70 @@ def _sync_survivor_health(
             unit.remaining_health = survivor_health[unit.instance_id]
 
 
+def _purge_sea_raid_staging_after_lost_naval(
+    state: GameState,
+    sea_territory_id: str,
+    attacker_faction: str,
+    unit_defs: dict[str, UnitDefinition],
+) -> list[GameEvent]:
+    """
+    When naval combat in a sea zone ends with all attackers eliminated, clear every
+    territory_sea_raid_from entry that staged from that sea and remove stranded land
+    attackers (passengers) from those land hexes so the land raid cannot follow.
+    """
+    events: list[GameEvent] = []
+    tsrf = getattr(state, "territory_sea_raid_from", None) or {}
+    lands = [lid for lid, sz in tsrf.items() if sz == sea_territory_id]
+    if not lands:
+        return events
+    state.territory_sea_raid_from = {k: v for k, v in tsrf.items() if v != sea_territory_id}
+
+    for lid in lands:
+        t = state.territories.get(lid)
+        if not t:
+            continue
+        kept: list[Unit] = []
+        for u in t.units:
+            ud = unit_defs.get(u.unit_id)
+            if (
+                get_unit_faction(u, unit_defs) == attacker_faction
+                and is_land_unit(ud)
+                and not _is_naval_unit(ud)
+            ):
+                unit_type = u.instance_id.split("_")[1] if "_" in u.instance_id else "unknown"
+                events.append(
+                    unit_destroyed(u.instance_id, unit_type, attacker_faction, lid, "sea_raid_naval_lost")
+                )
+                continue
+            kept.append(u)
+        t.units = kept
+
+    return events
+
+
+def _liberation_beneficiary_if_allied_original(
+    territory_id: str,
+    territory: TerritoryState,
+    capturer_faction: str,
+    faction_defs: dict[str, FactionDefinition],
+    state: GameState,
+) -> str | None:
+    """
+    Faction id restored at combat phase end when capturer and original_owner share an alliance.
+    Matches pending capture application in _handle_end_phase.
+    """
+    original_owner = effective_original_owner(territory_id, territory, state)
+    if not original_owner or original_owner == capturer_faction:
+        return None
+    capturer_def = faction_defs.get(capturer_faction)
+    original_def = faction_defs.get(original_owner)
+    if not capturer_def or not original_def:
+        return None
+    if capturer_def.alliance == original_def.alliance:
+        return original_owner
+    return None
+
+
 def _resolve_combat_end(
     state: GameState,
     attacker_faction: str,
@@ -2423,13 +3974,16 @@ def _resolve_combat_end(
     combat_log: list[CombatRoundResult],
     territory_defs: dict[str, TerritoryDefinition],
     unit_defs: dict[str, UnitDefinition],
+    faction_defs: dict[str, FactionDefinition],
     sea_zone_id: str | None = None,
+    initial_attacker_instance_ids: list[str] | None = None,
+    initial_defender_instance_ids: list[str] | None = None,
 ) -> tuple[GameState, list[GameEvent]]:
     """
     Resolve the end of combat.
     Both attackers and defenders are in the same contested territory (or, for sea raid, attackers in sea_zone_id).
     - If defenders eliminated AND at least one attacker survived: territory captured by attacker
-      (only if surviving attackers include at least one land unit; aerial-only cannot conquer)
+      (only if surviving attackers include a conquering-capable unit; aerial-only or siegework-only cannot conquer)
       For sea raid: move surviving attackers from sea zone to territory.
     - If attackers eliminated OR both sides eliminated: defender keeps territory (no conquest)
     """
@@ -2437,50 +3991,108 @@ def _resolve_combat_end(
     territory = state.territories[territory_id]
     old_owner = territory.owner
     total_rounds = len(combat_log)
+    # Casualty ids for one-line battle summary
+    att_cas = list(set(initial_attacker_instance_ids or []) - set(round_result.surviving_attacker_ids))
+    def_cas = list(set(initial_defender_instance_ids or []) - set(round_result.surviving_defender_ids))
     # Where attackers live: sea zone (before offload) or territory (after phase end / already offloaded)
     sea_zone = state.territories.get(sea_zone_id) if sea_zone_id else None
+    surviving_attacker_ids_set = set(round_result.surviving_attacker_ids)
     if sea_zone_id and sea_zone:
-        surviving_attacker_ids_set = set(round_result.surviving_attacker_ids)
         in_sea = [u for u in sea_zone.units if u.instance_id in surviving_attacker_ids_set]
         in_land = [u for u in territory.units if u.instance_id in surviving_attacker_ids_set]
+        # Conquer check must see every surviving attacker (land + sea). Previously we only used
+        # in_sea when non-empty, so surviving land units were ignored and did_conquer was false
+        # (no pending_captures) even though the battle was won — wrong for sea raids/offload splits.
+        surviving_attacker_units = in_sea + in_land
         attacker_territory = sea_zone if in_sea else territory
-        surviving_attacker_units = in_sea if in_sea else in_land
     else:
         attacker_territory = territory
-        surviving_attacker_ids_set = set(round_result.surviving_attacker_ids)
         surviving_attacker_units = [
             u for u in territory.units
             if u.instance_id in surviving_attacker_ids_set
         ]
 
+    # If instance ids say survivors exist but they are not on the contested land/sea lists (stale state),
+    # find them anywhere on the board so conquest and ground checks still match the round result.
+    if not surviving_attacker_units and surviving_attacker_ids_set:
+        seen_ids: set[str] = set()
+        for t in state.territories.values():
+            for u in t.units:
+                if u.instance_id in surviving_attacker_ids_set and u.instance_id not in seen_ids:
+                    seen_ids.add(u.instance_id)
+                    surviving_attacker_units.append(u)
+
     # Attacker only wins if defenders are gone AND at least one attacker survived
     if round_result.defenders_eliminated and not round_result.attackers_eliminated:
         has_living_ground_attacker = any(
-            is_land_unit(unit_defs.get(u.unit_id))
+            can_conquer_territory_as_attacker(unit_defs.get(u.unit_id))
             for u in surviving_attacker_units
         )
+        # Pure land (and sea): if board state lost sync with surviving_attacker_ids but the round
+        # result lists survivors, infer unit types from instance ids so pending_captures still applies.
+        if not has_living_ground_attacker and round_result.surviving_attacker_ids:
+            fids = list(faction_defs.keys())
+            for iid in round_result.surviving_attacker_ids:
+                uid = _unit_id_from_instance_id_pattern(iid, fids)
+                if uid and can_conquer_territory_as_attacker(unit_defs.get(uid)):
+                    has_living_ground_attacker = True
+                    break
         territory_def = territory_defs.get(territory_id)
-        if (
+        did_conquer = (
             has_living_ground_attacker
             and territory_def
             and getattr(territory_def, "ownable", True)
-        ):
+        )
+        if did_conquer:
             state.pending_captures[territory_id] = attacker_faction
         else:
             state.pending_captures.pop(territory_id, None)
 
         # Sea raid (attackers in sea): move only land units (passengers) to territory; boats stay in sea zone.
+        # Bomb (self_destruct tag) still moves if it survived the round; paired detonation is handled in combat.
         # If attackers were already on territory (offloaded), nothing to move.
         if sea_zone_id and sea_zone and attacker_territory is sea_zone:
             to_move = [
                 u for u in attacker_territory.units
-                if u.instance_id in surviving_attacker_ids_set and is_land_unit(unit_defs.get(u.unit_id))
+                if (u.instance_id in surviving_attacker_ids_set
+                    and is_land_unit(unit_defs.get(u.unit_id))
+                    and not _is_naval_unit(unit_defs.get(u.unit_id)))
             ]
-            for u in to_move:
-                attacker_territory.units.remove(u)
-                setattr(u, "loaded_onto", None)
-                territory.units.append(u)
+            # Remove all surviving attackers from sea; only to_move go to territory
+            for u in list(attacker_territory.units):
+                if u.instance_id in surviving_attacker_ids_set:
+                    attacker_territory.units.remove(u)
+                    if u in to_move:
+                        setattr(u, "loaded_onto", None)
+                        territory.units.append(u)
+        else:
+            # Land battle: keep surviving attackers (bombikazi/bomb removal is via round casualties only),
+            # bystanders, and defender-roster survivors only. When all defenders are eliminated, purge any
+            # stray defender-side units so allied garrison / roster drift cannot leave ghosts or wipe the wrong stack.
+            aa = getattr(faction_defs.get(attacker_faction), "alliance", None)
+            surv_def_set = set(round_result.surviving_defender_ids or [])
+            kept: list[Unit] = []
+            for u in territory.units:
+                uid = u.instance_id
+                side = _land_combat_unit_side(u, attacker_faction, aa, unit_defs, faction_defs)
+                if side == "defender":
+                    if uid in surv_def_set:
+                        kept.append(u)
+                    continue
+                if side == "attacker":
+                    if uid in surviving_attacker_ids_set:
+                        kept.append(u)
+                    continue
+                kept.append(u)
+            territory.units = kept
 
+        liberated_for = (
+            _liberation_beneficiary_if_allied_original(
+                territory_id, territory, attacker_faction, faction_defs, state,
+            )
+            if did_conquer
+            else None
+        )
         events.append(combat_ended(
             territory_id,
             "attacker",
@@ -2489,6 +4101,10 @@ def _resolve_combat_end(
             round_result.surviving_attacker_ids,
             [],
             total_rounds,
+            attacker_casualty_ids=att_cas,
+            defender_casualty_ids=def_cas,
+            outcome="conquer" if did_conquer else "victory",
+            liberated_for=liberated_for,
         ))
     else:
         # Defenders win: attacker eliminated, or mutual annihilation (no conquest)
@@ -2500,12 +4116,25 @@ def _resolve_combat_end(
             [],
             round_result.surviving_defender_ids,
             total_rounds,
+            attacker_casualty_ids=att_cas,
+            defender_casualty_ids=def_cas,
+            outcome="defeat",
         ))
 
-    # Clear active combat and sea-raid origin for this territory
+    # Clear active combat; if naval battle in a sea zone was lost, cancel any staged land sea raid
     state.active_combat = None
-    if getattr(state, "territory_sea_raid_from", None):
-        state.territory_sea_raid_from.pop(territory_id, None)
+    tsrf = getattr(state, "territory_sea_raid_from", None) or {}
+    tdef_end = territory_defs.get(territory_id)
+    is_sea_combat = bool(tdef_end and _is_sea_zone(tdef_end))
+    if tsrf:
+        if is_sea_combat and round_result.attackers_eliminated:
+            events.extend(
+                _purge_sea_raid_staging_after_lost_naval(
+                    state, territory_id, attacker_faction, unit_defs
+                )
+            )
+        else:
+            state.territory_sea_raid_from.pop(territory_id, None)
 
     return state, events
 
@@ -2537,6 +4166,16 @@ def _handle_end_phase(
             "Cannot end combat phase while combat is active. "
             "Must continue_combat or retreat first."
         )
+    # Cannot end combat phase while contested battles remain (units in enemy territory not yet resolved)
+    if state.phase == "combat" and state.active_combat is None and state.current_faction:
+        contested = get_contested_territories(
+            state, state.current_faction, faction_defs, unit_defs, territory_defs
+        )
+        if contested:
+            raise ValueError(
+                "Cannot end combat phase while there are unresolved battles. "
+                "Initiate and resolve or retreat from all battles first."
+            )
 
     old_phase = state.phase
 
@@ -2581,8 +4220,8 @@ def _handle_end_phase(
             # Liberation check: if original_owner exists and is allied with capturer,
             # restore to original owner instead of capturer
             new_owner = capturer
-            original_owner = territory.original_owner
-            
+            original_owner = effective_original_owner(territory_id, territory, state)
+
             if original_owner and original_owner != capturer:
                 capturer_def = faction_defs.get(capturer)
                 original_def = faction_defs.get(original_owner)
@@ -2641,6 +4280,34 @@ def _handle_end_phase(
     
     # After mobilization, apply pending camp placements then pending mobilizations then end the turn
     if state.phase == "mobilization":
+        faction_id = state.current_faction or ""
+        cd = camp_defs or {}
+        camp_cost = int(getattr(state, "camp_cost", 10) or 10)
+        queued_mob = {p.camp_index for p in getattr(state, "pending_camp_placements", []) or []}
+        for i, p in enumerate(state.pending_camps or []):
+            if p.get("placed_territory_id"):
+                continue
+            if i in queued_mob:
+                continue
+            if valid_camp_placement_territory_ids(
+                state, faction_id, i, cd, territory_defs
+            ):
+                continue
+            old_power = int(state.faction_resources.get(faction_id, {}).get("power", 0) or 0)
+            if faction_id not in state.faction_resources:
+                state.faction_resources[faction_id] = {}
+            new_power = old_power + camp_cost
+            state.faction_resources[faction_id]["power"] = new_power
+            state.pending_camps[i]["placed_territory_id"] = "__forfeited__"
+            events.append(
+                resources_changed(
+                    faction_id,
+                    "power",
+                    old_power,
+                    new_power,
+                    "camp_forfeited_no_valid_territory",
+                )
+            )
         state, camp_events = _apply_pending_camp_placements(state, camp_defs or {})
         events.extend(camp_events)
         state, mobilize_events = _apply_pending_mobilizations(
@@ -2658,6 +4325,7 @@ def _handle_end_phase(
     state.phase = phase_order[next_idx]
     if old_phase == "combat_move":
         state.loaded_naval_must_attack_instance_ids = []
+        state.avoided_forced_naval_combat_instance_ids = []
 
     # When entering combat_move, ensure all current-faction units have full movement
     # (including units in neutral/unownable territories like Dagorlad that may have
@@ -2751,8 +4419,6 @@ def _handle_skip_turn(
     """
     Force end current faction's turn from any phase. Used by forfeit when a player leaves on their turn.
     Clears phase-specific state (active combat, pending moves, etc.) then runs _handle_end_turn.
-    Next faction is chosen; factions with no capital and no units get turn_skipped (existing logic).
-    Remove only the Skip Turn button in the UI for production; keep this handler and the endpoint.
     """
     # Clear blockers so _handle_end_turn can run
     state.active_combat = None
@@ -2760,6 +4426,8 @@ def _handle_skip_turn(
     state.declared_battles = []
     state.pending_captures = {}
     state.loaded_naval_must_attack_instance_ids = []
+    state.avoided_forced_naval_combat_instance_ids = []
+    state.naval_mobilization_intruder_instance_ids = []
     return _handle_end_turn(state, territory_defs, faction_defs, camp_defs, unit_defs)
 
 
@@ -2790,7 +4458,8 @@ def _handle_end_turn(
 
     # Calculate and store pending income for the ending faction
     # Only if they still own their capital - if capital captured, no income
-    if _faction_owns_capital(state, old_faction, faction_defs):
+    income_calculated_event: GameEvent | None = None
+    if faction_owns_capital(state, old_faction, faction_defs):
         pending_income: dict[str, int] = {}
         contributing_territories: list[str] = []
 
@@ -2814,15 +4483,16 @@ def _handle_end_turn(
         # Store the pending income for collection at their next turn start
         state.faction_pending_income[old_faction] = pending_income
 
-        # Emit income calculated event
         if pending_income:
-            events.append(income_calculated(old_faction, pending_income, contributing_territories))
+            income_calculated_event = income_calculated(old_faction, pending_income, contributing_territories)
     else:
         # Capital captured - no income
         state.faction_pending_income[old_faction] = {}
 
-    # Emit turn ended event
+    # Turn end first; income summary last for this faction's turn (after mobilization / end phase)
     events.append(turn_ended(state.turn_number, old_faction))
+    if income_calculated_event is not None:
+        events.append(income_calculated_event)
 
     # Determine next faction (use state.turn_order from setup if set, else alphabetical)
     faction_ids = state.turn_order if state.turn_order else sorted(faction_defs.keys())
@@ -2873,7 +4543,7 @@ def _handle_end_turn(
             state.faction_pending_income[new_faction] = {}
 
         # Skip this faction if they have no capital and no units anywhere (no purchase/mobilize, nothing to move/attack)
-        if not _faction_owns_capital(state, new_faction, faction_defs) and _faction_unit_count(state, new_faction, unit_defs) == 0:
+        if not faction_owns_capital(state, new_faction, faction_defs) and _faction_unit_count(state, new_faction, unit_defs) == 0:
             events.append(turn_skipped(new_faction))
             skipped += 1
             next_idx = (next_idx + 1) % len(faction_ids)

@@ -14,15 +14,39 @@ from backend.engine.definitions import (
     UnitDefinition,
     TerritoryDefinition,
     FactionDefinition,
+    is_transportable,
 )
+from backend.engine.utils import effective_territory_owner, faction_owns_capital
 from backend.engine.movement import (
+    _is_sea_zone,
+    _sea_zone_has_hostile_enemy_boats,
+    are_sea_zones_directly_adjacent,
+    empty_sea_zone_valid_for_combat_move_sail_then_load_raid,
+    get_forced_naval_combat_instance_ids,
+    expand_sea_offload_instance_ids,
     get_reachable_territories_for_unit,
     get_sea_zones_reachable_by_sail,
     get_shortest_path,
     is_friendly_territory_for_landing,
-    _is_sea_zone,
+    ford_shortcut_requires_escort_lead,
+    land_move_ford_escort_cost_for_instances,
+    pending_ford_crosser_lead_move_from_origin,
+    pending_move_is_same_phase_load_into_sea,
+    remaining_ford_escort_slots,
+    remaining_load_slots_on_boat,
+    remaining_sea_load_passenger_slots,
+    resolve_territory_key_in_state,
+    resolve_unit_for_move_declaration,
+    sea_zone_ids_match,
+    sort_sea_zone_ids_numerically,
 )
-from backend.engine.utils import get_unit_faction, has_unit_special, is_aerial_unit, is_land_unit
+from backend.engine.utils import (
+    effective_territory_owner,
+    get_unit_faction,
+    has_unit_special,
+    is_aerial_unit,
+    is_land_unit,
+)
 
 
 def _territory_has_standing_camp(
@@ -52,12 +76,9 @@ def _territory_has_port(
 
 
 def _home_territory_ids(ud: UnitDefinition) -> list[str]:
-    """Return list of home territory ids for this unit (supports single or multiple)."""
+    """Return list of home territory ids for this unit. Uses home_territory_ids only."""
     ids = getattr(ud, "home_territory_ids", None)
-    if ids:
-        return list(ids)
-    single = getattr(ud, "home_territory_id", None)
-    return [single] if single else []
+    return list(ids) if ids else []
 
 
 def _sea_zone_adjacent_to_owned_port(
@@ -139,7 +160,7 @@ SET_TERRITORY_DEFENDER_CASUALTY_ORDER = "set_territory_defender_casualty_order"
 
 # Phase rules (duplicated from reducer to avoid circular imports)
 PHASE_ALLOWED_ACTIONS = {
-    "purchase": ["purchase_units", "purchase_camp", SET_TERRITORY_DEFENDER_CASUALTY_ORDER, "end_phase", "skip_turn"],
+    "purchase": ["purchase_units", "purchase_camp", "repair_stronghold", SET_TERRITORY_DEFENDER_CASUALTY_ORDER, "end_phase", "skip_turn"],
     "combat_move": ["move_units", "cancel_move", SET_TERRITORY_DEFENDER_CASUALTY_ORDER, "end_phase", "skip_turn"],
     "combat": ["initiate_combat", "continue_combat", "retreat", SET_TERRITORY_DEFENDER_CASUALTY_ORDER, "end_phase", "skip_turn"],
     "non_combat_move": ["move_units", "cancel_move", SET_TERRITORY_DEFENDER_CASUALTY_ORDER, "end_phase", "skip_turn"],
@@ -230,7 +251,13 @@ def validate_action(
         return _validate_initiate_combat(state, action, faction_defs, unit_defs, territory_defs)
     elif action_type == "mobilize_units":
         return _validate_mobilize(
-            state, action, unit_defs, territory_defs, camp_defs, port_defs
+            state,
+            action,
+            unit_defs,
+            territory_defs,
+            camp_defs,
+            port_defs,
+            faction_defs,
         )
     elif action_type == "retreat":
         return _validate_retreat(state, action, territory_defs, faction_defs, unit_defs)
@@ -240,14 +267,22 @@ def validate_action(
         return _validate_cancel_mobilization(state, action)
     elif action_type == "purchase_camp":
         return _validate_purchase_camp(state, action, camp_defs, territory_defs)
+    elif action_type == "repair_stronghold":
+        return _validate_repair_stronghold(state, action, territory_defs)
     elif action_type == "place_camp":
-        return _validate_place_camp(state, action, camp_defs)
+        return _validate_place_camp(state, action, camp_defs, territory_defs)
     elif action_type == "queue_camp_placement":
-        return _validate_queue_camp_placement(state, action, camp_defs)
+        return _validate_queue_camp_placement(state, action, camp_defs, territory_defs)
     elif action_type == "cancel_camp_placement":
         return _validate_cancel_camp_placement(state, action)
     elif action_type == "end_phase":
-        return _validate_end_phase(state)
+        return _validate_end_phase(
+            state,
+            faction_defs=faction_defs,
+            unit_defs=unit_defs,
+            territory_defs=territory_defs,
+            camp_defs=camp_defs,
+        )
     elif action_type in ["end_turn", "continue_combat", "skip_turn"]:
         return ValidationResult(True)
 
@@ -264,6 +299,169 @@ def _is_naval_unit(unit_def: UnitDefinition | None) -> bool:
         getattr(unit_def, "archetype", "") == "naval"
         or "naval" in getattr(unit_def, "tags", [])
     )
+
+
+def participates_in_sea_hex_naval_combat(unit, unit_def: UnitDefinition | None) -> bool:
+    """
+    Combat in a sea territory: naval surface units (not cargo) and aerial units that are not embarked
+    roll and appear as combatants. Matches initiate_combat roster rules.
+    """
+    if getattr(unit, "loaded_onto", None):
+        return False
+    if _is_naval_unit(unit_def):
+        return True
+    return is_aerial_unit(unit_def)
+
+
+def validate_move_as_sea_offload_if_applicable(
+    state: GameState,
+    origin: str,
+    destination: str,
+    units_in_stack: list,
+    unit_defs: dict[str, UnitDefinition],
+    territory_defs: dict[str, TerritoryDefinition],
+    faction_defs: dict[str, FactionDefinition],
+    faction_id: str,
+    charge_through: Any,
+) -> ValidationResult | None:
+    """
+    Sea zone -> adjacent land: dragging a boat with passengers means land units go ashore (offload / sea raid);
+    naval units in the request stay in the sea — they must be included for transport capacity, not treated as moving to land.
+
+    Returns ValidationResult(True/False) when this rule applies (stack includes at least one offloadable land unit),
+    or None if some other move validation path should handle the action.
+    """
+    origin_def = territory_defs.get(origin)
+    dest_def = territory_defs.get(destination)
+    if (
+        not origin_def
+        or not dest_def
+        or not _is_sea_zone(origin_def)
+        or _is_sea_zone(dest_def)
+    ):
+        return None
+
+    land_offload: list = []
+    naval_in_move: list = []
+    for u in units_in_stack:
+        ud = unit_defs.get(u.unit_id)
+        if _is_naval_unit(ud):
+            naval_in_move.append(u)
+        elif is_land_unit(ud) and not _is_naval_unit(ud):
+            # Passengers ashore/offload: land, non-naval. Do not require is_transportable here —
+            # load validation already enforced that; treating only transportable caused "orphan"
+            # units (in stack but neither naval nor land_offload) and the bogus reachability error.
+            land_offload.append(u)
+
+    if not land_offload:
+        # Boats alone cannot be "moved" onto land — UX often drags the boat token; passengers must be in the move.
+        if naval_in_move and len(naval_in_move) == len(units_in_stack):
+            return ValidationResult(
+                False,
+                "Naval units cannot move to land. Only land units (passengers) offload or conduct a sea raid; boats stay in the sea zone.",
+            )
+        return None
+
+    land_adj = getattr(dest_def, "adjacent", []) or []
+    sea_adj = getattr(origin_def, "adjacent", []) or []
+    if origin not in land_adj and destination not in sea_adj:
+        return ValidationResult(
+            False,
+            f"Territory {destination} is not adjacent to sea zone {origin} (cannot offload there)",
+        )
+
+    if state.phase == "non_combat_move":
+        dest_territory = state.territories.get(destination)
+        if dest_territory:
+            dest_eff = effective_territory_owner(state, destination)
+            if dest_eff is not None and dest_eff != faction_id:
+                our_fd = faction_defs.get(faction_id)
+                owner_fd = faction_defs.get(dest_eff)
+                our_alliance = getattr(our_fd, "alliance", "") if our_fd else ""
+                owner_alliance = getattr(owner_fd, "alliance", "") if owner_fd else ""
+                if owner_alliance != our_alliance:
+                    return ValidationResult(
+                        False,
+                        f"Non-combat move cannot target enemy territory {destination} (owner={dest_eff})",
+                    )
+            elif dest_eff is None:
+                dest_def_nc = territory_defs.get(destination)
+                if dest_def_nc and getattr(dest_def_nc, "ownable", True):
+                    return ValidationResult(
+                        False,
+                        f"Non-combat move cannot target ownable neutral territory {destination} (conquest is combat move only)",
+                    )
+
+    origin_territory = state.territories.get(origin)
+    naval_in_territory = [
+        u
+        for u in (origin_territory.units if origin_territory else [])
+        if get_unit_faction(u, unit_defs) == faction_id
+        and _is_naval_unit(unit_defs.get(u.unit_id))
+    ]
+    boat_ids_in_move = {n.instance_id for n in naval_in_move}
+    boat_ids_in_sea = {n.instance_id for n in naval_in_territory}
+
+    capacity_boats = naval_in_move if naval_in_move else naval_in_territory
+    naval_capacity = sum(
+        getattr(unit_defs.get(u.unit_id), "transport_capacity", 0) or 0
+        for u in capacity_boats
+    )
+    if len(land_offload) > naval_capacity:
+        return ValidationResult(
+            False,
+            f"Too many passengers ({len(land_offload)}) for transport capacity ({naval_capacity})",
+        )
+
+    def _passenger_assigned_to_boat(u, boat_ids: set[str]) -> bool:
+        lo = getattr(u, "loaded_onto", None)
+        if lo and lo in boat_ids:
+            return True
+        # Load still pending: no loaded_onto until phase end; match pending load onto this sea zone.
+        for pm in getattr(state, "pending_moves", []) or []:
+            if not pending_move_is_same_phase_load_into_sea(
+                state, pm, origin, territory_defs, state.phase
+            ):
+                continue
+            if u.instance_id not in (getattr(pm, "unit_instance_ids", None) or []):
+                continue
+            boat = getattr(pm, "load_onto_boat_instance_id", None) or None
+            if boat is None:
+                return True
+            if boat in boat_ids:
+                return True
+        return False
+
+    # When the client lists boats in the move (e.g. dragged the boat token), every passenger must be on one of those boats.
+    if boat_ids_in_move:
+        for u in land_offload:
+            if not _passenger_assigned_to_boat(u, boat_ids_in_move):
+                return ValidationResult(
+                    False,
+                    f"Offload/sea raid must include each passenger's boat in the move; check unit {u.instance_id} is on a selected boat.",
+                )
+    else:
+        for u in land_offload:
+            if not _passenger_assigned_to_boat(u, boat_ids_in_sea):
+                return ValidationResult(
+                    False,
+                    f"Passenger {u.instance_id} must be loaded onto a friendly boat in {origin} to offload.",
+                )
+
+    if charge_through is not None and isinstance(charge_through, list) and len(charge_through) > 0:
+        return ValidationResult(
+            False,
+            "charge_through not allowed for sea transport offload/sea raid",
+        )
+
+    for u in land_offload:
+        if getattr(u, "remaining_movement", 0) < 1:
+            return ValidationResult(
+                False,
+                f"Unit {u.instance_id} needs 1 movement to offload (has {getattr(u, 'remaining_movement', 0)})",
+            )
+
+    return ValidationResult(True)
 
 
 def _validate_purchase(
@@ -286,6 +484,12 @@ def _validate_purchase(
     faction_def = faction_defs.get(faction_id)
     if not faction_def:
         return ValidationResult(False, f"Unknown faction: {faction_id}")
+
+    if faction_defs and not faction_owns_capital(state, faction_id, faction_defs):
+        return ValidationResult(
+            False,
+            f"Cannot purchase units: {faction_id}'s capital has been captured",
+        )
 
     # Calculate total cost
     total_cost: dict[str, int] = {}
@@ -384,26 +588,120 @@ def _validate_move(
     if not origin:
         return ValidationResult(False, "No origin specified")
 
+    origin = resolve_territory_key_in_state(state, origin, territory_defs)
+    destination = resolve_territory_key_in_state(state, destination, territory_defs)
+
     origin_territory = state.territories.get(origin)
     if not origin_territory:
         return ValidationResult(False, f"Origin territory {origin} does not exist")
 
+    unit_instance_ids = expand_sea_offload_instance_ids(
+        state,
+        origin,
+        destination,
+        list(unit_instance_ids),
+        unit_defs,
+        territory_defs,
+        action.faction,
+    )
+    if not unit_instance_ids:
+        return ValidationResult(False, "No units specified to move")
+
     # Build list of units and which can reach destination
+    origin_def_chk = territory_defs.get(origin)
+    dest_def_chk = territory_defs.get(destination)
+    sea_to_land_ctx = (
+        origin_def_chk
+        and dest_def_chk
+        and _is_sea_zone(origin_def_chk)
+        and not _is_sea_zone(dest_def_chk)
+    )
+    sea_to_sea_ctx = (
+        origin_def_chk
+        and dest_def_chk
+        and _is_sea_zone(origin_def_chk)
+        and _is_sea_zone(dest_def_chk)
+    )
     units_in_stack = []
+    for instance_id in unit_instance_ids:
+        if sea_to_land_ctx:
+            unit = resolve_unit_for_move_declaration(
+                state, origin, instance_id, state.phase, territory_defs
+            )
+        elif sea_to_sea_ctx:
+            unit = next((u for u in origin_territory.units if u.instance_id == instance_id), None)
+            if not unit:
+                unit = resolve_unit_for_move_declaration(
+                    state, origin, instance_id, state.phase, territory_defs
+                )
+        else:
+            unit = next((u for u in origin_territory.units if u.instance_id == instance_id), None)
+        if not unit:
+            return ValidationResult(False, f"Unit {instance_id} not found for move from {origin}")
+        units_in_stack.append(unit)
+
+    # Sea→land offload must run *before* reachability. Passengers still on land (pending load) would be
+    # pathfound from the sea hex incorrectly → no "drivers" → spurious "At least one unit must reach" errors.
+    sea_offload_vr = validate_move_as_sea_offload_if_applicable(
+        state,
+        origin,
+        destination,
+        units_in_stack,
+        unit_defs,
+        territory_defs,
+        faction_defs,
+        action.faction,
+        action.payload.get("charge_through"),
+    )
+    if sea_offload_vr is not None:
+        return sea_offload_vr
+
     can_reach = {}
     charge_routes_by_unit = {}
-    for instance_id in unit_instance_ids:
-        unit = next((u for u in origin_territory.units if u.instance_id == instance_id), None)
-        if not unit:
-            return ValidationResult(False, f"Unit {instance_id} not found in {origin}")
-        units_in_stack.append(unit)
+    ford_exclude = set(unit_instance_ids)
+    same_move_has_ford_crosser = any(
+        has_unit_special(unit_defs.get(u.unit_id), "ford_crosser") for u in units_in_stack
+    )
+    for unit in units_in_stack:
         reachable, charge_routes = get_reachable_territories_for_unit(
-            unit, origin, state, unit_defs, territory_defs, faction_defs, state.phase
+            unit,
+            origin,
+            state,
+            unit_defs,
+            territory_defs,
+            faction_defs,
+            state.phase,
+            None,
+            ford_exclude,
+            same_move_has_ford_crosser,
         )
         can_reach[unit.instance_id] = destination in reachable
         charge_routes_by_unit[unit.instance_id] = charge_routes
 
     if all(can_reach[u.instance_id] for u in units_in_stack):
+        # Non-combat move: destination must be friendly, allied, or pass-through neutral only (never enemy, never ownable neutral)
+        if state.phase == "non_combat_move":
+            dest_territory = state.territories.get(destination)
+            faction_id = action.faction
+            if dest_territory:
+                dest_eff = effective_territory_owner(state, destination)
+                if dest_eff is not None and dest_eff != faction_id:
+                    our_fd = faction_defs.get(faction_id)
+                    owner_fd = faction_defs.get(dest_eff)
+                    our_alliance = getattr(our_fd, "alliance", "") if our_fd else ""
+                    owner_alliance = getattr(owner_fd, "alliance", "") if owner_fd else ""
+                    if owner_alliance != our_alliance:
+                        return ValidationResult(
+                            False,
+                            f"Non-combat move cannot target enemy territory {destination} (owner={dest_eff})",
+                        )
+                elif dest_eff is None:
+                    dest_def = territory_defs.get(destination)
+                    if dest_def and getattr(dest_def, "ownable", True):
+                        return ValidationResult(
+                            False,
+                            f"Non-combat move cannot target ownable neutral territory {destination} (conquest is combat move only)",
+                        )
         charge_through = action.payload.get("charge_through")
         if charge_through is not None and isinstance(charge_through, list):
             charge_through = [str(t) for t in charge_through]
@@ -413,6 +711,154 @@ def _validate_move(
                     return ValidationResult(
                         False,
                         f"Invalid charge_through for {destination}: not a valid charging route"
+                    )
+        if (
+            state.phase == "combat_move"
+            and origin_def_chk
+            and dest_def_chk
+            and _is_sea_zone(origin_def_chk)
+            and _is_sea_zone(dest_def_chk)
+            and units_in_stack
+            and all(_is_naval_unit(unit_defs.get(u.unit_id)) for u in units_in_stack)
+        ):
+            avoid_forced = bool(action.payload.get("avoid_forced_naval_combat"))
+            forced_ids = set(
+                get_forced_naval_combat_instance_ids(
+                    state, action.faction, unit_defs, territory_defs, faction_defs
+                )
+            )
+            moving_naval = {
+                u.instance_id for u in units_in_stack if _is_naval_unit(unit_defs.get(u.unit_id))
+            }
+            if avoid_forced:
+                if origin == destination:
+                    return ValidationResult(
+                        False,
+                        "avoid_forced_naval_combat requires sailing to a different sea zone",
+                    )
+                if not moving_naval.issubset(forced_ids):
+                    return ValidationResult(
+                        False,
+                        "avoid_forced_naval_combat only applies to boats that must fight or leave the mobilization standoff",
+                    )
+                if _sea_zone_has_hostile_enemy_boats(
+                    state, destination, action.faction, unit_defs, faction_defs, territory_defs
+                ):
+                    return ValidationResult(
+                        False,
+                        "Cannot use avoid_forced_naval_combat to sail into a sea zone with hostile enemy boats",
+                    )
+                if not are_sea_zones_directly_adjacent(territory_defs, origin, destination):
+                    return ValidationResult(
+                        False,
+                        "avoid_forced_naval_combat: you may only sail to an adjacent sea zone (1 hex), regardless of movement allowance",
+                    )
+            elif not _sea_zone_has_hostile_enemy_boats(
+                state, destination, action.faction, unit_defs, faction_defs, territory_defs
+            ):
+                if not any(
+                    empty_sea_zone_valid_for_combat_move_sail_then_load_raid(
+                        state,
+                        destination,
+                        origin,
+                        action.faction,
+                        u,
+                        unit_defs,
+                        territory_defs,
+                        faction_defs,
+                        state.phase,
+                    )
+                    for u in units_in_stack
+                ):
+                    return ValidationResult(
+                        False,
+                        "Combat move cannot sail to this sea zone unless it is hostile, or adjacent to both a friendly land with units to load and a land you can sea raid.",
+                    )
+        # Land → sea: transportable land = load (capacity). All-aerial = combat into sea, not embark.
+        odef = territory_defs.get(origin)
+        ddef = territory_defs.get(destination)
+        if (
+            odef is not None
+            and ddef is not None
+            and not _is_sea_zone(odef)
+            and _is_sea_zone(ddef)
+            and units_in_stack
+        ):
+            all_transportable_land = all(
+                is_land_unit(unit_defs.get(u.unit_id)) and is_transportable(unit_defs.get(u.unit_id))
+                for u in units_in_stack
+            )
+            all_aerial = all(is_aerial_unit(unit_defs.get(u.unit_id)) for u in units_in_stack)
+            if all_transportable_land:
+                dest_territory = state.territories.get(destination)
+                if not dest_territory:
+                    return ValidationResult(False, f"Destination {destination} does not exist")
+                faction_id = action.faction
+                load_onto_boat_id = (action.payload.get("load_onto_boat_instance_id") or "").strip() or None
+                if load_onto_boat_id:
+                    slots = remaining_load_slots_on_boat(
+                        state, destination, load_onto_boat_id, faction_id, unit_defs, territory_defs, state.phase
+                    )
+                    if len(units_in_stack) > slots:
+                        return ValidationResult(
+                            False,
+                            f"Boat {load_onto_boat_id} has {slots} passenger slot(s) left (capacity minus onboard and pending loads), "
+                            f"cannot load {len(units_in_stack)}",
+                        )
+                else:
+                    slots_left = remaining_sea_load_passenger_slots(
+                        state, destination, faction_id, unit_defs, territory_defs, state.phase
+                    )
+                    if len(units_in_stack) > slots_left:
+                        return ValidationResult(
+                            False,
+                            f"Not enough transport capacity in {destination}: {len(units_in_stack)} passengers but only "
+                            f"{slots_left} slot(s) left (boats may be full or already reserved by pending loads this phase)",
+                        )
+            elif not all_aerial:
+                return ValidationResult(
+                    False,
+                    "Only transportable land units can load into a sea zone",
+                )
+        # Land → land: ford escort (non-ford-crossers using ford-only edges)
+        if (
+            odef is not None
+            and ddef is not None
+            and not _is_sea_zone(odef)
+            and not _is_sea_zone(ddef)
+            and units_in_stack
+        ):
+            ford_cost = land_move_ford_escort_cost_for_instances(
+                origin, destination, unit_instance_ids, state, unit_defs, territory_defs
+            )
+            if ford_cost > 0:
+                okey = resolve_territory_key_in_state(state, origin, territory_defs)
+                dkey = resolve_territory_key_in_state(state, destination, territory_defs)
+                needs_lead = ford_shortcut_requires_escort_lead(okey, dkey, territory_defs)
+                if needs_lead and not any(
+                    has_unit_special(unit_defs.get(u.unit_id), "ford_crosser") for u in units_in_stack
+                ):
+                    if not pending_ford_crosser_lead_move_from_origin(
+                        state, origin, state.phase, unit_defs, territory_defs
+                    ):
+                        return ValidationResult(
+                            False,
+                            "Declare a ford crosser's move across this ford before other units may use escort capacity.",
+                        )
+                ford_rem = remaining_ford_escort_slots(
+                    state,
+                    origin,
+                    action.faction,
+                    unit_defs,
+                    territory_defs,
+                    state.phase,
+                    ford_exclude,
+                )
+                if ford_cost > ford_rem:
+                    return ValidationResult(
+                        False,
+                        f"Not enough ford escort capacity: need {ford_cost} slot(s) but only {ford_rem} remain "
+                        f"(ford crossers' transport_capacity in {origin}, minus pending moves)",
                     )
         return ValidationResult(True)
 
@@ -432,34 +878,30 @@ def _validate_move(
     drivers = [u for u in units_in_stack if can_reach[u.instance_id]]
     passengers = [u for u in units_in_stack if not can_reach[u.instance_id]]
 
-    # Offload: sea -> adjacent land; no driver needs to "reach" land (boats stay in sea)
-    origin_is_sea = origin_def and _is_sea_zone(origin_def)
-    if origin_is_sea and not dest_is_sea and not drivers and passengers:
-        land_def = territory_defs.get(destination)
-        land_adj = getattr(land_def, "adjacent", []) or [] if land_def else []
-        sea_adj = getattr(origin_def, "adjacent", []) or []
-        if origin not in land_adj and destination not in sea_adj:
-            return ValidationResult(
-                False,
-                f"Territory {destination} is not adjacent to sea zone {origin} (cannot offload there)",
-            )
-        for u in passengers:
-            ud = unit_defs.get(u.unit_id)
-            if not is_land_unit(ud):
-                return ValidationResult(False, f"Unit {u.instance_id} cannot be carried (only land units offload)")
-            if not getattr(ud, "transportable", True):
-                return ValidationResult(False, f"Unit {u.instance_id} cannot be transported")
-        naval_capacity = sum(
-            getattr(unit_defs.get(u.unit_id), "transport_capacity", 0) or 0
-            for u in units_in_stack
-            if _is_naval_unit(unit_defs.get(u.unit_id))
+    # Sea→sea sail to a sea zone adjacent to the land you dropped on (sea raid / offload chain).
+    # Not the same as generic naval combat_move reachability (which forbids empty sea destinations).
+    sail_land_raw = (action.payload.get("sail_to_offload_land_territory_id") or "").strip()
+    move_type_payload = (action.payload.get("move_type") or "").strip()
+    if (
+        sail_land_raw
+        and move_type_payload == "sail"
+        and _is_sea_zone(territory_defs.get(origin))
+        and _is_sea_zone(territory_defs.get(destination))
+    ):
+        vr = validate_sail_move_for_offload_sea_raid(
+            state,
+            origin,
+            destination,
+            sail_land_raw,
+            units_in_stack,
+            unit_instance_ids,
+            unit_defs,
+            territory_defs,
+            faction_defs,
+            action.faction,
+            state.phase,
         )
-        if len(passengers) > naval_capacity:
-            return ValidationResult(
-                False,
-                f"Too many passengers ({len(passengers)}) for transport capacity ({naval_capacity})",
-            )
-        return ValidationResult(True)
+        return vr
 
     # Load: land -> adjacent sea; stack can be all land units; boats already in sea zone provide capacity
     if origin_is_land and dest_is_sea and not drivers and passengers:
@@ -467,8 +909,8 @@ def _validate_move(
             ud = unit_defs.get(u.unit_id)
             if not is_land_unit(ud):
                 return ValidationResult(False, f"Unit {u.instance_id} cannot be carried (only land units can be passengers)")
-            if not getattr(ud, "transportable", True):
-                return ValidationResult(False, f"Unit {u.instance_id} cannot be transported (transportable=false)")
+            if not is_transportable(ud):
+                return ValidationResult(False, f"Unit {u.instance_id} cannot be transported (no transportable tag)")
         dest_territory = state.territories.get(destination)
         if not dest_territory:
             return ValidationResult(False, f"Destination {destination} does not exist")
@@ -483,28 +925,26 @@ def _validate_move(
                 return ValidationResult(False, f"Unit {load_onto_boat_id} is not a naval unit")
             if get_unit_faction(boat_unit, unit_defs) != faction_id:
                 return ValidationResult(False, f"Boat {load_onto_boat_id} does not belong to faction {faction_id}")
-            cap = getattr(boat_ud, "transport_capacity", 0) or 0
-            if len(passengers) > cap:
+            slots = remaining_load_slots_on_boat(
+                state, destination, load_onto_boat_id, faction_id, unit_defs, territory_defs, state.phase
+            )
+            if len(passengers) > slots:
                 return ValidationResult(
                     False,
-                    f"Boat {load_onto_boat_id} has capacity {cap}, cannot load {len(passengers)} passengers"
+                    f"Boat {load_onto_boat_id} has {slots} passenger slot(s) left (capacity minus onboard and pending loads), "
+                    f"cannot load {len(passengers)}",
                 )
         else:
-            naval_capacity = sum(
-                getattr(unit_defs.get(u.unit_id), "transport_capacity", 0) or 0
-                for u in dest_territory.units
-                if get_unit_faction(u, unit_defs) == faction_id
-                and (getattr(unit_defs.get(u.unit_id), "archetype", "") == "naval" or "naval" in getattr(unit_defs.get(u.unit_id), "tags", []))
+            slots_left = remaining_sea_load_passenger_slots(
+                state, destination, faction_id, unit_defs, territory_defs, state.phase
             )
-            if len(passengers) > naval_capacity:
+            if len(passengers) > slots_left:
                 return ValidationResult(
                     False,
-                    f"Too many passengers ({len(passengers)}) for transport capacity in {destination} ({naval_capacity})"
+                    f"Not enough transport capacity in {destination}: {len(passengers)} passengers but only "
+                    f"{slots_left} slot(s) left (boats may be full or already reserved by pending loads this phase)",
                 )
-        # Load move: each passenger needs at least 1 movement
-        for u in passengers:
-            if getattr(u, "remaining_movement", 0) < 1:
-                return ValidationResult(False, f"Unit {u.instance_id} needs 1 movement to load (has {getattr(u, 'remaining_movement', 0)})")
+        # Load costs 0 movement for passengers (offload/sea raid pays 1 when going ashore).
         return ValidationResult(True)
 
     if not drivers:
@@ -513,8 +953,8 @@ def _validate_move(
         ud = unit_defs.get(u.unit_id)
         if not is_land_unit(ud):
             return ValidationResult(False, f"Unit {u.instance_id} cannot be carried (only land units can be passengers)")
-        if not getattr(ud, "transportable", True):
-            return ValidationResult(False, f"Unit {u.instance_id} cannot be transported (transportable=false)")
+        if not is_transportable(ud):
+            return ValidationResult(False, f"Unit {u.instance_id} cannot be transported (no transportable tag)")
     naval_capacity = sum(
         getattr(unit_defs.get(u.unit_id), "transport_capacity", 0) or 0
         for u in drivers
@@ -568,14 +1008,31 @@ def _validate_initiate_combat(
             land_adj = getattr(territory_def, "adjacent", []) or []
             if territory_id not in sea_adj and sea_zone_id not in land_adj:
                 return ValidationResult(False, f"Territory {territory_id} is not adjacent to sea zone {sea_zone_id}")
-        attacker_units = [u for u in sea_zone.units if get_unit_faction(u, unit_defs) == attacker_faction]
+        # Sea raid: land units attack (from sea before offload, or on land after combat_move apply).
+        # Must match _handle_initiate_combat: try sea first, then land territory.
+        attacker_units = [
+            u for u in sea_zone.units
+            if get_unit_faction(u, unit_defs) == attacker_faction
+            and is_land_unit(unit_defs.get(u.unit_id))
+            and not _is_naval_unit(unit_defs.get(u.unit_id))
+        ]
+        if not attacker_units:
+            attacker_units = [
+                u for u in territory.units
+                if get_unit_faction(u, unit_defs) == attacker_faction
+                and is_land_unit(unit_defs.get(u.unit_id))
+                and not _is_naval_unit(unit_defs.get(u.unit_id))
+            ]
         defender_units = [
             u for u in territory.units
             if get_unit_faction(u, unit_defs) is not None
             and faction_defs.get(get_unit_faction(u, unit_defs), FactionDefinition("", "", "", "", "")).alliance != attacker_alliance
         ]
         if not attacker_units:
-            return ValidationResult(False, f"No attacking units in sea zone {sea_zone_id}")
+            return ValidationResult(
+                False,
+                f"No attacking land units in sea zone {sea_zone_id} or on territory {territory_id}",
+            )
         # Allow empty defenders (conquer without battle)
         return ValidationResult(True)
 
@@ -620,9 +1077,15 @@ def _validate_mobilize(
     territory_defs: dict[str, TerritoryDefinition],
     camp_defs: dict[str, CampDefinition],
     port_defs: dict[str, PortDefinition],
+    faction_defs: dict[str, FactionDefinition],
 ) -> ValidationResult:
     """Validate a mobilize_units action. Land units require a camp; naval units require a port-adjacent sea zone."""
     faction_id = action.faction
+    if faction_defs and not faction_owns_capital(state, faction_id, faction_defs):
+        return ValidationResult(
+            False,
+            f"Cannot mobilize units: {faction_id}'s capital has been captured",
+        )
     destination = action.payload.get("destination")
     units_to_mobilize = action.payload.get("units", [])
 
@@ -659,26 +1122,45 @@ def _validate_mobilize(
         # Shared capacity: each port territory P adjacent to this sea zone has pool P.power; count land to P + naval to P's adjacent sea zones
         power_production = None  # validated per-port below
     else:
-        # Land: destination must be owned territory with a standing camp or a home territory for the unit type (cap 1). Ports do NOT accept land.
+        # Land: camp or home territory for that unit (home works at port capitals e.g. Corsair → Umbar). Not generic port land deployment.
         has_camp = _territory_has_standing_camp(state, destination, camp_defs)
         is_home_for = {}  # unit_id -> True if this territory is home for that unit type
         for uid, ud in unit_defs.items():
+            if getattr(ud, "faction", None) != faction_id:
+                continue
             if has_unit_special(ud, "home") and destination in _home_territory_ids(ud):
                 is_home_for[uid] = True
-        if not has_camp and not is_home_for:
-            return ValidationResult(
-                False,
-                f"Land units can only mobilize to a territory with a standing camp or a home territory; {destination} has neither",
-            )
+        if not has_camp:
+            for item in units_to_mobilize:
+                uid = item.get("unit_id")
+                if not is_home_for.get(uid):
+                    return ValidationResult(
+                        False,
+                        f"Land units can only mobilize to a standing camp or a home territory for that unit type; "
+                        f"{destination} is not valid for {uid}",
+                    )
         if dest_territory.owner != faction_id:
             return ValidationResult(False, f"{destination} is not owned by {faction_id}")
-        if not has_camp:
-            # Home-only: single unit type, cap 1 total (pending + this) for that unit type to this destination
+        power_production = dest_def.produces.get("power", 0)
+        this_count = sum(item.get("count", 0) for item in units_to_mobilize)
+        if has_camp:
+            already_pending = sum(
+                sum(u.get("count", 0) for u in pm.units)
+                for pm in state.pending_mobilizations
+                if pm.destination == destination
+            )
+            if already_pending + this_count > power_production:
+                return ValidationResult(
+                    False,
+                    f"Cannot mobilize {this_count} more to {destination}: "
+                    f"already {already_pending} pending, capacity is {power_production}",
+                )
+        else:
             unit_ids_in_batch = {item.get("unit_id") for item in units_to_mobilize}
             if len(unit_ids_in_batch) != 1:
                 return ValidationResult(
                     False,
-                    "When mobilizing to a home territory (no camp/port), all units must be the same type",
+                    "When mobilizing to a home territory, all units must be the same type",
                 )
             unit_id = next(iter(unit_ids_in_batch))
             if not is_home_for.get(unit_id):
@@ -693,16 +1175,11 @@ def _validate_mobilize(
                 for u in pm.units
                 if u.get("unit_id") == unit_id
             )
-            this_count = sum(item.get("count", 0) for item in units_to_mobilize)
             if already_pending + this_count > 1:
                 return ValidationResult(
                     False,
                     f"At most 1 {unit_id} can be mobilized to home territory {destination} per phase (already {already_pending} pending)",
                 )
-            # Skip normal capacity check below for land; we've validated home cap
-            power_production = 0
-        else:
-            power_production = dest_def.produces.get("power", 0)
 
     # If mixed batch, we still validate capacity here; per-unit naval/land rules enforced in reducer
     for item in units_to_mobilize:
@@ -749,22 +1226,7 @@ def _validate_mobilize(
                         f"Cannot mobilize {this_action_count} naval to {destination}: "
                         f"port {adj_id} shared pool would exceed capacity ({total_for_port + this_action_count} > {port_power_val})",
                     )
-    else:
-        # Land: camp territory uses simple count; home-only already validated above (ports do not accept land)
-        if not has_camp:
-            pass  # Home-only: cap already enforced above
-        else:
-            already_pending = sum(
-                sum(u.get("count", 0) for u in pm.units)
-                for pm in state.pending_mobilizations
-                if pm.destination == destination
-            )
-            if already_pending + this_action_count > power_production:
-                return ValidationResult(
-                    False,
-                    f"Cannot mobilize {this_action_count} more to {destination}: "
-                    f"already {already_pending} pending, capacity is {power_production}",
-                )
+    # Land capacity (camp / port / home-only) fully validated in the land branch above.
 
     return ValidationResult(True)
 
@@ -779,6 +1241,9 @@ def _validate_retreat(
     """Validate a retreat action."""
     if not state.active_combat:
         return ValidationResult(False, "No active combat to retreat from")
+
+    if getattr(state.active_combat, "sea_zone_id", None):
+        return ValidationResult(False, "Retreat is not allowed during a sea raid")
 
     destination = action.payload.get("retreat_to")
     if not destination:
@@ -867,6 +1332,97 @@ def _validate_purchase_camp(
     return ValidationResult(True)
 
 
+def _validate_repair_stronghold(
+    state: GameState,
+    action: Action,
+    territory_defs: dict[str, TerritoryDefinition],
+) -> ValidationResult:
+    """Validate repair_stronghold: each territory must be owned stronghold with current_hp < base; cost = sum(hp_to_add) * stronghold_repair_cost."""
+    faction_id = action.faction
+    if state.phase != "purchase" or state.current_faction != faction_id:
+        return ValidationResult(False, "Can only repair strongholds during your purchase phase")
+    repair_cost_per_hp = getattr(state, "stronghold_repair_cost", 0)
+    if repair_cost_per_hp <= 0:
+        return ValidationResult(False, "Stronghold repair is not available in this setup")
+    repairs = action.payload.get("repairs")
+    if not isinstance(repairs, list) or not repairs:
+        return ValidationResult(True)  # No repairs is valid (e.g. confirm with 0 repairs)
+    power = state.faction_resources.get(faction_id, {}).get("power", 0)
+    total_hp = 0
+    for r in repairs:
+        if not isinstance(r, dict):
+            return ValidationResult(False, "Each repair must be {territory_id, hp_to_add}")
+        tid = r.get("territory_id")
+        hp_to_add = r.get("hp_to_add", 0)
+        if not tid or hp_to_add is None:
+            return ValidationResult(False, "Each repair must include territory_id and hp_to_add")
+        try:
+            hp_to_add = int(hp_to_add)
+        except (TypeError, ValueError):
+            return ValidationResult(False, "hp_to_add must be a number")
+        if hp_to_add <= 0:
+            continue
+        territory = state.territories.get(tid)
+        if not territory:
+            return ValidationResult(False, f"Unknown territory: {tid}")
+        if territory.owner != faction_id:
+            return ValidationResult(False, f"You do not own {tid}")
+        tdef = territory_defs.get(tid)
+        if not tdef or not getattr(tdef, "is_stronghold", False):
+            return ValidationResult(False, f"{tid} is not a stronghold")
+        base_hp = getattr(tdef, "stronghold_base_health", 0) or 0
+        if base_hp <= 0:
+            return ValidationResult(False, f"Stronghold {tid} has no base health defined")
+        current = getattr(territory, "stronghold_current_health", None)
+        current = current if current is not None else base_hp
+        if current + hp_to_add > base_hp:
+            return ValidationResult(False, f"Cannot repair {tid} above base health ({base_hp})")
+        total_hp += hp_to_add
+    total_cost = total_hp * repair_cost_per_hp
+    if power < total_cost:
+        return ValidationResult(False, f"Insufficient power: need {total_cost} for repairs, have {power}")
+    return ValidationResult(True)
+
+
+def valid_camp_placement_territory_ids(
+    state: GameState,
+    faction_id: str,
+    camp_index: int,
+    camp_defs: dict[str, CampDefinition],
+    territory_defs: dict[str, TerritoryDefinition],
+) -> list[str]:
+    """
+    Pending camp territory_options that are still legal: we own the hex, it produces power,
+    no standing camp, and no other queued placement reserves this territory.
+    """
+    pending = getattr(state, "pending_camps", []) or []
+    if camp_index < 0 or camp_index >= len(pending):
+        return []
+    entry = pending[camp_index]
+    if entry.get("placed_territory_id"):
+        return []
+    options = entry.get("territory_options") or []
+    queued_by_others = {
+        p.territory_id
+        for p in getattr(state, "pending_camp_placements", []) or []
+        if p.camp_index != camp_index
+    }
+    out: list[str] = []
+    for tid in options:
+        if not tid or tid in queued_by_others:
+            continue
+        terr = state.territories.get(tid)
+        if not terr or terr.owner != faction_id:
+            continue
+        tdef = territory_defs.get(tid)
+        if not tdef or (tdef.produces.get("power", 0) or 0) <= 0:
+            continue
+        if _territory_has_standing_camp(state, tid, camp_defs):
+            continue
+        out.append(tid)
+    return out
+
+
 def _validate_set_territory_defender_casualty_order(
     state: GameState,
     action: Action,
@@ -886,21 +1442,48 @@ def _validate_set_territory_defender_casualty_order(
     return ValidationResult(True)
 
 
-def _validate_end_phase(state: GameState) -> ValidationResult:
-    """Validate end_phase: in mobilization, all purchased camps must be placed or queued."""
+def _validate_end_phase(
+    state: GameState,
+    faction_defs: dict | None = None,
+    unit_defs: dict | None = None,
+    territory_defs: dict | None = None,
+    camp_defs: dict | None = None,
+) -> ValidationResult:
+    """Validate end_phase: combat phase cannot end while contested battles remain; mobilization: all camps placed or queued."""
+    if state.phase == "combat":
+        if state.active_combat is not None:
+            return ValidationResult(
+                False,
+                "Cannot end combat phase while a battle is in progress. Continue or retreat first.",
+            )
+        if faction_defs and unit_defs and territory_defs and state.current_faction:
+            contested = get_contested_territories(
+                state, state.current_faction, faction_defs, unit_defs, territory_defs
+            )
+            if contested:
+                return ValidationResult(
+                    False,
+                    f"Cannot end combat phase while {len(contested)} unresolved battle(s) remain. Initiate and resolve or retreat from all battles first.",
+                )
+        return ValidationResult(True)
     if state.phase != "mobilization":
         return ValidationResult(True)
     pending = getattr(state, "pending_camps", [])
     queued_indices = {p.camp_index for p in getattr(state, "pending_camp_placements", [])}
-    unplaced = [
-        p for i, p in enumerate(pending)
-        if not p.get("placed_territory_id") and i not in queued_indices
-    ]
-    if unplaced:
-        return ValidationResult(
-            False,
-            f"Place or queue all camps before ending mobilization ({len(unplaced)} camp(s) remaining)",
-        )
+    faction_id = state.current_faction or ""
+    cd = camp_defs or {}
+    td = territory_defs or {}
+    for i, p in enumerate(pending):
+        if p.get("placed_territory_id"):
+            continue
+        if i in queued_indices:
+            continue
+        valid = valid_camp_placement_territory_ids(state, faction_id, i, cd, td)
+        if valid:
+            return ValidationResult(
+                False,
+                "Place or queue all camps before ending mobilization (at least one camp still has a valid placement)",
+            )
     return ValidationResult(True)
 
 
@@ -908,6 +1491,7 @@ def _validate_place_camp(
     state: GameState,
     action: Action,
     camp_defs: dict[str, CampDefinition],
+    territory_defs: dict[str, TerritoryDefinition],
 ) -> ValidationResult:
     """Validate a place_camp action."""
     faction_id = action.faction
@@ -923,6 +1507,18 @@ def _validate_place_camp(
     options = pending[camp_index].get("territory_options") or []
     if territory_id not in options:
         return ValidationResult(False, f"Territory {territory_id} not in placement options")
+    terr = state.territories.get(territory_id)
+    if not terr or terr.owner != faction_id:
+        return ValidationResult(
+            False,
+            f"You must own {territory_id} to place a camp there",
+        )
+    tdef = territory_defs.get(territory_id)
+    if not tdef or (tdef.produces.get("power", 0) or 0) <= 0:
+        return ValidationResult(
+            False,
+            f"Territory {territory_id} cannot host a mobilization camp (needs power production)",
+        )
     if _territory_has_standing_camp(state, territory_id, camp_defs):
         return ValidationResult(False, f"Territory {territory_id} already has a camp")
     return ValidationResult(True)
@@ -932,9 +1528,10 @@ def _validate_queue_camp_placement(
     state: GameState,
     action: Action,
     camp_defs: dict[str, CampDefinition],
+    territory_defs: dict[str, TerritoryDefinition],
 ) -> ValidationResult:
     """Validate a queue_camp_placement action (same as place_camp; camp must not already be queued; territory must not have another pending placement)."""
-    r = _validate_place_camp(state, action, camp_defs)
+    r = _validate_place_camp(state, action, camp_defs, territory_defs)
     if not r.valid:
         return r
     camp_index = action.payload.get("camp_index", -1)
@@ -1001,12 +1598,16 @@ def get_movable_units(
             if not belongs:
                 continue
 
-            if unit.remaining_movement > 0:
+            try:
+                rm = int(getattr(unit, "remaining_movement", 0) or 0)
+            except (TypeError, ValueError):
+                rm = 0
+            if rm > 0:
                 result.append({
                     "instance_id": unit.instance_id,
                     "unit_id": unit.unit_id,
                     "territory_id": territory_id,
-                    "remaining_movement": unit.remaining_movement,
+                    "remaining_movement": rm,
                 })
 
     return result
@@ -1034,6 +1635,28 @@ def get_unit_move_targets(
                 )
 
     return {}, {}  # Unit not found
+
+
+def filter_unit_instances_that_can_reach(
+    state: GameState,
+    to_territory_id: str,
+    unit_instance_ids: list[str],
+    unit_defs: dict[str, UnitDefinition],
+    territory_defs: dict[str, TerritoryDefinition],
+    faction_defs: dict[str, FactionDefinition],
+) -> list[str]:
+    """
+    Return only those unit instance IDs that can reach to_territory_id.
+    Uses each unit's remaining_movement and phase; never includes a unit that cannot reach.
+    """
+    result = []
+    for iid in unit_instance_ids:
+        targets, _ = get_unit_move_targets(
+            state, iid, unit_defs, territory_defs, faction_defs
+        )
+        if to_territory_id in (targets or {}):
+            result.append(iid)
+    return result
 
 
 def get_purchasable_units(
@@ -1090,8 +1713,8 @@ def get_mobilization_territories(
     """
     Get territory IDs where faction can mobilize land units:
     - Owned territories with a standing camp, or
-    - Owned territories that are home_territory_id for some unit type (cap 1 per unit type; no camp required).
-    Ports do NOT allow land deployment; they only mobilize naval units to adjacent sea zones.
+    - Owned territories that are home for at least one unit type (cap 1 per type per phase), including port capitals (e.g. Corsair → Umbar).
+    Land does not deploy to ports generically; ships use adjacent sea zones.
     """
     camp_defs = camp_defs or {}
     port_defs = port_defs or {}
@@ -1102,13 +1725,15 @@ def get_mobilization_territories(
             continue
         if _territory_has_standing_camp(state, territory_id, camp_defs):
             result.append(territory_id)
-    # Home territories: owned, no camp, but at least one unit type has this as home
+    # Home territories: owned, no camp yet in list; include even if territory has a port (home special overrides for that unit)
     for territory_id, territory in state.territories.items():
         if territory.owner != faction_id or territory_id in result:
             continue
-        if _territory_has_standing_camp(state, territory_id, camp_defs) or _territory_has_port(territory_id, port_defs):
+        if _territory_has_standing_camp(state, territory_id, camp_defs):
             continue
         for ud in unit_defs.values():
+            if getattr(ud, "faction", None) != faction_id:
+                continue
             if has_unit_special(ud, "home") and territory_id in _home_territory_ids(ud):
                 result.append(territory_id)
                 break
@@ -1149,7 +1774,7 @@ def get_mobilization_capacity(
     Returns dict with:
         - total_capacity: sum of power from camps (land) + port territories (shared land+sea pool)
         - territories: list of {territory_id, power[, home_unit_capacity]} for camp-only and home-only territories
-        - port_territories: list of {territory_id, power, sea_zone_ids} for port territories (land to port shares pool with naval to adjacent sea zones)
+        - port_territories: list of {territory_id, power, sea_zone_ids[, home_unit_capacity]} — naval pool only for sea zones; optional home_unit_capacity for land units whose home is this port (e.g. Corsair at Umbar)
         - sea_zones: list of {sea_zone_id, power} for port-adjacent sea zones (naval mobilization)
     Home-only territories have power 0 and home_unit_capacity: { unit_id: 1 } (max 1 unit of that type per phase).
     """
@@ -1169,15 +1794,31 @@ def get_mobilization_capacity(
         power = territory_def.produces.get("power", 0)
         if _territory_has_standing_camp(state, territory_id, camp_defs):
             seen.add(territory_id)
-            territories.append({"territory_id": territory_id, "power": power})
+            home_at_camp: dict[str, int] = {}
+            for uid, uud in unit_defs.items():
+                if getattr(uud, "faction", None) != faction_id:
+                    continue
+                if has_unit_special(uud, "home") and territory_id in _home_territory_ids(uud):
+                    home_at_camp[uid] = 1
+            camp_row: dict[str, Any] = {"territory_id": territory_id, "power": power}
+            if home_at_camp:
+                camp_row["home_unit_capacity"] = home_at_camp
+            territories.append(camp_row)
             total += power
         elif _territory_has_port(territory_id, port_defs):
             seen.add(territory_id)
             sea_zone_ids = _sea_zones_adjacent_to_port_territory(territory_id, territory_defs)
+            home_on_port: dict[str, int] = {}
+            for unit_id, ud in unit_defs.items():
+                if getattr(ud, "faction", None) != faction_id:
+                    continue
+                if has_unit_special(ud, "home") and territory_id in _home_territory_ids(ud):
+                    home_on_port[unit_id] = 1
             port_territories.append({
                 "territory_id": territory_id,
                 "power": power,
                 "sea_zone_ids": sea_zone_ids,
+                **({"home_unit_capacity": home_on_port} if home_on_port else {}),
             })
             # Ports only mobilize naval to sea zones; do not add to total land capacity
     # Home-only territories: owned, no camp/port; cap 1 per unit type that has this as home
@@ -1188,6 +1829,8 @@ def get_mobilization_capacity(
             continue
         home_units: dict[str, int] = {}
         for unit_id, ud in unit_defs.items():
+            if getattr(ud, "faction", None) != faction_id:
+                continue
             if has_unit_special(ud, "home") and territory_id in _home_territory_ids(ud):
                 home_units[unit_id] = 1
         if home_units:
@@ -1215,6 +1858,46 @@ def get_mobilization_capacity(
     }
 
 
+def count_open_home_mobilization_slots_for_unit(
+    state: GameState,
+    faction_id: str,
+    unit_id: str,
+    territory_defs: dict[str, TerritoryDefinition],
+    camp_defs: dict[str, CampDefinition] | None,
+    port_defs: dict[str, PortDefinition] | None,
+    unit_defs: dict[str, UnitDefinition],
+) -> int:
+    """
+    Units with home special only deploy to home territories (and port homes). Count how many
+    slots remain for this unit_id this mobilization phase after pending_mobilizations.
+    """
+    ud = unit_defs.get(unit_id)
+    if not ud or not has_unit_special(ud, "home") or not _home_territory_ids(ud):
+        return 0
+    cap = get_mobilization_capacity(
+        state, faction_id, territory_defs, camp_defs, port_defs, unit_defs
+    )
+    total = 0
+    for bucket in (cap.get("territories") or [], cap.get("port_territories") or []):
+        for t_info in bucket:
+            tid = t_info.get("territory_id")
+            if not tid:
+                continue
+            home_cap = t_info.get("home_unit_capacity") or {}
+            if unit_id not in home_cap:
+                continue
+            max_n = int(home_cap.get(unit_id, 1) or 1)
+            already = sum(
+                int(u.get("count", 0) or 0)
+                for pm in (state.pending_mobilizations or [])
+                if getattr(pm, "destination", None) == tid
+                for u in getattr(pm, "units", []) or []
+                if u.get("unit_id") == unit_id
+            )
+            total += max(0, max_n - already)
+    return total
+
+
 def get_contested_territories(
     state: GameState,
     faction_id: str,
@@ -1225,8 +1908,12 @@ def get_contested_territories(
     """
     Get territories where faction has units alongside enemy units.
     These are territories where combat can be initiated.
-    For sea zones, only naval units count (naval combat); land territories use all units.
-    Returns list of {territory_id, attacker_count, defender_count}.
+    For sea zones, naval surface units and non-embarked aerial count (same as initiate_combat sea roster);
+    land territories use all units.
+
+    Sea raid: after combat_move ends, passengers offload onto the land hex (same as combative offload).
+    Attackers are on that land territory; `sea_zone_id` on an entry (from `territory_sea_raid_from`) is only
+    for initiate_combat to know which sea zone held the fleet.
     """
     attacker_alliance = faction_defs.get(faction_id, FactionDefinition(
         "", "", "", "", "")).alliance
@@ -1244,8 +1931,9 @@ def get_contested_territories(
 
         for unit in territory.units:
             unit_faction = get_unit_faction(unit, unit_defs)
-            if is_sea and not _is_naval_unit(unit_defs.get(unit.unit_id)):
-                continue  # In sea zones only naval units are combatants
+            ud = unit_defs.get(unit.unit_id)
+            if is_sea and not participates_in_sea_hex_naval_combat(unit, ud):
+                continue
             if unit_faction == faction_id:
                 attacker_units.append(unit)
             elif unit_faction is not None:
@@ -1320,8 +2008,77 @@ def get_valid_offload_sea_zones(
     )
     if not reachable_sea:
         return []
-    valid = sorted(adjacent_seas & reachable_sea)
-    return valid
+    return sort_sea_zone_ids_numerically(adjacent_seas & reachable_sea)
+
+
+def validate_sail_move_for_offload_sea_raid(
+    state: GameState,
+    origin: str,
+    destination: str,
+    sail_land_territory_id: str,
+    units_in_stack: list,
+    unit_instance_ids: list,
+    unit_defs: dict[str, UnitDefinition],
+    territory_defs: dict[str, TerritoryDefinition],
+    faction_defs: dict[str, FactionDefinition],
+    faction_id: str,
+    phase: str,
+) -> ValidationResult:
+    """
+    Sea→sea sail that only repositions the fleet for an offload/sea raid onto a specific land hex.
+    Uses get_valid_offload_sea_zones (sail BFS + adjacency to land), not get_reachable_territories_for_unit,
+    so empty/friendly sea hexes remain valid combat_move destinations for this chain only.
+    """
+    sail_land = resolve_territory_key_in_state(
+        state, str(sail_land_territory_id or "").strip(), territory_defs
+    )
+    land_def = territory_defs.get(sail_land)
+    if not land_def or _is_sea_zone(land_def):
+        return ValidationResult(False, f"Invalid offload/raid land territory: {sail_land}")
+    valid_zones = get_valid_offload_sea_zones(
+        origin,
+        sail_land,
+        state,
+        list(unit_instance_ids),
+        unit_defs,
+        territory_defs,
+        faction_defs,
+        phase,
+    )
+    if destination not in valid_zones:
+        return ValidationResult(
+            False,
+            f"Cannot sail to {destination} to raid/offload onto {sail_land}. Valid sea zones: {valid_zones}",
+        )
+    naval_drivers = [u for u in units_in_stack if _is_naval_unit(unit_defs.get(u.unit_id))]
+    if not naval_drivers:
+        return ValidationResult(
+            False,
+            "Sail for sea raid/offload requires at least one naval unit in the move",
+        )
+    passengers = [u for u in units_in_stack if not _is_naval_unit(unit_defs.get(u.unit_id))]
+    for u in passengers:
+        ud = unit_defs.get(u.unit_id)
+        if not is_land_unit(ud):
+            return ValidationResult(
+                False,
+                f"Unit {u.instance_id} cannot be carried (only land units can be passengers)",
+            )
+        if not is_transportable(ud):
+            return ValidationResult(
+                False,
+                f"Unit {u.instance_id} cannot be transported (no transportable tag)",
+            )
+    naval_capacity = sum(
+        getattr(unit_defs.get(u.unit_id), "transport_capacity", 0) or 0
+        for u in naval_drivers
+    )
+    if len(passengers) > naval_capacity:
+        return ValidationResult(
+            False,
+            f"Too many passengers ({len(passengers)}) for transport capacity ({naval_capacity})",
+        )
+    return ValidationResult(True)
 
 
 def get_sea_raid_targets(
@@ -1449,6 +2206,9 @@ def get_retreat_options(
     if not combat_def:
         return []
 
+    if getattr(state.active_combat, "sea_zone_id", None):
+        return []
+
     attacker_faction = state.active_combat.attacker_faction
     result = []
     retreat_adjacent = _get_retreat_adjacent_ids(state, territory_defs, unit_defs)
@@ -1486,7 +2246,8 @@ def get_aerial_units_must_move(
             if not is_aerial_unit(unit_def):
                 continue
             if is_friendly_territory_for_landing(
-                territory, current_faction, faction_defs, unit_defs
+                territory, current_faction, faction_defs, unit_defs,
+                state=state, territory_id=territory_id,
             ):
                 continue
             result.append({
@@ -1568,7 +2329,31 @@ def get_faction_stats(
         if tdef and getattr(tdef, "is_stronghold", False):
             neutral_strongholds += 1
 
-    return {"factions": factions, "alliances": alliances, "neutral_strongholds": neutral_strongholds}
+    out: dict[str, Any] = {
+        "factions": factions,
+        "alliances": alliances,
+        "neutral_strongholds": neutral_strongholds,
+    }
+    # Victory thresholds for UI markers on the good | neutral | evil stronghold bar (setup manifest).
+    stronghold_vc: dict[str, int] = {}
+    vc = getattr(state, "victory_criteria", None) or {}
+    if isinstance(vc, dict):
+        sh = vc.get("strongholds")
+        if isinstance(sh, dict):
+            for key in ("good", "evil"):
+                raw = sh.get(key)
+                if raw is None:
+                    continue
+                try:
+                    n = int(raw)
+                    if n > 0:
+                        stronghold_vc[key] = n
+                except (TypeError, ValueError):
+                    pass
+    if stronghold_vc:
+        out["stronghold_victory"] = stronghold_vc
+
+    return out
 
 
 def get_purchased_units(
@@ -1865,7 +2650,11 @@ def get_move_preview(
             if dest_id == territory_id:
                 continue  # Never allow move from X to X
             dest_territory = state.territories.get(dest_id)
-            dest_owner = dest_territory.owner if dest_territory else None
+            dest_owner = (
+                effective_territory_owner(state, dest_id)
+                if dest_territory
+                else None
+            )
 
             is_enemy = False
             if dest_owner and dest_owner != faction_id:

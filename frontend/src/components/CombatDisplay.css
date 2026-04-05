@@ -1,18 +1,31 @@
 /* Combat Modal */
 .combat-modal {
   position: relative;
-  width: 900px;
-  max-width: 95vw;
-  max-height: 90vh;
+  width: 1100px;
+  max-width: min(96vw, 1200px);
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+}
+
+/* Beat generic `.modal { max-height: 90vh }` (PurchaseModal.css) so desktop height is visible */
+@media (min-width: 768px) {
+  .modal.combat-modal {
+    min-height: 60vh;
+    max-height: 99vh;
+  }
 }
 
 .combat-modal .modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-shrink: 0;
+}
+
+.combat-modal .modal-footer {
+  flex-shrink: 0;
 }
 
 .combat-header-indicators {
@@ -53,33 +66,214 @@
   font-style: italic;
 }
 
-/* Combat Arena */
+/* Combat Arena: fills space between header/footer; inner columns scroll shelves — no squishing rows */
 .combat-arena {
+  position: relative;
   display: flex;
-  gap: 1rem;
+  flex-direction: column;
+  gap: 0.75rem;
   padding: 1rem;
   flex: 1;
-  min-height: 350px;
-  overflow-y: auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Victory/defeat: full-area overlay so shelves don’t shrink when the banner appears */
+.combat-result-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  box-sizing: border-box;
+  pointer-events: none;
+  background: rgba(24, 18, 12, 0.22);
+  backdrop-filter: blur(1px);
+  animation: combatResultOverlayIn 0.35s ease-out;
+}
+
+@keyframes combatResultOverlayIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.combat-ladder-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.combat-ladder-icon {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.combat-ladder-count {
+  font-family: 'Cinzel', serif;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.combat-ladder-units {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.combat-ladder-unit-token {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--ink-faded);
+  background: var(--parchment);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.combat-ladder-unit-token img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.combat-arena-sides {
+  display: flex;
+  gap: 1rem;
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
 }
 
 .combat-side {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.65rem;
   padding: 1rem;
   background: var(--parchment-light);
   border: 3px solid var(--ink-faded);
   border-radius: 6px;
 }
 
+/* Hits + casualty priority + cumulative: one tight block below shelves */
+.combat-side-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.14rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid var(--ink-faded);
+  flex-shrink: 0;
+}
+
 .combat-side-casualty-order {
+  font-size: 0.7rem;
+  color: var(--ink-faded);
+  margin: 0;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.combat-side-cumulative-hits {
+  font-size: 0.7rem;
+  color: var(--ink-faded);
+  margin: 0;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.combat-side-cumulative-hits-text {
+  font-weight: 500;
+}
+
+.combat-side-cumulative-hits-markers {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.06rem 0.15rem;
+  margin-top: 0.06rem;
+  max-width: 100%;
+}
+
+.combat-side-cumulative-hit-x {
+  font-size: 0.62rem;
+  line-height: 1;
+  color: #b33;
+  font-weight: 700;
+  opacity: 0.9;
+}
+
+.combat-side-cumulative-hits-more {
   font-size: 0.65rem;
   color: var(--ink-faded);
-  margin-top: 0.25rem;
-  line-height: 1.2;
-  text-align: center;
+  align-self: center;
+}
+
+.combat-defender-column {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  align-items: stretch;
+}
+
+.combat-stronghold-hp {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+  color: var(--ink);
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 4px;
+}
+
+.combat-stronghold-hp--header {
+  justify-content: flex-start;
+  gap: 0.32rem;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.93rem;
+  white-space: nowrap;
+  max-width: min(100%, 13rem);
+  min-width: 0;
+}
+
+.combat-stronghold-hp-icon {
+  font-size: 1.1rem;
+}
+
+.combat-stronghold-hp--header .combat-stronghold-hp-icon {
+  font-size: 1.18rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.combat-stronghold-hp-value {
+  font-weight: 600;
+}
+
+.combat-stronghold-hp--header .combat-stronghold-hp-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .side-header {
@@ -88,10 +282,19 @@
   gap: 0.5rem;
   padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--ink-faded);
+  min-width: 0;
+}
+
+.side-header-trailing {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-left: auto;
+  flex-shrink: 0;
+  min-width: 0;
 }
 
 .side-role-badge {
-  margin-left: auto;
   font-family: 'Cinzel', serif;
   font-size: 0.75rem;
   font-weight: 700;
@@ -117,6 +320,8 @@
   font-family: 'Cinzel', serif;
   font-weight: 600;
   font-size: 1rem;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 /* VS Divider */
@@ -128,6 +333,7 @@
   padding: 0 0.5rem;
   gap: 1rem;
   min-width: 100px;
+  flex-shrink: 0;
 }
 
 .vs-divider-terror {
@@ -137,7 +343,7 @@
   order: -1;
 }
 
-.vs-divider > span {
+.vs-divider>span {
   font-family: 'Cinzel', serif;
   font-size: 1.5rem;
   font-weight: 700;
@@ -159,33 +365,152 @@
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 1; }
+
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+
+  50% {
+    opacity: 1;
+  }
 }
 
 /* Units Shelves - rows grouped by stat value */
 .units-shelves {
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 0.35rem;
+  overflow-x: hidden;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .unit-row-shelf {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.5rem;
+  padding: 0.28rem 0.45rem;
   background: rgba(0, 0, 0, 0.03);
   border-radius: 4px;
-  min-height: 48px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  /* Intrinsic height per row: tall ladder/siegework split rows must not stretch siblings */
+  flex: 0 0 auto;
+  height: fit-content;
+  /* Fixed minimum row height: prevents flex from squishing shelves / dice bleeding into next row */
+  flex-shrink: 0;
+  min-height: 62px;
   opacity: 0.5;
   transition: opacity 0.3s ease;
 }
 
 .unit-row-shelf.revealed {
   opacity: 1;
+}
+
+.unit-row-shelf--siegework-split {
+  align-items: flex-start;
+  /* Same floor as normal shelves; two dice rows grow height only for this shelf */
+  min-height: 62px;
+}
+
+.unit-row-shelf--attacker-ladder {
+  align-items: flex-start;
+  min-height: 62px;
+}
+
+/* Fill remaining width beside stat label (row flex) */
+.unit-row-shelf--attacker-ladder > .attacker-ladder-grid,
+.unit-row-shelf--attacker-ladder > .attacker-ladder-segments {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.attacker-ladder-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: min-content min-content;
+  align-items: start;
+  align-content: start;
+  gap: 0.22rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.attacker-ladder-units {
+  grid-row: 1 / span 2;
+  grid-column: 1;
+  flex: 0 0 auto;
+}
+
+.attacker-ladder-dice-row {
+  grid-column: 2;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.attacker-ladder-dice-stack {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* Prevent dice from wrapping into a tall overflow box. */
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.siegework-split-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.siegework-split-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.siegework-split-row-label {
+  flex: 0 0 2.25rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--ink-faded);
+  padding-top: 0.2rem;
+  text-align: right;
+}
+
+.siegework-split-row-label--spacer {
+  visibility: hidden;
+}
+
+.siegework-split-row-units-dice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Bottom siegework row / no stat number: keep column width so units stay aligned with numbered shelves */
+.stat-label.stat-label--plain {
+  color: transparent;
+  user-select: none;
+  pointer-events: none;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .stat-label {
@@ -201,6 +526,8 @@
   background: var(--parchment);
   border: 2px solid var(--ink-faded);
   border-radius: 4px;
+  flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .unit-stack {
@@ -266,6 +593,27 @@
   border-radius: 0 0 4px 0;
   letter-spacing: -0.5px;
   z-index: 1;
+}
+
+/* Embarked count (naval); gold to match map unit tokens */
+.combat-unit-passenger-badge {
+  position: absolute;
+  bottom: -4px;
+  left: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  font-family: 'Cinzel', serif;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  color: #fff;
+  background: var(--gold-dark, #6b5344);
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  z-index: 1;
+  pointer-events: none;
 }
 
 .unit-count {
@@ -399,6 +747,13 @@
   border-color: transparent;
 }
 
+/* Non-rolling siegework (ladder / inactive ram): empty die outline next to unit art */
+.die.die-blank-slot {
+  background: rgba(255, 255, 255, 0.06);
+  border: 2px dashed var(--ink-faded);
+  box-shadow: none;
+}
+
 .die-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -458,6 +813,7 @@
   outline: 2px solid #c62828;
   outline-offset: 1px;
 }
+
 .die-reroll-x {
   position: absolute;
   inset: 0;
@@ -481,16 +837,20 @@
     transform: scale(0) translateY(-30px);
     opacity: 0;
   }
+
   50% {
     transform: scale(1.3) translateY(0);
     opacity: 1;
   }
+
   70% {
     transform: scale(0.9);
   }
+
   85% {
     transform: scale(1.05);
   }
+
   100% {
     transform: scale(1);
   }
@@ -498,11 +858,11 @@
 
 /* Hits Display */
 .hits-display {
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--ink-faded);
+  margin: 0;
+  padding: 0;
   text-align: center;
   opacity: 0;
-  transform: translateY(10px);
+  transform: translateY(6px);
   transition: opacity 0.4s ease, transform 0.4s ease;
 }
 
@@ -514,26 +874,36 @@
 .hits-count {
   font-family: 'Cinzel', serif;
   font-weight: 700;
-  font-size: 1.2rem;
+  font-size: 0.95rem;
+  line-height: 1;
+  margin: 0;
+  padding: 0;
+  display: inline-block;
   color: var(--gold-dark);
 }
 
-/* Combat Result */
-.combat-result {
-  padding: 1rem;
+/* Combat Result (card inside overlay; overlay handles dimming) */
+.combat-result-overlay .combat-result {
+  pointer-events: auto;
+  padding: 0.85rem 1.75rem;
   text-align: center;
-  border-top: 2px solid var(--ink-faded);
-  animation: resultReveal 0.5s ease-out;
+  border: 2px solid rgba(40, 32, 24, 0.45);
+  border-radius: 10px;
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  animation: combatResultCardIn 0.55s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-@keyframes resultReveal {
+@keyframes combatResultCardIn {
   0% {
     opacity: 0;
-    transform: scale(0.9);
+    transform: scale(0.92) translateY(8px);
   }
+
   100% {
     opacity: 1;
-    transform: scale(1);
+    transform: scale(1) translateY(0);
   }
 }
 
@@ -542,6 +912,7 @@
   font-size: 1.3rem;
   font-weight: 700;
   color: var(--ink);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 
 /* Combat Actions - buttons bottom left */
@@ -555,9 +926,9 @@
   width: 100%;
 }
 
-.combat-actions > .confirm-buttons,
-.combat-actions > .retreat-confirm,
-.combat-actions > .retreat-selection {
+.combat-actions>.confirm-buttons,
+.combat-actions>.retreat-confirm,
+.combat-actions>.retreat-selection {
   width: 100%;
   justify-content: center;
 }
@@ -601,6 +972,7 @@
   color: #bbb;
   cursor: not-allowed;
 }
+
 .combat-btn-retreat.disabled:hover,
 .combat-btn-retreat:disabled:hover {
   background: #6d6d6d;
@@ -650,6 +1022,7 @@
 .combat-pill--segmented-left {
   border-right: 1px solid var(--ink-faded);
 }
+
 .combat-pill--segmented-right {
   border-left: 1px solid transparent;
 }
@@ -663,6 +1036,16 @@
   color: var(--ink);
   background: var(--parchment);
   box-shadow: inset 0 0 0 1px rgba(139, 115, 85, 0.25);
+}
+
+.combat-pill:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.combat-pill:disabled:hover {
+  color: var(--ink-faded);
+  background: transparent;
 }
 
 /* Legacy - keep for confirm/retreat flows */
@@ -766,3 +1149,323 @@ button.danger:hover {
   padding: 0.75rem 2rem;
 }
 
+/* ——— Mobile: stacked battle layout, scrollable arena, touch-friendly footer ——— */
+@media (max-width: 767px) {
+  .combat-modal {
+    width: 100%;
+    max-height: min(92dvh, 92vh);
+    min-height: 0;
+  }
+
+  .combat-modal .modal-header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.35rem;
+    padding: 0.45rem 0.65rem;
+    border-bottom: 1px solid var(--ink-faded);
+  }
+
+  .combat-modal .modal-header h2 {
+    flex: 1 1 100%;
+    min-width: 0;
+    margin: 0;
+    font-size: clamp(0.88rem, 3.8vw, 1.05rem);
+    line-height: 1.25;
+    word-break: break-word;
+  }
+
+  .combat-header-indicators {
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    max-width: 100%;
+  }
+
+  .round-indicator {
+    font-size: 0.85rem;
+  }
+
+  .combat-modal .modal-header:has(.combat-modal-close-x) {
+    position: relative;
+    padding-right: 2.75rem;
+  }
+
+  .combat-modal-close-x {
+    position: absolute;
+    top: 0.35rem;
+    right: 0.35rem;
+  }
+
+  /* Stacked layout: scroll the whole arena; each section keeps natural height (no equal-height squish) */
+  .combat-arena {
+    padding: 0.35rem 0.45rem;
+    min-height: 0;
+    flex: 1 1 auto;
+    -webkit-overflow-scrolling: touch;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .combat-arena-sides>.combat-side,
+  .combat-arena-sides>.vs-divider,
+  .combat-arena-sides>.combat-defender-column {
+    flex: 0 0 auto;
+  }
+
+  .combat-defender-column {
+    overflow: visible;
+    min-height: 0;
+  }
+
+  .combat-side {
+    overflow: visible;
+    min-height: 0;
+  }
+
+  .combat-arena-sides {
+    flex-direction: column;
+    gap: 0.4rem;
+    align-items: stretch;
+    min-height: 0;
+  }
+
+  .combat-defender-column {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .combat-side {
+    padding: 0.45rem 0.5rem;
+    min-width: 0;
+    gap: 0.52rem;
+  }
+
+  .combat-side-meta {
+    padding-top: 0.22rem;
+    gap: 0.1rem;
+  }
+
+  .side-title {
+    font-size: 0.88rem;
+  }
+
+  .side-header .faction-icon {
+    width: 26px;
+    height: 26px;
+  }
+
+  .side-role-badge {
+    width: 20px;
+    height: 20px;
+    font-size: 0.65rem;
+  }
+
+  .side-header-trailing {
+    gap: 0.32rem;
+  }
+
+  .combat-stronghold-hp--header {
+    font-size: 0.76rem;
+    padding: 0.13rem 0.36rem;
+    max-width: 9.25rem;
+    gap: 0.22rem;
+  }
+
+  .combat-stronghold-hp--header .combat-stronghold-hp-icon {
+    font-size: 0.95rem;
+  }
+
+  /* Horizontal VS strip between stacked sides */
+  .vs-divider {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    min-width: 0;
+    width: 100%;
+    padding: 0.3rem 0.35rem;
+    gap: 0.35rem 0.75rem;
+    border-top: 1px solid var(--ink-faded);
+    border-bottom: 1px solid var(--ink-faded);
+    background: rgba(61, 41, 20, 0.06);
+  }
+
+  .vs-divider>span {
+    font-size: 1.15rem;
+  }
+
+  .vs-divider-terror {
+    font-size: 0.85rem;
+    order: 0;
+  }
+
+  .rolling-indicator {
+    font-size: 0.8rem;
+    width: 100%;
+    text-align: center;
+  }
+
+  .units-shelves {
+    flex: 0 0 auto;
+    min-height: 0;
+    overflow: visible;
+    gap: 0.35rem;
+  }
+
+  .unit-row-shelf {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.35rem;
+    padding: 0.26rem 0.35rem;
+    flex-shrink: 0;
+    min-height: 60px;
+  }
+
+  .unit-row-shelf--siegework-split {
+    min-height: 60px;
+  }
+
+  .unit-row-shelf--attacker-ladder {
+    min-height: 60px;
+  }
+
+  .stat-label {
+    font-size: 0.85rem;
+    min-width: 24px;
+    width: 24px;
+    height: 24px;
+    line-height: 24px;
+  }
+
+  .unit-stack {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .combat-unit-group {
+    width: 32px;
+    height: 32px;
+    border-width: 2px;
+  }
+
+  .unit-count {
+    min-width: 15px;
+    height: 15px;
+    font-size: 0.6rem;
+    bottom: -3px;
+    right: -3px;
+  }
+
+  .dice-stack {
+    justify-content: flex-start;
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .die {
+    width: 26px;
+    height: 26px;
+    padding: 2px;
+  }
+
+  .die .dot {
+    width: 4px;
+    height: 4px;
+  }
+
+  .die-reroll-x {
+    font-size: 18px;
+  }
+
+  .hits-count {
+    font-size: 0.88rem;
+  }
+
+  .combat-side-casualty-order,
+  .combat-side-cumulative-hits {
+    font-size: 0.65rem;
+  }
+
+  .combat-result-overlay .combat-result {
+    padding: 0.45rem 0.85rem;
+  }
+
+  .result-text {
+    font-size: 1.05rem;
+  }
+
+  .combat-ladder-unit-token {
+    width: 24px;
+    height: 24px;
+  }
+
+  /* Footer: primary actions full-width, options below */
+  .combat-modal .modal-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.55rem;
+    padding: 0.55rem 0.65rem;
+    padding-bottom: max(0.55rem, env(safe-area-inset-bottom, 0px));
+  }
+
+  .combat-modal .combat-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 0.45rem;
+    width: 100%;
+  }
+
+  .combat-modal .combat-actions>.combat-btn-close,
+  .combat-modal .combat-actions>.combat-btn-start,
+  .combat-modal .combat-actions>.combat-btn-retreat,
+  .combat-modal .combat-actions>.combat-btn-continue {
+    flex: 1 1 calc(50% - 0.25rem);
+    min-width: min(140px, 42vw);
+    min-height: 44px;
+    box-sizing: border-box;
+  }
+
+  .combat-modal .combat-actions>.combat-spectator-label {
+    flex: 1 1 100%;
+    width: 100%;
+    text-align: center;
+    padding: 0.35rem 0;
+  }
+
+  .combat-modal .combat-options-pills {
+    margin-left: 0;
+    width: 100%;
+    flex: 1 1 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.45rem;
+  }
+
+  .combat-modal .combat-options-row {
+    width: 100%;
+  }
+
+  .combat-modal .combat-pill-group {
+    display: flex;
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .combat-modal .combat-pill {
+    flex: 1;
+    font-size: 0.75rem;
+    padding: 0.4rem 0.35rem;
+    min-height: 40px;
+  }
+
+  .combat-modal .retreat-confirm .confirm-buttons,
+  .combat-modal .retreat-selection .retreat-options {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .combat-modal .retreat-option {
+    width: 100%;
+    min-height: 44px;
+  }
+}

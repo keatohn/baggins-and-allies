@@ -1,12 +1,80 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { DndContext, useDroppable, rectIntersection, useSensors, useSensor, PointerSensor } from '@dnd-kit/core';
-import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
+import { useState, useEffect, useRef, useCallback, useMemo, type PointerEvent as ReactPointerEvent } from 'react';
+import { DndContext, useDroppable, rectIntersection, pointerWithin, closestCenter, useSensors, useSensor, PointerSensor } from '@dnd-kit/core';
+import type { CollisionDetection, DragEndEvent, DragStartEvent } from '@dnd-kit/core';
+import { useDraggable } from '@dnd-kit/core';
+import { CSS } from '@dnd-kit/utilities';
 import type { GameState, SelectedUnit, MapTransform, PendingMove } from '../types/game';
 import DraggableUnit from './DraggableUnit';
-import DragOverlay from './DragOverlay';
+import DragOverlay, { type BulkDragOverlayStack } from './DragOverlay';
 import MobilizationTray from './MobilizationTray';
 import NavalTray, { type BoatInTray } from './NavalTray';
 import './GameMap.css';
+import { sortSeaZoneIdsByNumericSuffix, seaZonesReachableBySailFrom } from '../seaZoneSort';
+import {
+  directFordOnlyLandPair,
+  fordEscortOdMultiplier,
+  fordShortcutRequiresEscortLead,
+  isFordCrosser,
+  minFordEdgesForLandMove,
+  pendingFordCrosserLeadFromOrigin,
+  remainingFordEscortSlotsClient,
+  resolveTerritoryGraphKey,
+  usesFordEscortBudget,
+} from '../fordEscort';
+
+/** Walk ancestors — hit target may be inside the path, not the node that carries `id`. */
+function territoryIdsUnderPoint(clientX: number, clientY: number): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  try {
+    const stack = document.elementsFromPoint(clientX, clientY);
+    for (const node of stack) {
+      let el: Element | null = node instanceof Element ? node : null;
+      while (el) {
+        const idAttr = el.getAttribute?.('id');
+        if (idAttr?.startsWith('territory-')) {
+          const tid = idAttr.slice('territory-'.length).trim();
+          if (tid && !seen.has(tid)) {
+            seen.add(tid);
+            out.push(tid);
+          }
+          break;
+        }
+        el = el.parentElement;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return out;
+}
+
+/** Prefer a territory id that is actually in the highlighted valid set (topmost first). */
+function pickValidTerritoryUnderPoint(
+  clientX: number,
+  clientY: number,
+  validDropTargets: Set<string>,
+  resolveTerritoryDropId: (s: string) => string,
+): string {
+  for (const tid of territoryIdsUnderPoint(clientX, clientY)) {
+    const r = resolveTerritoryDropId(tid);
+    if (r && validDropTargets.has(r)) return r;
+    if (validDropTargets.has(tid)) return tid;
+  }
+  return '';
+}
+
+/**
+ * DragOverlay is not measured for collisions; rectIntersection uses the source draggable, which stays
+ * under the map cursor origin. Use pointer position against droppable rects so drops register on territories.
+ */
+const mapCollisionDetection: CollisionDetection = (args) => {
+  const byPointer = pointerWithin(args);
+  if (byPointer.length > 0) return byPointer;
+  const byRect = rectIntersection(args);
+  if (byRect.length > 0) return byRect;
+  return closestCenter(args);
+};
 
 /** Compute stroke (darkened) and glow rgba from hex for cross-browser territory glow without color-mix(). */
 function territoryGlowFromHex(hex: string): { stroke: string; glowRgba: string; glowRgbaSoft: string } {
@@ -28,20 +96,340 @@ function territoryGlowFromHex(hex: string): { stroke: string; glowRgba: string; 
   };
 }
 
-/** Normalize sea zone id so "sea_zone_9" and "sea_zone9" match (backend vs map/SVG). */
+/** Normalize sea zone id to canonical form sea_zone_n (e.g. sea_zone_9). Accepts sea_zone9 or sea_zone_9. */
 function canonicalSeaZoneId(tid: string): string {
   if (!tid || typeof tid !== 'string') return tid || '';
   const m = tid.trim().match(/^sea_zone_*(\d+)$/i);
-  return m ? 'sea_zone' + m[1] : tid.trim();
+  return m ? 'sea_zone_' + m[1] : tid.trim();
 }
 
-/** Add destination to set and, for sea zones, add the alternate form (backend "sea_zone9" vs map "sea_zone_9") so drop/highlight works either way. */
+/** Faction id for map stack order (same as unit token border: segment in factionData, else unit def faction, else first segment). */
+function factionKeyForUnitType(
+  unit_id: string,
+  unitDefs: Record<string, { faction?: string; cost?: number } | undefined>,
+  factionData: Record<string, { name?: string; color?: string } | undefined>,
+): string {
+  const parts = unit_id.split('_');
+  const factionFromId = parts.find((p) => factionData[p]);
+  const defFaction = unitDefs[unit_id]?.faction;
+  return factionFromId ?? defFaction ?? parts[0] ?? '';
+}
+
+/** Land / overlay: faction, then count (desc), then cost/power (desc), then unit_id. */
+function compareMapUnitStacks(
+  a: { unit_id: string; count: number },
+  b: { unit_id: string; count: number },
+  unitDefs: Record<string, { faction?: string; cost?: number } | undefined>,
+  factionData: Record<string, { name?: string; color?: string } | undefined>,
+): number {
+  const fa = factionKeyForUnitType(a.unit_id, unitDefs, factionData);
+  const fb = factionKeyForUnitType(b.unit_id, unitDefs, factionData);
+  if (fa !== fb) return fa.localeCompare(fb);
+  if (b.count !== a.count) return b.count - a.count;
+  const costA = unitDefs[a.unit_id]?.cost ?? 0;
+  const costB = unitDefs[b.unit_id]?.cost ?? 0;
+  if (costB !== costA) return costB - costA;
+  return a.unit_id.localeCompare(b.unit_id);
+}
+
+/** Every instance ID already on a pending move from this hex (same phase). */
+function committedInstanceIdsFromHex(
+  pendingMoves: PendingMove[] | undefined,
+  fromTid: string,
+  fromCanon: string,
+  phase: string,
+): Set<string> {
+  const out = new Set<string>();
+  if (!pendingMoves?.length) return out;
+  for (const m of pendingMoves) {
+    const sameFrom = m.from === fromTid || canonicalSeaZoneId(m.from || '') === fromCanon;
+    if (!sameFrom) continue;
+    if (m.phase != null && phase && m.phase !== phase) continue;
+    for (const iid of m.unit_instance_ids ?? []) out.add(iid);
+  }
+  return out;
+}
+
+type FullUnitRow = {
+  instance_id: string;
+  unit_id: string;
+  loaded_onto?: string | null;
+  remaining_movement?: number;
+};
+
+/**
+ * Minimum remaining_movement among movable units that bulk "All" would include (friendly stacks,
+ * not committed to pending, excluding passengers — they move with their boat). If any included
+ * unit has 0, bulk-all is invalid.
+ */
+function minRemainingMovementForBulkAll(
+  territoryId: string,
+  territoryUnits: Record<string, { unit_id: string; count: number }[]>,
+  territoryUnitsFull: Record<string, FullUnitRow[]>,
+  currentFaction: string,
+  factionData: Record<string, { alliance?: string }>,
+  unitDefs: Record<string, { faction?: string }>,
+  pendingMoves: PendingMove[] | undefined,
+  phase: string,
+): number | null {
+  const stacks = territoryUnits[territoryId] || [];
+  const full = territoryUnitsFull[territoryId] ?? territoryUnitsFull[canonicalSeaZoneId(territoryId)] ?? [];
+  const fromCanon = canonicalSeaZoneId(territoryId);
+  const committed = committedInstanceIdsFromHex(pendingMoves, territoryId, fromCanon, phase);
+
+  const friendlyStacks = stacks.filter((s) => {
+    const parts = s.unit_id.split('_');
+    const factionFromId = parts.find((p) => factionData[p]);
+    const defFaction = unitDefs[s.unit_id]?.faction;
+    const uf = factionFromId ?? defFaction ?? parts[0];
+    return uf === currentFaction;
+  });
+  if (friendlyStacks.length <= 1) return null;
+
+  let globalMin: number | null = null;
+  for (const s of friendlyStacks) {
+    const instances = full.filter(
+      (u) =>
+        u.unit_id === s.unit_id &&
+        !committed.has(u.instance_id) &&
+        !u.loaded_onto,
+    );
+    for (const u of instances) {
+      const rm = typeof u.remaining_movement === 'number' ? u.remaining_movement : 0;
+      if (globalMin === null || rm < globalMin) globalMin = rm;
+    }
+  }
+  return globalMin;
+}
+
+function isSeaTerrainId(
+  tid: string,
+  territoryData: Record<string, { terrain?: string } | undefined>,
+): boolean {
+  return territoryData[tid]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid);
+}
+
+/** Match backend pending_move_is_same_phase_load_into_sea (move_type may be omitted on legacy JSON). */
+function pendingMoveIsSamePhaseLoadIntoSea(
+  m: PendingMove,
+  seaZoneId: string,
+  territoryData: Record<string, { terrain?: string } | undefined>,
+  phase: string,
+): boolean {
+  if (m.phase !== phase) return false;
+  const toCanon = canonicalSeaZoneId(m.to);
+  const canonSea = canonicalSeaZoneId(seaZoneId);
+  if (toCanon !== canonSea && m.to !== seaZoneId) return false;
+  if (m.move_type === 'load') return true;
+  if (m.move_type != null && m.move_type !== '') return false;
+  const fromSea = isSeaTerrainId(m.from, territoryData);
+  const toSea = isSeaTerrainId(m.to, territoryData);
+  return !fromSea && toSea;
+}
+
+/** Add destination to set and, for sea zones, add canonical form (sea_zone_n) so drop/highlight works. */
 function addDestinationWithSeaZoneAlias(set: Set<string>, d: string): void {
   set.add(d);
-  const withUnderscore = d.match(/^sea_zone(\d+)$/i);
-  const withoutUnderscore = d.match(/^sea_zone_(\d+)$/i);
-  if (withUnderscore) set.add('sea_zone_' + withUnderscore[1]);
-  if (withoutUnderscore) set.add('sea_zone' + withoutUnderscore[1]);
+  const canonical = canonicalSeaZoneId(d);
+  if (canonical !== d) set.add(canonical);
+}
+
+/**
+ * Non-combat land destinations only (mirrors get_reachable_territories_for_unit non_combat_move filter):
+ * friendly, allied, or empty unownable neutral — never enemy/hostile/neutral-with-enemies/ownable neutral.
+ */
+function isNonCombatNavalOffloadLand(
+  rawLandId: string,
+  territoryData: Record<string, { terrain?: string; owner?: string; ownable?: boolean } | undefined>,
+  territoryUnits: Record<string, { unit_id: string }[]>,
+  unitDefs: Record<string, { faction?: string } | undefined>,
+  factionData: Record<string, { alliance: string }>,
+  currentFaction: string,
+): boolean {
+  const landKey = resolveTerritoryGraphKey(
+    rawLandId,
+    territoryData as Record<string, { adjacent?: string[]; ford_adjacent?: string[] } | undefined>,
+  );
+  const t = territoryData[landKey] ?? territoryData[rawLandId];
+  if (!t) return false;
+  if (t.terrain === 'sea' || /^sea_zone_?\d+$/i.test(landKey)) return false;
+  const cfAlliance = factionData[currentFaction]?.alliance;
+  const effO = t.owner;
+  const isNeutral = effO == null || effO === '';
+  const isOwnable = t.ownable !== false;
+  const stacks = territoryUnits[landKey] ?? territoryUnits[rawLandId] ?? [];
+  let neutralHasEnemies = false;
+  if (isNeutral && cfAlliance) {
+    for (const s of stacks) {
+      const f = unitDefs[s.unit_id]?.faction;
+      const fd = f ? factionData[f] : undefined;
+      if (!fd) {
+        neutralHasEnemies = true;
+        break;
+      }
+      if (fd.alliance !== cfAlliance) {
+        neutralHasEnemies = true;
+        break;
+      }
+    }
+  }
+  if (isNeutral) {
+    return !neutralHasEnemies && !isOwnable;
+  }
+  if (effO === currentFaction) return true;
+  const ownerFd = factionData[effO as string];
+  return Boolean(ownerFd && cfAlliance && ownerFd.alliance === cfAlliance);
+}
+
+/**
+ * Land units declared to load into this sea zone this phase (not applied until phase end).
+ * Same-phase offload/raid UI must treat these as passengers — do not require drag instanceIds or boat matching.
+ */
+function countPendingPassengersLoadingIntoSeaZone(
+  seaTerritoryId: string,
+  gamePhase: string,
+  pendingMoves: PendingMove[] | undefined,
+  territoryData: Record<string, { terrain?: string } | undefined>,
+): number {
+  let n = 0;
+  if (!pendingMoves?.length) return 0;
+  for (const m of pendingMoves) {
+    if (!pendingMoveIsSamePhaseLoadIntoSea(m, seaTerritoryId, territoryData, gamePhase)) continue;
+    n += m.unit_instance_ids?.length ?? m.count ?? 0;
+  }
+  return n;
+}
+
+/**
+ * Remaining passenger slots for land→sea load: sum over current faction's boats in the zone
+ * (per-boat capacity minus onboard and pending loads assigned to that boat), minus pending loads
+ * to this sea zone that do not yet specify a boat.
+ */
+function getLandToSeaLoadCapacityRemaining(
+  seaZoneId: string,
+  fullUnits: { instance_id: string; unit_id: string; loaded_onto?: string | null }[],
+  unitDefs: Record<string, { faction?: string; transport_capacity?: number }>,
+  navalUnitIds: Set<string>,
+  currentFaction: string,
+  pendingMoves: PendingMove[] | undefined,
+  gamePhase: string,
+  territoryData: Record<string, { terrain?: string } | undefined>,
+): number {
+  const boats = fullUnits.filter((u) => {
+    if (!navalUnitIds.has(u.unit_id) || u.loaded_onto) return false;
+    return unitDefs[u.unit_id]?.faction === currentFaction;
+  });
+  let total = 0;
+  for (const boat of boats) {
+    const cap = Number((unitDefs[boat.unit_id] as { transport_capacity?: number } | undefined)?.transport_capacity ?? 0);
+    const onboard = fullUnits.filter((u) => u.loaded_onto === boat.instance_id).length;
+    let pendingOnto = 0;
+    for (const m of pendingMoves ?? []) {
+      if (!pendingMoveIsSamePhaseLoadIntoSea(m, seaZoneId, territoryData, gamePhase)) continue;
+      if (m.load_onto_boat_instance_id !== boat.instance_id) continue;
+      pendingOnto += m.unit_instance_ids?.length ?? m.count ?? 0;
+    }
+    total += Math.max(0, cap - onboard - pendingOnto);
+  }
+  let unassignedPending = 0;
+  for (const m of pendingMoves ?? []) {
+    if (!pendingMoveIsSamePhaseLoadIntoSea(m, seaZoneId, territoryData, gamePhase)) continue;
+    if (m.load_onto_boat_instance_id) continue;
+    unassignedPending += m.unit_instance_ids?.length ?? m.count ?? 0;
+  }
+  return Math.max(0, total - unassignedPending);
+}
+
+function unitIsAerial(
+  unitId: string,
+  unitDefs: Record<string, { tags?: string[]; archetype?: string } | undefined>,
+): boolean {
+  const ud = unitDefs[unitId];
+  return ud?.archetype === 'aerial' || !!(ud?.tags && ud.tags.includes('aerial'));
+}
+
+/**
+ * Land units: only highlight sea zones as load destinations when the unit has `transportable` in tags
+ * and at least one friendly boat in that hex has remaining capacity (matches handleDragEnd land→sea checks).
+ * Aerial: strip all sea hexes from highlights during non_combat_move (cannot land at sea); combat_move unchanged (naval combat).
+ */
+function filterLandUnitSeaLoadDestinations(
+  validTargets: Set<string>,
+  unitId: string,
+  territoryData: Record<string, { terrain?: string; adjacent?: string[] } | undefined>,
+  territoryUnitsFull: Record<string, { instance_id: string; unit_id: string; loaded_onto?: string | null }[]>,
+  unitDefs: Record<string, { tags?: string[]; archetype?: string }>,
+  navalUnitIds: Set<string>,
+  currentFaction: string,
+  pendingMoves: PendingMove[] | undefined,
+  phase: string,
+): void {
+  if (navalUnitIds.has(unitId)) return;
+  const isAerial = unitIsAerial(unitId, unitDefs);
+  if (phase !== 'combat_move' && phase !== 'non_combat_move') return;
+  const isSeaT = (tid: string) => territoryData[tid]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid);
+  // Aerial units cannot end movement in a sea hex during non-combat (they may still fly to sea in combat for naval battles).
+  if (isAerial && phase === 'non_combat_move') {
+    for (const tid of [...validTargets]) {
+      if (!isSeaT(tid)) continue;
+      validTargets.delete(tid);
+      const c = canonicalSeaZoneId(tid);
+      if (c !== tid) validTargets.delete(c);
+    }
+    return;
+  }
+  if (isAerial) return;
+  const ud = unitDefs[unitId];
+  const isTransportable = (ud?.tags ?? []).includes('transportable');
+  for (const tid of [...validTargets]) {
+    if (!isSeaT(tid)) continue;
+    if (!isTransportable) {
+      validTargets.delete(tid);
+      const c = canonicalSeaZoneId(tid);
+      if (c !== tid) validTargets.delete(c);
+      continue;
+    }
+    const full =
+      territoryUnitsFull[tid] ??
+      territoryUnitsFull[canonicalSeaZoneId(tid)] ??
+      [];
+    const cap = getLandToSeaLoadCapacityRemaining(
+      tid,
+      full,
+      unitDefs as Record<string, { faction?: string; transport_capacity?: number }>,
+      navalUnitIds,
+      currentFaction,
+      pendingMoves,
+      phase,
+      territoryData,
+    );
+    if (cap <= 0) {
+      validTargets.delete(tid);
+      const c = canonicalSeaZoneId(tid);
+      if (c !== tid) validTargets.delete(c);
+    }
+  }
+}
+
+/** True when dragging naval from a sea hex with no passengers aboard and no pending loads into this sea (no raid/offload highlights). */
+function navalDragSeaNoPassengers(
+  fromTerritory: string,
+  unitId: string,
+  navalDrag: { passengerCount: number; instanceIds?: string[] } | undefined,
+  gamePhase: string,
+  territoryData: Record<string, { terrain?: string; adjacent?: string[] }>,
+  _territoryUnitsFull: Record<string, { instance_id: string; unit_id: string }[]> | undefined,
+  pendingMoves: PendingMove[] | undefined,
+  navalUnitIds: Set<string> | undefined,
+): boolean {
+  if (!navalUnitIds?.has(unitId)) return false;
+  const t = territoryData[fromTerritory];
+  const seaOrigin = t?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(fromTerritory);
+  if (!seaOrigin) return false;
+  if (gamePhase !== 'combat_move' && gamePhase !== 'non_combat_move') return false;
+  const onBoat = navalDrag?.passengerCount ?? 0;
+  const pendingPax = countPendingPassengersLoadingIntoSeaZone(fromTerritory, gamePhase, pendingMoves, territoryData);
+  return onBoat + pendingPax <= 0;
 }
 
 export interface PendingMoveConfirm {
@@ -69,6 +457,11 @@ export interface PendingMoveConfirm {
   seaRaidSeaZoneOptions?: string[];
   /** After user picked a sea zone from seaRaidSeaZoneOptions (multi), this is the chosen zone; then confirm panel is shown. */
   chosenSeaZoneId?: string;
+  /**
+   * Map stack drag: multiple ships of the same type in one sea zone. Each inner list is [boatInstanceId, ...passengerInstanceIds].
+   * `count` / `maxCount` are number of ships; confirm submits flattened slice of the first `count` stacks.
+   */
+  navalBoatStacks?: string[][];
 }
 
 // Backend-provided movement data
@@ -80,6 +473,8 @@ interface MoveableUnit {
     remaining_movement: number;
   };
   destinations: string[];
+  /** From API: territory id -> movement cost (for ford escort highlight merge). */
+  destinationCosts?: Record<string, number>;
   /** Cavalry: destination_id -> list of charge_through paths. */
   charge_routes?: Record<string, string[][]>;
 }
@@ -104,14 +499,18 @@ interface GameMapProps {
   territoryUnits: Record<string, { unit_id: string; count: number; instances?: string[] }[]>;
   /** Full unit list per territory (for sea zones: boats + loaded_onto to show passenger count per boat). */
   territoryUnitsFull?: Record<string, { instance_id: string; unit_id: string; loaded_onto?: string | null }[]>;
-  unitDefs: Record<string, { name: string; icon: string; faction?: string; archetype?: string; tags?: string[]; home_territory_id?: string; home_territory_ids?: string[]; cost?: number }>;
+  unitDefs: Record<string, { name: string; icon: string; faction?: string; archetype?: string; tags?: string[]; home_territory_ids?: string[]; cost?: number; transport_capacity?: number }>;
   unitStats: Record<string, { movement: number }>;
   factionData: Record<string, { name: string; icon: string; color: string; alliance: string; capital?: string }>;
   onTerritorySelect: (territoryId: string | null) => void;
-  /** When provided (e.g. during movement phase), clicking the boat stack in a sea zone opens the naval tray. */
+  /** When provided (e.g. during movement phase), double-clicking a multi-boat stack in a sea zone opens the naval tray. */
   onSeaZoneStackClick?: (territoryId: string) => void;
   onUnitSelect: (unit: SelectedUnit | null) => void;
   onUnitMove: (from: string, to: string, unitType: string, count: number) => void;
+  /** Bulk move from selected owned territory: send each stack (unit type) as its own pending move to destination. */
+  onBulkMoveDrop?: (fromTerritory: string, toTerritory: string) => void;
+  /** False when viewing another faction's turn (spectator / not your turn). Hides interactive controls that act for the current player. */
+  canAct?: boolean;
   isMovementPhase: boolean;
   isCombatMove: boolean;
   isMobilizePhase: boolean;
@@ -126,6 +525,10 @@ interface GameMapProps {
   /** Per-territory, per-unit remaining home slots (1 per home territory per unit type). Enables deploy to home without camp. */
   remainingHomeSlots?: Record<string, Record<string, number>>;
   onMobilizationDrop?: (territoryId: string, unitId: string, unitName: string, unitIcon: string, count: number) => void;
+  onMobilizationAllDrop?: (
+    territoryId: string,
+    units: { unitId: string; unitName: string; unitIcon: string; count: number }[]
+  ) => void;
   onCampDrop?: (campIndex: number, territoryId: string) => void;
   mobilizationTray?: {
     purchases: { unitId: string; name: string; icon: string; count: number }[];
@@ -135,6 +538,8 @@ interface GameMapProps {
     selectedCampIndex: number | null;
     onSelectUnit: (unitId: string | null) => void;
     onSelectCamp: (campIndex: number | null) => void;
+    mobilizationAllValidZones?: string[];
+    canMobilizeAll?: boolean;
   } | null;
   /** When placing a camp, these territories are valid targets (highlighted). */
   validCampTerritories?: string[];
@@ -152,6 +557,13 @@ interface GameMapProps {
   aerialUnitsMustMove?: { territory_id: string; unit_id: string; instance_id: string }[];
   /** Boat instance IDs that received a load this combat move and must attack before ending phase. Show caution on those boats. */
   loadedNavalMustAttackInstanceIds?: string[];
+  /** Defender boats in a mobilization naval standoff (must fight or sail away). */
+  forcedNavalCombatInstanceIds?: string[];
+  /**
+   * Sea zone ids (raw + canonical) where clicking the boat stack should open the naval tray even with no passengers
+   * aboard yet — e.g. pending land→sea loads into a hex with multiple boats (after user closed the tray with X).
+   */
+  seaZoneIdsEligibleForNavalTrayStackClick?: Set<string>;
   /** When set, show naval tray (boats + passengers) for the selected sea zone during movement phases. */
   navalTray?: { seaZoneId: string; seaZoneName: string; boats: BoatInTray[]; factionColor: string } | null;
   onCloseNavalTray?: () => void;
@@ -166,6 +578,8 @@ interface GameMapProps {
 }
 
 const MAX_SCALE = 3;
+
+const EMPTY_ELIGIBLE_SEA_ZONES_FOR_TRAY = new Set<string>();
 
 /**
  * Map base name (no extension) -> viewBox and display dimensions.
@@ -190,6 +604,17 @@ const OSGILIATH_OFFSET = (4 * 90) / (3 * Math.PI);
 const OSGILIATH_CENTROIDS: Record<string, { x: number; y: number }> = {
   east_osgiliath: { x: 2218.6035 + OSGILIATH_OFFSET, y: 1761.675 },
   west_osgiliath: { x: 2217.97 - OSGILIATH_OFFSET, y: 1761.089 },
+};
+
+/**
+ * Shift unit stacks relative to the marker anchor (SVG viewBox px). Medium territories often get a
+ * single pole-of-inaccessibility for both marker row and units, so tokens sit on stronghold/home art.
+ * Marker keeps the computed spot; only the unit layer moves. Tune per territory id (see Osgiliath fixed centroids above).
+ */
+const TERRITORY_UNIT_OFFSET_FROM_MARKER: Record<string, { dx: number; dy: number }> = {
+  dunharrow: { dx: 0, dy: 52 },
+  /** Extra vertical gap vs marker row; southern coast needs room before bottom clamp (see CLAMP_INSET_Y_BOTTOM). */
+  umbar: { dx: 0, dy: 108 },
 };
 
 function toMapBase(name: string | null | undefined): string {
@@ -230,10 +655,11 @@ function DroppableTerritory({
     data: { territoryId: tid },
   });
   const pathClass = `territory-path ${isSeaZone ? 'territory-path--sea' : 'territory-path--svg-glow'} ${isSelected ? 'selected' : ''} ${isHighlighted || isValidDrop ? 'highlight' : ''} ${isOver && isValidDrop ? 'drop-target' : ''}`;
-  const glowVars = territoryGlowFromHex(color);
-  const glowFilterId = isSeaZone ? undefined : `territory-glow-${color.replace(/^#/, '')}`;
+  const safeColor = color || '#d4c4a8';
+  const glowVars = territoryGlowFromHex(safeColor);
+  const glowFilterId = isSeaZone ? undefined : `territory-glow-${safeColor.replace(/^#/, '')}`;
   const pathStyle = {
-    ['--territory-glow' as string]: color,
+    ['--territory-glow' as string]: safeColor,
     ['--territory-stroke' as string]: glowVars.stroke,
     ['--territory-glow-rgba' as string]: glowVars.glowRgba,
     ['--territory-glow-rgba-soft' as string]: glowVars.glowRgbaSoft,
@@ -245,7 +671,7 @@ function DroppableTerritory({
         id={`territory-${tid}`}
         d={pathData.d}
         transform={pathData.transform}
-        fill={isSeaZone ? 'url(#sea-wave-pattern)' : color}
+        fill={isSeaZone ? 'url(#sea-wave-pattern)' : safeColor}
         stroke="none"
         style={pathStyle}
         className={`${pathClass} territory-path-fill`}
@@ -264,6 +690,46 @@ function DroppableTerritory({
   );
 }
 
+function DraggableAllStacksButton({
+  territoryId,
+  disabled,
+  onTapPrepPointerDown,
+}: {
+  territoryId: string;
+  disabled: boolean;
+  onTapPrepPointerDown?: (territoryId: string, e: ReactPointerEvent<HTMLDivElement>) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `all-stacks-${territoryId}`,
+    data: { type: 'bulk-all', territoryId },
+    disabled,
+  });
+  /* Wrapper keeps translateX(-50%) centering; inner gets only dnd-kit transform (otherwise inline transform wipes CSS centering). */
+  const dragStyle: React.CSSProperties = {
+    transform: CSS.Translate.toString(transform),
+    opacity: isDragging ? 0.45 : 1,
+    zIndex: isDragging ? 1000 : undefined,
+  };
+  return (
+    <div className="all-stacks-drag-btn-wrap">
+      <div
+        ref={setNodeRef}
+        className={`all-stacks-drag-btn${isDragging ? ' dragging' : ''}`}
+        style={dragStyle}
+        title="Drag all your stacks to a destination, or tap All then tap a highlighted territory (mobile)"
+        aria-label="Move all stacks: drag to destination or tap then tap territory"
+        onPointerDownCapture={(e) => onTapPrepPointerDown?.(territoryId, e)}
+        {...listeners}
+        {...attributes}
+        role="button"
+        tabIndex={attributes.tabIndex ?? 0}
+      >
+        All
+      </div>
+    </div>
+  );
+}
+
 function GameMap({
   gameState,
   selectedTerritory,
@@ -272,14 +738,16 @@ function GameMap({
   territoryUnits,
   territoryUnitsFull = {},
   unitDefs,
-  unitStats,
+  unitStats: _unitStats,
   factionData,
   onTerritorySelect,
   onSeaZoneStackClick,
   onUnitSelect,
   onUnitMove: _onUnitMove,
+  onBulkMoveDrop,
+  canAct = true,
   isMovementPhase,
-  isCombatMove,
+  isCombatMove: _isCombatMove,
   isMobilizePhase,
   hasMobilizationSelected,
   validMobilizeTerritories = [],
@@ -288,6 +756,7 @@ function GameMap({
   remainingMobilizationCapacity = {},
   remainingHomeSlots = {},
   onMobilizationDrop,
+  onMobilizationAllDrop,
   onCampDrop,
   mobilizationTray,
   navalTray,
@@ -307,6 +776,8 @@ function GameMap({
   availableMoveTargets,
   aerialUnitsMustMove = [],
   loadedNavalMustAttackInstanceIds = [],
+  forcedNavalCombatInstanceIds = [],
+  seaZoneIdsEligibleForNavalTrayStackClick = EMPTY_ELIGIBLE_SEA_ZONES_FOR_TRAY,
 }: GameMapProps) {
   /** Unique territory colors for SVG glow filters (Safari doesn't render CSS drop-shadow on SVG). */
   const uniqueGlowColors = useMemo(() => {
@@ -322,6 +793,10 @@ function GameMap({
   const loadedNavalMustAttackInstanceIdSet = useMemo(
     () => new Set(loadedNavalMustAttackInstanceIds),
     [loadedNavalMustAttackInstanceIds]
+  );
+  const forcedNavalCombatInstanceIdSet = useMemo(
+    () => new Set(forcedNavalCombatInstanceIds),
+    [forcedNavalCombatInstanceIds]
   );
   const wrapperRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -356,11 +831,48 @@ function GameMap({
     instanceIds?: string[];
     passengerCount?: number;
   } | null>(null);
+  const [bulkDragOverlay, setBulkDragOverlay] = useState<{ stacks: BulkDragOverlayStack[] } | null>(null);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const activeDragIdRef = useRef<string | null>(null);
+  /** When set, user tapped a unit (no drag); show valid destinations and next tap on territory = drop */
+  const [tapSelectedUnit, setTapSelectedUnit] = useState<{
+    unitId: string;
+    territoryId: string;
+    count: number;
+    unitDef?: { name: string; icon: string };
+    factionColor?: string;
+    isNaval?: boolean;
+    instanceIds?: string[];
+    passengerCount?: number;
+  } | null>(null);
+  const tapStartRef = useRef<{ territoryId: string; unitId: string; x: number; y: number } | null>(null);
+  /** Last pointer position while any map drag is active — prefer `elementsFromPoint` + valid targets over dnd-kit `over` (bbox collisions). */
+  const lastMapDragPointerRef = useRef<{ x: number; y: number } | null>(null);
+  /** Tap All (no drag) then tap destination — mobile-friendly bulk move */
+  const bulkAllTapStartRef = useRef<{ territoryId: string; x: number; y: number } | null>(null);
+  const [tapBulkAllFromTerritory, setTapBulkAllFromTerritory] = useState<string | null>(null);
   const [mapControlsCollapsed, setMapControlsCollapsed] = useState(false);
   const [mapKeyOpen, setMapKeyOpen] = useState(false);
+  /** On touch: which territory's unit stack is expanded (tap stack to expand, then tap unit to select) */
+  const [expandedStackKey, setExpandedStackKey] = useState<string | null>(null);
 
-  // Require 10px movement before starting drag so a simple click selects instead of hiding the item
+  useEffect(() => {
+    activeDragIdRef.current = activeDragId;
+  }, [activeDragId]);
+
+  useEffect(() => {
+    if (!activeDragId) {
+      lastMapDragPointerRef.current = null;
+      return;
+    }
+    const onMove = (e: PointerEvent) => {
+      lastMapDragPointerRef.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener('pointermove', onMove, { capture: true, passive: true });
+    return () => window.removeEventListener('pointermove', onMove, { capture: true });
+  }, [activeDragId]);
+
+  // Require 10px movement before starting drag so a simple click/tap selects unit and shows destinations
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 10 } })
   );
@@ -541,7 +1053,7 @@ function GameMap({
             return;
           }
           const area = bbox.width * bbox.height;
-          const isSeaZone = /^sea_zone\d*$/i.test(territoryId);
+          const isSeaZone = /^sea_zone_?\d+$/i.test(territoryId);
           const useTwoSpotsFirstPass =
             isSeaZone ||
             area >= TERRITORY_TWO_SPOT_AREA_THRESHOLD ||
@@ -775,6 +1287,17 @@ function GameMap({
         }
       });
 
+      for (const [tid, off] of Object.entries(TERRITORY_UNIT_OFFSET_FROM_MARKER)) {
+        const pos = positions[tid];
+        if (!pos) continue;
+        const marker = pos.marker;
+        const unit = { x: marker.x + off.dx, y: marker.y + off.dy };
+        positions[tid] = { marker, unit };
+        // Keep centroid at marker anchor so move/combat arrows (which use territoryCentroids) don’t
+        // originate from the nudged unit stack (e.g. Umbar’s line shooting up from under the hex).
+        centroids[tid] = marker;
+      }
+
       return { centroids, positions };
     };
 
@@ -833,7 +1356,7 @@ function GameMap({
       if (move.move_type === 'load') moveGroups[key].isLoad = true;
     });
 
-    const isSea = (tid: string) => territoryData[tid]?.terrain === 'sea' || /^sea_zone\d*$/i.test(tid);
+    const isSea = (tid: string) => territoryData[tid]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid);
 
     return Object.values(moveGroups).map(group => {
       const fromCentroid = territoryCentroids[group.from];
@@ -920,206 +1443,511 @@ function GameMap({
     };
   }, [mapBase, IMG_DIMENSIONS.width, IMG_DIMENSIONS.height, loadedSvgDimensions]);
 
-  // Helper to get alliance of a territory
-  const getAlliance = useCallback((owner?: string) => {
-    if (!owner) return null;
-    return factionData[owner]?.alliance || null;
-  }, [factionData]);
+  /** Map SVG / hit-test / stack keys → keys present in territoryData (case, sea_zone_9 vs sea_zone_9). */
+  const resolveTerritoryDropId = useMemo(() => {
+    const byLower = new Map<string, string>();
+    for (const k of Object.keys(territoryData || {})) {
+      byLower.set(k.toLowerCase(), k);
+    }
+    return (tid: string): string => {
+      if (!tid || typeof tid !== 'string') return '';
+      const t = tid.trim();
+      if (!t) return '';
+      if (territoryData[t]) return t;
+      const lowerHit = byLower.get(t.toLowerCase());
+      if (lowerHit) return lowerHit;
+      const seaCanon = canonicalSeaZoneId(t);
+      if (territoryData[seaCanon]) return seaCanon;
+      const seaLower = byLower.get(seaCanon.toLowerCase());
+      if (seaLower) return seaLower;
+      return t;
+    };
+  }, [territoryData]);
 
-  // Get valid move targets - backend is source of truth (uses remaining_movement). Fallback BFS only when backend gave us entries but empty destinations (e.g. units in neutral).
-  // Aerial units: can only attack if they can reach friendly territory with remaining moves (must land in friendly before phase end).
-  const getValidTargets = useCallback((fromTerritory: string, unitId: string): Set<string> => {
+  // Valid move targets come only from available-actions (backend pathfinding). No client BFS — empty highlights mean fix API/state sync, not paper over it here.
+  /** Naval drags from sea: strip raid/offload land unless passengers or pending loads into this sea. */
+  const getValidTargets = useCallback((
+    fromTerritory: string,
+    unitId: string,
+    navalDrag?: { passengerCount: number; instanceIds?: string[] },
+  ): Set<string> => {
+    if (!availableMoveTargets?.length) {
+      return new Set();
+    }
+    const fordGraphForMatch = territoryData as Record<string, { adjacent?: string[]; ford_adjacent?: string[] } | undefined>;
+    const fromKeyForMatch = resolveTerritoryGraphKey(fromTerritory, fordGraphForMatch);
     const fromCanon = canonicalSeaZoneId(fromTerritory);
-    const matches = availableMoveTargets
-      ? availableMoveTargets.filter(
-          m => (canonicalSeaZoneId(m.territory) === fromCanon || m.territory === fromTerritory) && m.unit.unit_id === unitId
-        )
-      : [];
-    let movement: number;
-    if (availableMoveTargets && matches.length > 0) {
-      // Use UNION of destinations so we show all targets any unit in the stack can reach (max range).
-      // User can then drop on a far territory and the confirm popup only allows moving as many units as can reach it.
-      const validTargets = new Set<string>();
+    const matches = availableMoveTargets.filter((m) => {
+      if (m.unit.unit_id !== unitId) return false;
+      const mKey = resolveTerritoryGraphKey(m.territory, fordGraphForMatch);
+      return (
+        mKey === fromKeyForMatch ||
+        canonicalSeaZoneId(m.territory) === fromCanon ||
+        m.territory === fromTerritory
+      );
+    });
+
+    const validTargets = new Set<string>();
+    if (matches.length > 0) {
       for (const m of matches) {
-        for (const d of (m.destinations || [])) {
+        const dests = m.destinations || [];
+        for (const d of dests) {
           addDestinationWithSeaZoneAlias(validTargets, d);
         }
       }
-      if (validTargets.size > 0) {
-        // Naval: allow dropping on land adjacent to any reachable sea zone (sea raid in combat_move, offload in non_combat_move); user will pick which sea zone.
-        if ((gameState.phase === 'combat_move' || gameState.phase === 'non_combat_move') && navalUnitIds?.has(unitId)) {
-          const isSeaT = (tid: string) => territoryData[tid]?.terrain === 'sea' || /^sea_zone\d*$/i.test(tid);
+      filterLandUnitSeaLoadDestinations(
+        validTargets,
+        unitId,
+        territoryData,
+        territoryUnitsFull ?? {},
+        unitDefs,
+        navalUnitIds ?? new Set(),
+        gameState.current_faction,
+        pendingMoves,
+        gameState.phase,
+      );
+    }
+    // Do not return early when validTargets is empty — ford escort + pending `to` merge below can still add land destinations.
+
+    const escortRemainingMovement = (): number => {
+      const rm0 = matches[0]?.unit?.remaining_movement;
+      if (typeof rm0 === 'number' && Number.isFinite(rm0)) return rm0;
+      const full =
+        territoryUnitsFull?.[fromKeyForMatch] ??
+        territoryUnitsFull?.[fromTerritory] ??
+        [];
+      let best = 0;
+      for (const u of full) {
+        if (u.unit_id !== unitId) continue;
+        const r = (u as { remaining_movement?: number }).remaining_movement;
+        if (typeof r === 'number' && r > best) best = r;
+      }
+      if (best > 0) return best;
+      return _unitStats[unitId]?.movement ?? 0;
+    };
+
+    if ((gameState.phase === 'combat_move' || gameState.phase === 'non_combat_move') && navalUnitIds?.has(unitId) && validTargets.size > 0) {
+      const isSeaT = (tid: string) => territoryData[tid]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid);
+      const emptySeaNaval = navalDragSeaNoPassengers(
+        fromTerritory,
+        unitId,
+        navalDrag,
+        gameState.phase,
+        territoryData,
+        territoryUnitsFull,
+        pendingMoves,
+        navalUnitIds,
+      );
+      if (emptySeaNaval) {
+        const onlySea = new Set<string>();
+        for (const tid of validTargets) {
+          if (isSeaT(tid)) addDestinationWithSeaZoneAlias(onlySea, tid);
+        }
+        validTargets.clear();
+        for (const tid of onlySea) validTargets.add(tid);
+      } else {
+        const onBoat = navalDrag?.passengerCount ?? 0;
+        const pendingPax = countPendingPassengersLoadingIntoSeaZone(
+          fromTerritory,
+          gameState.phase,
+          pendingMoves,
+          territoryData,
+        );
+        if (onBoat + pendingPax > 0) {
           const seaZoneIds = [...validTargets].filter(isSeaT);
           for (const sz of seaZoneIds) {
-            for (const adjId of (territoryData[sz]?.adjacent || [])) {
+            for (const adjId of territoryData[sz]?.adjacent || []) {
               if (!territoryData[adjId] || isSeaT(adjId)) continue;
+              if (
+                gameState.phase === 'non_combat_move' &&
+                !isNonCombatNavalOffloadLand(
+                  adjId,
+                  territoryData,
+                  territoryUnits,
+                  unitDefs,
+                  factionData,
+                  gameState.current_faction,
+                )
+              ) {
+                continue;
+              }
               addDestinationWithSeaZoneAlias(validTargets, adjId);
             }
           }
         }
-        return validTargets;
       }
-      // Backend included this origin/unit but returned no destinations → use remaining_movement for fallback BFS
-      movement = Math.max(0, ...matches.map(m => m.unit?.remaining_movement ?? 0));
-      if (movement <= 0) return new Set();
-    } else if (availableMoveTargets) {
-      // Backend gave no entries for this (territory, unitId) → unit(s) have 0 remaining movement; don't show any targets
-      return new Set();
-    } else {
-      // No backend data (e.g. not in move phase) - use unit type base movement
-      movement = unitStats[unitId]?.movement || 1;
     }
-
-    const territory = territoryData[fromTerritory];
-    if (!territory) return new Set();
-    const currentFaction = gameState.current_faction;
-    const currentAlliance = getAlliance(currentFaction);
-    const ud = unitDefs[unitId] as { archetype?: string; tags?: string[] } | undefined;
-    const isAerial = ud?.archetype === 'aerial' || (ud?.tags && ud.tags.includes('aerial'));
-
-    // Neighbors for BFS: adjacent + aerial_adjacent when unit is aerial (deduped)
-    const getNeighborIds = (t: { adjacent?: string[]; aerial_adjacent?: string[] } | undefined): string[] => {
-      if (!t) return [];
-      const adj = t.adjacent ?? [];
-      if (!isAerial) return adj;
-      const extra = t.aerial_adjacent ?? [];
-      const seen = new Set(adj);
-      const out = [...adj];
-      for (const id of extra) {
-        if (!seen.has(id)) {
-          seen.add(id);
-          out.push(id);
-        }
-      }
-      return out;
-    };
-
-    // Helper: can we reach any allied territory from this territory with movesLeft? (for aerial return-path rule; matches backend: only allied-owned counts, not neutral)
-    const canReachFriendlyFrom = (fromTid: string, movesLeft: number): boolean => {
-      if (movesLeft < 0) return false;
-      const fromT = territoryData[fromTid];
-      if (!fromT) return false;
-      const owner = fromT.owner;
-      const isNeutral = owner == null || owner === undefined || owner === '';
-      const alliance = getAlliance(owner);
-      const isFriendly = !isNeutral && (owner === currentFaction || (alliance !== null && alliance === currentAlliance));
-      if (isFriendly) return true;
-      if (movesLeft === 0) return false;
-      const visited = new Set<string>([fromTid]);
-      const queue: [string, number][] = [[fromTid, 0]];
-      while (queue.length > 0) {
-        const [tid, steps] = queue.shift()!;
-        if (steps >= movesLeft) continue;
-        const t = territoryData[tid];
-        if (!t) continue;
-        for (const adjId of getNeighborIds(t)) {
-          if (visited.has(adjId)) continue;
-          visited.add(adjId);
-          const adj = territoryData[adjId];
-          if (!adj) continue;
-          const aOwner = adj.owner;
-          const aNeutral = aOwner == null || aOwner === undefined || aOwner === '';
-          const aAlliance = getAlliance(aOwner);
-          const aFriendly = !aNeutral && (aOwner === currentFaction || (aAlliance !== null && aAlliance === currentAlliance));
-          if (aFriendly) return true;
-          queue.push([adjId, steps + 1]);
-        }
-      }
-      return false;
-    };
-
-    const validTargets = new Set<string>();
-    const queue: [string, number][] = [[fromTerritory, movement]];
-    const visited = new Set<string>([fromTerritory]);
-
-    while (queue.length > 0) {
-      const [currentId, remainingMoves] = queue.shift()!;
-      const current = territoryData[currentId];
-      if (!current) continue;
-
-      for (const adjId of getNeighborIds(current)) {
-        if (visited.has(adjId)) continue;
-
-        const adjTerritory = territoryData[adjId];
-        if (!adjTerritory) continue;
-
-        const adjOwner = adjTerritory.owner;
-        const isNeutral = adjOwner == null || adjOwner === undefined || adjOwner === '';
-        const adjAlliance = getAlliance(adjOwner);
-        const isFriendly = !isNeutral && (adjOwner === currentFaction ||
-          (adjAlliance !== null && adjAlliance === currentAlliance));
-        const isEnemy = !isNeutral && adjAlliance !== null && adjAlliance !== currentAlliance;
-        const movesAfterLanding = remainingMoves - 1;
-
-        if (isCombatMove) {
-          if (isFriendly) {
-            visited.add(adjId);
-            if (remainingMoves > 1) {
-              queue.push([adjId, remainingMoves - 1]);
+    /*
+     * Ford escort: API sometimes omits ford-only destinations for transportable stacks even after a
+     * ford crosser has declared a lead pending move. Merge crosser reach (same origin, min ford edges ≥ 1)
+     * so escorted units get valid highlights and drop targets (server already accepts these moves).
+     */
+    if (
+      (gameState.phase === 'combat_move' || gameState.phase === 'non_combat_move') &&
+      usesFordEscortBudget(unitDefs[unitId]) &&
+      pendingFordCrosserLeadFromOrigin(
+        fromTerritory,
+        gameState.phase,
+        pendingMoves,
+        territoryData as Record<string, { adjacent?: string[]; ford_adjacent?: string[] } | undefined>,
+        unitDefs as Record<string, { archetype?: string; tags?: string[]; specials?: string[] } | undefined>,
+        territoryUnitsFull ?? {},
+      )
+    ) {
+      const fordGraph = territoryData as Record<string, { adjacent?: string[]; ford_adjacent?: string[] } | undefined>;
+      const fromKey = resolveTerritoryGraphKey(fromTerritory, fordGraph);
+      const fordSlots = remainingFordEscortSlotsClient(
+        fromKey,
+        gameState.phase,
+        pendingMoves,
+        fordGraph,
+        territoryUnitsFull ?? {},
+        unitDefs as Record<
+          string,
+          | {
+              specials?: string[];
+              tags?: string[];
+              archetype?: string;
+              transport_capacity?: number;
+              faction?: string;
             }
-          } else if (isEnemy) {
-            visited.add(adjId);
-            const enemyHasUnits = (territoryUnits[adjId] || []).length > 0;
-            if (!isAerial) {
-              validTargets.add(adjId);
-            } else {
-              // Aerial: combat move only into territories that have units to attack
-              if (enemyHasUnits && canReachFriendlyFrom(adjId, movesAfterLanding)) {
-                validTargets.add(adjId);
+          | undefined
+        >,
+        gameState.current_faction,
+        new Set(),
+      );
+      const stackCount =
+        (territoryUnits[fromTerritory] || []).find((s) => s.unit_id === unitId)?.count ?? 1;
+      if (fordSlots > 0) {
+        const escortRm = escortRemainingMovement();
+        for (const m of availableMoveTargets) {
+          if (!isFordCrosser(unitDefs[m.unit.unit_id])) continue;
+          const mTerr = m.territory;
+          const mCanon = canonicalSeaZoneId(mTerr);
+          if (
+            mCanon !== fromCanon &&
+            mTerr !== fromTerritory &&
+            resolveTerritoryGraphKey(mTerr, fordGraph) !== fromKey
+          ) {
+            continue;
+          }
+          const costs = m.destinationCosts;
+          for (const d of m.destinations) {
+            const dk = resolveTerritoryGraphKey(d, fordGraph);
+            if (!fordShortcutRequiresEscortLead(fromKey, dk, fordGraph)) continue;
+            const od = fordEscortOdMultiplier(fromKey, dk, fordGraph);
+            if (od < 1 || fordSlots < od * stackCount) continue;
+            if (costs) {
+              const c = costs[d] ?? costs[dk];
+              if (c !== undefined && c > escortRm) continue;
+            }
+            addDestinationWithSeaZoneAlias(validTargets, d);
+          }
+        }
+        // Crosser may be absent from moveable_units (e.g. row omitted); still highlight escort drop = pending `to`.
+        const fullUnits =
+          territoryUnitsFull?.[fromKey] ?? territoryUnitsFull?.[fromTerritory] ?? [];
+        const byIid = new Map(fullUnits.map((u) => [u.instance_id, u]));
+        const pendingToSeen = new Set<string>();
+        for (const pm of pendingMoves ?? []) {
+          if (pm.phase !== gameState.phase) continue;
+          const mt = pm.move_type;
+          if (mt === 'load' || mt === 'offload' || mt === 'sail') continue;
+          if (resolveTerritoryGraphKey(pm.from, fordGraph) !== fromKey) continue;
+          const rawTo = (pm.to || '').trim();
+          if (!rawTo || pendingToSeen.has(rawTo)) continue;
+          const toK = resolveTerritoryGraphKey(rawTo, fordGraph);
+          if (!fordShortcutRequiresEscortLead(fromKey, toK, fordGraph)) continue;
+          const odPm = fordEscortOdMultiplier(fromKey, toK, fordGraph);
+          if (odPm < 1 || fordSlots < odPm * stackCount) continue;
+          const iids = pm.unit_instance_ids ?? [];
+          let pmHasCrosser = false;
+          if (!iids.length) {
+            if (pm.primary_unit_id && isFordCrosser(unitDefs[pm.primary_unit_id])) pmHasCrosser = true;
+          } else {
+            for (const iid of iids) {
+              const row = byIid.get(iid);
+              if (row && isFordCrosser(unitDefs[row.unit_id])) {
+                pmHasCrosser = true;
+                break;
               }
             }
-            if (remainingMoves > 1) {
-              queue.push([adjId, remainingMoves - 1]);
-            }
-          } else if (isNeutral) {
-            visited.add(adjId);
-            const ownable = adjTerritory.ownable !== false;
-            const stacks = territoryUnits[adjId] || [];
-            const hasEnemyUnits = stacks.some(
-              (s) => unitDefs[s.unit_id]?.faction !== currentFaction &&
-                getAlliance(unitDefs[s.unit_id]?.faction) !== currentAlliance
-            );
-            // Empty unowned ownable: ground only (conquer). Aerial cannot combat-move into empty.
-            if (ownable && !hasEnemyUnits) {
-              if (!isAerial) validTargets.add(adjId);
-            } else if (hasEnemyUnits && (!isAerial || canReachFriendlyFrom(adjId, movesAfterLanding))) {
-              validTargets.add(adjId);
-            }
-            if (remainingMoves > 1) {
-              queue.push([adjId, remainingMoves - 1]);
+            if (!pmHasCrosser && pm.primary_unit_id && isFordCrosser(unitDefs[pm.primary_unit_id]) && iids.length === 1) {
+              pmHasCrosser = true;
             }
           }
-        } else {
-          if (isFriendly) {
-            visited.add(adjId);
-            validTargets.add(adjId);
-            if (remainingMoves > 1) {
-              queue.push([adjId, remainingMoves - 1]);
-            }
-          } else if (isNeutral) {
-            const hasEnemyUnits = (territoryUnits[adjId] || []).some(
-              (s) => unitDefs[s.unit_id]?.faction !== currentFaction &&
-                getAlliance(unitDefs[s.unit_id]?.faction) !== currentAlliance
-            );
-            visited.add(adjId);
-            const ownable = adjTerritory.ownable !== false;
-            if (!hasEnemyUnits && !ownable) validTargets.add(adjId);
-            if (remainingMoves > 1) {
-              queue.push([adjId, remainingMoves - 1]);
-            }
-          }
+          if (!pmHasCrosser) continue;
+          pendingToSeen.add(rawTo);
+          addDestinationWithSeaZoneAlias(validTargets, rawTo);
         }
       }
     }
-
     return validTargets;
-  }, [availableMoveTargets, territoryData, territoryUnits, unitDefs, unitStats, gameState.current_faction, gameState.phase, isCombatMove, getAlliance, navalUnitIds]);
+  }, [
+    availableMoveTargets,
+    territoryData,
+    territoryUnits,
+    territoryUnitsFull,
+    unitDefs,
+    factionData,
+    _unitStats,
+    gameState.current_faction,
+    gameState.phase,
+    navalUnitIds,
+    pendingMoves,
+  ]);
+
+  const territoryMatchesValidDrop = useCallback(
+    (territoryId: string) => {
+      if (validDropTargets.has(territoryId)) return true;
+      const r = resolveTerritoryDropId(territoryId);
+      return r !== '' && validDropTargets.has(r);
+    },
+    [validDropTargets, resolveTerritoryDropId],
+  );
+
+  const computeBulkAllMoveData = useCallback(
+    (fromTerritory: string): { validTargets: Set<string>; stacks: BulkDragOverlayStack[] } => {
+      const stackUnits = territoryUnits[fromTerritory] || [];
+      const currentFaction = gameState.current_faction;
+      const friendlyStacks = stackUnits.filter((s) => {
+        const parts = s.unit_id.split('_');
+        const factionFromId = parts.find((p) => factionData[p]);
+        const defFaction = unitDefs[s.unit_id]?.faction;
+        const uf = factionFromId ?? defFaction ?? parts[0];
+        return uf === currentFaction;
+      });
+      const sortedFriendly = [...friendlyStacks].sort((a, b) =>
+        compareMapUnitStacks(a, b, unitDefs, factionData),
+      );
+      const crosserStacks = sortedFriendly.filter((s) => isFordCrosser(unitDefs[s.unit_id]));
+      const escortStacks = sortedFriendly.filter((s) => usesFordEscortBudget(unitDefs[s.unit_id]));
+      const neutralStacks = sortedFriendly.filter(
+        (s) => !isFordCrosser(unitDefs[s.unit_id]) && !usesFordEscortBudget(unitDefs[s.unit_id]),
+      );
+      let bulkTargets: Set<string> | null = null;
+      if (crosserStacks.length > 0 && escortStacks.length > 0) {
+        const intersectStacks = (stacks: typeof sortedFriendly): Set<string> => {
+          let acc: Set<string> | null = null;
+          for (const s of stacks) {
+            const t = getValidTargets(fromTerritory, s.unit_id);
+            if (acc === null) acc = new Set<string>(t);
+            else acc = new Set([...acc].filter((id: string) => t.has(id)));
+          }
+          return acc ?? new Set<string>();
+        };
+        const tCross = intersectStacks(crosserStacks);
+        const tEsc = intersectStacks(escortStacks);
+        const tOthers = neutralStacks.length ? intersectStacks(neutralStacks) : null;
+        const fordGraph = territoryData as Record<
+          string,
+          { adjacent?: string[]; ford_adjacent?: string[] } | undefined
+        >;
+        const fromKey = resolveTerritoryGraphKey(fromTerritory, fordGraph);
+        const escortFigureCount = escortStacks.reduce((sum, s) => sum + s.count, 0);
+        const fordSlots = remainingFordEscortSlotsClient(
+          fromKey,
+          gameState.phase,
+          pendingMoves,
+          fordGraph,
+          territoryUnitsFull ?? {},
+          unitDefs as Record<
+            string,
+            | {
+                specials?: string[];
+                tags?: string[];
+                archetype?: string;
+                transport_capacity?: number;
+                faction?: string;
+              }
+            | undefined
+          >,
+          currentFaction,
+          new Set(),
+        );
+        const fordExtras = new Set<string>();
+        if (fordSlots > 0 && escortFigureCount > 0) {
+          for (const d of tCross) {
+            const dk = resolveTerritoryGraphKey(d, fordGraph);
+            if (!fordShortcutRequiresEscortLead(fromKey, dk, fordGraph)) continue;
+            const od = fordEscortOdMultiplier(fromKey, dk, fordGraph);
+            if (od < 1 || fordSlots < od * escortFigureCount) continue;
+            fordExtras.add(d);
+          }
+        }
+        const escortOrFord = new Set<string>(tEsc);
+        for (const d of fordExtras) {
+          if (tCross.has(d)) escortOrFord.add(d);
+        }
+        bulkTargets = new Set<string>();
+        for (const d of tCross) {
+          if (!escortOrFord.has(d)) continue;
+          if (tOthers && !tOthers.has(d)) continue;
+          bulkTargets.add(d);
+        }
+      } else {
+        for (const s of sortedFriendly) {
+          const t = getValidTargets(fromTerritory, s.unit_id);
+          if (bulkTargets === null) {
+            bulkTargets = new Set<string>(t);
+          } else {
+            const next = new Set<string>();
+            for (const id of bulkTargets) {
+              if (t.has(id)) next.add(id);
+            }
+            bulkTargets = next;
+          }
+        }
+      }
+      const stacks: BulkDragOverlayStack[] = sortedFriendly.map((s) => {
+        const parts = s.unit_id.split('_');
+        const factionFromId = parts.find((p) => factionData[p]);
+        const colorFromId = factionFromId ? factionData[factionFromId].color : null;
+        const defFaction = unitDefs[s.unit_id]?.faction;
+        const colorFromDef = defFaction && factionData[defFaction] ? factionData[defFaction].color : null;
+        const ud = unitDefs[s.unit_id];
+        return {
+          unitId: s.unit_id,
+          count: s.count,
+          unitDef: {
+            name:
+              (ud as { display_name?: string; name?: string })?.display_name ??
+              (ud as { name?: string })?.name ??
+              s.unit_id,
+            icon: (ud as { icon?: string })?.icon ?? '',
+          },
+          factionColor: colorFromId ?? colorFromDef ?? undefined,
+          isNaval: navalUnitIds.has(s.unit_id),
+          passengerCount: 0,
+        };
+      });
+      return { validTargets: bulkTargets ?? new Set(), stacks };
+    },
+    [
+      territoryUnits,
+      territoryData,
+      territoryUnitsFull,
+      gameState.current_faction,
+      gameState.phase,
+      factionData,
+      unitDefs,
+      getValidTargets,
+      navalUnitIds,
+      pendingMoves,
+    ],
+  );
+
+  // Detect tap on unit (pointer down + up with <10px move): show valid destinations for click-then-click move
+  const handleUnitPointerDownCapture = useCallback((territoryId: string, unitId: string, e: ReactPointerEvent<HTMLElement>) => {
+    tapStartRef.current = { territoryId, unitId, x: e.clientX, y: e.clientY };
+  }, []);
+  useEffect(() => {
+    const handler = (e: PointerEvent) => {
+      const bulkStart = bulkAllTapStartRef.current;
+      if (bulkStart) {
+        const dx = e.clientX - bulkStart.x;
+        const dy = e.clientY - bulkStart.y;
+        bulkAllTapStartRef.current = null;
+        if (dx * dx + dy * dy >= 100) return;
+        if (activeDragIdRef.current !== null) return;
+        setTapSelectedUnit(null);
+        const { validTargets } = computeBulkAllMoveData(bulkStart.territoryId);
+        setValidDropTargets(validTargets);
+        setTapBulkAllFromTerritory(bulkStart.territoryId);
+        setBulkDragOverlay(null);
+        return;
+      }
+
+      const start = tapStartRef.current;
+      if (!start) return;
+      const dx = e.clientX - start.x;
+      const dy = e.clientY - start.y;
+      const distanceSq = dx * dx + dy * dy;
+      tapStartRef.current = null;
+      if (distanceSq >= 100) return; // 10px threshold
+      if (activeDragIdRef.current !== null) return; // Was a drag
+      // Build tap-selected unit from territory/unit and show valid destinations
+      const stacks = territoryUnits[start.territoryId] || [];
+      const stack = stacks.find(s => s.unit_id === start.unitId);
+      if (!stack) return;
+      const parts = start.unitId.split('_');
+      const factionFromId = parts.find(p => factionData[p]);
+      const defFaction = unitDefs[start.unitId]?.faction;
+      const unitFactionColor = factionFromId && factionData[factionFromId] ? factionData[factionFromId].color : (defFaction && factionData[defFaction] ? factionData[defFaction].color : undefined);
+      const instanceIdsForUnit = (territoryUnitsFull?.[start.territoryId] || []).filter(u => u.unit_id === start.unitId).map(u => u.instance_id);
+      const isSeaTap = territoryData[start.territoryId]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(start.territoryId);
+      let navalDrag: { passengerCount: number; instanceIds?: string[] } | undefined;
+      if (navalUnitIds.has(start.unitId) && isSeaTap && territoryUnitsFull?.[start.territoryId]?.length) {
+        const full = territoryUnitsFull[start.territoryId];
+        const boatsOfType = full.filter(u => u.unit_id === start.unitId && navalUnitIds.has(u.unit_id));
+        const boatIds = boatsOfType.map(b => b.instance_id);
+        const pax = full.filter(u => u.loaded_onto && boatIds.includes(u.loaded_onto));
+        navalDrag = {
+          passengerCount: pax.length,
+          instanceIds: [...boatIds, ...pax.map(p => p.instance_id)],
+        };
+      }
+      setTapSelectedUnit({
+        unitId: start.unitId,
+        territoryId: start.territoryId,
+        count: stack.count,
+        unitDef: unitDefs[start.unitId] ? { name: (unitDefs[start.unitId] as { display_name?: string; name?: string })?.display_name ?? (unitDefs[start.unitId] as { name?: string })?.name ?? start.unitId, icon: (unitDefs[start.unitId] as { icon?: string })?.icon ?? '' } : undefined,
+        factionColor: unitFactionColor,
+        isNaval: navalUnitIds.has(start.unitId),
+        instanceIds: instanceIdsForUnit.length > 0 ? instanceIdsForUnit : undefined,
+        passengerCount: navalDrag?.passengerCount ?? 0,
+      });
+      setValidDropTargets(getValidTargets(start.territoryId, start.unitId, navalDrag));
+    };
+    document.addEventListener('pointerup', handler);
+    return () => document.removeEventListener('pointerup', handler);
+  }, [territoryUnits, territoryUnitsFull, territoryData, unitDefs, factionData, navalUnitIds, getValidTargets, gameState.phase, pendingMoves, computeBulkAllMoveData]);
 
   // Handle drag start
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const data = event.active.data.current;
     if (!data) return;
+    const ae = event.activatorEvent as PointerEvent | MouseEvent | undefined;
+    if (ae && typeof ae.clientX === 'number' && typeof ae.clientY === 'number') {
+      lastMapDragPointerRef.current = { x: ae.clientX, y: ae.clientY };
+    }
+    setTapSelectedUnit(null); // Clear tap selection when starting a drag
+    setTapBulkAllFromTerritory(null);
+    bulkAllTapStartRef.current = null;
+    setBulkDragOverlay(null);
     setActiveDragId(event.active.id as string);
+    if ((data as { type?: string }).type === 'bulk-all') {
+      const fromTerritory = (data as { territoryId?: string }).territoryId;
+      if (fromTerritory) {
+        const { validTargets, stacks } = computeBulkAllMoveData(fromTerritory);
+        setValidDropTargets(validTargets);
+        setBulkDragOverlay(stacks.length > 0 ? { stacks } : null);
+      } else {
+        setValidDropTargets(new Set());
+        setBulkDragOverlay(null);
+      }
+      setActiveUnit(null);
+      return;
+    }
+
+    if ((data as { type?: string }).type === 'mobilization-all') {
+      const purchases = mobilizationTray?.purchases ?? [];
+      const zones = mobilizationTray?.mobilizationAllValidZones ?? [];
+      setValidDropTargets(new Set(zones));
+
+      const stacks: BulkDragOverlayStack[] = purchases.map(p => ({
+        unitId: p.unitId,
+        count: p.count,
+        unitDef: { name: p.name, icon: p.icon },
+        factionColor: mobilizationTray?.factionColor ?? undefined,
+        isNaval: navalUnitIds.has(p.unitId),
+        passengerCount: 0,
+      }));
+      setBulkDragOverlay(stacks.length > 0 ? { stacks } : null);
+      setActiveUnit(null);
+      return;
+    }
+
     if ((data as { type?: string }).type === 'mobilization-camp') {
       setActiveUnit(null);
       const campIndex = (data as { campIndex: number }).campIndex;
@@ -1156,19 +1984,151 @@ function GameMap({
       passengerCount?: number;
     };
     setActiveUnit({ unitId, territoryId, count, unitDef, factionColor, isNaval: navalUnitIds.has(unitId), instanceIds, passengerCount: passengerCount ?? 0 });
-    setValidDropTargets(getValidTargets(territoryId, unitId));
-  }, [getValidTargets, validMobilizeTerritories, validMobilizeSeaZones, navalUnitIds, remainingMobilizationCapacity, remainingHomeSlots, mobilizationTray?.pendingCamps, territoriesWithPendingCampPlacement, territoryData]);
+    const isSeaFrom = territoryData[territoryId]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(territoryId);
+    const navalDrag =
+      navalUnitIds.has(unitId) && isSeaFrom
+        ? { passengerCount: passengerCount ?? 0, instanceIds }
+        : undefined;
+    setValidDropTargets(getValidTargets(territoryId, unitId, navalDrag));
+  }, [
+    getValidTargets,
+    computeBulkAllMoveData,
+    validMobilizeTerritories,
+    validMobilizeSeaZones,
+    navalUnitIds,
+    remainingMobilizationCapacity,
+    remainingHomeSlots,
+    mobilizationTray?.pendingCamps,
+    mobilizationTray?.purchases,
+    mobilizationTray?.factionColor,
+    mobilizationTray?.mobilizationAllValidZones,
+    territoriesWithPendingCampPlacement,
+    territoryData,
+  ]);
 
   // Handle drag end
   const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const ptrAtEnd = lastMapDragPointerRef.current;
+    lastMapDragPointerRef.current = null;
+
     const { active, over } = event;
     const data = active.data.current;
     const dataType = (data as { type?: string })?.type;
+    const isBulkAll = dataType === 'bulk-all';
+    const isMobilizationAll = dataType === 'mobilization-all';
     const isMobilizationCamp = dataType === 'mobilization-camp';
     const isMobilization = dataType === 'mobilization-unit';
 
-    if (isMobilizationCamp && over && onCampDrop) {
-      const targetTerritory = (over.data.current as { territoryId: string })?.territoryId;
+    if (isBulkAll) {
+      let storeTarget = '';
+      const ptr = ptrAtEnd;
+      if (ptr) {
+        storeTarget = pickValidTerritoryUnderPoint(ptr.x, ptr.y, validDropTargets, resolveTerritoryDropId);
+      }
+      if (!storeTarget && over) {
+        const overId = over.id != null ? String(over.id) : '';
+        const raw = (over.data.current as { territoryId?: unknown })?.territoryId;
+        const targetFromData =
+          typeof raw === 'string'
+            ? raw.trim()
+            : raw != null && typeof raw === 'object' && 'territoryId' in (raw as object)
+              ? String((raw as { territoryId: string }).territoryId).trim()
+              : '';
+        const targetFromId = overId.startsWith('territory-') ? overId.slice('territory-'.length).trim() : '';
+        const targetTerritory =
+          targetFromData && targetFromData !== '[object Object]'
+            ? targetFromData
+            : targetFromId && targetFromId !== '[object Object]'
+              ? targetFromId
+              : '';
+        const isBadDest =
+          !targetTerritory ||
+          targetTerritory === '[object Object]' ||
+          targetTerritory.includes('object');
+        storeTarget = targetTerritory && !isBadDest ? targetTerritory : '';
+      }
+      if (!storeTarget && event.collisions?.length) {
+        const hit = event.collisions.find((c) => String(c.id).startsWith('territory-'));
+        if (hit) {
+          const tid = String(hit.id).slice('territory-'.length).trim();
+          if (tid && tid !== '[object Object]' && !tid.includes('object')) storeTarget = tid;
+        }
+      }
+      if (!storeTarget && ptr) {
+        const raw = territoryIdsUnderPoint(ptr.x, ptr.y)[0] ?? '';
+        if (raw) storeTarget = raw;
+      }
+      if (storeTarget) {
+        const resolvedId = resolveTerritoryDropId(storeTarget) || storeTarget;
+        const isValidDest = validDropTargets.has(resolvedId) || validDropTargets.has(storeTarget);
+        if (isValidDest) {
+          const destToUse = validDropTargets.has(resolvedId) ? resolvedId : storeTarget;
+          const fromTerritory = (data as { territoryId?: string }).territoryId;
+          if (fromTerritory) onBulkMoveDrop?.(fromTerritory, destToUse.trim());
+        }
+      }
+      setTapBulkAllFromTerritory(null);
+      setBulkDragOverlay(null);
+      setActiveUnit(null);
+      setActiveDragId(null);
+      setValidDropTargets(new Set());
+      return;
+    }
+
+    if (isMobilizationAll) {
+      let storeTarget = '';
+      const ptr = ptrAtEnd;
+      if (ptr) {
+        storeTarget = pickValidTerritoryUnderPoint(ptr.x, ptr.y, validDropTargets, resolveTerritoryDropId);
+      }
+      if (!storeTarget && over) {
+        const targetTerritory = (over.data.current as { territoryId?: unknown })?.territoryId;
+        if (typeof targetTerritory === 'string') storeTarget = targetTerritory;
+      }
+
+      if (storeTarget && validDropTargets.size > 0) {
+        const resolvedId = resolveTerritoryDropId(storeTarget) || storeTarget;
+        const isValidDest = validDropTargets.has(resolvedId) || validDropTargets.has(storeTarget);
+        if (isValidDest) {
+          const destToUse = validDropTargets.has(resolvedId) ? resolvedId : storeTarget;
+          const purchases = mobilizationTray?.purchases ?? [];
+          const units = purchases.map(p => ({
+            unitId: p.unitId,
+            unitName: p.name,
+            unitIcon: p.icon,
+            count: p.count,
+          }));
+          if (units.length > 1) {
+            onMobilizationAllDrop?.(destToUse.trim(), units);
+          }
+        }
+      }
+
+      setTapBulkAllFromTerritory(null);
+      setBulkDragOverlay(null);
+      setActiveUnit(null);
+      setActiveDragId(null);
+      setValidDropTargets(new Set());
+      return;
+    }
+
+    if (isMobilizationCamp && onCampDrop) {
+      let targetTerritory = '';
+      const ptr = ptrAtEnd;
+      if (ptr && validDropTargets.size > 0) {
+        targetTerritory = pickValidTerritoryUnderPoint(ptr.x, ptr.y, validDropTargets, resolveTerritoryDropId);
+      }
+      if (!targetTerritory && over) {
+        const t = (over.data.current as { territoryId?: string })?.territoryId;
+        if (typeof t === 'string') targetTerritory = t;
+      }
+      if (!targetTerritory && ptr) {
+        const raw = territoryIdsUnderPoint(ptr.x, ptr.y)[0] ?? '';
+        if (raw) {
+          const r = resolveTerritoryDropId(raw) || raw;
+          if (validDropTargets.has(r) || validDropTargets.has(raw)) targetTerritory = validDropTargets.has(r) ? r : raw;
+        }
+      }
       const campIndex = (data as { campIndex: number }).campIndex;
       if (targetTerritory && validDropTargets.has(targetTerritory)) {
         onCampDrop(campIndex, targetTerritory);
@@ -1178,8 +2138,23 @@ function GameMap({
       return;
     }
 
-    if (isMobilization && over && onMobilizationDrop) {
-      const targetTerritory = (over.data.current as { territoryId: string })?.territoryId;
+    if (isMobilization && onMobilizationDrop) {
+      let targetTerritory = '';
+      const ptr = ptrAtEnd;
+      if (ptr && validDropTargets.size > 0) {
+        targetTerritory = pickValidTerritoryUnderPoint(ptr.x, ptr.y, validDropTargets, resolveTerritoryDropId);
+      }
+      if (!targetTerritory && over) {
+        const t = (over.data.current as { territoryId?: string })?.territoryId;
+        if (typeof t === 'string') targetTerritory = t;
+      }
+      if (!targetTerritory && ptr) {
+        const raw = territoryIdsUnderPoint(ptr.x, ptr.y)[0] ?? '';
+        if (raw) {
+          const r = resolveTerritoryDropId(raw) || raw;
+          if (validDropTargets.has(r) || validDropTargets.has(raw)) targetTerritory = validDropTargets.has(r) ? r : raw;
+        }
+      }
       const { unitId, unitName, icon, count } = (data as { unitId: string; unitName: string; icon: string; count: number });
       if (targetTerritory && validDropTargets.has(targetTerritory)) {
         const campRemaining = remainingMobilizationCapacity[targetTerritory] ?? 0;
@@ -1199,33 +2174,44 @@ function GameMap({
       return;
     }
 
-    if (over && activeUnit) {
-      const overId = over.id != null ? String(over.id) : '';
-      const raw = (over.data.current as { territoryId?: unknown })?.territoryId;
-      const targetFromData =
-        typeof raw === 'string'
-          ? raw.trim()
-          : raw != null && typeof raw === 'object' && 'territoryId' in (raw as object)
-            ? String((raw as { territoryId: string }).territoryId).trim()
-            : '';
-      const targetFromId = overId.startsWith('territory-') ? overId.slice('territory-'.length).trim() : '';
-      const targetTerritory = (targetFromData && targetFromData !== '[object Object]') ? targetFromData : (targetFromId && targetFromId !== '[object Object]' ? targetFromId : '');
-      const isBadDest = !targetTerritory || targetTerritory === '[object Object]' || targetTerritory.includes('object');
-      let storeTarget = (targetTerritory && !isBadDest) ? targetTerritory : '';
-      // Resolve map/SVG territory id to backend territory id (e.g. SVG "sea_zone_11" -> backend "sea_zone11") so we always store and send an id the backend knows
-      const resolveToBackendId = (tid: string): string => {
-        if (!tid || typeof tid !== 'string') return '';
-        const t = tid.trim();
-        if (!t) return '';
-        if (territoryData[t]) return t;
-        const seaMatch = t.match(/^sea_zone_*(\d+)$/i);
-        if (seaMatch) {
-          const canonical = 'sea_zone' + seaMatch[1];
-          if (territoryData[canonical]) return canonical;
+    const unitForDrop = (active.id === 'tap-move' ? (active.data.current as typeof activeUnit) : activeUnit);
+    if (unitForDrop) {
+      let storeTarget = '';
+      const ptr = ptrAtEnd;
+      if (ptr && validDropTargets.size > 0) {
+        storeTarget = pickValidTerritoryUnderPoint(ptr.x, ptr.y, validDropTargets, resolveTerritoryDropId);
+      }
+      if (!storeTarget && over) {
+        const overId = over.id != null ? String(over.id) : '';
+        const raw = (over.data.current as { territoryId?: unknown })?.territoryId;
+        const targetFromData =
+          typeof raw === 'string'
+            ? raw.trim()
+            : raw != null && typeof raw === 'object' && 'territoryId' in (raw as object)
+              ? String((raw as { territoryId: string }).territoryId).trim()
+              : '';
+        const targetFromId = overId.startsWith('territory-') ? overId.slice('territory-'.length).trim() : '';
+        const targetTerritory = (targetFromData && targetFromData !== '[object Object]') ? targetFromData : (targetFromId && targetFromId !== '[object Object]' ? targetFromId : '');
+        const isBadDest = !targetTerritory || targetTerritory === '[object Object]' || targetTerritory.includes('object');
+        storeTarget = (targetTerritory && !isBadDest) ? targetTerritory : '';
+      }
+      if (!storeTarget && event.collisions?.length) {
+        const hit = event.collisions.find((c) => String(c.id).startsWith('territory-'));
+        if (hit) {
+          const tid = String(hit.id).slice('territory-'.length).trim();
+          if (tid && tid !== '[object Object]' && !tid.includes('object')) storeTarget = tid;
         }
-        return t;
-      };
-      const backendDestId = resolveToBackendId(storeTarget);
+      }
+      if (!storeTarget && ptr) {
+        const raw = territoryIdsUnderPoint(ptr.x, ptr.y)[0] ?? '';
+        if (raw) {
+          const r = resolveTerritoryDropId(raw) || raw;
+          if (validDropTargets.has(r) || validDropTargets.has(raw)) {
+            storeTarget = validDropTargets.has(r) ? r : raw;
+          }
+        }
+      }
+      const backendDestId = resolveTerritoryDropId(storeTarget);
       // Only accept drop on a valid destination (backend reachability). Invalid = no dialog, units snap back.
       const resolvedId = backendDestId || storeTarget;
       const isValidDest = validDropTargets.has(resolvedId) || validDropTargets.has(storeTarget);
@@ -1233,45 +2219,112 @@ function GameMap({
       if (dropAccepted) {
         const destToStash = resolvedId.trim();
         if (destToStash) _onDropDestination?.(destToStash);
-        storeTarget = backendDestId || storeTarget; // prefer backend id so confirm sends backend-canonical value (e.g. sea_zone11)
-        const isSeaT = (tid: string) => territoryData[tid]?.terrain === 'sea' || /^sea_zone\d*$/i.test(tid);
+        storeTarget = backendDestId || storeTarget; // prefer canonical id so confirm sends backend-canonical value (e.g. sea_zone_11)
+        const isSeaT = (tid: string) => territoryData[tid]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid);
         // Offload / sea raid (naval, drop on land): find all sea zones adjacent to the land that the boat can reach (current zone or any destination). Include hostile zones so user can choose. Only show zone picker when multiple options.
         let effectiveToTerritory = storeTarget;
         let seaRaidSeaZoneOptions: string[] | undefined;
         let storeToTerritory = storeTarget;
-        const isOffloadOrSeaRaid = (gameState.phase === 'combat_move' || gameState.phase === 'non_combat_move') && activeUnit.isNaval && !isSeaT(storeTarget);
+        const isOffloadOrSeaRaid = (gameState.phase === 'combat_move' || gameState.phase === 'non_combat_move') && unitForDrop.isNaval && !isSeaT(storeTarget);
         if (isOffloadOrSeaRaid) {
-          const destSet = new Set<string>();
-          const currentSeaRaw = typeof activeUnit.territoryId === 'string' ? activeUnit.territoryId : '';
+          const currentSeaRaw = typeof unitForDrop.territoryId === 'string' ? unitForDrop.territoryId : '';
           const currentSeaCanon = canonicalSeaZoneId(currentSeaRaw);
+          // Sail reachability (matches backend get_sea_zones_reachable_by_sail). Do NOT use combat_move
+          // destinations alone — those omit empty/friendly seas, which wrongly dropped valid offload zones
+          // and left only hostile hexes → single "option" and hostile default.
+          let maxSteps = 1;
           if (availableMoveTargets) {
             const mms = availableMoveTargets.filter(
               m =>
                 (canonicalSeaZoneId(m.territory) === currentSeaCanon || m.territory === currentSeaRaw) &&
-                m.unit.unit_id === activeUnit.unitId
+                m.unit.unit_id === unitForDrop.unitId
             );
-            for (const m of mms) for (const d of (m.destinations || [])) destSet.add(canonicalSeaZoneId(d));
+            for (const m of mms) {
+              const rm = m.unit?.remaining_movement;
+              if (typeof rm === 'number' && rm > maxSteps) maxSteps = rm;
+            }
           }
+          const sailReach = seaZonesReachableBySailFrom(
+            currentSeaRaw,
+            maxSteps,
+            territoryData,
+            territoryUnits,
+            gameState.current_faction,
+            factionData,
+            unitDefs,
+          );
           const adj = territoryData[storeTarget]?.adjacent || [];
           const seaZonesAdjacentToLand = adj.filter((id: string) => isSeaT(id));
-          const reachable = new Set<string>([currentSeaCanon, ...destSet]);
           const optionsCanon = seaZonesAdjacentToLand
             .map((sz: string) => canonicalSeaZoneId(sz))
-            .filter((sz: string) => reachable.has(sz));
-          const options = [...new Set(optionsCanon)];
+            .filter((sz: string) => sailReach.has(sz));
+          const options = sortSeaZoneIdsByNumericSuffix([...new Set(optionsCanon)]);
           if (options.length >= 1) {
-            effectiveToTerritory = options.find((sz) => destSet.has(sz)) ?? options[0];
+            const getAlliance = (owner?: string) => (owner ? factionData[owner]?.alliance ?? null : null);
+            const curAlliance = getAlliance(gameState.current_faction);
+            const isSeaHostile = (sz: string): boolean => {
+              const stacks = territoryUnits[sz] || territoryUnits[canonicalSeaZoneId(sz)] || [];
+              return stacks.some((s) => {
+                const uf = unitDefs[s.unit_id]?.faction;
+                if (!uf || uf === gameState.current_faction) return false;
+                const oa = getAlliance(uf);
+                return oa != null && curAlliance != null && oa !== curAlliance;
+              });
+            };
+            const pickDefaultSeaForMatch = (): string => {
+              if (options.length === 1) return options[0];
+              const atCurrent = options.find((o) => canonicalSeaZoneId(o) === currentSeaCanon);
+              if (atCurrent) return atCurrent;
+              const nonHostile = options.filter((o) => !isSeaHostile(o));
+              if (nonHostile.length > 0) return sortSeaZoneIdsByNumericSuffix(nonHostile)[0];
+              return options[0];
+            };
+            effectiveToTerritory = pickDefaultSeaForMatch();
             storeToTerritory = storeTarget;
             seaRaidSeaZoneOptions = options;
           }
         }
         // Max count = units in territory of this type minus already committed in other pending moves
-        const totalInTerritory = (territoryUnits[activeUnit.territoryId] || [])
-          .filter(u => u.unit_id === activeUnit.unitId)
+        const totalInTerritory = (territoryUnits[unitForDrop.territoryId] || [])
+          .filter(u => u.unit_id === unitForDrop.unitId)
           .reduce((s, u) => s + u.count, 0);
-        const committedElsewhere = pendingMoves
-          .filter(m => m.from === activeUnit.territoryId && m.unitType === activeUnit.unitId)
-          .reduce((s, m) => s + m.count, 0);
+        const fromTidForPending = typeof unitForDrop.territoryId === 'string' ? unitForDrop.territoryId : '';
+        const fromCanonForPending = canonicalSeaZoneId(fromTidForPending);
+        const gp = gameState.phase ?? '';
+        const fullForSource =
+          (fromTidForPending && territoryUnitsFull?.[fromTidForPending]) ||
+          territoryUnitsFull?.[fromCanonForPending] ||
+          [];
+        const committedIdsThisHex = committedInstanceIdsFromHex(
+          pendingMoves,
+          fromTidForPending,
+          fromCanonForPending,
+          gp,
+        );
+        // Prefer instance-id accounting (matches backend). Pending move unitType must not be inferred
+        // from instance id strings (fragile for every faction); server sends primary_unit_id + we map in App.
+        let committedElsewhere = 0;
+        if (fullForSource.length > 0) {
+          const byInstance = new Map(fullForSource.map(u => [u.instance_id, u]));
+          for (const iid of committedIdsThisHex) {
+            const u = byInstance.get(iid);
+            if (!u || u.unit_id !== unitForDrop.unitId) continue;
+            if (unitForDrop.isNaval) {
+              if (navalUnitIds.has(u.unit_id)) committedElsewhere += 1;
+            } else if (!navalUnitIds.has(u.unit_id)) {
+              committedElsewhere += 1;
+            }
+          }
+        } else {
+          committedElsewhere = pendingMoves
+            .filter(m => {
+              const sameFrom =
+                m.from === fromTidForPending ||
+                canonicalSeaZoneId(m.from || '') === fromCanonForPending;
+              return sameFrom && m.unitType === unitForDrop.unitId;
+            })
+            .reduce((s, m) => s + m.count, 0);
+        }
         let availableCount = Math.max(0, totalInTerritory - committedElsewhere);
         // Show confirm dialog whenever we have units to move; backend will validate reachability on submit.
         if (availableCount <= 0) {
@@ -1280,13 +2333,24 @@ function GameMap({
           setValidDropTargets(new Set());
           return;
         }
-        const fromCanon = canonicalSeaZoneId(activeUnit.territoryId);
+        const fromCanon = canonicalSeaZoneId(unitForDrop.territoryId);
         const destIncludes = (dests: string[] | undefined, tid: string) =>
           (dests ?? []).some(d => d === tid || canonicalSeaZoneId(d) === canonicalSeaZoneId(tid));
+        /** Instance IDs the backend says can reach this destination (rm>0 and path exists). Drag stack can include exhausted units — confirm must not. */
+        const movableInstanceIdsForDest = new Set(
+          (availableMoveTargets ?? [])
+            .filter(
+              (m) =>
+                (canonicalSeaZoneId(m.territory) === fromCanon || m.territory === unitForDrop.territoryId) &&
+                m.unit.unit_id === unitForDrop.unitId &&
+                destIncludes(m.destinations, effectiveToTerritory),
+            )
+            .map((m) => m.unit.instance_id),
+        );
         const matches = (availableMoveTargets ?? []).filter(
           m =>
-            (canonicalSeaZoneId(m.territory) === fromCanon || m.territory === activeUnit.territoryId) &&
-            m.unit.unit_id === activeUnit.unitId &&
+            (canonicalSeaZoneId(m.territory) === fromCanon || m.territory === unitForDrop.territoryId) &&
+            m.unit.unit_id === unitForDrop.unitId &&
             destIncludes(m.destinations, effectiveToTerritory)
         );
         // Prefer the move entry that has the most charge path options for this destination (in case multiple units match)
@@ -1304,73 +2368,305 @@ function GameMap({
         const paths = Array.isArray(rawPaths) ? rawPaths : [];
         const singlePath = paths.length === 1 ? paths[0] : undefined;
         const chargeThrough = singlePath?.length ? singlePath : (paths[0]?.length ? paths[0] : undefined);
-        const useInstanceIds = activeUnit.instanceIds;
-        const moveCount = useInstanceIds ? useInstanceIds.length : Math.min(activeUnit.count, availableCount);
-        const moveMaxCount = useInstanceIds ? useInstanceIds.length : availableCount;
+        const useInstanceIds = unitForDrop.instanceIds;
+        // Land: only instance IDs still in this hex, not on a pending move, and able to reach this drop (backend moveable_units).
+        const availableLandInstanceIds =
+          !unitForDrop.isNaval && fullForSource.length > 0
+            ? fullForSource
+                .filter(
+                  u =>
+                    u.unit_id === unitForDrop.unitId &&
+                    !navalUnitIds.has(u.unit_id) &&
+                    !committedIdsThisHex.has(u.instance_id) &&
+                    movableInstanceIdsForDest.has(u.instance_id),
+                )
+                .map(u => u.instance_id)
+            : null;
+        if (
+          !unitForDrop.isNaval &&
+          fullForSource.length > 0 &&
+          availableLandInstanceIds !== null &&
+          availableLandInstanceIds.length === 0
+        ) {
+          setActiveUnit(null);
+          setActiveDragId(null);
+          setValidDropTargets(new Set());
+          return;
+        }
+
+        let moveCount: number;
+        let moveMaxCount: number;
         let boatOptions: string[][] | undefined;
-        let instanceIdsToUse: string[] | undefined = useInstanceIds && useInstanceIds.length > 0 ? useInstanceIds : undefined;
-        if (instanceIdsToUse && activeUnit.isNaval && territoryUnitsFull?.[activeUnit.territoryId]) {
-          const fullUnits = territoryUnitsFull[activeUnit.territoryId];
-          const boatsOfType = fullUnits.filter(u => u.unit_id === activeUnit.unitId && navalUnitIds.has(u.unit_id));
+        let instanceIdsToUse: string[] | undefined;
+        let navalBoatStacks: string[][] | undefined;
+
+        if (availableLandInstanceIds !== null) {
+          if (availableLandInstanceIds.length > 0) {
+            instanceIdsToUse = [...availableLandInstanceIds];
+            moveCount = availableLandInstanceIds.length;
+            moveMaxCount = availableLandInstanceIds.length;
+          } else {
+            instanceIdsToUse = undefined;
+            moveCount = Math.min(unitForDrop.count, availableCount);
+            moveMaxCount = availableCount;
+          }
+        } else {
+          let fromDrag = useInstanceIds && useInstanceIds.length > 0 ? [...useInstanceIds] : undefined;
+          if (fromDrag && !unitForDrop.isNaval && movableInstanceIdsForDest.size > 0) {
+            const filteredDrag = fromDrag.filter((id) => movableInstanceIdsForDest.has(id));
+            if (filteredDrag.length === 0) {
+              setActiveUnit(null);
+              setActiveDragId(null);
+              setValidDropTargets(new Set());
+              return;
+            }
+            fromDrag = filteredDrag;
+          }
+          instanceIdsToUse = fromDrag;
+          moveCount = instanceIdsToUse
+            ? Math.min(instanceIdsToUse.length, availableCount)
+            : Math.min(unitForDrop.count, availableCount);
+          moveMaxCount = instanceIdsToUse
+            ? Math.min(instanceIdsToUse.length, availableCount)
+            : availableCount;
+        }
+        if (instanceIdsToUse && unitForDrop.isNaval && territoryUnitsFull?.[unitForDrop.territoryId]) {
+          const fullUnits = territoryUnitsFull[unitForDrop.territoryId];
+          const boatsOfType = fullUnits.filter(u => u.unit_id === unitForDrop.unitId && navalUnitIds.has(u.unit_id));
+          const boatInstanceIdSet = new Set(boatsOfType.map(b => b.instance_id));
           const options = boatsOfType.map(boat => {
             const passengers = fullUnits.filter(u => u.loaded_onto === boat.instance_id);
             return [boat.instance_id, ...passengers.map(p => p.instance_id)];
           });
           if (options.length > 1) {
-            const sameMakeup = options.every(op => op.length === options[0].length);
-            if (sameMakeup) {
-              instanceIdsToUse = options[0];
+            // Tray drag: exactly one boat id in payload. Map stack drag: all boats of this type + their passengers.
+            const dragBoatIds = (useInstanceIds ?? []).filter(id => boatInstanceIdSet.has(id));
+            if (dragBoatIds.length === 1) {
+              navalBoatStacks = undefined;
+              const chosen = options.find(op => op[0] === dragBoatIds[0]);
+              if (chosen) {
+                instanceIdsToUse = [...chosen];
+              }
+            } else if (dragBoatIds.length > 1) {
+              const stacksForDrag = options.filter(op => dragBoatIds.includes(op[0]));
+              if (stacksForDrag.length >= 2) {
+                navalBoatStacks = stacksForDrag;
+                instanceIdsToUse = stacksForDrag.flat();
+              } else if (stacksForDrag.length === 1) {
+                navalBoatStacks = undefined;
+                instanceIdsToUse = [...stacksForDrag[0]];
+              } else {
+                navalBoatStacks = undefined;
+                const sameMakeup = options.every(op => op.length === options[0].length);
+                if (sameMakeup) {
+                  instanceIdsToUse = [...options[0]];
+                } else {
+                  boatOptions = options;
+                  instanceIdsToUse = [...options[0]];
+                }
+              }
             } else {
-              boatOptions = options;
-              instanceIdsToUse = options[0];
+              navalBoatStacks = undefined;
+              const sameMakeup = options.every(op => op.length === options[0].length);
+              if (sameMakeup) {
+                instanceIdsToUse = [...options[0]];
+              } else {
+                boatOptions = options;
+                instanceIdsToUse = [...options[0]];
+              }
+            }
+          }
+        }
+        // Land → sea (embark): transportable land units only. Aerial → sea in combat is naval battle, not loading.
+        const isLandToSeaLoad =
+          !unitForDrop.isNaval && !unitIsAerial(unitForDrop.unitId, unitDefs) && isSeaT(storeTarget);
+        if (isLandToSeaLoad && territoryUnitsFull?.[storeTarget]) {
+          const seaCap = getLandToSeaLoadCapacityRemaining(
+            storeTarget,
+            territoryUnitsFull[storeTarget],
+            unitDefs,
+            navalUnitIds,
+            gameState.current_faction,
+            pendingMoves,
+            gameState.phase,
+            territoryData,
+          );
+          if (seaCap <= 0) {
+            setActiveUnit(null);
+            setActiveDragId(null);
+            setValidDropTargets(new Set());
+            return;
+          }
+          moveMaxCount = Math.min(moveMaxCount, seaCap);
+          if (instanceIdsToUse && instanceIdsToUse.length > moveMaxCount) {
+            instanceIdsToUse = instanceIdsToUse.slice(0, moveMaxCount);
+          }
+          if (instanceIdsToUse) {
+            moveCount = instanceIdsToUse.length;
+            moveMaxCount = instanceIdsToUse.length;
+          } else {
+            moveCount = Math.min(moveCount, moveMaxCount);
+          }
+        }
+        // Land → land across ford-only link: cap confirm count by remaining escort slots / min ford edges (transport_capacity sum, not a hardcoded 2).
+        const isLandToLandFordCap =
+          !unitForDrop.isNaval &&
+          !isSeaT(storeTarget) &&
+          (gameState.phase === 'combat_move' || gameState.phase === 'non_combat_move');
+        if (isLandToLandFordCap && usesFordEscortBudget(unitDefs[unitForDrop.unitId])) {
+          const fromKey = resolveTerritoryGraphKey(unitForDrop.territoryId, territoryData);
+          const toKey = resolveTerritoryGraphKey(effectiveToTerritory, territoryData);
+          let mf = minFordEdgesForLandMove(fromKey, toKey, territoryData);
+          if (mf === 0 && directFordOnlyLandPair(fromKey, toKey, territoryData)) mf = 1;
+          if (mf !== null && mf >= 1) {
+            const lead = pendingFordCrosserLeadFromOrigin(
+              unitForDrop.territoryId,
+              gameState.phase,
+              pendingMoves,
+              territoryData,
+              unitDefs,
+              territoryUnitsFull ?? {},
+            );
+            if (lead) {
+              const slots = remainingFordEscortSlotsClient(
+                fromKey,
+                gameState.phase,
+                pendingMoves,
+                territoryData,
+                territoryUnitsFull ?? {},
+                unitDefs,
+                gameState.current_faction,
+                new Set(),
+              );
+              const maxByFord = Math.max(0, Math.floor(slots / mf));
+              moveMaxCount = Math.min(moveMaxCount, maxByFord);
+              if (moveMaxCount <= 0) {
+                setActiveUnit(null);
+                setActiveDragId(null);
+                setValidDropTargets(new Set());
+                return;
+              }
+              if (instanceIdsToUse && instanceIdsToUse.length > moveMaxCount) {
+                instanceIdsToUse = instanceIdsToUse.slice(0, moveMaxCount);
+              }
+              if (instanceIdsToUse) {
+                moveCount = instanceIdsToUse.length;
+                moveMaxCount = instanceIdsToUse.length;
+              } else {
+                moveCount = Math.min(moveCount, moveMaxCount);
+              }
             }
           }
         }
         // Load (land -> sea): when destination has 2+ boats, build boatOptions so tray can show allocation / "Load into this boat"
-        if (instanceIdsToUse && !activeUnit.isNaval && territoryUnitsFull?.[storeTarget] && isSeaT(storeTarget)) {
+        if (
+          instanceIdsToUse &&
+          !unitForDrop.isNaval &&
+          !unitIsAerial(unitForDrop.unitId, unitDefs) &&
+          territoryUnitsFull?.[storeTarget] &&
+          isSeaT(storeTarget)
+        ) {
           const fullUnits = territoryUnitsFull[storeTarget];
           const boats = fullUnits.filter(u => navalUnitIds.has(u.unit_id));
           if (boats.length >= 2) {
             boatOptions = boats.map(boat => [boat.instance_id, ...instanceIdsToUse]);
           }
         }
-        const fromId = typeof activeUnit.territoryId === 'string' ? activeUnit.territoryId : String((activeUnit.territoryId as { id?: string; territoryId?: string })?.territoryId ?? (activeUnit.territoryId as { id?: string })?.id ?? activeUnit.territoryId);
+        // Confirm UI: count ships, not passengers. Multi-boat map drag: +/- = number of ships. Single ship raid/offload: 1.
+        if (navalBoatStacks && navalBoatStacks.length > 1) {
+          moveCount = navalBoatStacks.length;
+          moveMaxCount = navalBoatStacks.length;
+        } else if (isOffloadOrSeaRaid && unitForDrop.isNaval && instanceIdsToUse && instanceIdsToUse.length > 0) {
+          moveCount = 1;
+          moveMaxCount = 1;
+        }
+        const fromId = typeof unitForDrop.territoryId === 'string' ? unitForDrop.territoryId : String((unitForDrop.territoryId as { id?: string; territoryId?: string })?.territoryId ?? (unitForDrop.territoryId as { id?: string })?.id ?? unitForDrop.territoryId);
         const toStrStored = (typeof storeToTerritory === 'string' ? storeToTerritory : String((storeToTerritory as { id?: string; territoryId?: string })?.territoryId ?? (storeToTerritory as { id?: string })?.id ?? storeToTerritory)).trim();
         if (toStrStored === '[object Object]' || !toStrStored) return; // never store bad destination
         _onDropDestination?.(toStrStored);
         onSetPendingMove({
           fromTerritory: fromId,
           toTerritory: toStrStored,
-          unitId: activeUnit.unitId,
-          unitDef: activeUnit.unitDef,
+          unitId: unitForDrop.unitId,
+          unitDef: unitForDrop.unitDef,
           maxCount: moveMaxCount,
           count: moveCount,
           chargeThrough: paths.length <= 1 ? chargeThrough : undefined,
           chargePathOptions: paths.length > 1 ? paths : undefined,
           ...(instanceIdsToUse && instanceIdsToUse.length > 0 ? { instanceIds: instanceIdsToUse } : {}),
           ...(boatOptions && boatOptions.length > 1 ? { boatOptions } : {}),
+          ...(navalBoatStacks && navalBoatStacks.length > 1 ? { navalBoatStacks } : {}),
           ...(seaRaidSeaZoneOptions && seaRaidSeaZoneOptions.length >= 1 ? { seaRaidSeaZoneOptions } : {}),
         });
       }
     }
+    setTapBulkAllFromTerritory(null);
+    setBulkDragOverlay(null);
     setActiveUnit(null);
     setActiveDragId(null);
     setValidDropTargets(new Set());
-  }, [activeUnit, validDropTargets, territoryUnits, territoryUnitsFull, pendingMoves, availableMoveTargets, navalUnitIds, onSetPendingMove, _onDropDestination, onMobilizationDrop, onCampDrop, gameState.phase, territoryData]);
+  }, [activeUnit, validDropTargets, territoryUnits, territoryUnitsFull, pendingMoves, availableMoveTargets, navalUnitIds, onSetPendingMove, _onDropDestination, onBulkMoveDrop, onMobilizationDrop, onMobilizationAllDrop, onCampDrop, gameState.phase, gameState.current_faction, factionData, unitDefs, territoryData, resolveTerritoryDropId]);
 
-  // Handle territory click (toggle selection); ignore if user panned (drag > threshold)
+  const handleDragCancel = useCallback(() => {
+    lastMapDragPointerRef.current = null;
+    setTapBulkAllFromTerritory(null);
+    setBulkDragOverlay(null);
+    setActiveUnit(null);
+    setActiveDragId(null);
+    setValidDropTargets(new Set());
+  }, []);
+
+  // Handle territory click (toggle selection, or tap-to-drop when unit was tapped first)
   const handleTerritoryClick = useCallback((territoryId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const dx = e.clientX - panStartPos.current.x;
     const dy = e.clientY - panStartPos.current.y;
     if (dx * dx + dy * dy >= PAN_CLICK_THRESHOLD_PX * PAN_CLICK_THRESHOLD_PX) return; // Was a pan, not a click
+    // Tap-to-drop bulk: All then destination (mobile)
+    if (tapBulkAllFromTerritory && territoryMatchesValidDrop(territoryId)) {
+      const resolvedId = resolveTerritoryDropId(territoryId) || territoryId;
+      const destToUse = validDropTargets.has(resolvedId) ? resolvedId : territoryId;
+      onBulkMoveDrop?.(tapBulkAllFromTerritory, destToUse.trim());
+      setTapBulkAllFromTerritory(null);
+      setValidDropTargets(new Set());
+      return;
+    }
+    // Tap-to-drop: user previously tapped a unit; this territory is a valid destination
+    if (tapSelectedUnit && territoryMatchesValidDrop(territoryId)) {
+      const syntheticEvent = {
+        active: { id: 'tap-move', data: { current: tapSelectedUnit } },
+        over: { id: `territory-${territoryId}`, data: { current: { territoryId } } },
+        activatorEvent: e.nativeEvent,
+        collisions: null,
+        delta: { x: 0, y: 0 },
+      } as unknown as DragEndEvent;
+      handleDragEnd(syntheticEvent);
+      setTapSelectedUnit(null);
+      return;
+    }
+    const hadAnyTapMove = tapSelectedUnit != null || tapBulkAllFromTerritory != null;
+    setTapSelectedUnit(null);
+    setTapBulkAllFromTerritory(null);
+    if (hadAnyTapMove) setValidDropTargets(new Set());
+    setExpandedStackKey(null);
     if (selectedTerritory === territoryId) {
       onTerritorySelect(null);
     } else {
       onTerritorySelect(territoryId);
     }
     onUnitSelect(null);
-  }, [selectedTerritory, onTerritorySelect, onUnitSelect]);
+  }, [
+    selectedTerritory,
+    onTerritorySelect,
+    onUnitSelect,
+    tapSelectedUnit,
+    tapBulkAllFromTerritory,
+    validDropTargets,
+    territoryMatchesValidDrop,
+    resolveTerritoryDropId,
+    onBulkMoveDrop,
+    handleDragEnd,
+  ]);
 
   // Handle background click: clear selection when clicking map background; ignore if we just panned
   const handleBackgroundClick = useCallback((e: React.MouseEvent) => {
@@ -1383,6 +2679,10 @@ function GameMap({
     const dx = e.clientX - panStartPos.current.x;
     const dy = e.clientY - panStartPos.current.y;
     if (dx * dx + dy * dy >= PAN_CLICK_THRESHOLD_PX * PAN_CLICK_THRESHOLD_PX) return; // Was a pan, not a click
+    setTapSelectedUnit(null);
+    setTapBulkAllFromTerritory(null);
+    setValidDropTargets(new Set());
+    setExpandedStackKey(null);
     onTerritorySelect(null);
     onUnitSelect(null);
   }, [onTerritorySelect, onUnitSelect]);
@@ -1392,7 +2692,9 @@ function GameMap({
     if (e.button !== 0) return;
     const target = e.target as HTMLElement;
     if (target.closest('.unit-token')) return; // Don't start pan when pressing on a unit (so unit drag works)
+    if (target.closest('.all-stacks-drag-btn')) return; // Bulk "All" stack drag uses dnd-kit
     if (target.closest('.territory-units--sea-stack')) return; // Don't start pan when clicking boat stack (opens naval tray)
+    if (target.closest('.sea-zone-tray-open-btn')) return; // Open boat list (mobile / tap)
 
     setIsDragging(true);
     setDragStart({ x: e.clientX - transform.x, y: e.clientY - transform.y });
@@ -1420,6 +2722,117 @@ function GameMap({
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);
+  }, []);
+
+  // Touch: pinch to zoom, pan with one or two fingers
+  const touchPinchRef = useRef<{ distance: number; centerX: number; centerY: number; scale: number; x: number; y: number } | null>(null);
+  const touchPanRef = useRef<{ startX: number; startY: number; startTransformX: number; startTransformY: number } | null>(null);
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const getTouchCenter = (touches: TouchList) => {
+      if (touches.length === 0) return { x: 0, y: 0 };
+      let x = 0, y = 0;
+      for (let i = 0; i < touches.length; i++) {
+        x += touches[i].clientX;
+        y += touches[i].clientY;
+      }
+      return { x: x / touches.length, y: y / touches.length };
+    };
+    const getTouchDistance = (touches: TouchList) => {
+      if (touches.length < 2) return 0;
+      const a = touches[0], b = touches[1];
+      return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+    };
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const rect = el.getBoundingClientRect();
+        const center = getTouchCenter(e.touches);
+        touchPinchRef.current = {
+          distance: getTouchDistance(e.touches),
+          centerX: center.x - rect.left,
+          centerY: center.y - rect.top,
+          scale: transformRef.current.scale,
+          x: transformRef.current.x,
+          y: transformRef.current.y,
+        };
+        touchPanRef.current = null;
+      } else if (e.touches.length === 1 && !touchPinchRef.current) {
+        const target = e.target as HTMLElement;
+        if (
+          target.closest('.unit-token') ||
+          target.closest('.all-stacks-drag-btn') ||
+          target.closest('.territory-units--sea-stack') ||
+          target.closest('.sea-zone-tray-open-btn')
+        )
+          return;
+        touchPanRef.current = {
+          startX: e.touches[0].clientX,
+          startY: e.touches[0].clientY,
+          startTransformX: transformRef.current.x,
+          startTransformY: transformRef.current.y,
+        };
+      }
+    };
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && touchPinchRef.current) {
+        e.preventDefault();
+        const rect = el.getBoundingClientRect();
+        const distance = getTouchDistance(e.touches);
+        const center = getTouchCenter(e.touches);
+        const centerX = center.x - rect.left;
+        const centerY = center.y - rect.top;
+        const scaleRatio = distance / touchPinchRef.current.distance;
+        const newScale = Math.max(
+          Math.max(0.1, fitScaleRef.current),
+          Math.min(MAX_SCALE, touchPinchRef.current.scale * scaleRatio)
+        );
+        const ratio = newScale / touchPinchRef.current.scale;
+        let newX = centerX - (centerX - touchPinchRef.current.x) * ratio;
+        let newY = centerY - (centerY - touchPinchRef.current.y) * ratio;
+        const dims = imgDimensionsRef.current;
+        const scaledW = dims.width * newScale;
+        const scaledH = dims.height * newScale;
+        const minX = Math.min(0, el.clientWidth - scaledW);
+        const minY = Math.min(0, el.clientHeight - scaledH);
+        const maxX = Math.max(0, el.clientWidth - scaledW);
+        const maxY = Math.max(0, el.clientHeight - scaledH);
+        newX = Math.max(minX, Math.min(maxX, newX));
+        newY = Math.max(minY, Math.min(maxY, newY));
+        setTransform({ x: newX, y: newY, scale: newScale });
+      } else if (e.touches.length === 1 && touchPanRef.current) {
+        e.preventDefault();
+        const dx = e.touches[0].clientX - touchPanRef.current.startX;
+        const dy = e.touches[0].clientY - touchPanRef.current.startY;
+        let newX = touchPanRef.current.startTransformX + dx;
+        let newY = touchPanRef.current.startTransformY + dy;
+        const dims = imgDimensionsRef.current;
+        const scaledW = dims.width * transformRef.current.scale;
+        const scaledH = dims.height * transformRef.current.scale;
+        const minX = Math.min(0, el.clientWidth - scaledW);
+        const minY = Math.min(0, el.clientHeight - scaledH);
+        const maxX = Math.max(0, el.clientWidth - scaledW);
+        const maxY = Math.max(0, el.clientHeight - scaledH);
+        newX = Math.max(minX, Math.min(maxX, newX));
+        newY = Math.max(minY, Math.min(maxY, newY));
+        setTransform(prev => ({ ...prev, x: newX, y: newY }));
+      }
+    };
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) touchPinchRef.current = null;
+      if (e.touches.length < 1) touchPanRef.current = null;
+    };
+    el.addEventListener('touchstart', handleTouchStart, { passive: false });
+    el.addEventListener('touchmove', handleTouchMove, { passive: false });
+    el.addEventListener('touchend', handleTouchEnd, { passive: true });
+    el.addEventListener('touchcancel', handleTouchEnd, { passive: true });
+    return () => {
+      el.removeEventListener('touchstart', handleTouchStart);
+      el.removeEventListener('touchmove', handleTouchMove);
+      el.removeEventListener('touchend', handleTouchEnd);
+      el.removeEventListener('touchcancel', handleTouchEnd);
+    };
   }, []);
 
   // Non-passive wheel listener: pinch (ctrlKey) = zoom, 2-finger drag = pan
@@ -1558,11 +2971,14 @@ function GameMap({
     };
   };
 
-  // Clamp position to map bounds with inset so markers/units fit comfortably inside (e.g. far_harad)
-  const CLAMP_INSET = 80;
+  // Clamp overlay anchors to the map image. Sides/top stay generous (e.g. far_harad); bottom is tighter so
+  // southern territories (Umbar, etc.) can place unit stacks without the cap yanking them onto the marker row.
+  const CLAMP_INSET_X = 80;
+  const CLAMP_INSET_Y_TOP = 80;
+  const CLAMP_INSET_Y_BOTTOM = 28;
   const clampToMap = (p: { x: number; y: number }) => ({
-    x: Math.max(CLAMP_INSET, Math.min(IMG_DIMENSIONS.width - CLAMP_INSET, p.x)),
-    y: Math.max(CLAMP_INSET, Math.min(IMG_DIMENSIONS.height - CLAMP_INSET, p.y)),
+    x: Math.max(CLAMP_INSET_X, Math.min(IMG_DIMENSIONS.width - CLAMP_INSET_X, p.x)),
+    y: Math.max(CLAMP_INSET_Y_TOP, Math.min(IMG_DIMENSIONS.height - CLAMP_INSET_Y_BOTTOM, p.y)),
   });
 
   // Fallback position when territory has units but no centroid (e.g. not in SVG yet). Deterministic per territoryId so they don't stack.
@@ -1571,10 +2987,11 @@ function GameMap({
     for (let i = 0; i < territoryId.length; i++) h = (h * 31 + territoryId.charCodeAt(i)) >>> 0;
     const t = (h % 1000) / 1000;
     const u = ((h >> 10) % 1000) / 1000;
-    const margin = CLAMP_INSET * 2;
+    const innerW = IMG_DIMENSIONS.width - CLAMP_INSET_X * 2;
+    const innerH = IMG_DIMENSIONS.height - CLAMP_INSET_Y_TOP - CLAMP_INSET_Y_BOTTOM;
     return clampToMap({
-      x: margin + t * (IMG_DIMENSIONS.width - margin * 2),
-      y: margin + u * (IMG_DIMENSIONS.height - margin * 2),
+      x: CLAMP_INSET_X + t * innerW,
+      y: CLAMP_INSET_Y_TOP + u * innerH,
     });
   };
 
@@ -1583,7 +3000,8 @@ function GameMap({
       sensors={sensors}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
-      collisionDetection={rectIntersection}
+      onDragCancel={handleDragCancel}
+      collisionDetection={mapCollisionDetection}
     >
       <div className={`map-container ${mobilizationTray || navalTray ? 'map-container--with-tray' : ''}`}>
         <div className="map-content">
@@ -1591,13 +3009,21 @@ function GameMap({
             <div className="map-key-strip" role="region" aria-label="Map key">
               <span className="map-key-item"><span className="map-key-icon" aria-hidden>⛺</span> Camp</span>
               <span className="map-key-item"><span className="map-key-icon" aria-hidden>🌲</span> Forest</span>
-              <span className="map-key-item"><span className="map-key-icon" aria-hidden>🏰</span> Fortress</span>
               <span className="map-key-item"><span className="map-key-icon" aria-hidden>🏠</span> Home</span>
               <span className="map-key-item"><span className="map-key-icon" aria-hidden>⛰️</span> Mountains</span>
               <span className="map-key-item"><span className="map-key-icon" aria-hidden>⚓</span> Port</span>
+              <span className="map-key-item">
+                <img src="/bridge.png" alt="" className="map-key-img" aria-hidden />
+                Bridge
+              </span>
+              <span className="map-key-item">
+                <img src="/ford.png" alt="" className="map-key-img" aria-hidden />
+                Ford
+              </span>
               <span className="map-key-item"><span className="map-key-icon" aria-hidden></span> Strongholds have faction logo (capitals larger)</span>
             </div>
           )}
+          <div className="map-main">
           <div
             ref={wrapperRef}
             className={`map-wrapper ${isDragging ? 'panning' : ''}`}
@@ -1634,35 +3060,67 @@ function GameMap({
                 >
                   {Array.from(svgPaths.entries())
                     .sort(([idA], [idB]) => {
-                      const seaA = territoryData[idA]?.terrain === 'sea';
-                      const seaB = territoryData[idB]?.terrain === 'sea';
+                      const defA = territoryData[idA] ?? territoryData[resolveTerritoryDropId(idA)];
+                      const defB = territoryData[idB] ?? territoryData[resolveTerritoryDropId(idB)];
+                      const seaA = defA?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(String(idA));
+                      const seaB = defB?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(String(idB));
                       if (seaA === seaB) return 0;
                       return seaA ? 1 : -1;
                     })
                     .map(([tid, pathData]) => {
-                      const territoryId = typeof tid === 'string' ? tid : (tid != null && typeof tid === 'object' && 'id' in (tid as object) ? String((tid as { id: string }).id) : (tid != null && typeof tid === 'object' && 'territoryId' in (tid as object) ? String((tid as { territoryId: string }).territoryId) : String(tid ?? '')));
+                      const territoryId =
+                        typeof tid === 'string'
+                          ? tid
+                          : tid != null && typeof tid === 'object' && 'id' in (tid as object)
+                            ? String((tid as { id: string }).id)
+                            : tid != null && typeof tid === 'object' && 'territoryId' in (tid as object)
+                              ? String((tid as { territoryId: string }).territoryId)
+                              : String(tid ?? '');
                       if (!territoryId || territoryId === '[object Object]') return null;
-                      const territory = territoryData[territoryId];
+                      const stateKey = resolveTerritoryDropId(territoryId);
+                      const territory = territoryData[territoryId] ?? territoryData[stateKey];
                       const owner = territory?.owner;
                       const isNonOwnable = territory && (territory.ownable === false);
-                      const isSeaZone = territory?.terrain === 'sea' || /^sea_zone\d*$/i.test(territoryId);
+                      const isSeaZone = territory?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(territoryId);
+                      // Definitions may load after game state (e.g. create-game nav + getGame without embedded defs);
+                      // missing faction palette must not yield undefined — glow/filter code calls .replace on color.
                       const color = isSeaZone
                         ? '#2d4258'
                         : owner
-                          ? factionData[owner]?.color
+                          ? (factionData[owner]?.color ?? '#d4c4a8')
                           : isNonOwnable
                             ? '#7a7a7a'
                             : '#d4c4a8';
-                      const isSelected = selectedTerritory === territoryId;
-                      const isValidDrop = validDropTargets.has(territoryId);
+                      const isSelected =
+                        selectedTerritory === territoryId ||
+                        selectedTerritory === stateKey;
+                      const isValidDrop = territoryMatchesValidDrop(territoryId);
                       const hasUnitsToMobilize = (mobilizationTray?.purchases?.length ?? 0) > 0;
                       const selectedLandUnitId = mobilizationTray?.selectedUnitId && !navalUnitIds.has(mobilizationTray.selectedUnitId) ? mobilizationTray.selectedUnitId : null;
-                      const hasMobilizationRoom = (remainingMobilizationCapacity[territoryId] ?? 0) > 0
-                        || (selectedLandUnitId ? (remainingHomeSlots[territoryId]?.[selectedLandUnitId] ?? 0) > 0 : Object.values(remainingHomeSlots[territoryId] ?? {}).some((n: number) => n > 0));
-                      const isValidMobilizationTarget = isMobilizePhase && validMobilizeTerritories.includes(territoryId) && hasMobilizationRoom && (activeDragId != null ? isValidDrop : (hasMobilizationSelected || hasUnitsToMobilize));
-                      const isExternallyHighlighted = highlightedTerritories.includes(territoryId);
-                      const isCampPlacementTarget = isMobilizePhase && (validCampTerritories.length > 0 && validCampTerritories.includes(territoryId) || validDropTargets.has(territoryId));
-                      const isValidMobilizationTargetSea = isMobilizePhase && validMobilizeSeaZones.includes(territoryId) && hasMobilizationRoom && (activeDragId != null ? isValidDrop : (hasMobilizationSelected || (mobilizationTray?.purchases?.length ?? 0) > 0));
+                      const capLand = remainingMobilizationCapacity[territoryId] ?? remainingMobilizationCapacity[stateKey] ?? 0;
+                      const homeForTerr = remainingHomeSlots[territoryId] ?? remainingHomeSlots[stateKey] ?? {};
+                      const hasMobilizationRoom =
+                        capLand > 0 ||
+                        (selectedLandUnitId ? (homeForTerr[selectedLandUnitId] ?? 0) > 0 : Object.values(homeForTerr).some((n: number) => n > 0));
+                      const isValidMobilizationTarget =
+                        isMobilizePhase &&
+                        (validMobilizeTerritories.includes(territoryId) || validMobilizeTerritories.includes(stateKey)) &&
+                        hasMobilizationRoom &&
+                        (activeDragId != null ? isValidDrop : (hasMobilizationSelected || hasUnitsToMobilize));
+                      const isExternallyHighlighted =
+                        highlightedTerritories.includes(territoryId) || highlightedTerritories.includes(stateKey);
+                      const isCampPlacementTarget =
+                        isMobilizePhase &&
+                        ((validCampTerritories.length > 0 &&
+                          (validCampTerritories.includes(territoryId) || validCampTerritories.includes(stateKey))) ||
+                          territoryMatchesValidDrop(territoryId));
+                      const isValidMobilizationTargetSea =
+                        isMobilizePhase &&
+                        (validMobilizeSeaZones.includes(territoryId) || validMobilizeSeaZones.includes(stateKey)) &&
+                        hasMobilizationRoom &&
+                        (activeDragId != null ? isValidDrop : (hasMobilizationSelected || (mobilizationTray?.purchases?.length ?? 0) > 0));
+                      const isTapMoveTarget =
+                        (tapSelectedUnit != null || tapBulkAllFromTerritory != null) && territoryMatchesValidDrop(territoryId);
                       return (
                         <DroppableTerritory
                           key={territoryId}
@@ -1671,7 +3129,7 @@ function GameMap({
                           color={color}
                           isSeaZone={!!isSeaZone}
                           isSelected={isSelected}
-                          isHighlighted={isValidMobilizationTarget || isValidMobilizationTargetSea || isExternallyHighlighted || isCampPlacementTarget}
+                          isHighlighted={isValidMobilizationTarget || isValidMobilizationTargetSea || isExternallyHighlighted || isCampPlacementTarget || isTapMoveTarget}
                           isValidDrop={isValidDrop || isValidMobilizationTarget || isValidMobilizationTargetSea || isExternallyHighlighted}
                           onClick={(e) => handleTerritoryClick(territoryId, e)}
                         />
@@ -1703,11 +3161,11 @@ function GameMap({
                       {/* Darker troughs for depth */}
                       <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(15,30,45,0.52)" strokeWidth="2.75" strokeLinecap="round" />
                     </pattern>
-                    <marker id="arrowhead-combat" markerWidth="4" markerHeight="4" refX="3" refY="2" orient="auto">
-                      <polygon points="0,0 4,2 0,4" fill="#c62828" />
+                    <marker id="arrowhead-combat" markerWidth="5" markerHeight="5" refX="3.5" refY="2.5" orient="auto">
+                      <polygon points="0,0 5,2.5 0,5" fill="#c62828" />
                     </marker>
-                    <marker id="arrowhead-move" markerWidth="4" markerHeight="4" refX="3" refY="2" orient="auto">
-                      <polygon points="0,0 4,2 0,4" fill="#2e7d32" />
+                    <marker id="arrowhead-move" markerWidth="5" markerHeight="5" refX="3.5" refY="2.5" orient="auto">
+                      <polygon points="0,0 5,2.5 0,5" fill="#2e7d32" />
                     </marker>
                   </defs>
                   {moveArrows.map((arrow, idx) => arrow && (
@@ -1719,7 +3177,7 @@ function GameMap({
                         x2={arrow.endX}
                         y2={arrow.endY}
                         stroke={arrow.isCombat ? '#c62828' : '#2e7d32'}
-                        strokeWidth="3"
+                        strokeWidth="4"
                         strokeLinecap="round"
                         strokeDasharray={arrow.isCombat ? 'none' : '8,4'}
                         markerEnd={`url(#arrowhead-${arrow.isCombat ? 'combat' : 'move'})`}
@@ -1784,9 +3242,7 @@ function GameMap({
                     const hasCamp = territory.hasCamp === true;
                     const hasPort = territory.hasPort === true;
                     const hasHome = Object.values(unitDefs).some((def) => {
-                      const single = def.home_territory_id != null ? [def.home_territory_id] : [];
-                      const multi = def.home_territory_ids ?? [];
-                      const ids = [...new Set([...single, ...multi])] as string[];
+                      const ids = def.home_territory_ids ?? [];
                       if (ids.length === 0 || !ids.includes(territoryId)) return false;
                       return !territory.owner || def.faction === territory.owner;
                     });
@@ -1801,13 +3257,12 @@ function GameMap({
                     const showStronghold = showFactionLogo || showNeutralStronghold;
                     const showCamp = hasCamp && !isCapital;
                     const campAndStrongholdRow = showCamp && showStronghold;
-                    const isSeaZone = territory.terrain === 'sea' || /^sea_zone\d*$/i.test(territoryId);
+                    const isSeaZone = territory.terrain === 'sea' || /^sea_zone_?\d+$/i.test(territoryId);
                     const seaZoneNum = isSeaZone ? (territoryId.match(/(\d+)$/)?.[1] ?? '') : null;
                     const terrainType = (territory.terrain || '').toLowerCase();
-                    const showTerrainFortress = terrainType === 'fortress' && !showStronghold;
                     const showTerrainMountain = terrainType === 'mountains';
                     const showTerrainForest = terrainType === 'forest';
-                    const showTerrainIcon = showTerrainFortress || showTerrainMountain || showTerrainForest;
+                    const showTerrainIcon = showTerrainMountain || showTerrainForest;
                     // Inline row when we have power and any of camp/port/home/terrain (no stronghold) — keeps power beside markers, no overlap
                     const powerAndMarkersInline = showPower && (showCamp || hasPort || hasHome || showTerrainIcon) && !showStronghold;
                     if (!showCamp && !showStronghold && !showPower && !hasPort && !hasHome && !(isSeaZone && seaZoneNum) && !showTerrainIcon) return null;
@@ -1855,9 +3310,6 @@ function GameMap({
                                 <span className="port-marker-emoji" aria-hidden>⚓</span>
                               </div>
                             )}
-                            {showTerrainFortress && (
-                              <div className="territory-marker terrain-marker" title="Fortress">🏰</div>
-                            )}
                             {showTerrainMountain && (
                               <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
                             )}
@@ -1879,16 +3331,33 @@ function GameMap({
                             {campAndStrongholdRow ? (
                               <div className="territory-markers-row">
                                 {showFactionLogo && (
-                                  <div
-                                    className={`territory-marker faction-marker ${isCapital ? 'faction-marker--capital' : ''}`}
-                                    title={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
-                                  >
-                                    <img
-                                      src={factionData[territory.owner!].icon}
-                                      alt=""
-                                      width={isCapital ? 60 : 44}
-                                      height={isCapital ? 60 : 44}
-                                    />
+                                  <div className="stronghold-faction-hp-group">
+                                    <div
+                                      className={`territory-marker faction-marker ${isCapital ? 'faction-marker--capital' : ''}`}
+                                      title={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
+                                    >
+                                      <img
+                                        src={factionData[territory.owner!].icon}
+                                        alt=""
+                                        width={isCapital ? 60 : 44}
+                                        height={isCapital ? 60 : 44}
+                                      />
+                                    </div>
+                                    {((territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0) > 0 && (() => {
+                                      const base = (territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0;
+                                      const current = (territory as { stronghold_current_health?: number }).stronghold_current_health ?? base;
+                                      return (
+                                        <div
+                                          className="stronghold-hp-bars"
+                                          title={`Stronghold HP: ${current}/${base}`}
+                                          style={{ ['--faction-color' as string]: factionData[territory.owner!]?.color ?? '#888' }}
+                                        >
+                                          {Array.from({ length: base }, (_, i) => (
+                                            <span key={i} className="stronghold-hp-bar" data-filled={i < current ? 'true' : 'false'} />
+                                          ))}
+                                        </div>
+                                      );
+                                    })()}
                                   </div>
                                 )}
                                 {showNeutralStronghold && (
@@ -1910,9 +3379,6 @@ function GameMap({
                                   <div className="territory-marker port-marker" title="Port (naval mobilization)">
                                     <span className="port-marker-emoji" aria-hidden>⚓</span>
                                   </div>
-                                )}
-                                {showTerrainFortress && (
-                                  <div className="territory-marker terrain-marker" title="Fortress">🏰</div>
                                 )}
                                 {showTerrainMountain && (
                                   <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
@@ -1941,9 +3407,6 @@ function GameMap({
                                           <span className="port-marker-emoji" aria-hidden>⚓</span>
                                         </div>
                                       )}
-                                      {showTerrainFortress && (
-                                        <div className="territory-marker terrain-marker" title="Fortress">🏰</div>
-                                      )}
                                       {showTerrainMountain && (
                                         <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
                                       )}
@@ -1953,16 +3416,30 @@ function GameMap({
                                     </div>
                                   )}
                                   {showFactionLogo && (
-                                    <div
-                                      className={`territory-marker faction-marker ${isCapital ? 'faction-marker--capital' : ''}`}
-                                      title={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
-                                    >
-                                      <img
-                                        src={factionData[territory.owner!].icon}
-                                        alt=""
-                                        width={isCapital ? 60 : 44}
-                                        height={isCapital ? 60 : 44}
-                                      />
+                                    <div className="stronghold-faction-hp-group">
+                                      <div
+                                        className={`territory-marker faction-marker ${isCapital ? 'faction-marker--capital' : ''}`}
+                                        title={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
+                                      >
+                                        <img
+                                          src={factionData[territory.owner!].icon}
+                                          alt=""
+                                          width={isCapital ? 60 : 44}
+                                          height={isCapital ? 60 : 44}
+                                        />
+                                      </div>
+                                      {((territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0) > 0 && (
+                                        <div
+                                          className="stronghold-hp-bars"
+                                          title={`Stronghold HP: ${(territory as { stronghold_current_health?: number }).stronghold_current_health ?? (territory as { stronghold_base_health?: number }).stronghold_base_health}/${(territory as { stronghold_base_health?: number }).stronghold_base_health}`}
+                                          style={{ ['--faction-color' as string]: factionData[territory.owner!]?.color ?? '#888' }}
+                                        >
+                                          {Array.from({ length: (territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0 }, (_, i) => {
+                                            const current = (territory as { stronghold_current_health?: number }).stronghold_current_health ?? (territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0;
+                                            return <span key={i} className="stronghold-hp-bar" data-filled={i < current ? 'true' : 'false'} />;
+                                          })}
+                                        </div>
+                                      )}
                                     </div>
                                   )}
                                   {showNeutralStronghold && (
@@ -1999,73 +3476,204 @@ function GameMap({
                     const powerBadgeOffsetY = useSeparateUnitSpot ? 0 : (hasPowerBadge ? (hasStrongholdMarker ? 26 : 52) : (hasStrongholdMarker ? 0 : 6));
 
                     const NEUTRAL_UNIT_BORDER = '#888888';
-                    const isSeaZone = territory?.terrain === 'sea' || /^sea_zone\d*$/i.test(territoryId);
+                    const isSeaZone = territory?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(territoryId);
                     const fullUnits = territoryUnitsFull?.[territoryId];
 
-                    // Sea zone with full unit data. Show tray on click only when multiple boats AND at least one passenger; else allow drag from stack
+                    // Sea zone with full unit data: ships (+ passengers on those rows). Non-naval surface units (e.g. aerial after naval battle) render in a second row — do not return null when boats are gone.
                     if (isSeaZone && fullUnits?.length && navalUnitIds?.size) {
                       const navalUnits = fullUnits.filter(u => navalUnitIds.has(u.unit_id));
                       const totalBoats = navalUnits.length;
                       const totalPassengers = fullUnits.filter(u => u.loaded_onto).length;
-                      const showTrayOnClick = totalBoats > 1 && totalPassengers >= 1;
+                      const eligiblePending =
+                        seaZoneIdsEligibleForNavalTrayStackClick.has(territoryId) ||
+                        seaZoneIdsEligibleForNavalTrayStackClick.has(canonicalSeaZoneId(territoryId));
+                      const showTrayDblClick = totalBoats > 1;
 
-                      const navalTypes = [...new Set(navalUnits.map(u => u.unit_id))];
-                      if (navalTypes.length === 0) return null;
+                      const boatCountByType = new Map<string, number>();
+                      for (const u of navalUnits) {
+                        boatCountByType.set(u.unit_id, (boatCountByType.get(u.unit_id) ?? 0) + 1);
+                      }
+                      const navalTypes = [...boatCountByType.keys()];
+                      navalTypes.sort((a, b) =>
+                        compareMapUnitStacks(
+                          { unit_id: a, count: boatCountByType.get(a) ?? 0 },
+                          { unit_id: b, count: boatCountByType.get(b) ?? 0 },
+                          unitDefs,
+                          factionData,
+                        ),
+                      );
+
+                      const surfaceNonNaval = fullUnits.filter(
+                        (u) => !navalUnitIds.has(u.unit_id) && !u.loaded_onto,
+                      );
+                      const otherByType = new Map<string, typeof fullUnits>();
+                      for (const u of surfaceNonNaval) {
+                        if (!otherByType.has(u.unit_id)) otherByType.set(u.unit_id, []);
+                        otherByType.get(u.unit_id)!.push(u);
+                      }
+                      const otherTypes = [...otherByType.keys()];
+                      otherTypes.sort((a, b) =>
+                        compareMapUnitStacks(
+                          { unit_id: a, count: otherByType.get(a)?.length ?? 0 },
+                          { unit_id: b, count: otherByType.get(b)?.length ?? 0 },
+                          unitDefs,
+                          factionData,
+                        ),
+                      );
+
+                      if (navalTypes.length === 0 && otherTypes.length === 0) return null;
+
                       const useStacked = navalTypes.length >= 3;
-                      const handleStackClick = showTrayOnClick
+                      const handleStackDoubleClick = showTrayDblClick
                         ? (e: React.MouseEvent) => {
                           e.stopPropagation();
                           onSeaZoneStackClick?.(territoryId);
                         }
                         : undefined;
+                      const handleOpenNavalTrayClick = showTrayDblClick
+                        ? (e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          onSeaZoneStackClick?.(territoryId);
+                        }
+                        : undefined;
+                      const left = screenPos.x;
+                      const top = screenPos.y + unitOffsetY + powerBadgeOffsetY;
                       return (
                         <div
                           key={territoryId}
-                          role={showTrayOnClick ? 'button' : undefined}
-                          tabIndex={showTrayOnClick ? 0 : undefined}
-                          className={`territory-units ${useStacked ? 'territory-units--stacked' : ''} ${showTrayOnClick ? 'territory-units--sea-stack' : ''}`}
+                          className="territory-units territory-units--sea-combined"
                           style={{
-                            left: screenPos.x,
-                            top: screenPos.y + unitOffsetY + powerBadgeOffsetY,
+                            left,
+                            top,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'flex-start',
+                            gap: 4,
                           }}
-                          onClick={handleStackClick}
-                          onKeyDown={showTrayOnClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSeaZoneStackClick?.(territoryId); } } : undefined}
-                          aria-label={showTrayOnClick ? `Boats in ${territoryData[territoryId]?.name ?? territoryId}. Click to open naval tray.` : undefined}
                         >
-                          {navalTypes.map((unit_id) => {
-                            const boatsOfType = fullUnits.filter(u => u.unit_id === unit_id);
-                            const boatCount = boatsOfType.length;
-                            const boatInstanceIds = boatsOfType.map(b => b.instance_id);
-                            const passengerUnits = fullUnits.filter(u => u.loaded_onto && boatInstanceIds.includes(u.loaded_onto));
-                            const passengerCount = passengerUnits.length;
-                            const instanceIds = [...boatInstanceIds, ...passengerUnits.map(p => p.instance_id)];
-                            const parts = unit_id.split('_');
-                            const factionFromId = parts.find(p => factionData[p]);
-                            const colorFromId = factionFromId ? factionData[factionFromId].color : null;
-                            const defFaction = unitDefs[unit_id]?.faction;
-                            const colorFromDef = defFaction && factionData[defFaction] ? factionData[defFaction].color : null;
-                            const unitFactionColor = colorFromId ?? colorFromDef ?? NEUTRAL_UNIT_BORDER;
-                            const unitFaction = factionFromId ?? defFaction ?? parts[0];
-                            const canDrag = !showTrayOnClick && isMovementPhase && (unitFaction === gameState.current_faction);
-                            return (
-                              <DraggableUnit
-                                key={`${territoryId}-${unit_id}`}
-                                id={`${territoryId}-${unit_id}`}
-                                unitId={unit_id}
-                                territoryId={territoryId}
-                                count={boatCount}
-                                unitDef={unitDefs[unit_id]}
-                                isSelected={selectedUnit?.territory === territoryId && selectedUnit?.unitType === unit_id}
-                                disabled={!canDrag}
-                                factionColor={unitFactionColor}
-                                showAerialMustMove={aerialMustMoveKeySet.has(`${territoryId}_${unit_id}`)}
-                                showNavalMustAttack={gameState.phase === 'combat_move' && instanceIds.some(id => loadedNavalMustAttackInstanceIdSet.has(id))}
-                                isNaval
-                                passengerCount={passengerCount}
-                                instanceIds={instanceIds}
-                              />
-                            );
-                          })}
+                          {navalTypes.length > 0 && (
+                            <div
+                              className={`territory-units territory-units--sea-stack-row ${showTrayDblClick ? 'territory-units--sea-stack' : ''}`}
+                              style={{ position: 'relative', left: 0, top: 0, display: 'flex', alignItems: 'flex-end', gap: 6, flexWrap: 'wrap' }}
+                            >
+                              {showTrayDblClick && onSeaZoneStackClick && (
+                                <button
+                                  type="button"
+                                  className="sea-zone-tray-open-btn"
+                                  onClick={handleOpenNavalTrayClick}
+                                  title="Open boat list (tap here on phones; double-click the stack on desktop)"
+                                  aria-label={`Open boat list for ${territory?.name ?? territoryId}`}
+                                >
+                                  Boats
+                                </button>
+                              )}
+                              <div
+                                className={`territory-units ${useStacked ? 'territory-units--stacked' : ''}`}
+                                style={{ position: 'relative', left: 0, top: 0 }}
+                                onDoubleClick={handleStackDoubleClick}
+                                title={
+                                  showTrayDblClick
+                                    ? `Boats: open list (tap button or double-click stack). Drag a ship stack to move all ships of that type.${
+                                      eligiblePending && totalPassengers < 1 ? ' Pending loads into this zone.' : ''
+                                    }`
+                                    : undefined
+                                }
+                              >
+                              {navalTypes.map((unit_id) => {
+                                const boatsOfType = fullUnits.filter(u => u.unit_id === unit_id);
+                                const boatCount = boatsOfType.length;
+                                const boatInstanceIds = boatsOfType.map(b => b.instance_id);
+                                const passengerUnits = fullUnits.filter(u => u.loaded_onto && boatInstanceIds.includes(u.loaded_onto));
+                                const passengerCount = passengerUnits.length;
+                                const instanceIds = [...boatInstanceIds, ...passengerUnits.map(p => p.instance_id)];
+                                const parts = unit_id.split('_');
+                                const factionFromId = parts.find(p => factionData[p]);
+                                const colorFromId = factionFromId ? factionData[factionFromId].color : null;
+                                const defFaction = unitDefs[unit_id]?.faction;
+                                const colorFromDef = defFaction && factionData[defFaction] ? factionData[defFaction].color : null;
+                                const unitFactionColor = colorFromId ?? colorFromDef ?? NEUTRAL_UNIT_BORDER;
+                                const unitFaction = factionFromId ?? defFaction ?? parts[0];
+                                const canDrag = isMovementPhase && (unitFaction === gameState.current_faction);
+                                return (
+                                  <span
+                                    key={`${territoryId}-${unit_id}`}
+                                    className="unit-token-tap-wrapper"
+                                    onPointerDownCapture={(ev) => handleUnitPointerDownCapture(territoryId, unit_id, ev)}
+                                    style={{ display: 'inline-block' }}
+                                  >
+                                    <DraggableUnit
+                                      id={`${territoryId}-${unit_id}`}
+                                      unitId={unit_id}
+                                      territoryId={territoryId}
+                                      count={boatCount}
+                                      unitDef={unitDefs[unit_id]}
+                                      isSelected={selectedUnit?.territory === territoryId && selectedUnit?.unitType === unit_id}
+                                      disabled={!canDrag}
+                                      factionColor={unitFactionColor}
+                                      showAerialMustMove={aerialMustMoveKeySet.has(`${territoryId}_${unit_id}`)}
+                                      showNavalMustAttack={
+                                        gameState.phase === 'combat_move' &&
+                                        instanceIds.some((id) => loadedNavalMustAttackInstanceIdSet.has(id))
+                                      }
+                                      showForcedNavalStandoff={
+                                        gameState.phase === 'combat_move' &&
+                                        instanceIds.some(
+                                          (id) =>
+                                            forcedNavalCombatInstanceIdSet.has(id) &&
+                                            !loadedNavalMustAttackInstanceIdSet.has(id)
+                                        )
+                                      }
+                                      isNaval
+                                      passengerCount={passengerCount}
+                                      instanceIds={instanceIds}
+                                    />
+                                  </span>
+                                );
+                              })}
+                              </div>
+                            </div>
+                          )}
+                          {otherTypes.length > 0 && (
+                            <div className="territory-units-token-row" style={{ position: 'relative', left: 0, top: 0 }}>
+                              {otherTypes.map((unit_id) => {
+                                const list = otherByType.get(unit_id)!;
+                                const count = list.length;
+                                const instanceIdsForUnit = list.map((u) => u.instance_id);
+                                const parts = unit_id.split('_');
+                                const factionFromId = parts.find(p => factionData[p]);
+                                const colorFromId = factionFromId ? factionData[factionFromId].color : null;
+                                const defFaction = unitDefs[unit_id]?.faction;
+                                const colorFromDef = defFaction && factionData[defFaction] ? factionData[defFaction].color : null;
+                                const unitFactionColor = colorFromId ?? colorFromDef ?? NEUTRAL_UNIT_BORDER;
+                                const unitFaction = factionFromId ?? defFaction ?? parts[0];
+                                const canDrag = isMovementPhase && (unitFaction === gameState.current_faction);
+                                return (
+                                  <span
+                                    key={`${territoryId}-${unit_id}-sea-surface`}
+                                    className="unit-token-tap-wrapper"
+                                    onPointerDownCapture={(ev) => handleUnitPointerDownCapture(territoryId, unit_id, ev)}
+                                    style={{ display: 'inline-block' }}
+                                  >
+                                    <DraggableUnit
+                                      id={`${territoryId}-${unit_id}-sea-surface`}
+                                      unitId={unit_id}
+                                      territoryId={territoryId}
+                                      count={count}
+                                      unitDef={unitDefs[unit_id]}
+                                      isSelected={selectedUnit?.territory === territoryId && selectedUnit?.unitType === unit_id}
+                                      disabled={!canDrag}
+                                      factionColor={unitFactionColor}
+                                      showAerialMustMove={aerialMustMoveKeySet.has(`${territoryId}_${unit_id}`)}
+                                      showNavalMustAttack={false}
+                                      showForcedNavalStandoff={false}
+                                      isNaval={false}
+                                      instanceIds={instanceIdsForUnit}
+                                    />
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       );
                     }
@@ -2073,23 +3681,54 @@ function GameMap({
                     // Land (or sea without full data): stacked tokens by unit type
                     const stackCount = units.length;
                     const useStacked = stackCount >= 3;
-                    const sortedUnits = [...units].sort((a, b) => {
-                      if (b.count !== a.count) return b.count - a.count;
-                      const costA = unitDefs[a.unit_id]?.cost ?? 0;
-                      const costB = unitDefs[b.unit_id]?.cost ?? 0;
-                      if (costB !== costA) return costB - costA;
-                      return a.unit_id.localeCompare(b.unit_id);
-                    });
+                    const sortedUnits = [...units].sort((a, b) =>
+                      compareMapUnitStacks(a, b, unitDefs, factionData),
+                    );
 
+                    const bulkMinRm = minRemainingMovementForBulkAll(
+                      territoryId,
+                      territoryUnits,
+                      territoryUnitsFull,
+                      gameState.current_faction,
+                      factionData,
+                      unitDefs,
+                      pendingMoves,
+                      gameState.phase,
+                    );
+                    /** Bulk "All" only when every stack is the current turn faction (not allies you can't command). */
+                    const allStacksAreCurrentTurnFaction = units.every((s) => {
+                      const parts = s.unit_id.split('_');
+                      const factionFromId = parts.find((p) => factionData[p]);
+                      const defFaction = unitDefs[s.unit_id]?.faction;
+                      const uf = factionFromId ?? defFaction ?? parts[0];
+                      return uf === gameState.current_faction;
+                    });
+                    const canShowAllDrag =
+                      canAct &&
+                      isMovementPhase &&
+                      allStacksAreCurrentTurnFaction &&
+                      stackCount > 1 &&
+                      bulkMinRm != null &&
+                      bulkMinRm > 0;
                     return (
                       <div
                         key={territoryId}
-                        className={`territory-units ${useStacked ? 'territory-units--stacked' : ''}`}
+                        className={`territory-units ${useStacked ? 'territory-units--stacked' : ''} ${useStacked && expandedStackKey === territoryId ? 'territory-units--stack-expanded' : ''}`}
                         style={{
                           left: screenPos.x,
                           top: screenPos.y + unitOffsetY + powerBadgeOffsetY,
                         }}
                       >
+                        {canShowAllDrag && (
+                          <DraggableAllStacksButton
+                            territoryId={territoryId}
+                            disabled={!isMovementPhase || !canAct}
+                            onTapPrepPointerDown={(tid, ev) => {
+                              bulkAllTapStartRef.current = { territoryId: tid, x: ev.clientX, y: ev.clientY };
+                            }}
+                          />
+                        )}
+                        <div className="territory-units-token-row">
                         {sortedUnits.map(({ unit_id, count }) => {
                           // Border = unit's faction ONLY. Never territory owner. Prefer faction name found in unit_id (e.g. rider_of_rohan → rohan) so Rohan units get Rohan color even when def.faction is "freepeoples".
                           const parts = unit_id.split('_');
@@ -2102,26 +3741,56 @@ function GameMap({
                           const unitFaction = factionFromId ?? defFaction ?? parts[0];
                           const canDrag = isMovementPhase && (unitFaction === gameState.current_faction);
                           const instanceIdsForUnit = (territoryUnitsFull?.[territoryId] || []).filter(u => u.unit_id === unit_id).map(u => u.instance_id);
-                          const showNavalMustAttackStacked = gameState.phase === 'combat_move' && navalUnitIds.has(unit_id) && instanceIdsForUnit.some(id => loadedNavalMustAttackInstanceIdSet.has(id));
+                          const showNavalMustAttackStacked =
+                            gameState.phase === 'combat_move' &&
+                            navalUnitIds.has(unit_id) &&
+                            instanceIdsForUnit.some((id) => loadedNavalMustAttackInstanceIdSet.has(id));
+                          const showForcedNavalStandoffStacked =
+                            gameState.phase === 'combat_move' &&
+                            navalUnitIds.has(unit_id) &&
+                            instanceIdsForUnit.some(
+                              (id) =>
+                                forcedNavalCombatInstanceIdSet.has(id) &&
+                                !loadedNavalMustAttackInstanceIdSet.has(id)
+                            );
 
                           return (
-                            <DraggableUnit
+                            <span
                               key={`${territoryId}-${unit_id}`}
-                              id={`${territoryId}-${unit_id}`}
-                              unitId={unit_id}
-                              territoryId={territoryId}
-                              count={count}
-                              unitDef={unitDefs[unit_id]}
-                              isSelected={selectedUnit?.territory === territoryId && selectedUnit?.unitType === unit_id}
-                              disabled={!canDrag}
-                              factionColor={unitFactionColor}
-                              showAerialMustMove={aerialMustMoveKeySet.has(`${territoryId}_${unit_id}`)}
-                              showNavalMustAttack={showNavalMustAttackStacked}
-                              isNaval={navalUnitIds.has(unit_id)}
-                              instanceIds={instanceIdsForUnit.length > 0 ? instanceIdsForUnit : undefined}
-                            />
+                              className="unit-token-tap-wrapper"
+                              onPointerDownCapture={(ev) => handleUnitPointerDownCapture(territoryId, unit_id, ev)}
+                              style={{ display: 'inline-block' }}
+                            >
+                              <DraggableUnit
+                                id={`${territoryId}-${unit_id}`}
+                                unitId={unit_id}
+                                territoryId={territoryId}
+                                count={count}
+                                unitDef={unitDefs[unit_id]}
+                                isSelected={selectedUnit?.territory === territoryId && selectedUnit?.unitType === unit_id}
+                                disabled={!canDrag}
+                                factionColor={unitFactionColor}
+                                showAerialMustMove={aerialMustMoveKeySet.has(`${territoryId}_${unit_id}`)}
+                                showNavalMustAttack={showNavalMustAttackStacked}
+                                showForcedNavalStandoff={showForcedNavalStandoffStacked}
+                                isNaval={navalUnitIds.has(unit_id)}
+                                instanceIds={instanceIdsForUnit.length > 0 ? instanceIdsForUnit : undefined}
+                              />
+                            </span>
                           );
                         })}
+                        {useStacked && expandedStackKey !== territoryId && (
+                          <div
+                            className="territory-units-expand-overlay"
+                            onClick={(e) => { e.stopPropagation(); setExpandedStackKey(territoryId); }}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpandedStackKey(territoryId); } }}
+                            aria-label="Expand unit stack"
+                          />
+                        )}
+                        </div>
                       </div>
                     );
                   })}
@@ -2130,7 +3799,13 @@ function GameMap({
             </div>
           </div>
 
-          <DragOverlay activeUnit={activeUnit} activeMobilizationItem={activeMobilizationItem} activeCampDrag={activeCampDrag} factionColor={mobilizationTray?.factionColor} />
+          <DragOverlay
+            bulkDragOverlay={bulkDragOverlay}
+            activeUnit={activeUnit}
+            activeMobilizationItem={activeMobilizationItem}
+            activeCampDrag={activeCampDrag}
+            factionColor={mobilizationTray?.factionColor}
+          />
 
           <div className={`map-controls ${mapControlsCollapsed ? 'map-controls--collapsed' : ''}`}>
             {mapControlsCollapsed ? (
@@ -2183,6 +3858,7 @@ function GameMap({
               </>
             )}
           </div>
+          </div>
         </div>
 
         {mobilizationTray && (
@@ -2192,6 +3868,7 @@ function GameMap({
             pendingCamps={mobilizationTray.pendingCamps}
             faction={gameState.current_faction}
             factionColor={mobilizationTray.factionColor}
+            canMobilizeAll={mobilizationTray.canMobilizeAll ?? false}
             selectedUnitId={mobilizationTray.selectedUnitId}
             selectedCampIndex={mobilizationTray.selectedCampIndex}
             onSelectUnit={mobilizationTray.onSelectUnit}

@@ -2,6 +2,8 @@
 
 You own **bagginsandallies.com** on GoDaddy. Use this guide to get the app live.
 
+**Railway API + GitHub Pages (SPA)** — Follow **`docs/PRODUCTION_DEPLOYMENT.md`** only for that stack (phased checklist, env vars, Pages notes); this file does not repeat it.
+
 **Backend: pick one** — Heroku, Railway, or Render. You do **not** use Railway if you choose Heroku (and vice versa). Frontend can stay on Vercel for any backend choice.
 
 ---

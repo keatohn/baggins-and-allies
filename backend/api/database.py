@@ -1,10 +1,14 @@
 """
 Database setup for Baggins & Allies.
-Uses SQLite locally; use DATABASE_URL (e.g. Heroku Postgres) for production.
+
+- Local: SQLite at backend/api/game.db unless overridden.
+- Production SQLite: set SQLITE_DATABASE_PATH (e.g. /data/game.db on Railway volume);
+  leave DATABASE_URL unset. See docs/PRODUCTION_DEPLOYMENT.md.
+- Production Postgres: set DATABASE_URL (e.g. Heroku/Railway Postgres).
 """
 
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 # Heroku sets DATABASE_URL to postgres://; SQLAlchemy 2.x expects postgresql://
@@ -14,8 +18,17 @@ if _raw_url and _raw_url.startswith("postgres://"):
 elif _raw_url:
     DATABASE_URL = _raw_url
 else:
-    DB_DIR = os.path.dirname(os.path.abspath(__file__))
-    DATABASE_URL = f"sqlite:///{os.path.join(DB_DIR, 'game.db')}"
+    # Railway/local: optional persistent path (e.g. volume mount `/data/game.db`)
+    _sqlite_path = os.environ.get("SQLITE_DATABASE_PATH")
+    if _sqlite_path:
+        _sqlite_abs = os.path.abspath(_sqlite_path)
+        parent = os.path.dirname(_sqlite_abs)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        DATABASE_URL = f"sqlite:///{_sqlite_abs}"
+    else:
+        DB_DIR = os.path.dirname(os.path.abspath(__file__))
+        DATABASE_URL = f"sqlite:///{os.path.join(DB_DIR, 'game.db')}"
 
 
 # SQLite needs check_same_thread=False; Postgres does not use that arg
@@ -45,6 +58,73 @@ def get_db_file_path() -> str | None:
     return path_part or None
 
 
+# This row is set to admin on each init (single-row UPDATE only). Other players’ is_admin is never cleared.
+ADMIN_PLAYER_EMAIL = "kjhubbs8@gmail.com"
+
+
+def _ensure_is_admin_column():
+    """Add players.is_admin if missing (non-destructive). Never bulk-clear admin flags.
+
+    - ALTER ADD COLUMN only: existing player rows keep all other columns; new column defaults to false/0.
+    - Games / game_state are untouched (this migration does not reference them).
+    - After ensure: one UPDATE sets admin only for ADMIN_PLAYER_EMAIL so bootstrap admin stays true;
+      any other player you set true in the DB is left unchanged.
+    """
+    if DATABASE_URL.startswith("sqlite"):
+        with engine.begin() as conn:
+            rows = conn.execute(text("PRAGMA table_info(players)")).fetchall()
+            names = {row[1] for row in rows}
+            if "is_admin" not in names:
+                conn.execute(text("ALTER TABLE players ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0"))
+            conn.execute(
+                text("UPDATE players SET is_admin = 1 WHERE lower(email) = lower(:email)"),
+                {"email": ADMIN_PLAYER_EMAIL},
+            )
+    else:
+        with engine.begin() as conn:
+            exists = conn.execute(
+                text(
+                    """
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'players'
+                      AND column_name = 'is_admin'
+                    """
+                )
+            ).fetchone()
+            if exists is None:
+                conn.execute(
+                    text(
+                        "ALTER TABLE players ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT false"
+                    )
+                )
+            conn.execute(
+                text(
+                    "UPDATE players SET is_admin = true WHERE lower(email) = lower(:email)"
+                ),
+                {"email": ADMIN_PLAYER_EMAIL},
+            )
+
+
+def _ensure_player_preferences_column():
+    """Add players.preferences if missing (existing SQLite/Postgres DBs before this column)."""
+    if DATABASE_URL.startswith("sqlite"):
+        with engine.begin() as conn:
+            rows = conn.execute(text("PRAGMA table_info(players)")).fetchall()
+            names = {row[1] for row in rows}
+            if "preferences" not in names:
+                conn.execute(text("ALTER TABLE players ADD COLUMN preferences TEXT"))
+    else:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE players ADD COLUMN IF NOT EXISTS preferences TEXT"))
+
+
 def init_db():
-    """Create all tables."""
+    """Create all tables and apply additive schema patches.
+
+    Migrations here only add missing columns (ALTER TABLE ... ADD COLUMN). They do not drop tables,
+    truncate rows, or rewrite game_state — player and game data are preserved.
+    """
     Base.metadata.create_all(bind=engine)
+    _ensure_player_preferences_column()
+    _ensure_is_admin_column()

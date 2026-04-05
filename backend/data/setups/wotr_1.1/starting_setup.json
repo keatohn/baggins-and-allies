@@ -1,0 +1,422 @@
+{
+  "turn_order": [
+    "freepeoples",
+    "isengard",
+    "rohan",
+    "mordor",
+    "gondor"
+  ],
+  "territory_owners": {
+    "forlindon": "freepeoples",
+    "harlindon": "freepeoples",
+    "the_shire": "freepeoples",
+    "grey_havens": "freepeoples",
+    "rivendell": "freepeoples",
+    "lothlorien": "freepeoples",
+    "fangorn": "freepeoples",
+    "dol_guldur": "mordor",
+    "thranduils_halls": "freepeoples",
+    "gundabad": "mordor",
+    "erebor": "freepeoples",
+    "dale": "freepeoples",
+    "esgaroth": "freepeoples",
+    "iron_hills": "freepeoples",
+    "north_rhun": "mordor",
+    "west_rhun": "mordor",
+    "rhun_hills": "mordor",
+    "dorwinion": "mordor",
+    "minas_tirith": "gondor",
+    "pelennor": "gondor",
+    "anorien": "gondor",
+    "west_osgiliath": "gondor",
+    "east_osgiliath": "gondor",
+    "south_ithilien": "gondor",
+    "north_ithilien": "gondor",
+    "lossarnach": "gondor",
+    "lebennin": "gondor",
+    "pelargir": "gondor",
+    "belfalas": "gondor",
+    "anfalas": "gondor",
+    "andrast": "gondor",
+    "erech_lamedon": "gondor",
+    "minas_morgul": "mordor",
+    "the_black_gate": "mordor",
+    "barad_dur": "mordor",
+    "mount_doom": "mordor",
+    "gorgoroth": "mordor",
+    "nurn": "mordor",
+    "udun": "mordor",
+    "cirith_ungol": "mordor",
+    "isengard": "isengard",
+    "south_dunland": "isengard",
+    "gap_of_rohan": "rohan",
+    "westfold": "rohan",
+    "westemnet": "rohan",
+    "edoras": "rohan",
+    "helms_deep": "rohan",
+    "dunharrow": "rohan",
+    "eastfold": "rohan",
+    "eastemnet": "rohan",
+    "entwash": "rohan",
+    "the_wold": "rohan",
+    "fords_of_isen": "rohan",
+    "west_march": "rohan",
+    "khand": "mordor",
+    "near_harad": "mordor",
+    "far_harad": "mordor",
+    "haradwaith": "mordor",
+    "umbar": "mordor"
+  },
+  "starting_units": {
+    "the_shire": [
+      {
+        "unit_id": "hobbit",
+        "count": 1
+      }
+    ],
+    "grey_havens": [
+      {
+        "unit_id": "rivendell_warrior",
+        "count": 1
+      }
+    ],
+    "south_downs": [
+      {
+        "unit_id": "barrowwight",
+        "count": 1
+      }
+    ],
+    "rivendell": [
+      {
+        "unit_id": "rivendell_knight",
+        "count": 1
+      },
+      {
+        "unit_id": "rivendell_warrior",
+        "count": 1
+      }
+    ],
+    "lothlorien": [
+      {
+        "unit_id": "galadhrim_archer",
+        "count": 2
+      }
+    ],
+    "carrock": [
+      {
+        "unit_id": "goblin",
+        "count": 2
+      }
+    ],
+    "moria": [
+      {
+        "unit_id": "goblin",
+        "count": 10
+      },
+      {
+        "unit_id": "cave_troll",
+        "count": 1
+      }
+    ],
+    "fangorn": [
+      {
+        "unit_id": "ent",
+        "count": 2
+      }
+    ],
+    "dol_guldur": [
+      {
+        "unit_id": "mordor_warg_rider",
+        "count": 3
+      },
+      {
+        "unit_id": "black_uruk",
+        "count": 2
+      }
+    ],
+    "south_mirkwood": [
+      {
+        "unit_id": "spider",
+        "count": 1
+      }
+    ],
+    "north_mirkwood": [
+      {
+        "unit_id": "spider",
+        "count": 1
+      }
+    ],
+    "thranduils_halls": [
+      {
+        "unit_id": "mirkwood_elf",
+        "count": 1
+      }
+    ],
+    "gundabad": [
+      {
+        "unit_id": "mordor_warg_rider",
+        "count": 1
+      },
+      {
+        "unit_id": "black_uruk",
+        "count": 1
+      }
+    ],
+    "erebor": [
+      {
+        "unit_id": "dwarf_warrior",
+        "count": 2
+      }
+    ],
+    "esgaroth": [
+      {
+        "unit_id": "laketown_archer",
+        "count": 1
+      }
+    ],
+    "withered_heath": [
+      {
+        "unit_id": "dragon",
+        "count": 1
+      }
+    ],
+    "iron_hills": [
+      {
+        "unit_id": "dwarf_warrior",
+        "count": 1
+      }
+    ],
+    "north_rhun": [
+      {
+        "unit_id": "easterling_pikeman",
+        "count": 1
+      }
+    ],
+    "west_rhun": [
+      {
+        "unit_id": "easterling_pikeman",
+        "count": 1
+      }
+    ],
+    "rhun_hills": [
+      {
+        "unit_id": "easterling_pikeman",
+        "count": 2
+      }
+    ],
+    "dorwinion": [
+      {
+        "unit_id": "easterling_pikeman",
+        "count": 2
+      }
+    ],
+    "minas_tirith": [
+      {
+        "unit_id": "trebuchet",
+        "count": 1
+      },
+      {
+        "unit_id": "citadel_guard",
+        "count": 1
+      },
+      {
+        "unit_id": "gondor_archer",
+        "count": 1
+      },
+      {
+        "unit_id": "gondor_soldier",
+        "count": 1
+      }
+    ],
+    "west_osgiliath": [
+      {
+        "unit_id": "gondor_soldier",
+        "count": 1
+      }
+    ],
+    "east_osgiliath": [
+      {
+        "unit_id": "gondor_archer",
+        "count": 1
+      },
+      {
+        "unit_id": "gondor_soldier",
+        "count": 2
+      }
+    ],
+    "south_ithilien": [
+      {
+        "unit_id": "ithilien_ranger",
+        "count": 2
+      }
+    ],
+    "north_ithilien": [
+      {
+        "unit_id": "ithilien_ranger",
+        "count": 3
+      }
+    ],
+    "lebennin": [
+      {
+        "unit_id": "gondor_soldier",
+        "count": 1
+      }
+    ],
+    "pelargir": [
+      {
+        "unit_id": "gondor_soldier",
+        "count": 1
+      }
+    ],
+    "belfalas": [
+      {
+        "unit_id": "gondor_soldier",
+        "count": 1
+      }
+    ],
+    "minas_morgul": [
+      {
+        "unit_id": "nazgul",
+        "count": 1
+      },
+      {
+        "unit_id": "orc_warrior",
+        "count": 5
+      }
+    ],
+    "the_black_gate": [
+      {
+        "unit_id": "armored_troll",
+        "count": 1
+      },
+      {
+        "unit_id": "black_uruk",
+        "count": 2
+      }
+    ],
+    "barad_dur": [
+      {
+        "unit_id": "black_uruk",
+        "count": 3
+      }
+    ],
+    "cirith_ungol": [
+      {
+        "unit_id": "orc_warrior",
+        "count": 1
+      },
+      {
+        "unit_id": "black_uruk",
+        "count": 1
+      }
+    ],
+    "isengard": [
+      {
+        "unit_id": "uruk_crossbowman",
+        "count": 2
+      },
+      {
+        "unit_id": "uruk_pikeman",
+        "count": 3
+      },
+      {
+        "unit_id": "urukhai_warrior",
+        "count": 5
+      },
+      {
+        "unit_id": "berserker",
+        "count": 1
+      },
+      {
+        "unit_id": "isengard_warg_rider",
+        "count": 3
+      },
+      {
+        "unit_id": "bomb",
+        "count": 1
+      }
+    ],
+    "south_dunland": [
+      {
+        "unit_id": "dunland_wildman",
+        "count": 3
+      }
+    ],
+    "westfold": [
+      {
+        "unit_id": "rohan_peasant",
+        "count": 2
+      }
+    ],
+    "westemnet": [
+      {
+        "unit_id": "rohan_peasant",
+        "count": 1
+      }
+    ],
+    "edoras": [
+      {
+        "unit_id": "royal_guard",
+        "count": 1
+      },
+      {
+        "unit_id": "rohirrim_soldier",
+        "count": 2
+      }
+    ],
+    "helms_deep": [
+      {
+        "unit_id": "rohirrim_archer",
+        "count": 2
+      },
+      {
+        "unit_id": "rohirrim_soldier",
+        "count": 1
+      }
+    ],
+    "dunharrow": [
+      {
+        "unit_id": "rohirrim_soldier",
+        "count": 1
+      }
+    ],
+    "eastfold": [
+      {
+        "unit_id": "rohan_peasant",
+        "count": 1
+      }
+    ],
+    "eastemnet": [
+      {
+        "unit_id": "rider_of_rohan",
+        "count": 2
+      },
+      {
+        "unit_id": "rohirrim_archer_rider",
+        "count": 1
+      }
+    ],
+    "fords_of_isen": [
+      {
+        "unit_id": "rider_of_rohan",
+        "count": 2
+      }
+    ],
+    "far_harad": [
+      {
+        "unit_id": "war_mumakil",
+        "count": 1
+      },
+      {
+        "unit_id": "haradrim_archer",
+        "count": 3
+      }
+    ],
+    "umbar": [
+      {
+        "unit_id": "corsair_of_umbar",
+        "count": 1
+      }
+    ]
+  }
+}
