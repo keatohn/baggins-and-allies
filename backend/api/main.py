@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .database import get_db, get_db_file_path, init_db, SessionLocal
@@ -1106,7 +1107,8 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
             status_code=400,
             detail="Username must be 2–32 characters, letters numbers and underscore only",
         )
-    if db.query(Player).filter(Player.email == request.email).first():
+    email_norm = request.email.strip().lower()
+    if db.query(Player).filter(func.lower(Player.email) == email_norm).first():
         raise HTTPException(status_code=400, detail="Email already registered")
     if db.query(Player).filter(Player.username == request.username).first():
         raise HTTPException(status_code=400, detail="Username already taken")
@@ -1114,7 +1116,7 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
         player_id = str(uuid.uuid4())
         player = Player(
             id=player_id,
-            email=request.email,
+            email=email_norm,
             username=request.username,
             password_hash=hash_password(request.password),
             is_admin=False,
@@ -1132,8 +1134,9 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
 
 @app.post("/auth/login")
 def login(request: LoginRequest, db: Session = Depends(get_db)):
-    """Login with email and password."""
-    player = db.query(Player).filter(Player.email == request.email).first()
+    """Login with email and password (email matched case-insensitively)."""
+    email_norm = request.email.strip().lower()
+    player = db.query(Player).filter(func.lower(Player.email) == email_norm).first()
     if not player or not verify_password(request.password, player.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     token = create_access_token(player.id)
