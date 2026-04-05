@@ -4,9 +4,15 @@
 
 import { syncAudioFromAuthPlayer } from '../audio/gameAudio';
 
-const API_BASE =
-  import.meta.env.VITE_API_URL ??
-  (import.meta.env.DEV ? '/api' : 'http://localhost:8000');
+/** Empty string must count as unset — otherwise fetch uses same-origin URLs and static hosts return 405 on POST. */
+function resolveApiBase(): string {
+  const raw = import.meta.env.VITE_API_URL;
+  const trimmed = typeof raw === 'string' ? raw.trim() : '';
+  if (trimmed) return trimmed.replace(/\/$/, '');
+  return import.meta.env.DEV ? '/api' : 'http://localhost:8000';
+}
+
+const API_BASE = resolveApiBase();
 
 const AUTH_TOKEN_KEY = 'baggins_auth_token';
 
