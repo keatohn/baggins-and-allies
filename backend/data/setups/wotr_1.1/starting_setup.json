@@ -165,7 +165,7 @@
     "erebor": [
       {
         "unit_id": "dwarf_warrior",
-        "count": 2
+        "count": 1
       }
     ],
     "esgaroth": [
@@ -195,7 +195,7 @@
     "west_rhun": [
       {
         "unit_id": "easterling_pikeman",
-        "count": 1
+        "count": 2
       }
     ],
     "rhun_hills": [
@@ -207,7 +207,7 @@
     "dorwinion": [
       {
         "unit_id": "easterling_pikeman",
-        "count": 2
+        "count": 1
       }
     ],
     "minas_tirith": [
