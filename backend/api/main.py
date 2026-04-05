@@ -155,9 +155,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS configuration for frontend (add production origins via CORS_ORIGINS env, comma-separated)
+# CORS configuration for frontend (add production origins via CORS_ORIGINS env, comma-separated).
+# Also accept CORS_ORIGIN (singular) if CORS_ORIGINS is unset — common dashboard typo.
 _default_origins = ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"]
-_extra = os.environ.get("CORS_ORIGINS", "")
+_extra = os.environ.get("CORS_ORIGINS", "") or os.environ.get("CORS_ORIGIN", "")
 if _extra:
     _default_origins = [o.strip() for o in _extra.split(",") if o.strip()] + _default_origins
 CORS_ORIGINS = _default_origins
