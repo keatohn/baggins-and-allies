@@ -86,7 +86,7 @@ function unitIsAerial(
   unitDefs: Record<string, { archetype?: string; tags?: string[] } | undefined>,
 ): boolean {
   const d = unitDefs[unitId];
-  return d?.archetype === 'aerial' || (Array.isArray(d.tags) && d.tags.includes('aerial'));
+  return d?.archetype === 'aerial' || (d != null && Array.isArray(d.tags) && d.tags.includes('aerial'));
 }
 
 /** Same load-into-sea semantics as navalTrayData's loadMovesToZone (phase + sea to + load / land→sea). */
@@ -3021,6 +3021,9 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           : {}),
       });
 
+      const ladderInfantryIdsRaw = (p as unknown as { ladder_infantry_instance_ids?: unknown })
+        .ladder_infantry_instance_ids;
+
       const round: CombatRound = {
         roundNumber: p.round_number,
         attackerRolls: toAttackerRolls(p.attacker_dice as Record<string, AttackerDicePayload>),
@@ -3040,12 +3043,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         terrorRerollCount: typeof p.terror_reroll_count === 'number' ? p.terror_reroll_count : undefined,
         attackerUnitsAtStart: (Array.isArray(p.attacker_units_at_start) ? p.attacker_units_at_start : []).map(backendUnitToCombatUnit),
         defenderUnitsAtStart: (Array.isArray(p.defender_units_at_start) ? p.defender_units_at_start : []).map(backendUnitToCombatUnit),
-        ...(Array.isArray((p as { ladder_infantry_instance_ids?: unknown }).ladder_infantry_instance_ids)
-          ? {
-            ladderInfantryInstanceIds: (p as { ladder_infantry_instance_ids: unknown[] }).ladder_infantry_instance_ids.map(
-              x => String(x),
-            ),
-          }
+        ...(Array.isArray(ladderInfantryIdsRaw)
+          ? { ladderInfantryInstanceIds: ladderInfantryIdsRaw.map(x => String(x)) }
           : {}),
       };
 

@@ -239,7 +239,7 @@ function unitIsAerial(
   unitDefs: Record<string, { archetype?: string; tags?: string[] } | undefined>,
 ): boolean {
   const d = unitDefs[unitId];
-  return d?.archetype === 'aerial' || (Array.isArray(d.tags) && d.tags.includes('aerial'));
+  return d?.archetype === 'aerial' || (d != null && Array.isArray(d.tags) && d.tags.includes('aerial'));
 }
 
 /** Planned Attacks list: never show "Load" for aerial into sea (backend may still send move_type load on older pending rows). */
