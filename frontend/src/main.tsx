@@ -11,7 +11,12 @@ import GameList from './pages/GameList.tsx'
 import JoinGame from './pages/JoinGame.tsx'
 import Profile from './pages/Profile.tsx'
 import Admin from './pages/Admin.tsx'
-import { playUiClickSound, startMenuAmbience, stopMenuAmbience } from './audio/gameAudio'
+import {
+  playUiClickSound,
+  resumeMenuAmbienceIfPaused,
+  startMenuAmbience,
+  stopMenuAmbience,
+} from './audio/gameAudio'
 import { useEffect } from 'react'
 
 const CLICKABLE_SELECTOR = [
@@ -54,10 +59,12 @@ if (typeof document !== 'undefined') {
   document.addEventListener(
     'pointerdown',
     (event) => {
+      resumeMenuAmbienceIfPaused()
+
       const target = event.target
+      const pathname = window.location.pathname || ''
       if (!(target instanceof Element)) return
       if (!target.closest(CLICKABLE_SELECTOR)) return
-      const pathname = window.location.pathname || ''
       if (isActiveGameRoute(pathname) && !isMajorInGameClick(target)) return
       if (target.closest('[data-no-ui-click-sfx]')) return
       playUiClickSound()

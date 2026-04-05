@@ -19,6 +19,10 @@
   .create-game-form {
     max-width: none;
   }
+
+  .create-game-page__menu-anchor {
+    align-self: center;
+  }
 }
 
 .create-game-page__title {

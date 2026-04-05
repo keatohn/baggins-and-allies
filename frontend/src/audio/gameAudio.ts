@@ -917,7 +917,15 @@ export function stopMenuAmbience(): void {
 }
 
 export function startMenuAmbience(mode: 'menu' | 'lobby' = 'menu'): void {
-  if (menuLoop && currentMenuAmbienceMode === mode) return;
+  // Do not skip restart when autoplay was blocked: play() may have rejected while menuLoop
+  // still exists, which would leave ambience silent until route change without this check.
+  if (menuLoop && currentMenuAmbienceMode === mode) {
+    try {
+      if (!menuLoop.getActiveElement().paused) return;
+    } catch {
+      /* keep going */
+    }
+  }
   stopTurnCueImmediate();
   stopMenuAmbience();
   const vol = readMenuMusicVolume();
@@ -931,9 +939,32 @@ export function startMenuAmbience(mode: 'menu' | 'lobby' = 'menu'): void {
     const pair = new MenuLoopPair(urlA, urlB, sessionId);
     menuLoop = pair;
     currentMenuAmbienceMode = mode;
-    void pair.startFirstPlay().then(() => {
-      if (sessionId !== menuSession.v || menuLoop !== pair) return;
-      fadeGainMenu(pair.a, 0, 1, MENU_FADE_IN_MS, menuSession, sessionId);
-    });
+    void pair
+      .startFirstPlay()
+      .then(() => {
+        if (sessionId !== menuSession.v || menuLoop !== pair) return;
+        fadeGainMenu(pair.a, 0, 1, MENU_FADE_IN_MS, menuSession, sessionId);
+      })
+      .catch(() => {
+        /* Autoplay policy: play() may reject until user gesture; resumeMenuAmbienceIfPaused retries. */
+      });
   });
+}
+
+/**
+ * Call from a user gesture (e.g. pointerdown) when menu/lobby ambience should be audible.
+ * Browsers often block programmatic play() until the user interacts with the page.
+ */
+export function resumeMenuAmbienceIfPaused(): void {
+  if (!menuLoop) return;
+  if (isGameAudioMuted()) return;
+  const vol = readMenuMusicVolume();
+  if (vol <= 0.001) return;
+  const active = menuLoop.getActiveElement();
+  if (!active.paused) return;
+  const sid = menuLoop.sessionId;
+  void active.play().then(() => {
+    if (sid !== menuSession.v || menuLoop?.getActiveElement() !== active) return;
+    fadeGainMenu(active, 0, 1, MENU_FADE_IN_MS, menuSession, sid);
+  }).catch(() => {});
 }
