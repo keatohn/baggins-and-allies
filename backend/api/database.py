@@ -3,6 +3,7 @@ Database setup for Baggins & Allies.
 
 - Local: SQLite at backend/api/game.db unless overridden.
 - Production SQLite: set SQLITE_DATABASE_PATH (e.g. /data/game.db on Railway volume);
+  SQLITE_DATABASE is accepted as an alias if the path was set under that name by mistake.
   leave DATABASE_URL unset. See docs/PRODUCTION_DEPLOYMENT.md.
 - Production Postgres: set DATABASE_URL (e.g. Heroku/Railway Postgres).
 """
@@ -18,8 +19,9 @@ if _raw_url and _raw_url.startswith("postgres://"):
 elif _raw_url:
     DATABASE_URL = _raw_url
 else:
-    # Railway/local: optional persistent path (e.g. volume mount `/data/game.db`)
-    _sqlite_path = os.environ.get("SQLITE_DATABASE_PATH")
+    # Railway/local: optional persistent path (e.g. volume mount `/data/game.db`).
+    # Accept SQLITE_DATABASE as alias — easy to misname; only SQLITE_DATABASE_PATH was documented.
+    _sqlite_path = os.environ.get("SQLITE_DATABASE_PATH") or os.environ.get("SQLITE_DATABASE")
     if _sqlite_path:
         _sqlite_abs = os.path.abspath(_sqlite_path)
         parent = os.path.dirname(_sqlite_abs)
