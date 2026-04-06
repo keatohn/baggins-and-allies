@@ -1224,8 +1224,14 @@
   }
 }
 
-/* Header modals (stats, unit stats, specials, help) — compact on phones & short landscape */
-@media (max-width: 767px), (max-height: 520px) and (orientation: landscape), (max-height: 420px) {
+/*
+ * Header modals — compact on narrow viewports only.
+ * Height-only breakpoints used to fire on wide desktop windows (short height) and wrecked layout;
+ * gate them with max-width (960px) so large-phone landscape still matches but wide desktop does not.
+ */
+@media (max-width: 767px),
+  ((max-width: 960px) and (max-height: 520px) and (orientation: landscape)),
+  ((max-width: 960px) and (max-height: 420px)) {
   /* Game stats: modest width + fixed table layout (see base .stats-modal .header-stats-table) */
   .modal.stats-modal {
     min-width: 0 !important;

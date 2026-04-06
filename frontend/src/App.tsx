@@ -649,7 +649,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   const [highlightedTerritories, setHighlightedTerritories] = useState<string[]>([]);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const w = localStorage.getItem('sidebarWidth');
-    return w != null ? Math.min(600, Math.max(260, Number(w))) : 360;
+    return w != null ? Math.min(780, Math.max(260, Number(w))) : 400;
   });
   const [viewportWidth, setViewportWidth] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth : 1200,
@@ -769,8 +769,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
             : landscapeShort
               ? Math.min(308, Math.floor(viewportWidth * 0.35))
               : viewportWidth < 1100
-                ? Math.min(560, Math.floor(viewportWidth * 0.46))
-                : 640;
+                ? Math.min(620, Math.floor(viewportWidth * 0.48))
+                : 760;
     return Math.min(sidebarWidth, Math.max(196, cap));
   }, [sidebarCollapsed, sidebarWidth, viewportWidth, viewportHeight]);
   useEffect(() => {
@@ -3284,7 +3284,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     const onMove = (e: MouseEvent) => {
       if (resizeStartRef.current === null) return;
       const dx = resizeStartRef.current.x - e.clientX;
-      const newWidth = Math.min(600, Math.max(260, resizeStartRef.current.width + dx));
+      const newWidth = Math.min(780, Math.max(260, resizeStartRef.current.width + dx));
       setSidebarWidth(newWidth);
       resizeStartRef.current = { x: e.clientX, width: newWidth };
     };
