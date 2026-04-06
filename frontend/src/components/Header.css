@@ -460,6 +460,8 @@
   background: var(--parchment-dark);
   max-height: min(60vh, 500px);
   overflow-y: auto;
+  /* Flex child of .modal: allows fixed-layout tables to respect column widths */
+  min-width: 0;
 }
 
 /* Help: taller scroll area than default stats/specials */
@@ -746,9 +748,14 @@
 
 .unit-stats-modal .unit-stats-faction-row .stats-col-unit {
   padding-left: 0.75rem;
+}
+
+/* Flex must stay inside the cell — display:flex on <td> breaks table column alignment */
+.unit-stats-modal .unit-stats-name-cell {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  min-width: 0;
 }
 
 .stats-modal .stats-faction-icon {
@@ -790,9 +797,6 @@
 }
 
 .unit-stats-modal .unit-stats-unit-row .stats-col-unit {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
   padding-left: 2rem;
 }
 
@@ -1172,6 +1176,11 @@
     font-size: 1.32rem;
   }
 
+  /* SP shares stats-col-num + stats-col-specials; lock size so it never picks up body-cell specials styling */
+  .unit-stats-modal .header-stats-table.header-stats-table--units thead th.stats-col-specials {
+    font-size: 1.32rem;
+  }
+
   .stats-modal .stats-alliance-row td {
     font-size: 1.38rem;
   }
@@ -1493,6 +1502,9 @@
 
   .unit-stats-modal .unit-stats-unit-row .stats-col-unit {
     padding-left: 0.85rem;
+  }
+
+  .unit-stats-modal .unit-stats-unit-row .unit-stats-name-cell {
     gap: 0.35rem;
   }
 

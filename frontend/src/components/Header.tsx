@@ -497,17 +497,21 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
                         return [
                           <tr key={`faction-${fid}`} className="unit-stats-faction-row">
                             <td colSpan={8} className="stats-col-unit">
-                              {fd?.icon && (fd?.alliance === 'good' || fd?.alliance === 'evil') && (
-                                <img className="unit-stats-faction-icon" src={fd.icon} alt="" aria-hidden />
-                              )}
-                              <span>{fd?.name ?? fid}</span>
+                              <div className="unit-stats-name-cell">
+                                {fd?.icon && (fd?.alliance === 'good' || fd?.alliance === 'evil') && (
+                                  <img className="unit-stats-faction-icon" src={fd.icon} alt="" aria-hidden />
+                                )}
+                                <span>{fd?.name ?? fid}</span>
+                              </div>
                             </td>
                           </tr>,
                           ...units.map(u => (
                             <tr key={u.id} className="unit-stats-unit-row">
                               <td className="stats-col-unit">
-                                <img src={u.icon} alt="" className="unit-stats-unit-icon" aria-hidden />
-                                <span className="unit-name-text">{u.name}</span>
+                                <div className="unit-stats-name-cell">
+                                  <img src={u.icon} alt="" className="unit-stats-unit-icon" aria-hidden />
+                                  <span className="unit-name-text">{u.name}</span>
+                                </div>
                               </td>
                               <td className="stats-col-num">{u.cost}</td>
                               <td className="stats-col-num">{u.attack}</td>
