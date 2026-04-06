@@ -27,6 +27,8 @@ interface MobilizationTrayProps {
   selectedCampIndex: number | null;
   onSelectUnit: (unitId: string | null) => void;
   onSelectCamp: (campIndex: number | null) => void;
+  /** Mobile / tap: arm “mobilize all” then tap a valid territory (same flow as single-stack tap). */
+  onTapMobilizeAll?: () => void;
   activeDragId?: string | null;
 }
 
@@ -120,10 +122,12 @@ function DraggableMobilizeAllButton({
   factionColor,
   activeDragId,
   disabled,
+  onTapMobilizeAll,
 }: {
   factionColor: string;
   activeDragId?: string | null;
   disabled: boolean;
+  onTapMobilizeAll?: () => void;
 }) {
   const dragId = 'mobilize-all';
   const isActiveDrag = activeDragId === dragId;
@@ -144,6 +148,9 @@ function DraggableMobilizeAllButton({
       className={`mobilize-all-btn${isActiveDrag ? ' dragging-source' : ''}`}
       style={{ ...style, borderColor: factionColor }}
       title="Mobilize all remaining stacks to a single destination"
+      onClick={() => {
+        if (!disabled) onTapMobilizeAll?.();
+      }}
       {...attributes}
       {...listeners}
       aria-label="Mobilize all stacks"
@@ -164,6 +171,7 @@ function MobilizationTray({
   selectedCampIndex,
   onSelectUnit,
   onSelectCamp,
+  onTapMobilizeAll,
   activeDragId = null,
 }: MobilizationTrayProps) {
   if (!isOpen) return null;
@@ -183,6 +191,7 @@ function MobilizationTray({
             factionColor={factionColor}
             activeDragId={activeDragId}
             disabled={!canMobilizeAll}
+            onTapMobilizeAll={onTapMobilizeAll}
           />
         </div>
       )}

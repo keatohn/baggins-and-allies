@@ -166,7 +166,15 @@ button.page-menu-btn:hover:not(:disabled) {
     box-sizing: border-box;
   }
 
-  .modal.stats-modal,
+  /* Game stats: readable width — full bleed was stretching the table */
+  .modal.stats-modal {
+    min-width: 0 !important;
+    width: min(100%, 26rem) !important;
+    max-width: min(100%, 26rem) !important;
+    max-height: min(92dvh, 92vh) !important;
+    border-radius: 8px;
+  }
+
   .modal.specials-modal,
   .modal.unit-stats-modal,
   .modal.help-modal,

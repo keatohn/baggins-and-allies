@@ -609,16 +609,37 @@
   min-width: 2.75rem;
 }
 
+/* Game stats: stable columns so numbers stay under S / T / PP / … (not stretched with full-width table) */
+.stats-modal .header-stats-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.stats-modal .header-stats-table thead th:first-child,
+.stats-modal .header-stats-table tbody td:first-child {
+  width: 34%;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.stats-modal .header-stats-table th.stats-col-num,
+.stats-modal .header-stats-table td.stats-col-num {
+  width: 11%;
+}
+
 .unit-stats-modal .header-stats-table th.stats-col-specials {
   text-align: left;
-  min-width: 18rem;
-  width: 22%;
+  min-width: 9rem;
+  width: 18%;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
 }
 
 .unit-stats-modal .header-stats-table td.stats-col-specials {
-  font-size: 0.82rem;
+  font-size: 0.68rem;
   max-width: none;
-  white-space: nowrap;
+  white-space: normal;
+  line-height: 1.3;
 }
 
 /* Make Unit Stats modal wider so SP column can fit on one line */
@@ -706,9 +727,10 @@
   font-size: 0.95rem;
 }
 
-/* SP column: smaller font, same as unit name; blank when no specials */
+/* SP column — compact text (lists of special codes) */
 .unit-stats-modal .unit-stats-unit-row td.stats-col-num.stats-col-specials {
-  font-size: 0.85rem;
+  font-size: 0.7rem;
+  line-height: 1.25;
   font-family: var(--font-parchment);
 }
 
@@ -1190,12 +1212,21 @@
 
 /* Header modals (stats, unit stats, specials, help) — compact on phones & short landscape */
 @media (max-width: 767px), (max-height: 520px) and (orientation: landscape), (max-height: 420px) {
-  /* Stats tables: use nearly full viewport width (36rem cap left huge gutters in landscape) */
-  .modal.stats-modal,
+  /* Game stats: modest width + fixed table layout (see base .stats-modal .header-stats-table) */
+  .modal.stats-modal {
+    min-width: 0 !important;
+    width: min(26rem, calc(100vw - 1rem)) !important;
+    max-width: min(26rem, calc(100vw - 1rem)) !important;
+    max-height: min(90dvh, 92vh) !important;
+    border-width: 2px;
+    border-radius: 8px;
+  }
+
+  /* Unit stats: cap width; table can extend horizontally inside scroll area */
   .modal.unit-stats-modal {
     min-width: 0 !important;
-    width: calc(100vw - 0.75rem) !important;
-    max-width: calc(100vw - 0.75rem) !important;
+    width: min(44rem, calc(100vw - 0.75rem)) !important;
+    max-width: min(44rem, calc(100vw - 0.75rem)) !important;
     max-height: min(90dvh, 92vh) !important;
     border-width: 2px;
     border-radius: 8px;
@@ -1255,9 +1286,13 @@
     max-height: min(72dvh, 82vh) !important;
   }
 
-  .stats-modal .header-stats-table,
-  .unit-stats-modal .header-stats-table {
+  .stats-modal .header-stats-table {
     width: 100%;
+  }
+
+  .unit-stats-modal .header-stats-table {
+    width: max-content;
+    min-width: 100%;
   }
 
   .help-section {
@@ -1382,20 +1417,20 @@
   }
 
   .unit-stats-modal .header-stats-table th.stats-col-specials {
-    min-width: 5.5rem;
+    min-width: 5rem;
     width: auto;
-    max-width: 42vw;
+    max-width: 12rem;
   }
 
   .unit-stats-modal .header-stats-table td.stats-col-specials {
-    font-size: clamp(0.58rem, 2.1vw, 0.68rem);
+    font-size: clamp(0.5rem, 1.75vw, 0.6rem);
     white-space: normal;
     word-break: break-word;
-    line-height: 1.25;
+    line-height: 1.22;
   }
 
   .unit-stats-modal .unit-stats-unit-row td.stats-col-num.stats-col-specials {
-    font-size: clamp(0.58rem, 2.1vw, 0.68rem);
+    font-size: clamp(0.5rem, 1.75vw, 0.6rem);
   }
 
   .stats-modal-key,

@@ -1160,8 +1160,8 @@ button.danger:hover {
   .combat-modal .modal-header {
     flex-wrap: wrap;
     align-items: flex-start;
-    gap: 0.35rem;
-    padding: 0.45rem 0.65rem;
+    gap: 0.22rem;
+    padding: 0.28rem 0.45rem;
     border-bottom: 1px solid var(--ink-faded);
   }
 
@@ -1169,30 +1169,35 @@ button.danger:hover {
     flex: 1 1 100%;
     min-width: 0;
     margin: 0;
-    font-size: clamp(0.88rem, 3.8vw, 1.05rem);
-    line-height: 1.25;
+    font-size: clamp(0.65rem, 2.9vw, 0.82rem);
+    line-height: 1.2;
     word-break: break-word;
+    letter-spacing: 0.02em;
   }
 
   .combat-header-indicators {
     flex-wrap: wrap;
-    gap: 0.35rem;
+    gap: 0.22rem;
     max-width: 100%;
   }
 
   .round-indicator {
-    font-size: 0.85rem;
+    font-size: clamp(0.58rem, 2.4vw, 0.68rem);
+    line-height: 1.2;
   }
 
   .combat-modal .modal-header:has(.combat-modal-close-x) {
     position: relative;
-    padding-right: 2.75rem;
+    padding-right: 2.6rem;
   }
 
   .combat-modal-close-x {
     position: absolute;
-    top: 0.35rem;
-    right: 0.35rem;
+    top: 0.18rem;
+    right: 0.25rem;
+    width: 2rem;
+    height: 2rem;
+    font-size: 1.25rem;
   }
 
   /* Stacked layout: scroll the whole arena; each section keeps natural height (no equal-height squish) */
@@ -1245,7 +1250,7 @@ button.danger:hover {
   }
 
   .side-title {
-    font-size: 0.88rem;
+    font-size: clamp(0.68rem, 2.8vw, 0.8rem);
   }
 
   .side-header .faction-icon {
@@ -1290,16 +1295,16 @@ button.danger:hover {
   }
 
   .vs-divider>span {
-    font-size: 1.15rem;
+    font-size: clamp(0.78rem, 3vw, 0.95rem);
   }
 
   .vs-divider-terror {
-    font-size: 0.85rem;
+    font-size: clamp(0.62rem, 2.5vw, 0.72rem);
     order: 0;
   }
 
   .rolling-indicator {
-    font-size: 0.8rem;
+    font-size: clamp(0.58rem, 2.4vw, 0.68rem);
     width: 100%;
     text-align: center;
   }
@@ -1329,11 +1334,11 @@ button.danger:hover {
   }
 
   .stat-label {
-    font-size: 0.85rem;
-    min-width: 24px;
-    width: 24px;
-    height: 24px;
-    line-height: 24px;
+    font-size: clamp(0.62rem, 2.5vw, 0.72rem);
+    min-width: 20px;
+    width: 20px;
+    height: 20px;
+    line-height: 20px;
   }
 
   .unit-stack {
@@ -1362,9 +1367,9 @@ button.danger:hover {
   }
 
   .die {
-    width: 26px;
-    height: 26px;
-    padding: 2px;
+    width: 22px;
+    height: 22px;
+    padding: 1px;
   }
 
   .die .dot {
@@ -1377,20 +1382,20 @@ button.danger:hover {
   }
 
   .hits-count {
-    font-size: 0.88rem;
+    font-size: clamp(0.62rem, 2.5vw, 0.74rem);
   }
 
   .combat-side-casualty-order,
   .combat-side-cumulative-hits {
-    font-size: 0.65rem;
+    font-size: clamp(0.52rem, 2.1vw, 0.6rem);
   }
 
   .combat-result-overlay .combat-result {
-    padding: 0.45rem 0.85rem;
+    padding: 0.35rem 0.65rem;
   }
 
   .result-text {
-    font-size: 1.05rem;
+    font-size: clamp(0.78rem, 3.2vw, 0.92rem);
   }
 
   .combat-ladder-unit-token {
@@ -1398,20 +1403,21 @@ button.danger:hover {
     height: 24px;
   }
 
-  /* Footer: primary actions full-width, options below */
+  /* Footer: row 1 = primary buttons; row 2 = config pills in one wrapping band (not 3 stacked blocks) */
   .combat-modal .modal-footer {
     flex-direction: column;
     align-items: stretch;
-    gap: 0.55rem;
-    padding: 0.55rem 0.65rem;
-    padding-bottom: max(0.55rem, env(safe-area-inset-bottom, 0px));
+    gap: 0.32rem;
+    padding: 0.32rem 0.45rem;
+    padding-bottom: max(0.32rem, env(safe-area-inset-bottom, 0px));
   }
 
   .combat-modal .combat-actions {
     flex-direction: row;
     flex-wrap: wrap;
-    align-items: stretch;
-    gap: 0.45rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.32rem;
     width: 100%;
   }
 
@@ -1419,43 +1425,67 @@ button.danger:hover {
   .combat-modal .combat-actions>.combat-btn-start,
   .combat-modal .combat-actions>.combat-btn-retreat,
   .combat-modal .combat-actions>.combat-btn-continue {
-    flex: 1 1 calc(50% - 0.25rem);
-    min-width: min(140px, 42vw);
-    min-height: 44px;
+    flex: 1 1 calc(50% - 0.2rem);
+    max-width: calc(50% - 0.2rem);
+    min-width: 0;
+    min-height: 38px;
     box-sizing: border-box;
+    font-size: clamp(0.65rem, 2.6vw, 0.78rem);
+    padding: 0.32rem 0.45rem;
   }
 
   .combat-modal .combat-actions>.combat-spectator-label {
     flex: 1 1 100%;
     width: 100%;
     text-align: center;
-    padding: 0.35rem 0;
+    padding: 0.22rem 0;
+    font-size: clamp(0.58rem, 2.3vw, 0.68rem);
   }
 
   .combat-modal .combat-options-pills {
     margin-left: 0;
     width: 100%;
     flex: 1 1 100%;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.45rem;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.28rem 0.4rem;
+    row-gap: 0.28rem;
   }
 
   .combat-modal .combat-options-row {
-    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.22rem;
+    width: auto;
+    flex: 0 1 auto;
+    max-width: 100%;
+  }
+
+  .combat-modal .combat-options-field-label {
+    font-size: clamp(0.5rem, 1.9vw, 0.58rem);
+    line-height: 1.15;
+    color: var(--ink-faded);
+    max-width: 4.8rem;
+    text-align: left;
   }
 
   .combat-modal .combat-pill-group {
-    display: flex;
-    width: 100%;
-    justify-content: stretch;
+    display: inline-flex;
+    width: auto;
+    flex: 0 0 auto;
+    border-width: 1px;
+    border-radius: 4px;
   }
 
   .combat-modal .combat-pill {
-    flex: 1;
-    font-size: 0.75rem;
-    padding: 0.4rem 0.35rem;
-    min-height: 40px;
+    flex: 0 1 auto;
+    min-width: 0;
+    font-size: clamp(0.52rem, 2vw, 0.62rem);
+    padding: 0.18rem 0.28rem;
+    min-height: 30px;
   }
 
   .combat-modal .retreat-confirm .confirm-buttons,
@@ -1464,8 +1494,85 @@ button.danger:hover {
     width: 100%;
   }
 
+  .combat-modal .confirm-message,
+  .combat-modal .selection-message {
+    font-size: clamp(0.62rem, 2.5vw, 0.74rem);
+    line-height: 1.35;
+  }
+
   .combat-modal .retreat-option {
     width: 100%;
-    min-height: 44px;
+    min-height: 40px;
+    font-size: clamp(0.62rem, 2.4vw, 0.74rem);
+    padding: 0.35rem 0.65rem;
+  }
+
+  .combat-modal .cancel-retreat {
+    font-size: clamp(0.58rem, 2.2vw, 0.68rem);
+    padding: 0.28rem 0.65rem;
+  }
+}
+
+/* Portrait phones: keep footer to ~2 rows (actions + wrapped pill band) */
+@media (max-width: 767px) and (orientation: portrait) {
+  .combat-modal .combat-options-pills {
+    gap: 0.22rem 0.32rem;
+  }
+
+  .combat-modal .combat-pill {
+    min-height: 28px;
+    padding: 0.14rem 0.22rem;
+  }
+
+  .combat-modal .combat-actions>.combat-btn-close,
+  .combat-modal .combat-actions>.combat-btn-start,
+  .combat-modal .combat-actions>.combat-btn-retreat,
+  .combat-modal .combat-actions>.combat-btn-continue {
+    min-height: 36px;
+  }
+
+  /*
+   * Default mobile uses .dice-stack { flex: 1 1 100% }, which wraps dice under unit icons.
+   * On portrait, keep stat | units | dice on one shelf row; dice sit to the right (same as desktop).
+   */
+  .unit-row-shelf {
+    flex-wrap: nowrap;
+  }
+
+  .unit-row-shelf>.unit-stack {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .unit-row-shelf>.dice-stack {
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: flex-end;
+  }
+
+  .siegework-split-row-units-dice {
+    flex-wrap: nowrap;
+  }
+
+  .siegework-split-row-units-dice>.unit-stack {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .siegework-split-row-units-dice>.dice-stack {
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: flex-end;
+  }
+
+  .attacker-ladder-dice-row {
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+
+  .attacker-ladder-dice-row .attacker-ladder-dice-stack {
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: flex-end;
   }
 }

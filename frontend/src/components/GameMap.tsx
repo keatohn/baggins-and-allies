@@ -851,6 +851,8 @@ function GameMap({
   /** Tap All (no drag) then tap destination — mobile-friendly bulk move */
   const bulkAllTapStartRef = useRef<{ territoryId: string; x: number; y: number } | null>(null);
   const [tapBulkAllFromTerritory, setTapBulkAllFromTerritory] = useState<string | null>(null);
+  /** Tap tray “All” then tap territory — mirrors single-stack tap mobilization on mobile */
+  const [tapMobilizationAll, setTapMobilizationAll] = useState(false);
   const [mapControlsCollapsed, setMapControlsCollapsed] = useState(false);
   const [mapKeyOpen, setMapKeyOpen] = useState(false);
   /** On touch: which territory's unit stack is expanded (tap stack to expand, then tap unit to select) */
@@ -859,6 +861,17 @@ function GameMap({
   useEffect(() => {
     activeDragIdRef.current = activeDragId;
   }, [activeDragId]);
+
+  useEffect(() => {
+    if (!tapMobilizationAll) return;
+    const uid = mobilizationTray?.selectedUnitId ?? null;
+    const camp = mobilizationTray?.selectedCampIndex ?? null;
+    if (uid != null || camp != null) {
+      setTapMobilizationAll(false);
+      setValidDropTargets(new Set());
+      setBulkDragOverlay(null);
+    }
+  }, [tapMobilizationAll, mobilizationTray?.selectedUnitId, mobilizationTray?.selectedCampIndex]);
 
   useEffect(() => {
     if (!activeDragId) {
@@ -1851,6 +1864,7 @@ function GameMap({
         if (dx * dx + dy * dy >= 100) return;
         if (activeDragIdRef.current !== null) return;
         setTapSelectedUnit(null);
+        setTapMobilizationAll(false);
         const { validTargets } = computeBulkAllMoveData(bulkStart.territoryId);
         setValidDropTargets(validTargets);
         setTapBulkAllFromTerritory(bulkStart.territoryId);
@@ -1866,6 +1880,7 @@ function GameMap({
       tapStartRef.current = null;
       if (distanceSq >= 100) return; // 10px threshold
       if (activeDragIdRef.current !== null) return; // Was a drag
+      setTapMobilizationAll(false);
       // Build tap-selected unit from territory/unit and show valid destinations
       const stacks = territoryUnits[start.territoryId] || [];
       const stack = stacks.find(s => s.unit_id === start.unitId);
@@ -1903,6 +1918,27 @@ function GameMap({
     return () => document.removeEventListener('pointerup', handler);
   }, [territoryUnits, territoryUnitsFull, territoryData, unitDefs, factionData, navalUnitIds, getValidTargets, gameState.phase, pendingMoves, computeBulkAllMoveData]);
 
+  const handleTapMobilizeAllFromTray = useCallback(() => {
+    if (!mobilizationTray?.canMobilizeAll || (mobilizationTray.purchases?.length ?? 0) <= 1) return;
+    mobilizationTray.onSelectUnit(null);
+    mobilizationTray.onSelectCamp(null);
+    setTapMobilizationAll(true);
+    const zones = mobilizationTray.mobilizationAllValidZones ?? [];
+    setValidDropTargets(new Set(zones));
+    const purchases = mobilizationTray.purchases ?? [];
+    const stacks: BulkDragOverlayStack[] = purchases.map(p => ({
+      unitId: p.unitId,
+      count: p.count,
+      unitDef: { name: p.name, icon: p.icon },
+      factionColor: mobilizationTray.factionColor ?? undefined,
+      isNaval: navalUnitIds.has(p.unitId),
+      passengerCount: 0,
+    }));
+    setBulkDragOverlay(stacks.length > 0 ? { stacks } : null);
+    setTapSelectedUnit(null);
+    setTapBulkAllFromTerritory(null);
+  }, [mobilizationTray, navalUnitIds]);
+
   // Handle drag start
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const data = event.active.data.current;
@@ -1913,6 +1949,7 @@ function GameMap({
     }
     setTapSelectedUnit(null); // Clear tap selection when starting a drag
     setTapBulkAllFromTerritory(null);
+    setTapMobilizationAll(false);
     bulkAllTapStartRef.current = null;
     setBulkDragOverlay(null);
     setActiveDragId(event.active.id as string);
@@ -2104,6 +2141,7 @@ function GameMap({
         }
       }
 
+      setTapMobilizationAll(false);
       setTapBulkAllFromTerritory(null);
       setBulkDragOverlay(null);
       setActiveUnit(null);
@@ -2610,6 +2648,7 @@ function GameMap({
   const handleDragCancel = useCallback(() => {
     lastMapDragPointerRef.current = null;
     setTapBulkAllFromTerritory(null);
+    setTapMobilizationAll(false);
     setBulkDragOverlay(null);
     setActiveUnit(null);
     setActiveDragId(null);
@@ -2631,6 +2670,25 @@ function GameMap({
       setValidDropTargets(new Set());
       return;
     }
+    // Tray “All” then tap valid mobilization destination (mobile)
+    if (tapMobilizationAll && territoryMatchesValidDrop(territoryId)) {
+      const resolvedId = resolveTerritoryDropId(territoryId) || territoryId;
+      const destToUse = validDropTargets.has(resolvedId) ? resolvedId : territoryId;
+      const purchases = mobilizationTray?.purchases ?? [];
+      const units = purchases.map(p => ({
+        unitId: p.unitId,
+        unitName: p.name,
+        unitIcon: p.icon,
+        count: p.count,
+      }));
+      if (units.length > 1) {
+        onMobilizationAllDrop?.(destToUse.trim(), units);
+      }
+      setTapMobilizationAll(false);
+      setValidDropTargets(new Set());
+      setBulkDragOverlay(null);
+      return;
+    }
     // Tap-to-drop: user previously tapped a unit; this territory is a valid destination
     if (tapSelectedUnit && territoryMatchesValidDrop(territoryId)) {
       const syntheticEvent = {
@@ -2644,10 +2702,15 @@ function GameMap({
       setTapSelectedUnit(null);
       return;
     }
-    const hadAnyTapMove = tapSelectedUnit != null || tapBulkAllFromTerritory != null;
+    const hadMobilizationAllTap = tapMobilizationAll;
+    const hadAnyTapMove = tapSelectedUnit != null || tapBulkAllFromTerritory != null || tapMobilizationAll;
     setTapSelectedUnit(null);
     setTapBulkAllFromTerritory(null);
-    if (hadAnyTapMove) setValidDropTargets(new Set());
+    setTapMobilizationAll(false);
+    if (hadAnyTapMove) {
+      setValidDropTargets(new Set());
+      if (hadMobilizationAllTap) setBulkDragOverlay(null);
+    }
     setExpandedStackKey(null);
     if (selectedTerritory === territoryId) {
       onTerritorySelect(null);
@@ -2661,10 +2724,13 @@ function GameMap({
     onUnitSelect,
     tapSelectedUnit,
     tapBulkAllFromTerritory,
+    tapMobilizationAll,
+    mobilizationTray?.purchases,
     validDropTargets,
     territoryMatchesValidDrop,
     resolveTerritoryDropId,
     onBulkMoveDrop,
+    onMobilizationAllDrop,
     handleDragEnd,
   ]);
 
@@ -2681,7 +2747,9 @@ function GameMap({
     if (dx * dx + dy * dy >= PAN_CLICK_THRESHOLD_PX * PAN_CLICK_THRESHOLD_PX) return; // Was a pan, not a click
     setTapSelectedUnit(null);
     setTapBulkAllFromTerritory(null);
+    setTapMobilizationAll(false);
     setValidDropTargets(new Set());
+    setBulkDragOverlay(null);
     setExpandedStackKey(null);
     onTerritorySelect(null);
     onUnitSelect(null);
@@ -2693,6 +2761,7 @@ function GameMap({
     const target = e.target as HTMLElement;
     if (target.closest('.unit-token')) return; // Don't start pan when pressing on a unit (so unit drag works)
     if (target.closest('.all-stacks-drag-btn')) return; // Bulk "All" stack drag uses dnd-kit
+    if (target.closest('.mobilize-all-btn')) return; // Mobilization tray “All”: tap or dnd-kit drag
     if (target.closest('.territory-units--sea-stack')) return; // Don't start pan when clicking boat stack (opens naval tray)
     if (target.closest('.sea-zone-tray-open-btn')) return; // Open boat list (mobile / tap)
 
@@ -2763,6 +2832,7 @@ function GameMap({
         if (
           target.closest('.unit-token') ||
           target.closest('.all-stacks-drag-btn') ||
+          target.closest('.mobilize-all-btn') ||
           target.closest('.territory-units--sea-stack') ||
           target.closest('.sea-zone-tray-open-btn')
         )
@@ -3124,7 +3194,8 @@ function GameMap({
                         hasMobilizationRoom &&
                         (activeDragId != null ? isValidDrop : (hasMobilizationSelected || (mobilizationTray?.purchases?.length ?? 0) > 0));
                       const isTapMoveTarget =
-                        (tapSelectedUnit != null || tapBulkAllFromTerritory != null) && territoryMatchesValidDrop(territoryId);
+                        (tapSelectedUnit != null || tapBulkAllFromTerritory != null || tapMobilizationAll) &&
+                        territoryMatchesValidDrop(territoryId);
                       return (
                         <DroppableTerritory
                           key={territoryId}
@@ -3877,6 +3948,7 @@ function GameMap({
             selectedCampIndex={mobilizationTray.selectedCampIndex}
             onSelectUnit={mobilizationTray.onSelectUnit}
             onSelectCamp={mobilizationTray.onSelectCamp}
+            onTapMobilizeAll={handleTapMobilizeAllFromTray}
             activeDragId={activeDragId}
           />
         )}
