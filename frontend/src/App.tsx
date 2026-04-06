@@ -767,10 +767,10 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           : viewportWidth < 768
             ? Math.min(landscapeShort ? 204 : 276, Math.floor(viewportWidth * (landscapeShort ? 0.29 : 0.35)))
             : landscapeShort
-              ? Math.min(280, Math.floor(viewportWidth * 0.32))
+              ? Math.min(308, Math.floor(viewportWidth * 0.35))
               : viewportWidth < 1100
-                ? Math.min(520, Math.floor(viewportWidth * 0.42))
-                : 600;
+                ? Math.min(560, Math.floor(viewportWidth * 0.46))
+                : 640;
     return Math.min(sidebarWidth, Math.max(196, cap));
   }, [sidebarCollapsed, sidebarWidth, viewportWidth, viewportHeight]);
   useEffect(() => {

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import {
+  setGameMusicVolume,
+  setGameSfxVolume,
+  setMenuMusicVolume,
+} from '../audio/gameAudio';
 import { api, getAuthToken, setAuthToken } from '../services/api';
 import type { AuthPlayer } from '../services/api';
 import './Profile.css';
@@ -288,6 +293,7 @@ export default function Profile() {
                     setMenuMusicVolumePct(v);
                     setAudioError(null);
                     audioSnapshotRef.current = { ...audioSnapshotRef.current, menuMusic: v };
+                    if (!muted && !audioSaving) setMenuMusicVolume(v / 100);
                   }}
                   disabled={muted || audioSaving}
                   className="profile-page__audio-range"
@@ -311,6 +317,7 @@ export default function Profile() {
                     setGameMusicVolumePct(v);
                     setAudioError(null);
                     audioSnapshotRef.current = { ...audioSnapshotRef.current, gameMusic: v };
+                    if (!muted && !audioSaving) setGameMusicVolume(v / 100);
                   }}
                   disabled={muted || audioSaving}
                   className="profile-page__audio-range"
@@ -334,6 +341,7 @@ export default function Profile() {
                     setSfxVolumePct(v);
                     setAudioError(null);
                     audioSnapshotRef.current = { ...audioSnapshotRef.current, sfx: v };
+                    if (!muted && !audioSaving) setGameSfxVolume(v / 100);
                   }}
                   disabled={muted || audioSaving}
                   className="profile-page__audio-range"

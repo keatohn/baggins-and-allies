@@ -613,18 +613,19 @@
 .stats-modal .header-stats-table {
   table-layout: fixed;
   width: 100%;
+  font-variant-numeric: tabular-nums;
 }
 
 .stats-modal .header-stats-table thead th:first-child,
 .stats-modal .header-stats-table tbody td:first-child {
-  width: 34%;
+  width: 30%;
   overflow-wrap: break-word;
   word-break: normal;
 }
 
 .stats-modal .header-stats-table th.stats-col-num,
 .stats-modal .header-stats-table td.stats-col-num {
-  width: 11%;
+  width: 11.67%;
 }
 
 .unit-stats-modal .header-stats-table th.stats-col-specials {
@@ -676,7 +677,11 @@
 .stats-modal .stats-faction-row .stats-col-faction {
   font-style: italic;
   padding-left: 0.75rem;
-  display: flex;
+  vertical-align: middle;
+}
+
+.stats-modal .stats-faction-row .stats-col-faction .stats-faction-cell-inner {
+  display: inline-flex;
   align-items: center;
   gap: 0.5rem;
 }
@@ -1081,11 +1086,20 @@
   flex-direction: column;
 }
 
+/* Game stats: wider than specials/help so numeric columns can breathe */
+.stats-modal {
+  max-width: min(880px, 94vw);
+}
+
 @media (min-width: 1024px) {
-  .stats-modal,
   .specials-modal {
     min-width: 640px;
     max-width: min(980px, 94vw);
+  }
+
+  .stats-modal {
+    min-width: 640px;
+    max-width: min(1080px, 96vw);
   }
 
   .stats-modal-body,
@@ -1375,6 +1389,9 @@
 
   .stats-modal .stats-faction-row .stats-col-faction {
     padding-left: 0.4rem;
+  }
+
+  .stats-modal .stats-faction-row .stats-col-faction .stats-faction-cell-inner {
     gap: 0.35rem;
   }
 

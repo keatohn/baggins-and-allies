@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import './PurchaseModal.css';
 
 interface UnitPurchaseInfo {
@@ -78,6 +78,39 @@ function compareUnitsForPurchase(a: UnitPurchaseInfo, b: UnitPurchaseInfo): numb
     || (a.specialLabels?.length ?? 0) - (b.specialLabels?.length ?? 0)
     || a.name.localeCompare(b.name)
   );
+}
+
+/** Cart costs from unit quantities + camp + repair (must match totalCosts / remainingResources logic). */
+function buildPurchaseCostTotals(
+  quantities: Record<string, number>,
+  units: UnitPurchaseInfo[],
+  campQty: number,
+  campCostPower: number,
+  repairPowerTotal: number,
+): Record<string, number> {
+  const costs: Record<string, number> = {};
+  for (const [id, qty] of Object.entries(quantities)) {
+    if (qty <= 0) continue;
+    const u = units.find(x => x.id === id);
+    if (!u) continue;
+    for (const [r, amt] of Object.entries(u.cost)) {
+      costs[r] = (costs[r] || 0) + amt * qty;
+    }
+  }
+  if (campCostPower > 0 && campQty > 0) {
+    costs.power = (costs.power || 0) + campQty * campCostPower;
+  }
+  if (repairPowerTotal > 0) {
+    costs.power = (costs.power || 0) + repairPowerTotal;
+  }
+  return costs;
+}
+
+function canAffordCostTotals(available: Record<string, number>, costs: Record<string, number>): boolean {
+  for (const [r, spent] of Object.entries(costs)) {
+    if ((available[r] || 0) < spent) return false;
+  }
+  return true;
 }
 
 function UnitStatBlock({ unit }: { unit: UnitPurchaseInfo }) {
@@ -245,7 +278,7 @@ function PurchaseModal({
     return remaining;
   }, [availableResources, totalCosts]);
 
-  // Check if player can afford a unit
+  // Check if player can afford one more of this unit (for + button enablement; uses current render state)
   const canAfford = (unit: UnitPurchaseInfo) => {
     for (const [resource, amount] of Object.entries(unit.cost)) {
       if ((remainingResources[resource] || 0) < amount) {
@@ -255,42 +288,65 @@ function PurchaseModal({
     return true;
   };
 
-  const handleQuantityChange = (unitId: string, delta: number) => {
-    setQuantities(prev => {
-      const current = prev[unitId] || 0;
-      const newQty = Math.max(0, current + delta);
-      const totalInCart = Object.values(prev).reduce((s, q) => s + q, 0) - current + newQty;
+  const handleQuantityChange = useCallback(
+    (unitId: string, delta: number) => {
+      setQuantities(prev => {
+        const current = prev[unitId] || 0;
+        const newQty = Math.max(0, current + delta);
+        const unit = availableUnits.find(u => u.id === unitId);
+        if (!unit) return prev;
 
-      const unit = availableUnits.find(u => u.id === unitId);
-      if (!unit) return prev;
+        if (delta > 0) {
+          const tryState = { ...prev, [unitId]: newQty };
+          const tryCosts = buildPurchaseCostTotals(
+            tryState,
+            availableUnits,
+            campQuantity,
+            campCost,
+            repairCostTotal,
+          );
+          if (!canAffordCostTotals(availableResources, tryCosts)) return prev;
 
-      if (delta > 0) {
-        if (!canAfford(unit)) return prev;
-        if (mobilizationCapacity != null && totalInCart > mobilizationCapacity) return prev;
-        if (unit.isNaval && mobilizationSeaCapacity != null) {
-          const newSeaInCart = seaInCart - (prev[unitId] || 0) + newQty;
-          if (newSeaInCart > mobilizationSeaCapacity) return prev;
+          const totalInCart = Object.values(tryState).reduce((s, q) => s + q, 0);
+          if (mobilizationCapacity != null && totalInCart > mobilizationCapacity) return prev;
+
+          if (unit.isNaval && mobilizationSeaCapacity != null) {
+            const newSeaInCart = seaUnits.reduce((s, u) => s + (tryState[u.id] || 0), 0);
+            if (newSeaInCart > mobilizationSeaCapacity) return prev;
+          }
+          if (!unit.isNaval && (mobilizationLandCapacity != null || mobilizationCampLandCapacity != null)) {
+            const newLandInCart = nonNavalUnits.reduce((s, u) => s + (tryState[u.id] || 0), 0);
+            const campCap = mobilizationCampLandCapacity ?? mobilizationLandCapacity ?? 0;
+            const homeSlots = nonNavalUnits
+              .filter(u => (tryState[u.id] || 0) > 0 && (u.homeTerritoryCount ?? 0) > 0)
+              .reduce((s, u) => s + (u.homeTerritoryCount ?? 0), 0);
+            const newLandCap = Math.min(campCap + homeSlots, mobilizationLandCapacity ?? Infinity);
+            if (newLandInCart > newLandCap) return prev;
+          }
         }
-        if (!unit.isNaval && (mobilizationLandCapacity != null || mobilizationCampLandCapacity != null)) {
-          const newQuantities = { ...prev, [unitId]: newQty };
-          const newLandInCart = nonNavalUnits.reduce((s, u) => s + (newQuantities[u.id] || 0), 0);
-          const campCap = mobilizationCampLandCapacity ?? mobilizationLandCapacity ?? 0;
-          const homeSlots = nonNavalUnits
-            .filter(u => (newQuantities[u.id] || 0) > 0 && (u.homeTerritoryCount ?? 0) > 0)
-            .reduce((s, u) => s + (u.homeTerritoryCount ?? 0), 0);
-          const newLandCap = Math.min(campCap + homeSlots, mobilizationLandCapacity ?? Infinity);
-          if (newLandInCart > newLandCap) return prev;
+
+        if (newQty === 0) {
+          const { [unitId]: _, ...rest } = prev;
+          return rest;
         }
-      }
 
-      if (newQty === 0) {
-        const { [unitId]: _, ...rest } = prev;
-        return rest;
-      }
-
-      return { ...prev, [unitId]: newQty };
-    });
-  };
+        return { ...prev, [unitId]: newQty };
+      });
+    },
+    [
+      availableUnits,
+      availableResources,
+      campQuantity,
+      campCost,
+      repairCostTotal,
+      mobilizationCapacity,
+      mobilizationSeaCapacity,
+      mobilizationLandCapacity,
+      mobilizationCampLandCapacity,
+      nonNavalUnits,
+      seaUnits,
+    ],
+  );
 
   const totalUnits = Object.values(quantities).reduce((sum, qty) => sum + qty, 0);
   const atMobilizationCap =
@@ -345,7 +401,7 @@ function PurchaseModal({
       <div className="modal purchase-modal" onClick={e => e.stopPropagation()}>
         <header className="modal-header">
           <h2>Purchase</h2>
-          <button className="close-btn" onClick={handleCancel}>×</button>
+          <button type="button" className="close-btn" onClick={handleCancel}>×</button>
         </header>
 
         <div className="purchase-modal-tabs">
@@ -438,9 +494,9 @@ function PurchaseModal({
                       <span className="cost-value">{formatCost(unit.cost)}</span>
                     </div>
                     <div className="quantity-controls">
-                      <button onClick={() => handleQuantityChange(unit.id, -1)} disabled={qty === 0}>−</button>
+                      <button type="button" onClick={() => handleQuantityChange(unit.id, -1)} disabled={qty === 0}>−</button>
                       <span className="quantity">{qty}</span>
-                      <button onClick={() => handleQuantityChange(unit.id, 1)} disabled={!affordable || atMobilizationCap}>+</button>
+                      <button type="button" onClick={() => handleQuantityChange(unit.id, 1)} disabled={!affordable || atMobilizationCap}>+</button>
                     </div>
                   </div>
                 );
@@ -476,9 +532,9 @@ function PurchaseModal({
                       <span className="cost-value">{formatCost(unit.cost)}</span>
                     </div>
                     <div className="quantity-controls">
-                      <button onClick={() => handleQuantityChange(unit.id, -1)} disabled={qty === 0}>−</button>
+                      <button type="button" onClick={() => handleQuantityChange(unit.id, -1)} disabled={qty === 0}>−</button>
                       <span className="quantity">{qty}</span>
-                      <button onClick={() => handleQuantityChange(unit.id, 1)} disabled={!affordable || atMobilizationCap}>+</button>
+                      <button type="button" onClick={() => handleQuantityChange(unit.id, 1)} disabled={!affordable || atMobilizationCap}>+</button>
                     </div>
                   </div>
                 );
@@ -514,9 +570,9 @@ function PurchaseModal({
                       <span className="cost-value">{formatCost(unit.cost)}</span>
                     </div>
                     <div className="quantity-controls">
-                      <button onClick={() => handleQuantityChange(unit.id, -1)} disabled={qty === 0}>−</button>
+                      <button type="button" onClick={() => handleQuantityChange(unit.id, -1)} disabled={qty === 0}>−</button>
                       <span className="quantity">{qty}</span>
-                      <button onClick={() => handleQuantityChange(unit.id, 1)} disabled={!affordable || atMobilizationCap}>+</button>
+                      <button type="button" onClick={() => handleQuantityChange(unit.id, 1)} disabled={!affordable || atMobilizationCap}>+</button>
                     </div>
                   </div>
                 );
@@ -543,9 +599,9 @@ function PurchaseModal({
                   <span className="cost-value">{campCost}P</span>
                 </div>
                 <div className="quantity-controls">
-                  <button onClick={() => handleCampChange(-1)} disabled={campQuantity === 0}>−</button>
+                  <button type="button" onClick={() => handleCampChange(-1)} disabled={campQuantity === 0}>−</button>
                   <span className="quantity">{campQuantity}</span>
-                  <button onClick={() => handleCampChange(1)} disabled={!canAffordOneMoreCamp || atCampCap}>+</button>
+                  <button type="button" onClick={() => handleCampChange(1)} disabled={!canAffordOneMoreCamp || atCampCap}>+</button>
                 </div>
               </div>
             ) : null}
@@ -567,9 +623,9 @@ function PurchaseModal({
                         <span className="cost-value">{strongholdRepairCost}P</span>
                       </div>
                       <div className="quantity-controls">
-                        <button onClick={() => handleRepairTargetChange(s.territoryId, -1)} disabled={target <= s.currentHp}>−</button>
+                        <button type="button" onClick={() => handleRepairTargetChange(s.territoryId, -1)} disabled={target <= s.currentHp}>−</button>
                         <span className="quantity">{target}</span>
-                        <button onClick={() => handleRepairTargetChange(s.territoryId, 1)} disabled={!canAffordMore || atCap}>+</button>
+                        <button type="button" onClick={() => handleRepairTargetChange(s.territoryId, 1)} disabled={!canAffordMore || atCap}>+</button>
                       </div>
                     </div>
                   );
@@ -591,8 +647,8 @@ function PurchaseModal({
             </span>
           </div>
           <div className="modal-actions">
-            <button onClick={handleCancel}>Cancel</button>
-            <button className="primary" onClick={handleConfirm}>Confirm</button>
+            <button type="button" onClick={handleCancel}>Cancel</button>
+            <button type="button" className="primary" onClick={handleConfirm}>Confirm</button>
           </div>
         </footer>
       </div>

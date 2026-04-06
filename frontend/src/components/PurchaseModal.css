@@ -472,7 +472,9 @@
     flex-wrap: nowrap;
     align-items: flex-start;
     gap: 0.4rem;
-    padding: 0.5rem 0.2rem;
+    padding: 0.6rem 0.25rem;
+    position: relative;
+    isolation: isolate;
   }
 
   .purchase-modal .unit-info {
@@ -561,6 +563,7 @@
     flex: 0 0 auto;
     margin-left: 0;
     gap: 0.35rem;
+    touch-action: manipulation;
   }
 
   .purchase-modal .quantity-controls button {

@@ -303,10 +303,12 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
                             return (
                               <tr key={fid} className="stats-faction-row">
                                 <td className="stats-col-faction">
-                                  {fd?.icon && (
-                                    <img className="stats-faction-icon" src={fd.icon} alt="" aria-hidden />
-                                  )}
-                                  <span>{name}</span>
+                                  <span className="stats-faction-cell-inner">
+                                    {fd?.icon && (
+                                      <img className="stats-faction-icon" src={fd.icon} alt="" aria-hidden />
+                                    )}
+                                    <span>{name}</span>
+                                  </span>
                                 </td>
                                 <td className="stats-col-num">{st.strongholds}</td>
                                 <td className="stats-col-num">{st.territories}</td>
