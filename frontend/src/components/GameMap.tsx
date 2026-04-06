@@ -575,6 +575,8 @@ interface GameMapProps {
   /** Which boat each pending passenger instance ID is assigned to (boatInstanceId -> instanceIds[]). */
   loadAllocation?: Record<string, string[]>;
   onLoadAllocationChange?: (allocation: Record<string, string[]>) => void;
+  /** Canonical destination while sidebar mobilization confirm is open — used to clear map click-focus when confirm/cancel finishes. */
+  mobilizationPendingDestination?: string | null;
 }
 
 const MAX_SCALE = 3;
@@ -638,6 +640,7 @@ function DroppableTerritory({
   isSelected,
   isHighlighted,
   isValidDrop,
+  highlightMuted = false,
   onClick,
 }: {
   territoryId: string;
@@ -647,6 +650,8 @@ function DroppableTerritory({
   isSelected: boolean;
   isHighlighted: boolean;
   isValidDrop: boolean;
+  /** Weaker outline — other valid mobilization zones while a destination is pending confirm. */
+  highlightMuted?: boolean;
   onClick: (e: React.MouseEvent) => void;
 }) {
   const tid = typeof territoryId === 'string' ? territoryId : (territoryId != null && typeof territoryId === 'object' && 'id' in (territoryId as object) ? String((territoryId as { id: string }).id) : (territoryId != null && typeof territoryId === 'object' && 'territoryId' in (territoryId as object) ? String((territoryId as { territoryId: string }).territoryId) : String(territoryId ?? '')));
@@ -654,7 +659,8 @@ function DroppableTerritory({
     id: `territory-${tid}`,
     data: { territoryId: tid },
   });
-  const pathClass = `territory-path ${isSeaZone ? 'territory-path--sea' : 'territory-path--svg-glow'} ${isSelected ? 'selected' : ''} ${isHighlighted || isValidDrop ? 'highlight' : ''} ${isOver && isValidDrop ? 'drop-target' : ''}`;
+  const showStrongHighlight = (isHighlighted || isValidDrop) && !highlightMuted;
+  const pathClass = `territory-path ${isSeaZone ? 'territory-path--sea' : 'territory-path--svg-glow'} ${isSelected ? 'selected' : ''} ${showStrongHighlight ? 'highlight' : ''} ${highlightMuted ? 'highlight-muted' : ''} ${isOver && isValidDrop ? 'drop-target' : ''}`;
   const safeColor = color || '#d4c4a8';
   const glowVars = territoryGlowFromHex(safeColor);
   const glowFilterId = isSeaZone ? undefined : `territory-glow-${safeColor.replace(/^#/, '')}`;
@@ -766,6 +772,7 @@ function GameMap({
   pendingLoadPassengers,
   loadAllocation,
   onLoadAllocationChange,
+  mobilizationPendingDestination = null,
   pendingMoveConfirm: _pendingMoveConfirm,
   onDropDestination: _onDropDestination,
   onSetPendingMove,
@@ -857,10 +864,33 @@ function GameMap({
   const [mapKeyOpen, setMapKeyOpen] = useState(false);
   /** On touch: which territory's unit stack is expanded (tap stack to expand, then tap unit to select) */
   const [expandedStackKey, setExpandedStackKey] = useState<string | null>(null);
+  /** Set when user commits a mobilization destination (drop/tap); mutes other valid zones until confirm ends. Cleared when pending confirm clears in parent. */
+  const [mobilizationDestinationClickCanon, setMobilizationDestinationClickCanon] = useState<string | null>(null);
+  const prevMobilizationPendingDestRef = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
     activeDragIdRef.current = activeDragId;
   }, [activeDragId]);
+
+  /** After confirm/cancel, parent clears pending — restore full valid-zone highlights for the next mobilization. */
+  useEffect(() => {
+    const cur = mobilizationPendingDestination?.trim() || null;
+    if (prevMobilizationPendingDestRef.current === undefined) {
+      prevMobilizationPendingDestRef.current = cur;
+      return;
+    }
+    const prev = prevMobilizationPendingDestRef.current;
+    if (prev != null && cur == null) {
+      setMobilizationDestinationClickCanon(null);
+    }
+    prevMobilizationPendingDestRef.current = cur;
+  }, [mobilizationPendingDestination]);
+
+  useEffect(() => {
+    if (!isMobilizePhase) {
+      setMobilizationDestinationClickCanon(null);
+    }
+  }, [isMobilizePhase]);
 
   useEffect(() => {
     if (!tapMobilizationAll) return;
@@ -2136,6 +2166,8 @@ function GameMap({
             count: p.count,
           }));
           if (units.length > 1) {
+            const destCanon = resolveTerritoryDropId(destToUse.trim()) || destToUse.trim();
+            setMobilizationDestinationClickCanon(destCanon);
             onMobilizationAllDrop?.(destToUse.trim(), units);
           }
         }
@@ -2203,6 +2235,8 @@ function GameMap({
             ? Math.min(count, 1)
             : 0;
         if (cappedCount > 0) {
+          const destCanon = resolveTerritoryDropId(targetTerritory) || targetTerritory;
+          setMobilizationDestinationClickCanon(destCanon);
           onMobilizationDrop(targetTerritory, unitId, unitName, icon, cappedCount);
         }
       }
@@ -2661,6 +2695,7 @@ function GameMap({
     const dx = e.clientX - panStartPos.current.x;
     const dy = e.clientY - panStartPos.current.y;
     if (dx * dx + dy * dy >= PAN_CLICK_THRESHOLD_PX * PAN_CLICK_THRESHOLD_PX) return; // Was a pan, not a click
+
     // Tap-to-drop bulk: All then destination (mobile)
     if (tapBulkAllFromTerritory && territoryMatchesValidDrop(territoryId)) {
       const resolvedId = resolveTerritoryDropId(territoryId) || territoryId;
@@ -2682,6 +2717,8 @@ function GameMap({
         count: p.count,
       }));
       if (units.length > 1) {
+        const destCanon = resolveTerritoryDropId(destToUse.trim()) || destToUse.trim();
+        setMobilizationDestinationClickCanon(destCanon);
         onMobilizationAllDrop?.(destToUse.trim(), units);
       }
       setTapMobilizationAll(false);
@@ -3193,6 +3230,13 @@ function GameMap({
                         (validMobilizeSeaZones.includes(territoryId) || validMobilizeSeaZones.includes(stateKey)) &&
                         hasMobilizationRoom &&
                         (activeDragId != null ? isValidDrop : (hasMobilizationSelected || (mobilizationTray?.purchases?.length ?? 0) > 0));
+                      const isMobilizationZone = isValidMobilizationTarget || isValidMobilizationTargetSea;
+                      const thisCanon = resolveTerritoryDropId(territoryId) || territoryId;
+                      const mobilizationMuted =
+                        mobilizationDestinationClickCanon != null &&
+                        isMobilizationZone &&
+                        thisCanon !== mobilizationDestinationClickCanon;
+                      const mobilizationStrong = isMobilizationZone && !mobilizationMuted;
                       const isTapMoveTarget =
                         (tapSelectedUnit != null || tapBulkAllFromTerritory != null || tapMobilizationAll) &&
                         territoryMatchesValidDrop(territoryId);
@@ -3204,8 +3248,9 @@ function GameMap({
                           color={color}
                           isSeaZone={!!isSeaZone}
                           isSelected={isSelected}
-                          isHighlighted={isValidMobilizationTarget || isValidMobilizationTargetSea || isExternallyHighlighted || isCampPlacementTarget || isTapMoveTarget}
-                          isValidDrop={isValidDrop || isValidMobilizationTarget || isValidMobilizationTargetSea || isExternallyHighlighted}
+                          isHighlighted={mobilizationStrong || isExternallyHighlighted || isCampPlacementTarget || isTapMoveTarget}
+                          isValidDrop={isValidDrop || mobilizationStrong || isExternallyHighlighted}
+                          highlightMuted={mobilizationMuted}
                           onClick={(e) => handleTerritoryClick(territoryId, e)}
                         />
                       );
@@ -3672,7 +3717,7 @@ function GameMap({
                                 return (
                                   <span
                                     key={`${territoryId}-${unit_id}`}
-                                    className="unit-token-tap-wrapper"
+                                    className={`unit-token-tap-wrapper${tapSelectedUnit?.territoryId === territoryId && tapSelectedUnit?.unitId === unit_id ? ' unit-token-tap-wrapper--selected' : ''}`}
                                     onPointerDownCapture={(ev) => handleUnitPointerDownCapture(territoryId, unit_id, ev)}
                                     style={{ display: 'inline-block' }}
                                   >
@@ -3725,7 +3770,7 @@ function GameMap({
                                 return (
                                   <span
                                     key={`${territoryId}-${unit_id}-sea-surface`}
-                                    className="unit-token-tap-wrapper"
+                                    className={`unit-token-tap-wrapper${tapSelectedUnit?.territoryId === territoryId && tapSelectedUnit?.unitId === unit_id ? ' unit-token-tap-wrapper--selected' : ''}`}
                                     onPointerDownCapture={(ev) => handleUnitPointerDownCapture(territoryId, unit_id, ev)}
                                     style={{ display: 'inline-block' }}
                                   >
@@ -3832,7 +3877,7 @@ function GameMap({
                           return (
                             <span
                               key={`${territoryId}-${unit_id}`}
-                              className="unit-token-tap-wrapper"
+                              className={`unit-token-tap-wrapper${tapSelectedUnit?.territoryId === territoryId && tapSelectedUnit?.unitId === unit_id ? ' unit-token-tap-wrapper--selected' : ''}`}
                               onPointerDownCapture={(ev) => handleUnitPointerDownCapture(territoryId, unit_id, ev)}
                               style={{ display: 'inline-block' }}
                             >

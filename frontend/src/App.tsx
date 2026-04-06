@@ -3958,6 +3958,9 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               onSetPendingMove={setPendingMoveConfirm}
               onDropDestination={setDropDestination}
               pendingMoves={gameState.pending_moves}
+              mobilizationPendingDestination={
+                pendingMobilization?.toTerritory ?? bulkMobilizeConfirm?.toTerritory ?? null
+              }
               highlightedTerritories={highlightedTerritories}
               availableMoveTargets={availableActions?.moveable_units?.map(m => ({
                 territory: m.territory,

@@ -609,31 +609,40 @@
   min-width: 2.75rem;
 }
 
-/* Game stats: stable columns so numbers stay under S / T / PP / … (not stretched with full-width table) */
+/* Game stats: auto layout + nowrap numerics so values stay under S / T / PP / … */
 .stats-modal .header-stats-table {
-  table-layout: fixed;
+  table-layout: auto;
   width: 100%;
   font-variant-numeric: tabular-nums;
 }
 
 .stats-modal .header-stats-table thead th:first-child,
 .stats-modal .header-stats-table tbody td:first-child {
-  width: 30%;
+  width: auto;
+  min-width: 7.5rem;
+  max-width: 16rem;
   overflow-wrap: break-word;
   word-break: normal;
 }
 
 .stats-modal .header-stats-table th.stats-col-num,
 .stats-modal .header-stats-table td.stats-col-num {
-  width: 11.67%;
+  width: auto;
+  min-width: 2.35rem;
+  padding-left: 0.45rem;
+  padding-right: 0.45rem;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 
+/* SP header: same size as other column headers; body cells stay smaller below */
 .unit-stats-modal .header-stats-table th.stats-col-specials {
   text-align: left;
-  min-width: 9rem;
-  width: 18%;
-  font-size: 0.72rem;
-  letter-spacing: 0.02em;
+  min-width: 10rem;
+  width: 22%;
+  font-size: inherit;
+  line-height: inherit;
+  letter-spacing: normal;
 }
 
 .unit-stats-modal .header-stats-table td.stats-col-specials {
@@ -1086,9 +1095,9 @@
   flex-direction: column;
 }
 
-/* Game stats: wider than specials/help so numeric columns can breathe */
+/* Game stats: modest width — very wide modals stretched the table and broke column alignment */
 .stats-modal {
-  max-width: min(880px, 94vw);
+  max-width: min(720px, 94vw);
 }
 
 @media (min-width: 1024px) {
@@ -1098,8 +1107,8 @@
   }
 
   .stats-modal {
-    min-width: 640px;
-    max-width: min(1080px, 96vw);
+    min-width: 480px;
+    max-width: min(760px, 92vw);
   }
 
   .stats-modal-body,

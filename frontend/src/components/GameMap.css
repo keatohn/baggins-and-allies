@@ -142,6 +142,15 @@
   paint-order: stroke fill;
 }
 
+/* Valid mobilization hex but not the pending-confirm destination */
+.territory-path.highlight-muted {
+  fill-opacity: 0.56;
+  stroke: var(--territory-stroke, #555);
+  stroke-width: 3;
+  stroke-dasharray: 5 7;
+  paint-order: stroke fill;
+}
+
 .territory-path.drop-target {
   fill-opacity: 0.82;
   stroke: var(--gold);
@@ -172,6 +181,11 @@
 .territory-path--sea.highlight {
   stroke: var(--gold-dark);
   stroke-width: 8;
+}
+.territory-path--sea.highlight-muted {
+  stroke: #1a2838;
+  stroke-width: 5;
+  stroke-dasharray: 6 8;
 }
 .territory-path--sea.drop-target {
   fill-opacity: 0.75;
@@ -631,6 +645,17 @@
 .unit-token-tap-wrapper {
   display: inline-block;
   vertical-align: top;
+}
+
+/* Tap-to-move selected stack: clearer feedback on touch (tray selection unchanged) */
+@media (pointer: coarse) {
+  .unit-token-tap-wrapper--selected {
+    position: relative;
+    z-index: 25;
+    transform: scale(1.12);
+    transform-origin: center bottom;
+    transition: transform 0.15s ease;
+  }
 }
 
 /* Sea zones with 2+ ships: explicit control so touch users need not double-tap */
