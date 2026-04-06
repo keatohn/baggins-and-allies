@@ -262,7 +262,13 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
             </header>
             <div className="stats-modal-body">
               {allianceOrder.length > 0 ? (
-                <table className="header-stats-table">
+                <table className="header-stats-table header-stats-table--game">
+                  <colgroup>
+                    <col className="stats-game-col-faction" />
+                    {[1, 2, 3, 4, 5, 6].map((i) => (
+                      <col key={i} className="stats-game-col-num" />
+                    ))}
+                  </colgroup>
                   <thead>
                     <tr>
                       <th className="stats-col-faction">Faction</th>
@@ -464,7 +470,14 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
               </header>
               <div className="unit-stats-modal-body">
                 {Object.keys(unitsByFaction).length > 0 ? (
-                  <table className="header-stats-table">
+                  <table className="header-stats-table header-stats-table--units">
+                    <colgroup>
+                      <col className="stats-units-col-name" />
+                      {[1, 2, 3, 4, 5, 6].map((i) => (
+                        <col key={i} className="stats-units-col-num" />
+                      ))}
+                      <col className="stats-units-col-specials" />
+                    </colgroup>
                     <thead>
                       <tr>
                         <th className="stats-col-unit">Unit</th>

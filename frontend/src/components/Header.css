@@ -609,40 +609,79 @@
   min-width: 2.75rem;
 }
 
-/* Game stats: auto layout + nowrap numerics so values stay under S / T / PP / … */
-.stats-modal .header-stats-table {
-  table-layout: auto;
+/* Game stats: fixed columns + tabular nums so thead aligns with every row */
+.stats-modal .header-stats-table.header-stats-table--game {
+  table-layout: fixed;
   width: 100%;
   font-variant-numeric: tabular-nums;
 }
 
-.stats-modal .header-stats-table thead th:first-child,
-.stats-modal .header-stats-table tbody td:first-child {
-  width: auto;
-  min-width: 7.5rem;
-  max-width: 16rem;
+.stats-modal .header-stats-table.header-stats-table--game col.stats-game-col-faction {
+  width: 40%;
+}
+
+.stats-modal .header-stats-table.header-stats-table--game col.stats-game-col-num {
+  width: 10%;
+}
+
+.stats-modal .header-stats-table.header-stats-table--game thead th:first-child,
+.stats-modal .header-stats-table.header-stats-table--game tbody td:first-child {
   overflow-wrap: break-word;
   word-break: normal;
 }
 
-.stats-modal .header-stats-table th.stats-col-num,
-.stats-modal .header-stats-table td.stats-col-num {
-  width: auto;
-  min-width: 2.35rem;
+.stats-modal .header-stats-table.header-stats-table--game th.stats-col-num,
+.stats-modal .header-stats-table.header-stats-table--game td.stats-col-num {
+  min-width: 0;
   padding-left: 0.45rem;
   padding-right: 0.45rem;
   white-space: nowrap;
   vertical-align: middle;
+  text-align: right;
 }
 
-/* SP header: same size as other column headers; body cells stay smaller below */
-.unit-stats-modal .header-stats-table th.stats-col-specials {
+/* Unit stats: fixed columns so headers line up with P/A/D/…/SP body cells */
+.unit-stats-modal .header-stats-table.header-stats-table--units {
+  table-layout: fixed;
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+.unit-stats-modal .header-stats-table.header-stats-table--units col.stats-units-col-name {
+  width: 30%;
+}
+
+.unit-stats-modal .header-stats-table.header-stats-table--units col.stats-units-col-num {
+  width: 7%;
+}
+
+.unit-stats-modal .header-stats-table.header-stats-table--units col.stats-units-col-specials {
+  width: 28%;
+}
+
+.unit-stats-modal .header-stats-table.header-stats-table--units th.stats-col-num,
+.unit-stats-modal .header-stats-table.header-stats-table--units td.stats-col-num {
+  min-width: 0;
+  padding-left: 0.35rem;
+  padding-right: 0.35rem;
+  white-space: nowrap;
+  vertical-align: middle;
+  text-align: right;
+}
+
+.unit-stats-modal .header-stats-table.header-stats-table--units th.stats-col-specials,
+.unit-stats-modal .header-stats-table.header-stats-table--units td.stats-col-specials {
+  text-align: left;
+  white-space: normal;
+  word-break: break-word;
+  vertical-align: middle;
+}
+
+/* SP column (non–fixed-layout fallback): layout only; superseded by --units col widths when present */
+.unit-stats-modal .header-stats-table:not(.header-stats-table--units) th.stats-col-specials {
   text-align: left;
   min-width: 10rem;
   width: 22%;
-  font-size: inherit;
-  line-height: inherit;
-  letter-spacing: normal;
 }
 
 .unit-stats-modal .header-stats-table td.stats-col-specials {
@@ -658,13 +697,15 @@
   max-width: min(1100px, 96vw);
 }
 
-/* Frozen (sticky) unit-stats table header row */
+/* Frozen (sticky) unit-stats table header row — one font-size for all columns (incl. SP); 1024px+ bumps below */
 .unit-stats-modal .header-stats-table thead th {
   position: sticky;
   top: 0;
   z-index: 3;
   background-color: var(--parchment-dark);
   box-shadow: 0 1px 0 var(--ink-faded);
+  font-size: 1em;
+  line-height: 1.2;
 }
 
 .stats-modal .stats-alliance-row td {
@@ -1126,6 +1167,11 @@
     font-size: 1.32rem;
   }
 
+  /* Unit Stats: only header row matches Game Stats header size; body rows keep their own rules */
+  .unit-stats-modal .header-stats-table thead th {
+    font-size: 1.32rem;
+  }
+
   .stats-modal .stats-alliance-row td {
     font-size: 1.38rem;
   }
@@ -1324,6 +1370,12 @@
     min-width: 100%;
   }
 
+  /* Fixed colgroup layout must fill the scroll area — max-content breaks column alignment */
+  .unit-stats-modal .header-stats-table.header-stats-table--units {
+    width: 100%;
+    max-width: 100%;
+  }
+
   .help-section {
     margin-bottom: 0.85rem;
   }
@@ -1374,6 +1426,11 @@
   .stats-modal .header-stats-table,
   .unit-stats-modal .header-stats-table {
     font-size: clamp(0.56rem, 2vw, 0.68rem);
+  }
+
+  /* Keep all Unit Stats header letters (including SP) the same size as the table scale */
+  .unit-stats-modal .header-stats-table thead th {
+    font-size: 1em;
   }
 
   .stats-modal .header-stats-table th,
@@ -1448,10 +1505,9 @@
     height: 16px;
   }
 
-  .unit-stats-modal .header-stats-table th.stats-col-specials {
-    min-width: 5rem;
-    width: auto;
-    max-width: 12rem;
+  .unit-stats-modal .header-stats-table.header-stats-table--units th.stats-col-specials {
+    min-width: 0;
+    max-width: none;
   }
 
   .unit-stats-modal .header-stats-table td.stats-col-specials {
