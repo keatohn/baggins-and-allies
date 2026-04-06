@@ -761,11 +761,11 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     const landscapeShort = viewportHeight < 520 && viewportWidth > viewportHeight;
     const cap =
       viewportWidth < 400
-        ? Math.min(landscapeShort ? 180 : 210, Math.floor(viewportWidth * (landscapeShort ? 0.34 : 0.54)))
+        ? Math.min(landscapeShort ? 168 : 194, Math.floor(viewportWidth * (landscapeShort ? 0.31 : 0.5)))
         : viewportWidth < 480
-          ? Math.min(landscapeShort ? 200 : 230, Math.floor(viewportWidth * (landscapeShort ? 0.36 : 0.56)))
+          ? Math.min(landscapeShort ? 186 : 212, Math.floor(viewportWidth * (landscapeShort ? 0.33 : 0.52)))
           : viewportWidth < 768
-            ? Math.min(landscapeShort ? 220 : 300, Math.floor(viewportWidth * (landscapeShort ? 0.32 : 0.38)))
+            ? Math.min(landscapeShort ? 204 : 276, Math.floor(viewportWidth * (landscapeShort ? 0.29 : 0.35)))
             : landscapeShort
               ? Math.min(280, Math.floor(viewportWidth * 0.32))
               : viewportWidth < 1100
