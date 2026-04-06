@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import type { Definitions } from '../services/api';
 import api, { type SimulateCombatResponse } from '../services/api';
 import './CombatSimulatorPanel.css';
@@ -570,6 +570,12 @@ export default function CombatSimulatorPanel({
   onClose,
   embedded,
 }: CombatSimulatorPanelProps) {
+  /** Fresh props for effects that must not re-run on every multiplayer poll. */
+  const territoryUnitsRef = useRef(territoryUnits);
+  territoryUnitsRef.current = territoryUnits;
+  const territoryDataRef = useRef(territoryData);
+  territoryDataRef.current = territoryData;
+
   const allFactions = useMemo(() => {
     if (!definitions?.factions) return [];
     const list = Object.entries(definitions.factions).map(([id, f]) => ({
@@ -723,16 +729,34 @@ export default function CombatSimulatorPanel({
     [defenderStacks, definitions, isLandCombat]
   );
 
-  /** Sync territory defender counts when territory or its units change; defaults to actual counts in territory. */
+  const defenderStacksFilteredRef = useRef(defenderStacksFiltered);
+  defenderStacksFilteredRef.current = defenderStacksFiltered;
+
+  /**
+   * Seed editable defender counts from the board only when the user changes the defender territory.
+   * Depends only on `territoryId` so `defenderStacksFiltered` reference churn from polling does not re-run this.
+   */
+  const seededDefenderTerritoryIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!territoryId || defenderStacksFiltered.length === 0) {
+    if (!territoryId || territoryId.startsWith(TERRAIN_PREFIX)) {
+      seededDefenderTerritoryIdRef.current = null;
       setDefenderTerritoryCounts({});
       return;
     }
+    const filtered = defenderStacksFilteredRef.current;
+    if (filtered.length === 0) {
+      if (seededDefenderTerritoryIdRef.current !== territoryId) {
+        seededDefenderTerritoryIdRef.current = territoryId;
+        setDefenderTerritoryCounts({});
+      }
+      return;
+    }
+    if (seededDefenderTerritoryIdRef.current === territoryId) return;
+    seededDefenderTerritoryIdRef.current = territoryId;
     setDefenderTerritoryCounts(
-      defenderStacksFiltered.reduce<Record<string, number>>((acc, { unit_id, count }) => ({ ...acc, [unit_id]: count }), {})
+      filtered.reduce<Record<string, number>>((acc, { unit_id, count }) => ({ ...acc, [unit_id]: count }), {})
     );
-  }, [territoryId, defenderStacksFiltered.map((s) => `${s.unit_id}:${s.count}`).join(',')]);
+  }, [territoryId]);
 
   /** When switching Land/Sea, clear generic terrain selection if it's no longer valid (e.g. Forest when switching to Sea). */
   useEffect(() => {
@@ -753,21 +777,46 @@ export default function CombatSimulatorPanel({
     }
   }, [attackingTerritoryId, attackingTerritoryOptions]);
 
+  /**
+   * Seed attacker counts when faction / attacking territory / land-vs-sea changes, or when definitions arrive
+   * and counts are still zero. Uses `territoryUnitsRef` so multiplayer polls do not retrigger a full re-seed.
+   */
+  const attackerSeedKeyRef = useRef<string>('');
   useEffect(() => {
-    if (!attackerFaction || !attackingTerritoryId) return;
-    const stacks = territoryUnits?.[attackingTerritoryId] ?? [];
-    const next: Record<string, number> = {};
-    stacks.forEach((s) => {
-      const raw = definitions?.units?.[s.unit_id];
-      const f = (raw as { faction?: string } | undefined)?.faction ?? unitDefs[s.unit_id]?.faction;
-      if (f !== attackerFaction) return;
-      if (!unitAllowedForCombatType(definitions, s.unit_id, isLandCombat)) return;
-      if (getUnitMovement(definitions, s.unit_id) <= 0) return;
-      if (!isLandCombat && !isUnitPurchasableInDefs(raw)) return;
-      next[s.unit_id] = (next[s.unit_id] ?? 0) + s.count;
+    if (!attackerFaction || !attackingTerritoryId) {
+      attackerSeedKeyRef.current = '';
+      return;
+    }
+    const seedKey = `${attackerFaction}\0${attackingTerritoryId}\0${isLandCombat}`;
+    const stacks = territoryUnitsRef.current?.[attackingTerritoryId] ?? [];
+    const computeNext = (): Record<string, number> => {
+      const next: Record<string, number> = {};
+      stacks.forEach((s) => {
+        const raw = definitions?.units?.[s.unit_id];
+        const f = (raw as { faction?: string } | undefined)?.faction ?? unitDefs[s.unit_id]?.faction;
+        if (f !== attackerFaction) return;
+        if (!unitAllowedForCombatType(definitions, s.unit_id, isLandCombat)) return;
+        if (getUnitMovement(definitions, s.unit_id) <= 0) return;
+        if (!isLandCombat && !isUnitPurchasableInDefs(raw)) return;
+        next[s.unit_id] = (next[s.unit_id] ?? 0) + s.count;
+      });
+      return next;
+    };
+
+    const keyChanged = attackerSeedKeyRef.current !== seedKey;
+    if (keyChanged) {
+      attackerSeedKeyRef.current = seedKey;
+      setAttackerCounts(computeNext());
+      return;
+    }
+
+    setAttackerCounts((prev) => {
+      const prevTotal = Object.values(prev).reduce((a, b) => a + b, 0);
+      if (prevTotal > 0) return prev;
+      const next = computeNext();
+      return Object.keys(next).length > 0 ? next : prev;
     });
-    setAttackerCounts(next);
-  }, [attackerFaction, attackingTerritoryId, territoryUnits, definitions, unitDefs, isLandCombat]);
+  }, [attackerFaction, attackingTerritoryId, isLandCombat, definitions, unitDefs]);
 
   const isTerrainSelection = territoryId.startsWith(TERRAIN_PREFIX);
   const defenderOrderForEffect =
@@ -787,16 +836,22 @@ export default function CombatSimulatorPanel({
   const strongholdLocked = !isTerrainSelection && territoryId !== '';
   const strongholdHpMax = strongholdLocked && isSelectedStronghold ? strongholdBaseHp : 10;
 
-  /** When a territory is selected, lock checkbox to stronghold yes/no and set amount from current HP. */
+  /** When defender territory changes, seed stronghold HP once per selection (not on every `territoryData` poll). */
+  const seededStrongholdTerritoryIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (isTerrainSelection || !territoryId) return;
+    if (isTerrainSelection || !territoryId) {
+      seededStrongholdTerritoryIdRef.current = null;
+      return;
+    }
+    if (seededStrongholdTerritoryIdRef.current === territoryId) return;
+    seededStrongholdTerritoryIdRef.current = territoryId;
     const def = definitions?.territories?.[territoryId] as { is_stronghold?: boolean; stronghold_base_health?: number } | undefined;
     const baseHp = def?.stronghold_base_health ?? 10;
-    const tData = territoryData[territoryId] as { stronghold_current_health?: number } | undefined;
+    const tData = territoryDataRef.current[territoryId] as { stronghold_current_health?: number } | undefined;
     const currentHp = tData?.stronghold_current_health ?? baseHp;
     setStrongholdHpEnabled(!!def?.is_stronghold);
     setStrongholdHpAmount(Math.max(0, Math.min(currentHp, baseHp)));
-  }, [territoryId, isTerrainSelection, definitions?.territories, territoryData]);
+  }, [territoryId, isTerrainSelection, definitions?.territories]);
 
   /** Effective territory defender stacks (editable counts). */
   const territoryDefenderStacksWithCounts = useMemo(

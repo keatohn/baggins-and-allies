@@ -356,6 +356,14 @@
     flex: 1 1 0;
     min-width: min(110px, 46%);
   }
+
+  .combat-sim-preview-unit-stack {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding: 0.15rem 0;
+  }
 }
 
 /*
@@ -1072,9 +1080,8 @@
   align-items: center;
   flex: 1 1 auto;
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: visible;
-  -webkit-overflow-scrolling: touch;
+  /* overflow-x: auto + overflow-y: visible computes to auto on both axes → bogus vertical scrollbars on desktop */
+  overflow: visible;
 }
 
 .combat-sim-preview-unit-group {
