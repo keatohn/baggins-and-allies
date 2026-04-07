@@ -243,10 +243,14 @@
       },
       {
         "unit_id": "gondor_archer",
-        "count": 1
+        "count": 2
       },
       {
         "unit_id": "gondor_soldier",
+        "count": 1
+      },
+      {
+        "unit_id": "gondor_knight",
         "count": 1
       }
     ],

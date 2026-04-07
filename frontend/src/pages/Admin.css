@@ -176,6 +176,12 @@
   margin-top: 1rem;
 }
 
+.admin-page__actions .admin-page__btn--primary {
+  min-width: 12rem;
+  padding-left: 1.75rem;
+  padding-right: 1.75rem;
+}
+
 .admin-page__error {
   margin-top: 0.75rem;
   padding: 0.65rem 0.85rem;

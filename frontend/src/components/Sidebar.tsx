@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import type { GameState, GamePhase, GameEvent, DeclaredBattle } from '../types/game';
+import { mergeGroupedEventLogForDisplay } from '../utils/eventLogDisplay';
 import type { PendingMoveConfirm } from './GameMap';
 import type { BulkMoveConfirmState, PendingMobilization, BulkMobilizeConfirmState } from '../App';
 import './Sidebar.css';
@@ -406,6 +407,11 @@ function Sidebar({
     });
   }, [eventLog, eventLogTurn, eventLogFaction, eventLogPhase]);
 
+  const displayEventLog = useMemo(
+    () => mergeGroupedEventLogForDisplay(filteredEventLog, unitDefs, territoryData),
+    [filteredEventLog, unitDefs, territoryData],
+  );
+
   // Purchase is disabled when current faction's capital is captured
   const currentFactionCapital = factionData[gameState.current_faction]?.capital;
   const capitalOwner = currentFactionCapital ? territoryData[currentFactionCapital]?.owner : undefined;
@@ -440,7 +446,6 @@ function Sidebar({
             {/* Backend asked for offload sea zone choice (multiple valid sea zones) */}
             {pendingOffloadSeaChoice && pendingOffloadSeaChoice.validSeaZones.length > 0 && (
               <div className="move-confirm">
-                <h3>{gameState.phase === 'non_combat_move' ? 'Offload' : 'Sea Raid'}</h3>
                 <p className="move-details">
                   <span className="move-route">
                     {territoryData[pendingOffloadSeaChoice.from]?.name || pendingOffloadSeaChoice.from} → {territoryData[pendingOffloadSeaChoice.to]?.name || pendingOffloadSeaChoice.to}
@@ -468,12 +473,10 @@ function Sidebar({
               <div className="move-confirm">
                 {(() => {
                   const isAttack = gameState.phase === 'combat_move';
-                  const confirmTitle = isAttack ? 'Confirm Attack' : 'Confirm Move';
                   const buttonLabel = isAttack ? 'Attack' : 'Move';
                   const confirmBtnClass = isAttack ? 'confirm-move-btn attack-btn' : 'confirm-move-btn';
                   return (
                     <>
-                      <h3>{confirmTitle}</h3>
                       <p className="move-details">
                         <span className="unit-name">All units</span>
                         <br />
@@ -506,7 +509,6 @@ function Sidebar({
               <div className="move-confirm">
                 {pendingMoveConfirm.chargePathOptions && pendingMoveConfirm.chargePathOptions.length > 1 ? (
                   <>
-                    <h3>Charge Through</h3>
                     <p className="move-details">
                       <span className="unit-name">{pendingMoveConfirm.unitDef?.name || pendingMoveConfirm.unitId}</span>
                     </p>
@@ -575,7 +577,6 @@ function Sidebar({
                   const multipleSeaZones = (isSeaRaid || isOffload) && (pendingMoveConfirm.seaRaidSeaZoneOptions?.length ?? 0) > 1;
                   return multipleSeaZones ? (
                     <>
-                      <h3>{gameState.phase === 'non_combat_move' ? 'Offload' : 'Sea Raid'}</h3>
                       <p className="move-details">
                         <span className="unit-name">{pendingMoveConfirm.unitDef?.name || pendingMoveConfirm.unitId}</span>
                         <br />
@@ -611,7 +612,6 @@ function Sidebar({
                             (!fromSea && toSea) ||
                             combatNavalAttack);
                         const isNavalMove = isLoad || isOffload || isSail;
-                        const confirmTitle = isLoad ? 'Confirm Load' : isOffload ? 'Confirm Offload' : isSail ? 'Confirm Sail' : isSeaRaid ? 'Confirm Sea Raid' : isAttack ? 'Confirm Attack' : 'Confirm Move';
                         const buttonLabel = isLoad ? 'Load' : isOffload ? 'Offload' : isSail ? 'Sail' : isSeaRaid ? 'Sea Raid' : isAttack ? 'Attack' : 'Move';
                         const confirmBtnClass = isAttack
                           ? 'confirm-move-btn attack-btn'
@@ -623,7 +623,6 @@ function Sidebar({
                           : null;
                         return (
                           <>
-                            <h3>{confirmTitle}</h3>
                             <p className="move-details">
                               <span className="unit-name">{pendingMoveConfirm.unitDef?.name || pendingMoveConfirm.unitId}</span>
                               <br />
@@ -676,7 +675,6 @@ function Sidebar({
             {/* Bulk mobilization confirmation ("All") */}
             {bulkMobilizeConfirm && !pendingMobilization && (
               <div className="move-confirm mobilization-confirm">
-                <h3>Mobilize All</h3>
                 <p className="move-details">
                   <span className="unit-name">All units</span>
                   <br />
@@ -1343,12 +1341,12 @@ function Sidebar({
           </div>
         )}
         <div className="log-entries">
-          {filteredEventLog.length === 0 ? (
+          {displayEventLog.length === 0 ? (
             <p className="empty-state">
               {eventLog.length === 0 ? 'No events yet' : 'No events match the selected filters'}
             </p>
           ) : (
-            filteredEventLog.map(event => (
+            displayEventLog.map(event => (
               <div key={event.id} className={`log-entry ${event.type}`}>
                 {formatEventLogEntryLine(event, gameState, factionData)}
               </div>

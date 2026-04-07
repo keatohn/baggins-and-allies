@@ -789,13 +789,13 @@
     "adjacent": [
       "pelennor",
       "eastfold",
-      "entwash",
-      "north_ithilien"
+      "entwash"
     ],
     "aerial_adjacent": [
       "minas_tirith",
       "lossarnach",
-      "lebennin"
+      "lebennin",
+      "north_ithilien"
     ]
   },
   "west_osgiliath": {
@@ -871,16 +871,16 @@
       "south_ithilien",
       "east_osgiliath",
       "dead_marshes",
+      "pelennor",
       "dagorlad",
-      "anorien",
       "sea_zone_12"
     ],
     "aerial_adjacent": [
-      "pelennor",
       "west_osgiliath",
       "udun",
       "cirith_ungol",
-      "gorgoroth"
+      "gorgoroth",
+      "anorien"
     ]
   },
   "lossarnach": {

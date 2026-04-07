@@ -115,9 +115,7 @@
     "tags": [
       "naval"
     ],
-    "specials": [
-      "naval"
-    ],
+    "specials": [],
     "icon": "lindon_ship.png"
   },
   "ent": {
@@ -505,9 +503,7 @@
     "tags": [
       "naval"
     ],
-    "specials": [
-      "naval"
-    ],
+    "specials": [],
     "icon": "gondor_ship.png"
   },
   "trebuchet": {
@@ -650,9 +646,7 @@
     "tags": [
       "naval"
     ],
-    "specials": [
-      "naval"
-    ],
+    "specials": [],
     "icon": "black_ship.png"
   },
   "war_mumakil": {

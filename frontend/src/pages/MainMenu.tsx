@@ -39,7 +39,12 @@ export default function MainMenu() {
             Profile
           </button>
           {player.is_admin ? (
-            <button type="button" className="main-menu__btn" onClick={() => navigate('/admin')}>
+            <button
+              type="button"
+              className="main-menu__btn"
+              data-admin-major-sfx
+              onClick={() => navigate('/admin')}
+            >
               Admin
             </button>
           ) : null}

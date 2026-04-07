@@ -858,9 +858,6 @@
       "pelargir",
       "gorgoroth",
       "nurn"
-    ],
-    "ford_adjacent": [
-      "pelennor"
     ]
   },
   "north_ithilien": {
@@ -877,16 +874,16 @@
       "south_ithilien",
       "east_osgiliath",
       "dead_marshes",
-      "dagorlad",
       "pelennor",
+      "dagorlad",
       "sea_zone_12"
     ],
     "aerial_adjacent": [
-      "anorien",
       "west_osgiliath",
       "udun",
       "cirith_ungol",
-      "gorgoroth"
+      "gorgoroth",
+      "anorien"
     ]
   },
   "lossarnach": {

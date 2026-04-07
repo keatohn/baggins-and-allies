@@ -3958,9 +3958,19 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               onSetPendingMove={setPendingMoveConfirm}
               onDropDestination={setDropDestination}
               pendingMoves={gameState.pending_moves}
-              mobilizationPendingDestination={
-                pendingMobilization?.toTerritory ?? bulkMobilizeConfirm?.toTerritory ?? null
-              }
+              mobilizationPendingDestination={(() => {
+                const pm = pendingMoveConfirm;
+                const bm = bulkMoveConfirm;
+                const pmo = pendingMobilization;
+                const bmo = bulkMobilizeConfirm;
+                return (
+                  (typeof pm?.toTerritory === 'string' && pm.toTerritory.trim()) ||
+                  (typeof bm?.toTerritory === 'string' && bm.toTerritory.trim()) ||
+                  (typeof pmo?.toTerritory === 'string' && pmo.toTerritory.trim()) ||
+                  (typeof bmo?.toTerritory === 'string' && bmo.toTerritory.trim()) ||
+                  null
+                );
+              })()}
               highlightedTerritories={highlightedTerritories}
               availableMoveTargets={availableActions?.moveable_units?.map(m => ({
                 territory: m.territory,

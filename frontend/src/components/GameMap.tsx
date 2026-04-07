@@ -575,7 +575,10 @@ interface GameMapProps {
   /** Which boat each pending passenger instance ID is assigned to (boatInstanceId -> instanceIds[]). */
   loadAllocation?: Record<string, string[]>;
   onLoadAllocationChange?: (allocation: Record<string, string[]>) => void;
-  /** Canonical destination while sidebar mobilization confirm is open — used to clear map click-focus when confirm/cancel finishes. */
+  /**
+   * Canonical destination while sidebar confirm is open (move, bulk move, mobilize, bulk mobilize).
+   * Keeps the destination territory highlighted on the map after tap (e.g. mobile).
+   */
   mobilizationPendingDestination?: string | null;
 }
 
@@ -3218,8 +3221,16 @@ function GameMap({
                         (validMobilizeTerritories.includes(territoryId) || validMobilizeTerritories.includes(stateKey)) &&
                         hasMobilizationRoom &&
                         (activeDragId != null ? isValidDrop : (hasMobilizationSelected || hasUnitsToMobilize));
+                      const pendingSidebarDest = (mobilizationPendingDestination ?? '').trim();
+                      const matchesPendingSidebarDest =
+                        pendingSidebarDest.length > 0 &&
+                        (territoryId === pendingSidebarDest ||
+                          stateKey === pendingSidebarDest ||
+                          resolveTerritoryDropId(territoryId) === resolveTerritoryDropId(pendingSidebarDest));
                       const isExternallyHighlighted =
-                        highlightedTerritories.includes(territoryId) || highlightedTerritories.includes(stateKey);
+                        highlightedTerritories.includes(territoryId) ||
+                        highlightedTerritories.includes(stateKey) ||
+                        matchesPendingSidebarDest;
                       const isCampPlacementTarget =
                         isMobilizePhase &&
                         ((validCampTerritories.length > 0 &&

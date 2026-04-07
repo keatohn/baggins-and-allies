@@ -34,6 +34,10 @@ function isActiveGameRoute(pathname: string): boolean {
   return pathname.startsWith('/game/') && pathname !== '/game/new'
 }
 
+function isAdminMajorClick(target: Element): boolean {
+  return Boolean(target.closest('[data-admin-major-sfx]') || target.closest('.page-menu-btn'));
+}
+
 function isMajorInGameClick(target: Element): boolean {
   if (target.closest('.actions-panel')) {
     // Explicitly exclude "minor" actions in the Actions tab.
@@ -67,6 +71,7 @@ if (typeof document !== 'undefined') {
       const pathname = window.location.pathname || ''
       if (!(target instanceof Element)) return
       if (!target.closest(CLICKABLE_SELECTOR)) return
+      if (pathname === '/admin' && !isAdminMajorClick(target)) return
       if (isActiveGameRoute(pathname) && !isMajorInGameClick(target)) return
       if (target.closest('[data-no-ui-click-sfx]')) return
       playUiClickSound()
