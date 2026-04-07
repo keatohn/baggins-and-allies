@@ -261,9 +261,8 @@
   flex-shrink: 0;
 }
 
-@media (max-width: 767px),
-  ((max-width: 960px) and (max-height: 520px) and (orientation: landscape)),
-  ((max-width: 960px) and (max-height: 420px)) {
+/* Phone / narrow: bottom sheet + compact chrome (do not tie this to short desktop windows) */
+@media (max-width: 767px) {
   .combat-sim-modal-overlay {
     align-items: flex-end;
     padding: 0;
@@ -300,6 +299,20 @@
     min-width: 28px;
     min-height: 28px;
     font-size: 1.15rem;
+  }
+}
+
+/* Wider-but-short viewports (e.g. tiled desktop window): fit vertically without shrinking header/pills.
+   min-width: 768px avoids fighting the phone rules above on small landscape handsets. */
+@media ((min-width: 768px) and (max-width: 960px) and (max-height: 520px) and (orientation: landscape)),
+  ((min-width: 768px) and (max-width: 960px) and (max-height: 420px)) {
+  .combat-sim-modal-overlay {
+    align-items: center;
+    padding: max(0.35rem, env(safe-area-inset-top, 0px)) max(0.5rem, env(safe-area-inset-right, 0px)) max(0.35rem, env(safe-area-inset-bottom, 0px)) max(0.5rem, env(safe-area-inset-left, 0px));
+  }
+
+  .combat-sim-modal {
+    max-height: min(92dvh, 92vh) !important;
   }
 }
 

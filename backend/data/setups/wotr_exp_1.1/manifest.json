@@ -2,7 +2,7 @@
     "id": "wotr_exp_1.1",
     "display_name": "War of the Ring - Expanded",
     "is_active": true,
-    "map_asset": "wotr_map_1.1",
+    "map_asset": "wotr_map_1.2",
     "context": {
         "year": "TA 3019",
         "map": "Middle-earth",

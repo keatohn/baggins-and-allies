@@ -68,12 +68,6 @@
     "umbar": "mordor"
   },
   "starting_units": {
-    "the_shire": [
-      {
-        "unit_id": "hobbit",
-        "count": 1
-      }
-    ],
     "grey_havens": [
       {
         "unit_id": "rivendell_warrior",

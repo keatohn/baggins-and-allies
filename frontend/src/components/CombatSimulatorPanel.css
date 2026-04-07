@@ -174,11 +174,13 @@
 
 .combat-sim-pct-pill {
   display: inline-block;
-  padding: 0.15rem 0.5rem;
+  padding: 0.2rem 0.55rem;
   border-radius: 999px;
   color: #fff;
-  font-weight: 600;
-  font-size: 0.9rem;
+  font-weight: 500;
+  font-size: 0.92rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
 }
 
 .combat-sim-label {
@@ -350,11 +352,7 @@
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     gap: 0.5rem;
-  }
-
-  .combat-sim-preview-shelf-row .combat-sim-preview-shelf {
-    flex: 1 1 0;
-    min-width: min(110px, 46%);
+    grid-template-columns: minmax(110px, 1fr) minmax(110px, 1fr);
   }
 
   .combat-sim-preview-unit-stack {
@@ -450,6 +448,7 @@
 }
 
 .combat-sim-select {
+  box-sizing: border-box;
   width: 100%;
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--ink-faded);
@@ -457,6 +456,17 @@
   background: var(--parchment);
   color: var(--ink);
   font-size: 0.9rem;
+}
+
+/* Desktop: taller hit area on native selects (keep text size same as base) */
+@media (min-width: 641px) {
+  .combat-sim-select {
+    min-height: 2.875rem;
+    padding-block: 0.7rem;
+    padding-inline: 0.65rem;
+    line-height: 1.2;
+    border-radius: 6px;
+  }
 }
 
 .combat-sim-logos-section {
@@ -1017,16 +1027,13 @@
   text-align: center;
 }
 
+/* Grid: two equal columns even when one side has no units (flex + min-width:0 collapsed empty shelf + gap looked like a hole before defender stat) */
 .combat-sim-preview-shelf-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1rem;
   margin-bottom: 0.35rem;
   align-items: flex-start;
-}
-
-.combat-sim-preview-shelf-row .combat-sim-preview-shelf {
-  flex: 1 1 0;
-  min-width: 0;
 }
 
 .combat-sim-preview-shelves {
@@ -1043,6 +1050,7 @@
   background: rgba(0, 0, 0, 0.03);
   border-radius: 4px;
   min-height: 44px;
+  min-width: 0;
 }
 
 /* No units on this side for this stat tier — avoid empty gray “shelf” slots */
@@ -1065,8 +1073,11 @@
   min-width: 26px;
   width: 26px;
   height: 26px;
-  text-align: center;
-  line-height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
   background: var(--parchment);
   border: 2px solid var(--ink-faded);
   border-radius: 4px;
