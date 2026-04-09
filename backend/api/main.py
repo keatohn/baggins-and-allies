@@ -520,7 +520,9 @@ def _build_battle_context(
     _, _, att_eff_attack_ov = get_attacker_effective_dice_and_bombikazi_self_destruct(
         attacker_units, unit_defs
     )
-    by_stat_att: dict[int, dict[str, dict[str, Any]]] = {}  # stat_value -> unit_id -> { count, special_codes, ... }
+    # Merge stacks only when unit_id, effective stat, and active special badges match — otherwise a row with
+    # anti_cavalry (etc.) would incorrectly inherit badges from another instance at the same stat (captain/terrain).
+    by_stat_att: dict[int, dict[tuple[str, int, tuple[str, ...]], dict[str, Any]]] = {}
     for u in attacker_units:
         ud = unit_defs.get(u.unit_id)
         base_attack = getattr(ud, "attack", 0) if ud else 0
@@ -531,16 +533,15 @@ def _build_battle_context(
             stat = base_attack + mod
         flags = att_specials.get(u.instance_id) or {}
         codes = [_special_key_to_frontend(k) for k, v in flags.items() if v]
+        code_key = tuple(sorted(codes))
+        row_key = (u.unit_id, stat, code_key)
         if stat not in by_stat_att:
             by_stat_att[stat] = {}
-        rec = by_stat_att[stat].get(u.unit_id)
+        rec = by_stat_att[stat].get(row_key)
         if rec:
             rec["count"] += 1
-            for c in codes:
-                if c not in rec["special_codes"]:
-                    rec["special_codes"].append(c)
         else:
-            by_stat_att[stat][u.unit_id] = {
+            by_stat_att[stat][row_key] = {
                 "unit_id": u.unit_id,
                 "name": _unit_name(u.unit_id),
                 "icon": _unit_icon(u.unit_id),
@@ -569,7 +570,7 @@ def _build_battle_context(
 
     def_mods = result.stat_modifiers_defender
     def_specials = result.specials_defender
-    by_stat_def: dict[int, dict[str, dict[str, Any]]] = {}
+    by_stat_def: dict[int, dict[tuple[str, int, tuple[str, ...]], dict[str, Any]]] = {}
     for u in defender_units:
         ud = unit_defs.get(u.unit_id)
         base_def = getattr(ud, "defense", 0) if ud else 0
@@ -577,16 +578,15 @@ def _build_battle_context(
         stat = base_def + mod
         flags = def_specials.get(u.instance_id) or {}
         codes = [_special_key_to_frontend(k) for k, v in flags.items() if v]
+        code_key = tuple(sorted(codes))
+        row_key = (u.unit_id, stat, code_key)
         if stat not in by_stat_def:
             by_stat_def[stat] = {}
-        rec = by_stat_def[stat].get(u.unit_id)
+        rec = by_stat_def[stat].get(row_key)
         if rec:
             rec["count"] += 1
-            for c in codes:
-                if c not in rec["special_codes"]:
-                    rec["special_codes"].append(c)
         else:
-            by_stat_def[stat][u.unit_id] = {
+            by_stat_def[stat][row_key] = {
                 "unit_id": u.unit_id,
                 "name": _unit_name(u.unit_id),
                 "icon": _unit_icon(u.unit_id),

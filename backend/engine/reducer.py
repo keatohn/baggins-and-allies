@@ -2083,7 +2083,17 @@ def _handle_mobilize_units(
                     )
         power_production = dest_def.produces.get("power", 0)
         total_mobilizing = sum(u.get("count", 0) for u in units_to_mobilize)
-        if has_camp:
+        owned_at_turn_start = getattr(state, "faction_territories_at_turn_start", {}).get(faction_id, []) or []
+        camp_hex_owned_at_turn_start = destination_id in owned_at_turn_start
+        if has_camp and not camp_hex_owned_at_turn_start:
+            for ureq in units_to_mobilize:
+                uid = ureq.get("unit_id")
+                if not is_home_for.get(uid):
+                    raise ValueError(
+                        f"Cannot mobilize to camp territory {destination_id}: it was not owned at the start of your turn. "
+                        f"You may still mobilize units with the home special to their home here."
+                    )
+        if has_camp and camp_hex_owned_at_turn_start:
             already_pending = sum(
                 sum(item.get("count", 0) for item in pm.units)
                 for pm in state.pending_mobilizations
@@ -2093,6 +2103,28 @@ def _handle_mobilize_units(
                 raise ValueError(
                     f"Cannot mobilize {total_mobilizing} more units to {destination_id}: "
                     f"already {already_pending} pending, capacity is {power_production}"
+                )
+        elif has_camp and not camp_hex_owned_at_turn_start:
+            unit_ids_in_batch = {u.get("unit_id") for u in units_to_mobilize}
+            if len(unit_ids_in_batch) != 1:
+                raise ValueError(
+                    "When mobilizing to a home territory on a camp hex you captured this turn, all units must be the same type"
+                )
+            unit_id = next(iter(unit_ids_in_batch))
+            if not is_home_for.get(unit_id):
+                raise ValueError(
+                    f"{destination_id} is not a home territory for {unit_id}"
+                )
+            already_pending = sum(
+                u.get("count", 0)
+                for pm in state.pending_mobilizations
+                if pm.destination == destination_id
+                for u in pm.units
+                if u.get("unit_id") == unit_id
+            )
+            if already_pending + total_mobilizing > 1:
+                raise ValueError(
+                    f"At most 1 {unit_id} can be mobilized to home territory {destination_id} per phase (already {already_pending} pending)"
                 )
         else:
             # Home deployment (including port + home, e.g. Umbar for Corsair): single unit type, cap 1 per type per phase

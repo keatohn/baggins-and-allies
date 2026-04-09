@@ -1111,8 +1111,8 @@ export default function CombatSimulatorPanel({
 
   const handleSwap = () => {
     if (!canSwap || !defenderLogoFaction || !definitions) return;
-    const terrainType = getTerrainTypeFromTerritoryId(definitions, territoryId);
-    const newTerritoryId = terrainType ? `${TERRAIN_PREFIX}${terrainType}` : territoryId;
+    const prevDefenderTerritoryId = territoryId;
+    const prevAttackingTerritoryId = attackingTerritoryId;
 
     const defenderCountByUnit: Record<string, number> = {};
     territoryDefenderStacksWithCounts.forEach(({ unit_id, count }) => {
@@ -1133,14 +1133,24 @@ export default function CombatSimulatorPanel({
       .filter((u) => (attackerCounts[u.id] ?? 0) > 0)
       .map((u) => ({ unit_id: u.id, count: attackerCounts[u.id] ?? 0 }));
 
+    let newDefenderTerritoryId = '';
+    if (prevAttackingTerritoryId.trim()) {
+      newDefenderTerritoryId = prevAttackingTerritoryId;
+    } else if (prevDefenderTerritoryId.startsWith(TERRAIN_PREFIX)) {
+      newDefenderTerritoryId = prevDefenderTerritoryId;
+    } else {
+      const tt = getTerrainTypeFromTerritoryId(definitions, prevDefenderTerritoryId);
+      newDefenderTerritoryId = tt ? `${TERRAIN_PREFIX}${tt}` : prevDefenderTerritoryId;
+    }
+
     setAttackerFaction(defenderLogoFaction);
-    setTerritoryId(newTerritoryId);
+    setTerritoryId(newDefenderTerritoryId);
     setAttackerCounts(newAttackerCounts);
     setDefenderTerritoryCounts({});
     setAddedDefenderStacks(newDefenderStacks);
-    // New attacker (old defender) stages from the defended hex when it was a real territory; generic terrain has no hex.
-    const defendingWasTerrainOnly = territoryId.startsWith(TERRAIN_PREFIX);
-    setAttackingTerritoryId(defendingWasTerrainOnly ? '' : territoryId);
+    // New attacker stages from the hex they previously defended (when it was a real territory).
+    const defendingWasTerrainOnly = prevDefenderTerritoryId.startsWith(TERRAIN_PREFIX);
+    setAttackingTerritoryId(defendingWasTerrainOnly ? '' : prevDefenderTerritoryId);
     setCasualtyOrderAttacker('best_unit');
     setResult(null);
     setError(null);

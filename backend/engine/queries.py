@@ -1143,7 +1143,18 @@ def _validate_mobilize(
             return ValidationResult(False, f"{destination} is not owned by {faction_id}")
         power_production = dest_def.produces.get("power", 0)
         this_count = sum(item.get("count", 0) for item in units_to_mobilize)
-        if has_camp:
+        owned_at_turn_start = getattr(state, "faction_territories_at_turn_start", {}).get(faction_id, []) or []
+        camp_hex_owned_at_turn_start = destination in owned_at_turn_start
+        if has_camp and not camp_hex_owned_at_turn_start:
+            for item in units_to_mobilize:
+                uid = item.get("unit_id")
+                if not is_home_for.get(uid):
+                    return ValidationResult(
+                        False,
+                        f"Cannot mobilize to camp territory {destination}: it was not owned at the start of your turn. "
+                        f"You may still mobilize units with the home special to their home here.",
+                    )
+        if has_camp and camp_hex_owned_at_turn_start:
             already_pending = sum(
                 sum(u.get("count", 0) for u in pm.units)
                 for pm in state.pending_mobilizations
@@ -1154,6 +1165,31 @@ def _validate_mobilize(
                     False,
                     f"Cannot mobilize {this_count} more to {destination}: "
                     f"already {already_pending} pending, capacity is {power_production}",
+                )
+        elif has_camp and not camp_hex_owned_at_turn_start:
+            unit_ids_in_batch = {item.get("unit_id") for item in units_to_mobilize}
+            if len(unit_ids_in_batch) != 1:
+                return ValidationResult(
+                    False,
+                    "When mobilizing to a home territory on a camp hex you captured this turn, all units must be the same type",
+                )
+            unit_id = next(iter(unit_ids_in_batch))
+            if not is_home_for.get(unit_id):
+                return ValidationResult(
+                    False,
+                    f"{destination} is not a home territory for {unit_id}",
+                )
+            already_pending = sum(
+                u.get("count", 0)
+                for pm in state.pending_mobilizations
+                if pm.destination == destination
+                for u in pm.units
+                if u.get("unit_id") == unit_id
+            )
+            if already_pending + this_count > 1:
+                return ValidationResult(
+                    False,
+                    f"At most 1 {unit_id} can be mobilized to home territory {destination} per phase (already {already_pending} pending)",
                 )
         else:
             unit_ids_in_batch = {item.get("unit_id") for item in units_to_mobilize}
@@ -1800,11 +1836,13 @@ def get_mobilization_capacity(
                     continue
                 if has_unit_special(uud, "home") and territory_id in _home_territory_ids(uud):
                     home_at_camp[uid] = 1
-            camp_row: dict[str, Any] = {"territory_id": territory_id, "power": power}
+            owned_at_start = getattr(state, "faction_territories_at_turn_start", {}).get(faction_id, []) or []
+            camp_power = power if territory_id in owned_at_start else 0
+            camp_row: dict[str, Any] = {"territory_id": territory_id, "power": camp_power}
             if home_at_camp:
                 camp_row["home_unit_capacity"] = home_at_camp
             territories.append(camp_row)
-            total += power
+            total += camp_power
         elif _territory_has_port(territory_id, port_defs):
             seen.add(territory_id)
             sea_zone_ids = _sea_zones_adjacent_to_port_territory(territory_id, territory_defs)

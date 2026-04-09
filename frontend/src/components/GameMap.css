@@ -658,14 +658,17 @@
   }
 }
 
-/* Sea zones with 2+ ships: explicit control so touch users need not double-tap */
+/* Sea zones with 2+ ships: list control on fine pointer; touch uses long-press on stack (see GameMap.tsx) */
 .sea-zone-tray-open-btn {
   flex-shrink: 0;
   align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
   font-family: 'Cinzel', serif;
-  font-size: 0.65rem;
+  font-size: 0.62rem;
   font-weight: 600;
-  padding: 0.28rem 0.45rem;
+  padding: 0.25rem 0.4rem;
   border: 2px solid var(--gold);
   border-radius: 4px;
   background: var(--parchment);
@@ -676,16 +679,19 @@
   touch-action: manipulation;
 }
 
+.sea-zone-tray-open-btn__icon {
+  font-size: 0.85rem;
+  line-height: 1;
+  opacity: 0.9;
+}
+
 .sea-zone-tray-open-btn:hover {
   background: var(--parchment-light);
 }
 
 @media (pointer: coarse) {
-  .sea-zone-tray-open-btn {
-    min-height: 2.5rem;
-    min-width: 2.75rem;
-    padding: 0.4rem 0.55rem;
-    font-size: 0.75rem;
+  .sea-zone-tray-open-btn--fine-pointer {
+    display: none;
   }
 }
 

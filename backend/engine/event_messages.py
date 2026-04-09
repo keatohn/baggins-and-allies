@@ -235,7 +235,10 @@ def build_message(
         return "Income collected"
 
     if event_type == RESOURCES_CHANGED:
-        # Usually not shown as a standalone log line; purchase/combat already summarize
+        reason = str(payload.get("reason") or "")
+        if reason == "purchase_camp":
+            return "Purchased a camp"
+        # Other resource deltas are summarized elsewhere or omitted
         return ""
 
     if event_type == TERRITORY_CAPTURED:

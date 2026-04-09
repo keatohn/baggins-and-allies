@@ -108,7 +108,14 @@ export function eventLogMergeGroupKey(e: GameEvent): string | null {
     const fac = String(p.faction ?? '');
     const phase = String(p.phase ?? '');
     const turn = typeof p.turn_number === 'number' ? p.turn_number : -1;
-    return `units_purchased|${turn}|${fac}|${phase}`;
+    return `purchase_phase|${turn}|${fac}|${phase}`;
+  }
+  if (e.type === 'resources_changed' && String((e.payload as Record<string, unknown>)?.reason ?? '') === 'purchase_camp') {
+    const p = e.payload ?? {};
+    const fac = String(p.faction ?? '');
+    const phase = String(p.phase ?? '');
+    const turn = typeof p.turn_number === 'number' ? p.turn_number : -1;
+    return `purchase_phase|${turn}|${fac}|${phase}`;
   }
   if (e.type === 'combat_ended') {
     const p = e.payload ?? {};
@@ -144,7 +151,7 @@ export function eventLogMergeGroupKey(e: GameEvent): string | null {
 
 /**
  * Collapse duplicate summary lines that share faction + turn + phase (+ destination for moves):
- * - units_purchased → one line per purchase phase (merged counts)
+ * - units_purchased + resources_changed(purchase_camp) → one line per purchase phase (merged counts + camps)
  * - units_moved → per destination; combat_move merges all declarations into the same hex
  * - units_mobilized → per destination
  * - combat_ended → one line per battle territory (same turn + combat phase)
@@ -236,10 +243,14 @@ function mergeGroup(
       payload: { ...p, message: msg },
     };
   }
-  if (first.type === 'units_purchased') {
+  if (first.type === 'units_purchased' || first.type === 'resources_changed') {
     const mergedPurchases: Record<string, number> = {};
     const mergedCost: Record<string, number> = {};
-    for (const ev of group) {
+    let campCount = 0;
+    const unitsEvents = group.filter((ev) => ev.type === 'units_purchased');
+    const baseEv = unitsEvents[0] ?? first;
+    const basePayload = (baseEv.payload as Record<string, unknown>) ?? {};
+    for (const ev of unitsEvents) {
       const pr = (ev.payload?.purchases as Record<string, number>) ?? {};
       for (const [k, v] of Object.entries(pr)) {
         const n = typeof v === 'number' ? v : 0;
@@ -251,17 +262,27 @@ function mergeGroup(
         mergedCost[k] = (mergedCost[k] ?? 0) + n;
       }
     }
+    for (const ev of group) {
+      if (ev.type === 'resources_changed' && String(ev.payload?.reason ?? '') === 'purchase_camp') {
+        campCount += 1;
+      }
+    }
     const p = {
-      ...(first.payload as Record<string, unknown>),
+      ...basePayload,
       purchases: mergedPurchases,
       total_cost: mergedCost,
     };
-    const msg = formatUnitsPurchasedMessage(p, unitDefs);
+    let msg = formatUnitsPurchasedMessage(p, unitDefs);
+    if (campCount > 0) {
+      const campPart = campCount === 1 ? '1 camp' : `${campCount} camps`;
+      msg = msg === 'Purchased nothing' ? `Purchased ${campPart}` : `${msg}; ${campPart}`;
+    }
     return {
-      ...first,
-      id: `${first.id}-merged`,
+      ...baseEv,
+      id: `${baseEv.id}-merged`,
+      type: 'units_purchased',
       message: msg,
-      payload: { ...p, message: msg },
+      payload: { ...basePayload, ...p, message: msg },
     };
   }
   return first;

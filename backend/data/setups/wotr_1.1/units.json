@@ -112,7 +112,7 @@
     "id": "rivendell_warrior",
     "display_name": "Rivendell Warrior",
     "faction": "freepeoples",
-    "archetype": "cavalry",
+    "archetype": "infantry",
     "attack": 4,
     "defense": 4,
     "dice": 1,

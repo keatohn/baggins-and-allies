@@ -856,6 +856,28 @@ function GameMap({
     passengerCount?: number;
   } | null>(null);
   const tapStartRef = useRef<{ territoryId: string; unitId: string; x: number; y: number } | null>(null);
+  /** Touch: long-press boat stack (2+ ships) opens naval tray without a separate "list" control. */
+  const navalTrayLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const navalTrayLongPressStartRef = useRef<{ x: number; y: number; territoryId: string } | null>(null);
+  const [coarsePointer, setCoarsePointer] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(pointer: coarse)');
+    const fn = () => setCoarsePointer(mq.matches);
+    mq.addEventListener('change', fn);
+    return () => mq.removeEventListener('change', fn);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (navalTrayLongPressTimerRef.current != null) {
+        clearTimeout(navalTrayLongPressTimerRef.current);
+        navalTrayLongPressTimerRef.current = null;
+      }
+    },
+    [],
+  );
   /** Last pointer position while any map drag is active — prefer `elementsFromPoint` + valid targets over dnd-kit `over` (bbox collisions). */
   const lastMapDragPointerRef = useRef<{ x: number; y: number } | null>(null);
   /** Tap All (no drag) then tap destination — mobile-friendly bulk move */
@@ -3667,6 +3689,32 @@ function GameMap({
                           onSeaZoneStackClick?.(territoryId);
                         }
                         : undefined;
+                      const cancelNavalTrayLongPress = () => {
+                        if (navalTrayLongPressTimerRef.current != null) {
+                          clearTimeout(navalTrayLongPressTimerRef.current);
+                          navalTrayLongPressTimerRef.current = null;
+                        }
+                        const s = navalTrayLongPressStartRef.current;
+                        if (s?.territoryId === territoryId) navalTrayLongPressStartRef.current = null;
+                      };
+                      const handleNavalStackPointerDown = (e: ReactPointerEvent) => {
+                        if (!coarsePointer || !showTrayDblClick || !onSeaZoneStackClick) return;
+                        if (e.button !== 0) return;
+                        cancelNavalTrayLongPress();
+                        navalTrayLongPressStartRef.current = { x: e.clientX, y: e.clientY, territoryId };
+                        navalTrayLongPressTimerRef.current = window.setTimeout(() => {
+                          navalTrayLongPressTimerRef.current = null;
+                          navalTrayLongPressStartRef.current = null;
+                          onSeaZoneStackClick(territoryId);
+                        }, 520);
+                      };
+                      const handleNavalStackPointerMove = (e: ReactPointerEvent) => {
+                        const s = navalTrayLongPressStartRef.current;
+                        if (!s || s.territoryId !== territoryId) return;
+                        const dx = e.clientX - s.x;
+                        const dy = e.clientY - s.y;
+                        if (dx * dx + dy * dy > 144) cancelNavalTrayLongPress();
+                      };
                       const left = screenPos.x;
                       const top = screenPos.y + unitOffsetY + powerBadgeOffsetY;
                       return (
@@ -3690,23 +3738,35 @@ function GameMap({
                               {showTrayDblClick && onSeaZoneStackClick && (
                                 <button
                                   type="button"
-                                  className="sea-zone-tray-open-btn"
+                                  className="sea-zone-tray-open-btn sea-zone-tray-open-btn--fine-pointer"
                                   onClick={handleOpenNavalTrayClick}
-                                  title="Open boat list (tap here on phones; double-click the stack on desktop)"
-                                  aria-label={`Open boat list for ${territory?.name ?? territoryId}`}
+                                  title="Ship list and passengers (double-click stack also works)"
+                                  aria-label={`Open ship list for ${territory?.name ?? territoryId}`}
                                 >
-                                  Boats
+                                  <span className="sea-zone-tray-open-btn__icon" aria-hidden>
+                                    ☰
+                                  </span>
+                                  <span className="sea-zone-tray-open-btn__text">Ships</span>
                                 </button>
                               )}
                               <div
                                 className={`territory-units ${useStacked ? 'territory-units--stacked' : ''}`}
                                 style={{ position: 'relative', left: 0, top: 0 }}
                                 onDoubleClick={handleStackDoubleClick}
+                                onPointerDown={handleNavalStackPointerDown}
+                                onPointerMove={handleNavalStackPointerMove}
+                                onPointerUp={cancelNavalTrayLongPress}
+                                onPointerCancel={cancelNavalTrayLongPress}
+                                onPointerLeave={cancelNavalTrayLongPress}
                                 title={
                                   showTrayDblClick
-                                    ? `Boats: open list (tap button or double-click stack). Drag a ship stack to move all ships of that type.${
-                                      eligiblePending && totalPassengers < 1 ? ' Pending loads into this zone.' : ''
-                                    }`
+                                    ? coarsePointer
+                                      ? `Long-press this stack for ship list & passengers, or drag to move.${
+                                          eligiblePending && totalPassengers < 1 ? ' Pending loads into this zone.' : ''
+                                        }`
+                                      : `Double-click stack or use the list control for ships & passengers. Drag a ship stack to move.${
+                                          eligiblePending && totalPassengers < 1 ? ' Pending loads into this zone.' : ''
+                                        }`
                                     : undefined
                                 }
                               >
