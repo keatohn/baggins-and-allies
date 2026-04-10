@@ -45,6 +45,13 @@
   width: 100%;
 }
 
+@media (min-width: 768px) {
+  .game-list {
+    /* Wider than base so long setup names (e.g. War of the Ring - Expanded) don’t wrap into turn meta */
+    max-width: min(725px, 100%);
+  }
+}
+
 .game-list__item {
   margin-bottom: 0.75rem;
 }
