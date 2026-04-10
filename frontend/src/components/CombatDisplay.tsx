@@ -223,6 +223,19 @@ export interface CombatRound {
   ladderInfantryInstanceIds?: string[];
 }
 
+/** Row keys used for dice reveal order; same logic as staggered animation (spectators reveal all at once). */
+function combatRowRevealKeysFromRound(round: CombatRound): string[] {
+  const order: string[] = [];
+  for (let i = 1; i <= 10; i++) {
+    if (attackerStatRowHasRolls(round.attackerRolls[i])) order.push(`attacker_${i}`);
+  }
+  if (round.defenderRolls[-1]?.length) order.push('defender_-1');
+  for (let i = 1; i <= 10; i++) {
+    if (round.defenderRolls[i]?.length) order.push(`defender_${i}`);
+  }
+  return order;
+}
+
 interface RetreatOption {
   territoryId: string;
   territoryName: string;
@@ -1546,7 +1559,7 @@ function CombatDisplay({
 
   // Spectator: sync round state from backend combat_log when it updates (e.g. from polling)
   useEffect(() => {
-    if (!readOnly || !combatLog?.length || !attacker.units.length || !defender.units.length) return;
+    if (!isOpen || !readOnly || !combatLog?.length || !attacker.units.length || !defender.units.length) return;
     const last = combatLog[combatLog.length - 1] as {
       round_number?: number;
       attacker_rolls?: number[];
@@ -1557,6 +1570,7 @@ function CombatDisplay({
       defender_casualties?: string[];
       is_archer_prefire?: boolean;
       is_stealth_prefire?: boolean;
+      is_siegeworks_round?: boolean;
     };
     const rn = last.round_number ?? 0;
     const aRolls = last.attacker_rolls ?? [];
@@ -1593,6 +1607,7 @@ function CombatDisplay({
       defenderCasualties: last.defender_casualties ?? [],
       isArcherPrefire: last.is_archer_prefire ?? false,
       isStealthPrefire: last.is_stealth_prefire ?? false,
+      isSiegeworksRound: last.is_siegeworks_round ?? false,
       terrorApplied: false,
       attackerUnitsAtStart: aAtStart,
       defenderUnitsAtStart: dAtStart,
@@ -1603,8 +1618,16 @@ function CombatDisplay({
     setCurrentRound(round);
     setShowHits(true);
     setShowCasualtyBadges(true);
+    // Live players reveal rows via animateDiceReveals; spectators never run that — must mark all shelves revealed or dice stay blank.
+    setRevealedRows(new Set(combatRowRevealKeysFromRound(round)));
+    setCurrentRowKey(null);
+    setIsLanding(false);
+    setTerrorRerollPhase(null);
+    setTerrorRerolledIndicesByStat({});
+    setTerrorFinalRound(null);
+    setShowTerrorRerollX(false);
     setCombatPhase('awaiting_decision'); // Show round + hits; result banner only when combatEndResult is set
-  }, [readOnly, combatLog, attacker.units, defender.units]);
+  }, [isOpen, readOnly, combatLog, attacker.units, defender.units]);
 
   // Spectator: when combat ended, show result banner then auto-close after 3s
   useEffect(() => {
@@ -1829,25 +1852,7 @@ function CombatDisplay({
   ]);
 
   // Calculate row animation order (include -1 for archer prefire)
-  const getRowOrder = useCallback((round: CombatRound) => {
-    const order: string[] = [];
-
-    for (let i = 1; i <= 10; i++) {
-      if (attackerStatRowHasRolls(round.attackerRolls[i])) {
-        order.push(`attacker_${i}`);
-      }
-    }
-    if (round.defenderRolls[-1]?.length > 0) {
-      order.push('defender_-1');
-    }
-    for (let i = 1; i <= 10; i++) {
-      if (round.defenderRolls[i]?.length > 0) {
-        order.push(`defender_${i}`);
-      }
-    }
-
-    return order;
-  }, []);
+  const getRowOrder = useCallback((round: CombatRound) => combatRowRevealKeysFromRound(round), []);
 
   // Convert grouped dice (stat -> { rolls, hits }) to round defenderRolls format
   const groupedToDefenderRolls = useCallback((

@@ -652,7 +652,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     if (w != null) return Math.min(780, Math.max(260, Number(w)));
     const vw = typeof window !== 'undefined' ? window.innerWidth : 1200;
     // Wider default on desktop/tablet; mobile keeps a smaller intrinsic default (still capped below).
-    return vw >= 768 ? 520 : 400;
+    return vw >= 768 ? 600 : 400;
   });
   const [viewportWidth, setViewportWidth] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth : 1200,
@@ -763,13 +763,15 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     if (sidebarCollapsed) return sidebarWidth;
     const landscapeShort = viewportHeight < 520 && viewportWidth > viewportHeight;
     const isMobileViewport = viewportWidth < 768;
+    /** Short + wide desktop windows (e.g. docked DevTools) should not force the phone-landscape 308px cap. */
+    const narrowLandscapeShort = landscapeShort && viewportWidth < 1024;
     const cap = isMobileViewport
       ? viewportWidth < 400
         ? Math.min(landscapeShort ? 168 : 194, Math.floor(viewportWidth * (landscapeShort ? 0.31 : 0.5)))
         : viewportWidth < 480
           ? Math.min(landscapeShort ? 186 : 212, Math.floor(viewportWidth * (landscapeShort ? 0.33 : 0.52)))
           : Math.min(landscapeShort ? 204 : 276, Math.floor(viewportWidth * (landscapeShort ? 0.29 : 0.35)))
-      : landscapeShort
+      : narrowLandscapeShort
         ? Math.min(308, Math.floor(viewportWidth * 0.35))
         : viewportWidth < 1200
           ? Math.min(780, Math.max(380, Math.floor(viewportWidth * 0.52)))

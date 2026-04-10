@@ -1918,6 +1918,7 @@ function GameMap({
         bulkAllTapStartRef.current = null;
         if (dx * dx + dy * dy >= 100) return;
         if (activeDragIdRef.current !== null) return;
+        if (!canAct) return;
         setTapSelectedUnit(null);
         setTapMobilizationAll(false);
         const { validTargets } = computeBulkAllMoveData(bulkStart.territoryId);
@@ -1935,6 +1936,7 @@ function GameMap({
       tapStartRef.current = null;
       if (distanceSq >= 100) return; // 10px threshold
       if (activeDragIdRef.current !== null) return; // Was a drag
+      if (!canAct) return;
       setTapMobilizationAll(false);
       // Build tap-selected unit from territory/unit and show valid destinations
       const stacks = territoryUnits[start.territoryId] || [];
@@ -1943,6 +1945,8 @@ function GameMap({
       const parts = start.unitId.split('_');
       const factionFromId = parts.find(p => factionData[p]);
       const defFaction = unitDefs[start.unitId]?.faction;
+      const unitFaction = factionFromId ?? defFaction ?? parts[0];
+      if (unitFaction !== gameState.current_faction) return;
       const unitFactionColor = factionFromId && factionData[factionFromId] ? factionData[factionFromId].color : (defFaction && factionData[defFaction] ? factionData[defFaction].color : undefined);
       const instanceIdsForUnit = (territoryUnitsFull?.[start.territoryId] || []).filter(u => u.unit_id === start.unitId).map(u => u.instance_id);
       const isSeaTap = territoryData[start.territoryId]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(start.territoryId);
@@ -1971,7 +1975,20 @@ function GameMap({
     };
     document.addEventListener('pointerup', handler);
     return () => document.removeEventListener('pointerup', handler);
-  }, [territoryUnits, territoryUnitsFull, territoryData, unitDefs, factionData, navalUnitIds, getValidTargets, gameState.phase, pendingMoves, computeBulkAllMoveData]);
+  }, [
+    territoryUnits,
+    territoryUnitsFull,
+    territoryData,
+    unitDefs,
+    factionData,
+    navalUnitIds,
+    getValidTargets,
+    gameState.phase,
+    gameState.current_faction,
+    pendingMoves,
+    computeBulkAllMoveData,
+    canAct,
+  ]);
 
   const handleTapMobilizeAllFromTray = useCallback(() => {
     if (!mobilizationTray?.canMobilizeAll || (mobilizationTray.purchases?.length ?? 0) <= 1) return;
@@ -2008,6 +2025,12 @@ function GameMap({
     bulkAllTapStartRef.current = null;
     setBulkDragOverlay(null);
     setActiveDragId(event.active.id as string);
+    if (!canAct) {
+      setValidDropTargets(new Set());
+      setBulkDragOverlay(null);
+      setActiveUnit(null);
+      return;
+    }
     if ((data as { type?: string }).type === 'bulk-all') {
       const fromTerritory = (data as { territoryId?: string }).territoryId;
       if (fromTerritory) {
@@ -2096,6 +2119,7 @@ function GameMap({
     mobilizationTray?.mobilizationAllValidZones,
     territoriesWithPendingCampPlacement,
     territoryData,
+    canAct,
   ]);
 
   // Handle drag end
@@ -2110,6 +2134,16 @@ function GameMap({
     const isMobilizationAll = dataType === 'mobilization-all';
     const isMobilizationCamp = dataType === 'mobilization-camp';
     const isMobilization = dataType === 'mobilization-unit';
+
+    if (!canAct) {
+      setTapBulkAllFromTerritory(null);
+      setTapMobilizationAll(false);
+      setBulkDragOverlay(null);
+      setActiveUnit(null);
+      setActiveDragId(null);
+      setValidDropTargets(new Set());
+      return;
+    }
 
     if (isBulkAll) {
       let storeTarget = '';
@@ -2702,7 +2736,7 @@ function GameMap({
     setActiveUnit(null);
     setActiveDragId(null);
     setValidDropTargets(new Set());
-  }, [activeUnit, validDropTargets, territoryUnits, territoryUnitsFull, pendingMoves, availableMoveTargets, navalUnitIds, onSetPendingMove, _onDropDestination, onBulkMoveDrop, onMobilizationDrop, onMobilizationAllDrop, onCampDrop, gameState.phase, gameState.current_faction, factionData, unitDefs, territoryData, resolveTerritoryDropId]);
+  }, [activeUnit, validDropTargets, territoryUnits, territoryUnitsFull, pendingMoves, availableMoveTargets, navalUnitIds, onSetPendingMove, _onDropDestination, onBulkMoveDrop, onMobilizationDrop, onMobilizationAllDrop, onCampDrop, gameState.phase, gameState.current_faction, factionData, unitDefs, territoryData, resolveTerritoryDropId, canAct]);
 
   const handleDragCancel = useCallback(() => {
     lastMapDragPointerRef.current = null;
@@ -2722,7 +2756,7 @@ function GameMap({
     if (dx * dx + dy * dy >= PAN_CLICK_THRESHOLD_PX * PAN_CLICK_THRESHOLD_PX) return; // Was a pan, not a click
 
     // Tap-to-drop bulk: All then destination (mobile)
-    if (tapBulkAllFromTerritory && territoryMatchesValidDrop(territoryId)) {
+    if (canAct && tapBulkAllFromTerritory && territoryMatchesValidDrop(territoryId)) {
       const resolvedId = resolveTerritoryDropId(territoryId) || territoryId;
       const destToUse = validDropTargets.has(resolvedId) ? resolvedId : territoryId;
       onBulkMoveDrop?.(tapBulkAllFromTerritory, destToUse.trim());
@@ -2731,7 +2765,7 @@ function GameMap({
       return;
     }
     // Tray “All” then tap valid mobilization destination (mobile)
-    if (tapMobilizationAll && territoryMatchesValidDrop(territoryId)) {
+    if (canAct && tapMobilizationAll && territoryMatchesValidDrop(territoryId)) {
       const resolvedId = resolveTerritoryDropId(territoryId) || territoryId;
       const destToUse = validDropTargets.has(resolvedId) ? resolvedId : territoryId;
       const purchases = mobilizationTray?.purchases ?? [];
@@ -2752,7 +2786,7 @@ function GameMap({
       return;
     }
     // Tap-to-drop: user previously tapped a unit; this territory is a valid destination
-    if (tapSelectedUnit && territoryMatchesValidDrop(territoryId)) {
+    if (canAct && tapSelectedUnit && territoryMatchesValidDrop(territoryId)) {
       const syntheticEvent = {
         active: { id: 'tap-move', data: { current: tapSelectedUnit } },
         over: { id: `territory-${territoryId}`, data: { current: { territoryId } } },
@@ -2794,6 +2828,7 @@ function GameMap({
     onBulkMoveDrop,
     onMobilizationAllDrop,
     handleDragEnd,
+    canAct,
   ]);
 
   // Handle background click: clear selection when clicking map background; ignore if we just panned
@@ -3785,7 +3820,8 @@ function GameMap({
                                 const colorFromDef = defFaction && factionData[defFaction] ? factionData[defFaction].color : null;
                                 const unitFactionColor = colorFromId ?? colorFromDef ?? NEUTRAL_UNIT_BORDER;
                                 const unitFaction = factionFromId ?? defFaction ?? parts[0];
-                                const canDrag = isMovementPhase && (unitFaction === gameState.current_faction);
+                                const canDrag =
+                                  canAct && isMovementPhase && unitFaction === gameState.current_faction;
                                 return (
                                   <span
                                     key={`${territoryId}-${unit_id}`}
@@ -3838,7 +3874,8 @@ function GameMap({
                                 const colorFromDef = defFaction && factionData[defFaction] ? factionData[defFaction].color : null;
                                 const unitFactionColor = colorFromId ?? colorFromDef ?? NEUTRAL_UNIT_BORDER;
                                 const unitFaction = factionFromId ?? defFaction ?? parts[0];
-                                const canDrag = isMovementPhase && (unitFaction === gameState.current_faction);
+                                const canDrag =
+                                  canAct && isMovementPhase && unitFaction === gameState.current_faction;
                                 return (
                                   <span
                                     key={`${territoryId}-${unit_id}-sea-surface`}
@@ -3931,7 +3968,8 @@ function GameMap({
                           const unitFactionColor = colorFromId ?? colorFromDef ?? NEUTRAL_UNIT_BORDER;
                           // Draggable during movement phase if this unit belongs to the current faction (regardless of territory owner)
                           const unitFaction = factionFromId ?? defFaction ?? parts[0];
-                          const canDrag = isMovementPhase && (unitFaction === gameState.current_faction);
+                          const canDrag =
+                            canAct && isMovementPhase && unitFaction === gameState.current_faction;
                           const instanceIdsForUnit = (territoryUnitsFull?.[territoryId] || []).filter(u => u.unit_id === unit_id).map(u => u.instance_id);
                           const showNavalMustAttackStacked =
                             gameState.phase === 'combat_move' &&
