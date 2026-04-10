@@ -649,7 +649,10 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   const [highlightedTerritories, setHighlightedTerritories] = useState<string[]>([]);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const w = localStorage.getItem('sidebarWidth');
-    return w != null ? Math.min(780, Math.max(260, Number(w))) : 400;
+    if (w != null) return Math.min(780, Math.max(260, Number(w)));
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1200;
+    // Wider default on desktop/tablet; mobile keeps a smaller intrinsic default (still capped below).
+    return vw >= 768 ? 520 : 400;
   });
   const [viewportWidth, setViewportWidth] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth : 1200,
@@ -755,22 +758,22 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  /** Sidebar inline width can exceed narrow viewports; cap so map stays usable (esp. mobile). */
+  /** Sidebar inline width can exceed narrow viewports; cap so map stays usable on mobile only (<768px). */
   const sidebarWidthCapped = useMemo(() => {
     if (sidebarCollapsed) return sidebarWidth;
     const landscapeShort = viewportHeight < 520 && viewportWidth > viewportHeight;
-    const cap =
-      viewportWidth < 400
+    const isMobileViewport = viewportWidth < 768;
+    const cap = isMobileViewport
+      ? viewportWidth < 400
         ? Math.min(landscapeShort ? 168 : 194, Math.floor(viewportWidth * (landscapeShort ? 0.31 : 0.5)))
         : viewportWidth < 480
           ? Math.min(landscapeShort ? 186 : 212, Math.floor(viewportWidth * (landscapeShort ? 0.33 : 0.52)))
-          : viewportWidth < 768
-            ? Math.min(landscapeShort ? 204 : 276, Math.floor(viewportWidth * (landscapeShort ? 0.29 : 0.35)))
-            : landscapeShort
-              ? Math.min(308, Math.floor(viewportWidth * 0.35))
-              : viewportWidth < 1100
-                ? Math.min(620, Math.floor(viewportWidth * 0.48))
-                : 760;
+          : Math.min(landscapeShort ? 204 : 276, Math.floor(viewportWidth * (landscapeShort ? 0.29 : 0.35)))
+      : landscapeShort
+        ? Math.min(308, Math.floor(viewportWidth * 0.35))
+        : viewportWidth < 1200
+          ? Math.min(780, Math.max(380, Math.floor(viewportWidth * 0.52)))
+          : 780;
     return Math.min(sidebarWidth, Math.max(196, cap));
   }, [sidebarCollapsed, sidebarWidth, viewportWidth, viewportHeight]);
   useEffect(() => {

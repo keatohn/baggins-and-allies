@@ -19,7 +19,7 @@
     "fangorn": "elves",
     "dol_guldur": "mordor",
     "thranduils_halls": "erebor",
-    "rhudaur": "elves",
+    "gladden_fields": "elves",
     "gundabad": "mordor",
     "erebor": "erebor",
     "dale": "erebor",
@@ -91,7 +91,7 @@
       },
       {
         "unit_id": "rivendell_warrior",
-        "count": 1
+        "count": 2
       }
     ],
     "lothlorien": [
@@ -106,10 +106,16 @@
         "count": 2
       }
     ],
+    "gladden_fields": [
+      {
+        "unit_id": "galadhrim_archer",
+        "count": 1
+      }
+    ],
     "moria": [
       {
         "unit_id": "goblin",
-        "count": 10
+        "count": 7
       },
       {
         "unit_id": "cave_troll",
@@ -119,7 +125,7 @@
     "fangorn": [
       {
         "unit_id": "ent",
-        "count": 3
+        "count": 2
       }
     ],
     "dol_guldur": [
@@ -200,6 +206,14 @@
       {
         "unit_id": "easterling_warrior",
         "count": 2
+      },
+      {
+        "unit_id": "easterling_pikeman",
+        "count": 1
+      },
+      {
+        "unit_id": "easterling_archer",
+        "count": 1
       }
     ],
     "rhun_hills": [
@@ -219,7 +233,7 @@
       },
       {
         "unit_id": "easterling_pikeman",
-        "count": 2
+        "count": 1
       },
       {
         "unit_id": "easterling_kataphrakt",
@@ -344,6 +358,18 @@
         "count": 1
       }
     ],
+    "gorgoroth": [
+      {
+        "unit_id": "orc_warrior",
+        "count": 2
+      }
+    ],
+    "udun": [
+      {
+        "unit_id": "orc_warrior",
+        "count": 2
+      }
+    ],
     "isengard": [
       {
         "unit_id": "uruk_crossbowman",
@@ -355,7 +381,7 @@
       },
       {
         "unit_id": "urukhai_warrior",
-        "count": 5
+        "count": 6
       },
       {
         "unit_id": "berserker",
@@ -367,6 +393,10 @@
       },
       {
         "unit_id": "bomb",
+        "count": 1
+      },
+      {
+        "unit_id": "siege_ladder",
         "count": 1
       }
     ],
@@ -423,7 +453,7 @@
     "eastemnet": [
       {
         "unit_id": "rider_of_rohan",
-        "count": 2
+        "count": 3
       },
       {
         "unit_id": "rohirrim_archer_rider",
@@ -442,14 +472,16 @@
         "count": 1
       }
     ],
+    "haradwaith": [
+      {
+        "unit_id": "haradrim_warrior",
+        "count": 1
+      }
+    ],
     "far_harad": [
       {
         "unit_id": "war_mumakil",
         "count": 1
-      },
-      {
-        "unit_id": "haradrim_warrior",
-        "count": 2
       },
       {
         "unit_id": "haradrim_archer",
@@ -459,7 +491,7 @@
     "umbar": [
       {
         "unit_id": "corsair_of_umbar",
-        "count": 2
+        "count": 1
       }
     ],
     "sea_zone_11": [

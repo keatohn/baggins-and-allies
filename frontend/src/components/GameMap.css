@@ -1,3 +1,13 @@
+/* Fills .map-wrap (flex child) so the map column gets a definite height; avoids bottom tray clipping on mobile. */
+.game-map-root {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .map-container {
   flex: 1;
   min-height: 0;
@@ -6,6 +16,14 @@
   background: var(--parchment-dark);
   display: flex;
   flex-direction: column;
+}
+
+/* Docked trays stay in flow and above map chrome; safe-area padding lives on tray components. */
+.map-container--with-tray .mobilization-tray,
+.map-container--with-tray .naval-tray {
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 25;
 }
 
 .map-container .map-content {

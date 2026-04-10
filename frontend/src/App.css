@@ -1,7 +1,11 @@
 .app {
   display: flex;
   flex-direction: column;
+  /* dvh tracks mobile browser chrome better than vh so bottom UI (e.g. mobilization tray) is not clipped */
+  min-height: 100vh;
+  min-height: 100dvh;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   position: relative;
 }

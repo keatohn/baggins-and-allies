@@ -3132,6 +3132,7 @@ function GameMap({
   };
 
   return (
+    <div className="game-map-root">
     <DndContext
       sensors={sensors}
       onDragStart={handleDragStart}
@@ -4085,6 +4086,7 @@ function GameMap({
         )}
       </div>
     </DndContext>
+    </div>
   );
 }
 

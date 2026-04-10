@@ -1143,11 +1143,39 @@ export default function CombatSimulatorPanel({
       newDefenderTerritoryId = tt ? `${TERRAIN_PREFIX}${tt}` : prevDefenderTerritoryId;
     }
 
+    const swapById: Record<string, number> = {};
+    for (const { unit_id, count } of newDefenderStacks) {
+      if (count <= 0) continue;
+      swapById[unit_id] = (swapById[unit_id] ?? 0) + count;
+    }
+
+    let nextDefenderTerritoryCounts: Record<string, number> = {};
+    let nextAddedDefenderStacks: { unit_id: string; count: number }[] = [];
+
+    if (newDefenderTerritoryId.startsWith(TERRAIN_PREFIX) || !newDefenderTerritoryId.trim()) {
+      seededDefenderTerritoryIdRef.current = null;
+      nextAddedDefenderStacks = newDefenderStacks.filter((s) => s.count > 0);
+    } else {
+      const stacksRaw = (territoryUnits?.[newDefenderTerritoryId] ?? []).filter((s) => s.count > 0);
+      const filteredForNew = stacksRaw.filter((s) => unitAllowedForCombatType(definitions, s.unit_id, isLandCombat));
+      const onHexIds = new Set(filteredForNew.map((s) => s.unit_id));
+
+      seededDefenderTerritoryIdRef.current = newDefenderTerritoryId;
+      for (const { unit_id } of filteredForNew) {
+        nextDefenderTerritoryCounts[unit_id] = swapById[unit_id] ?? 0;
+      }
+      for (const [unit_id, count] of Object.entries(swapById)) {
+        if (!onHexIds.has(unit_id)) {
+          nextAddedDefenderStacks.push({ unit_id, count });
+        }
+      }
+    }
+
     setAttackerFaction(defenderLogoFaction);
     setTerritoryId(newDefenderTerritoryId);
     setAttackerCounts(newAttackerCounts);
-    setDefenderTerritoryCounts({});
-    setAddedDefenderStacks(newDefenderStacks);
+    setDefenderTerritoryCounts(nextDefenderTerritoryCounts);
+    setAddedDefenderStacks(nextAddedDefenderStacks);
     // New attacker stages from the hex they previously defended (when it was a real territory).
     const defendingWasTerrainOnly = prevDefenderTerritoryId.startsWith(TERRAIN_PREFIX);
     setAttackingTerritoryId(defendingWasTerrainOnly ? '' : prevDefenderTerritoryId);

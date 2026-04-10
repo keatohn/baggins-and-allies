@@ -75,13 +75,10 @@
       "transportable"
     ],
     "specials": [
-      "home",
       "mountain"
     ],
     "icon": "dwarf_warrior.png",
-    "home_territory_ids": [
-      "iron_hills"
-    ]
+    "home_territory_ids": []
   },
   "galadhrim_archer": {
     "id": "galadhrim_archer",
@@ -655,7 +652,7 @@
     "transport_capacity": 0,
     "purchasable": true,
     "cost": {
-      "power": 12
+      "power": 10
     },
     "tags": [
       "land",

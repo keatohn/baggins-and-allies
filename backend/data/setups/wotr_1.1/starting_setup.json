@@ -82,12 +82,8 @@
     ],
     "rivendell": [
       {
-        "unit_id": "rivendell_knight",
-        "count": 1
-      },
-      {
         "unit_id": "rivendell_warrior",
-        "count": 1
+        "count": 2
       }
     ],
     "lothlorien": [
@@ -189,7 +185,7 @@
     "west_rhun": [
       {
         "unit_id": "easterling_pikeman",
-        "count": 2
+        "count": 3
       }
     ],
     "rhun_hills": [
@@ -308,6 +304,18 @@
         "count": 1
       }
     ],
+    "gorgoroth": [
+      {
+        "unit_id": "orc_warrior",
+        "count": 2
+      }
+    ],
+    "udun": [
+      {
+        "unit_id": "orc_warrior",
+        "count": 2
+      }
+    ],
     "isengard": [
       {
         "unit_id": "uruk_crossbowman",
@@ -319,7 +327,7 @@
       },
       {
         "unit_id": "urukhai_warrior",
-        "count": 5
+        "count": 6
       },
       {
         "unit_id": "berserker",
@@ -331,6 +339,10 @@
       },
       {
         "unit_id": "bomb",
+        "count": 1
+      },
+      {
+        "unit_id": "siege_ladder",
         "count": 1
       }
     ],
@@ -387,7 +399,7 @@
     "eastemnet": [
       {
         "unit_id": "rider_of_rohan",
-        "count": 2
+        "count": 3
       },
       {
         "unit_id": "rohirrim_archer_rider",
@@ -400,6 +412,12 @@
         "count": 2
       }
     ],
+    "haradwaith": [
+      {
+        "unit_id": "haradrim_archer",
+        "count": 2
+      }
+    ],
     "far_harad": [
       {
         "unit_id": "war_mumakil",
@@ -407,13 +425,7 @@
       },
       {
         "unit_id": "haradrim_archer",
-        "count": 3
-      }
-    ],
-    "umbar": [
-      {
-        "unit_id": "corsair_of_umbar",
-        "count": 1
+        "count": 2
       }
     ]
   }

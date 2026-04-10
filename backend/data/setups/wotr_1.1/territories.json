@@ -59,7 +59,7 @@
     "display_name": "Grey Havens",
     "terrain_type": "city",
     "produces": {
-      "power": 3
+      "power": 4
     },
     "is_stronghold": false,
     "ownable": true,
@@ -511,7 +511,7 @@
     "display_name": "Gundabad",
     "terrain_type": "fortress",
     "produces": {
-      "power": 2
+      "power": 3
     },
     "is_stronghold": false,
     "ownable": true,
@@ -564,7 +564,7 @@
     "display_name": "Erebor",
     "terrain_type": "mountains",
     "produces": {
-      "power": 5
+      "power": 4
     },
     "is_stronghold": true,
     "stronghold_base_health": 2,
@@ -726,7 +726,7 @@
     "display_name": "Dorwinion",
     "terrain_type": "grassland",
     "produces": {
-      "power": 3
+      "power": 2
     },
     "is_stronghold": false,
     "ownable": true,
@@ -1206,7 +1206,7 @@
     "display_name": "South Dunland",
     "terrain_type": "hills",
     "produces": {
-      "power": 2
+      "power": 4
     },
     "is_stronghold": false,
     "ownable": true,

@@ -1,5 +1,6 @@
 .mobilization-tray {
   flex-shrink: 0;
+  box-sizing: border-box;
   background: var(--parchment);
   border-top: 3px solid;
   padding: 0.75rem 1rem;
@@ -214,5 +215,26 @@
 
   .mobilize-all-label {
     font-size: 0.62rem;
+  }
+}
+
+/* Portrait phones: home indicator / dynamic toolbar often eat the bottom; keep tray usable and scroll stacks if needed. */
+@media (max-width: 767px) and (orientation: portrait) {
+  .mobilization-tray {
+    padding-bottom: max(0.45rem, env(safe-area-inset-bottom, 0px));
+    padding-left: max(0.45rem, env(safe-area-inset-left, 0px));
+    padding-right: max(0.45rem, env(safe-area-inset-right, 0px));
+  }
+
+  .tray-units {
+    align-items: flex-start;
+    justify-content: flex-start;
+    max-height: min(42dvh, 280px);
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    overscroll-behavior-y: contain;
+    padding-bottom: 0.15rem;
   }
 }

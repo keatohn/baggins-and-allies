@@ -416,7 +416,7 @@
     "display_name": "Dol Guldur",
     "terrain_type": "fortress",
     "produces": {
-      "power": 4
+      "power": 5
     },
     "is_stronghold": true,
     "stronghold_base_health": 2,
@@ -510,7 +510,7 @@
     "display_name": "Gundabad",
     "terrain_type": "fortress",
     "produces": {
-      "power": 2
+      "power": 3
     },
     "is_stronghold": false,
     "ownable": true,
