@@ -2543,16 +2543,12 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                     defender_stronghold_hp=def_sh_hp_ac,
                     fuse_bomb=fuse_ac,
                 )
-                has_ladders_ac = any(
-                    combat_is_siegework_unit(ud.get(u.unit_id))
-                    and combat_has_special(ud.get(u.unit_id), "ladder")
-                    for u in attackers_ac
-                )
                 combat_log_list = ac_dict.get("combat_log") or []
+                # Match reducer + combat.siegework_dice_round_applies: ladder alone has no siegework *dice* round.
                 siegeworks_pending = (
                     ac_dict.get("round_number", 0) == 0
                     and not any((r.get("is_siegeworks_round") if isinstance(r, dict) else getattr(r, "is_siegeworks_round", False)) for r in combat_log_list)
-                    and (att_sw_dice > 0 or def_sw_dice > 0 or has_ladders_ac)
+                    and (att_sw_dice > 0 or def_sw_dice > 0)
                 )
                 archer_prefire_pending = (
                     ac_dict.get("round_number", 0) == 0
@@ -3111,11 +3107,8 @@ def _generate_initiate_combat_payload(
         attackers, defenders, ud, def_sh_battle, defender_stronghold_hp=def_sh_hp_battle,
         fuse_bomb=fuse_bomb,
     )
-    has_lad_first = any(
-        combat_is_siegework_unit(ud.get(u.unit_id)) and combat_has_special(ud.get(u.unit_id), "ladder")
-        for u in attackers
-    )
-    siegeworks_needed_first = sw_att_first > 0 or sw_def_first > 0 or has_lad_first
+    # Ladder-only: no dedicated siegework dice round (see get_siegework_dice_counts / initiate reducer).
+    siegeworks_needed_first = sw_att_first > 0 or sw_def_first > 0
 
     if all_attackers_have_stealth:
         att_effective_dice, _, _ = get_attacker_effective_dice_and_bombikazi_self_destruct(attackers, ud)
@@ -3324,14 +3317,10 @@ def do_continue_combat(
         attackers, defenders, ud, def_sh, defender_stronghold_hp=def_sh_hp_continue,
         fuse_bomb=fuse_cont,
     )
-    has_lad = any(
-        combat_is_siegework_unit(ud.get(u.unit_id)) and combat_has_special(ud.get(u.unit_id), "ladder")
-        for u in attackers
-    )
     siegeworks_pending = (
         combat.round_number == 0
         and not any(getattr(r, "is_siegeworks_round", False) for r in combat_log)
-        and (sw_att > 0 or sw_def > 0 or has_lad)
+        and (sw_att > 0 or sw_def > 0)
     )
 
     archer_prefire_pending = (
@@ -3718,17 +3707,13 @@ def _enrich_active_combat_siegework_display_ids(ac_dict: dict, state: GameState,
         attackers, defenders, ud, def_sh, defender_stronghold_hp=def_sh_hp_enrich,
         fuse_bomb=fuse_en,
     )
-    has_lad = any(
-        combat_is_siegework_unit(ud.get(u.unit_id)) and combat_has_special(ud.get(u.unit_id), "ladder")
-        for u in attackers
-    )
     siegeworks_pending = (
         ac_dict.get("round_number", 0) == 0
         and not any(
             (r.get("is_siegeworks_round") if isinstance(r, dict) else getattr(r, "is_siegeworks_round", False))
             for r in combat_log_list
         )
-        and (sw_att > 0 or sw_def > 0 or has_lad)
+        and (sw_att > 0 or sw_def > 0)
     )
     if siegeworks_pending:
         disp_att = get_siegework_round_attacker_display_units(
@@ -3760,14 +3745,17 @@ def _generate_dice_rolls_for_active_combat(state, ud, td) -> dict:
         attackers, defenders, ud, def_sh, defender_stronghold_hp=def_sh_hp_en,
         fuse_bomb=fuse_roll,
     )
-    has_lad = any(
-        combat_is_siegework_unit(ud.get(u.unit_id)) and combat_has_special(ud.get(u.unit_id), "ladder")
-        for u in attackers
-    )
     siegeworks_pending = (
         combat.round_number == 0
         and not any(getattr(r, "is_siegeworks_round", False) for r in combat_log)
-        and (sw_a > 0 or sw_d > 0 or has_lad)
+        and (sw_a > 0 or sw_d > 0)
+    )
+    archer_prefire_pending = (
+        combat.round_number == 0
+        and not siegeworks_pending
+        and not any(getattr(r, "is_archer_prefire", False) for r in combat_log)
+        and not any(getattr(r, "is_stealth_prefire", False) for r in combat_log)
+        and any(has_unit_special(ud.get(u.unit_id), "archer") for u in defenders if ud.get(u.unit_id))
     )
     if siegeworks_pending:
         att_rolling = get_siegework_attacker_rolling_units(
@@ -3778,6 +3766,15 @@ def _generate_dice_rolls_for_active_combat(state, ud, td) -> dict:
         return {
             "attacker": generate_dice_rolls_for_units(att_rolling, ud),
             "defender": generate_dice_rolls_for_units(def_sw, ud),
+        }
+    if archer_prefire_pending:
+        defender_archer_units = sorted(
+            [u for u in defenders if ud.get(u.unit_id) and has_unit_special(ud[u.unit_id], "archer")],
+            key=lambda u: u.instance_id,
+        )
+        return {
+            "attacker": [],
+            "defender": generate_dice_rolls_for_units(defender_archer_units, ud),
         }
     att_effective_dice, _, _ = get_attacker_effective_dice_and_bombikazi_self_destruct(attackers, ud)
     _sort_attackers_for_ladder_dice_if_needed(state, attackers, defenders, ud, td)
