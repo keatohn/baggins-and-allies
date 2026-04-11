@@ -327,6 +327,12 @@
   transition: background 0.15s ease, color 0.15s ease;
 }
 
+/* Single-player You | Computer (and “Set all” rows): sentence case; beats global `button` uppercase */
+.lobby-view .lobby-view__binary-pills button.lobby-view__pill {
+  text-transform: none;
+  letter-spacing: normal;
+}
+
 .lobby-view__binary-pills .lobby-view__pill:last-child {
   border-right: none;
 }
@@ -396,6 +402,8 @@
   background: var(--gold-dark, #8b7355);
   color: #fff;
   cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .lobby-view__start-btn:hover:not(:disabled) {
