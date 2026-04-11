@@ -1375,7 +1375,7 @@
     "transport_capacity": 0,
     "purchasable": true,
     "cost": {
-      "power": 9
+      "power": 8
     },
     "tags": [
       "land"
@@ -1447,7 +1447,9 @@
     "tags": [
       "land"
     ],
-    "specials": [],
+    "specials": [
+      "fearless"
+    ],
     "icon": "dragon.png"
   },
   "spider": {

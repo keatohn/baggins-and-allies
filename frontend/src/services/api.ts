@@ -641,6 +641,12 @@ export interface GameMeta {
   is_host?: boolean;
 }
 
+/** GET /games/:id/forfeit-options — factions you control and valid assignees for each. */
+export interface ForfeitOptionsResponse {
+  factions: { faction_id: string; display_name: string; alliance: string }[];
+  assignees: { id: string; label: string }[];
+}
+
 export interface GameListItem {
   id: string;
   name: string;
@@ -782,13 +788,27 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ faction_id: factionId, claim }),
     }),
+  /** Multiplayer lobby, host only: set faction to computer AI or clear computer (via claim-faction). */
+  lobbyAssignComputer: (gameId: string, factionId: string, computer: boolean) =>
+    fetchJson<{ lobby_claims: Record<string, string> }>(`/games/${gameId}/claim-faction`, {
+      method: 'POST',
+      body: JSON.stringify({
+        faction_id: factionId,
+        claim: false,
+        assign_computer: computer,
+      }),
+    }),
   startGame: (gameId: string) =>
     fetchJson<{ message: string; status: string }>(`/games/${gameId}/start`, {
       method: 'POST',
     }),
-  forfeitGame: (gameId: string) =>
+  /** Per-faction reassignment when leaving (each value: "computer" or another player id). */
+  getForfeitOptions: (gameId: string) =>
+    fetchJson<ForfeitOptionsResponse>(`/games/${gameId}/forfeit-options`),
+  forfeitGame: (gameId: string, body: { faction_assignments: Record<string, string> }) =>
     fetchJson<{ message: string }>(`/games/${gameId}/forfeit`, {
       method: 'POST',
+      body: JSON.stringify(body),
     }),
 
   // Get static definitions

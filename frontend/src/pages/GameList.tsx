@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../services/api';
-import type { GameListItem, AuthPlayer } from '../services/api';
+import type { GameListItem, AuthPlayer, ForfeitOptionsResponse } from '../services/api';
 import StrongholdAllianceBar from '../components/StrongholdAllianceBar';
 import './GameList.css';
 
@@ -39,6 +39,9 @@ export default function GameList() {
   const [confirmText, setConfirmText] = useState('');
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [forfeitError, setForfeitError] = useState<string | null>(null);
+  const [forfeitOptions, setForfeitOptions] = useState<ForfeitOptionsResponse | null>(null);
+  const [forfeitOptionsLoading, setForfeitOptionsLoading] = useState(false);
+  const [forfeitAssignments, setForfeitAssignments] = useState<Record<string, string>>({});
 
   const loadGames = () => {
     api.listGames()
@@ -51,6 +54,42 @@ export default function GameList() {
     loadGames();
     api.authMe().then(setPlayer).catch(() => setPlayer(null));
   }, []);
+
+  useEffect(() => {
+    if (!gameToForfeit) {
+      setForfeitOptions(null);
+      setForfeitAssignments({});
+      setForfeitOptionsLoading(false);
+      setForfeitError(null);
+      return;
+    }
+    let cancelled = false;
+    setForfeitOptionsLoading(true);
+    setForfeitError(null);
+    api
+      .getForfeitOptions(gameToForfeit)
+      .then((o) => {
+        if (cancelled) return;
+        setForfeitOptions(o);
+        const init: Record<string, string> = {};
+        for (const f of o.factions) {
+          init[f.faction_id] = 'computer';
+        }
+        setForfeitAssignments(init);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setForfeitError(e instanceof Error ? e.message : 'Could not load forfeit options');
+          setForfeitOptions(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setForfeitOptionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [gameToForfeit]);
 
   const handleDeleteClick = (e: React.MouseEvent, id: string) => {
     e.preventDefault();
@@ -99,12 +138,15 @@ export default function GameList() {
 
   const handleForfeitConfirm = async () => {
     if (!gameToForfeit || confirmText !== FORFEIT_CONFIRM_PHRASE) return;
+    if (!forfeitOptions?.factions.length) return;
     setForfeitError(null);
     try {
-      await api.forfeitGame(gameToForfeit);
+      await api.forfeitGame(gameToForfeit, { faction_assignments: forfeitAssignments });
       setGames((prev) => prev.filter((g) => g.id !== gameToForfeit));
       setGameToForfeit(null);
       setConfirmText('');
+      setForfeitOptions(null);
+      setForfeitAssignments({});
     } catch (e) {
       setForfeitError(e instanceof Error ? e.message : 'Failed to forfeit');
     }
@@ -272,15 +314,43 @@ export default function GameList() {
           <div className="game-list__modal" onClick={(e) => e.stopPropagation()}>
             <h2 className="game-list__modal-title">Forfeit this game?</h2>
             <p className="game-list__modal-text">
-              You will be removed from <strong>{forfeitingGame.name}</strong>. Your faction(s) will be auto-skipped; other players can continue. Type <strong>{FORFEIT_CONFIRM_PHRASE}</strong> to confirm.
+              You will be removed from <strong>{forfeitingGame.name}</strong>. Choose who will control each of your
+              factions. Then type <strong>{FORFEIT_CONFIRM_PHRASE}</strong> to confirm.
             </p>
+            {forfeitOptionsLoading && <p className="game-list__modal-text">Loading options…</p>}
+            {!forfeitOptionsLoading && forfeitOptions && forfeitOptions.factions.length > 0 && (
+              <ul className="game-list__forfeit-faction-list">
+                {forfeitOptions.factions.map((f) => (
+                  <li key={f.faction_id} className="game-list__forfeit-faction-row">
+                    <label className="game-list__forfeit-faction-label" htmlFor={`forfeit-assign-${f.faction_id}`}>
+                      {f.display_name}
+                    </label>
+                    <select
+                      id={`forfeit-assign-${f.faction_id}`}
+                      className="game-list__forfeit-select"
+                      value={forfeitAssignments[f.faction_id] ?? 'computer'}
+                      onChange={(e) =>
+                        setForfeitAssignments((prev) => ({ ...prev, [f.faction_id]: e.target.value }))
+                      }
+                    >
+                      {forfeitOptions.assignees.map((a) => (
+                        <option key={`${f.faction_id}-${a.id}`} value={a.id}>
+                          {a.label}
+                        </option>
+                      ))}
+                    </select>
+                  </li>
+                ))}
+              </ul>
+            )}
             <input
               type="text"
               className="game-list__modal-input"
               value={confirmText}
               onChange={(e) => setConfirmText(e.target.value)}
               placeholder={FORFEIT_CONFIRM_PHRASE}
-              autoFocus
+              autoFocus={!forfeitOptionsLoading}
+              disabled={forfeitOptionsLoading || !forfeitOptions}
             />
             {forfeitError && <p className="game-list__error">{forfeitError}</p>}
             <div className="game-list__modal-actions">
@@ -291,7 +361,12 @@ export default function GameList() {
                 type="button"
                 className="game-list__modal-btn game-list__modal-btn--danger"
                 onClick={handleForfeitConfirm}
-                disabled={confirmText !== FORFEIT_CONFIRM_PHRASE}
+                disabled={
+                  confirmText !== FORFEIT_CONFIRM_PHRASE ||
+                  forfeitOptionsLoading ||
+                  !forfeitOptions ||
+                  forfeitOptions.factions.length === 0
+                }
               >
                 Forfeit
               </button>

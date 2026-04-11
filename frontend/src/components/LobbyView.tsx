@@ -7,6 +7,9 @@ const ALLIANCE_ORDER = ['good', 'evil'];
 
 const LOBBY_POLL_MS = 3000;
 
+/** Matches backend LOBBY_COMPUTER_PLAYER_ID — lobby_claims value for AI-controlled slot. */
+const LOBBY_COMPUTER_ID = '__computer__';
+
 interface LobbyViewProps {
   gameId: string;
   meta: GameMeta;
@@ -65,6 +68,28 @@ export default function LobbyView({
     }
   };
 
+  const handleLobbyComputer = async (factionId: string, computer: boolean) => {
+    setClaimError(null);
+    setClaimingFactionId(factionId);
+    try {
+      await api.lobbyAssignComputer(gameId, factionId, computer);
+      await refreshMeta();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Update failed';
+      const isRouteOrMissing =
+        msg === 'Not Found' ||
+        msg === 'Game not found' ||
+        (msg.toLowerCase().includes('not found') && msg.length < 40);
+      setClaimError(
+        isRouteOrMissing
+          ? 'Server could not run this action (try restarting the backend, then refresh).'
+          : msg,
+      );
+    } finally {
+      setClaimingFactionId(null);
+    }
+  };
+
   /** Factions in turn order grouped by alliance (for single-player "set all" row). */
   const alliancesWithFactions = useMemo(() => {
     const order = turnOrder.length ? turnOrder : Object.keys(definitions?.factions ?? {});
@@ -106,6 +131,10 @@ export default function LobbyView({
   const handleStartClick = () => setStartConfirmOpen(true);
   const handleStartConfirmCancel = () => setStartConfirmOpen(false);
   const handleStartConfirmOk = async () => {
+    if (!canStartGame) {
+      setStartConfirmOpen(false);
+      return;
+    }
     setStarting(true);
     setClaimError(null);
     try {
@@ -126,6 +155,23 @@ export default function LobbyView({
   const allFactionsClaimed = isSinglePlayer
     ? order.length > 0 && order.some((fid) => lobbyClaims[fid])
     : order.length > 0 && order.every((fid) => lobbyClaims[fid]);
+
+  /** Distinct human user IDs with at least one faction (multiplayer only; excludes AI slots). */
+  const multiplayerHumanPlayerCount = (() => {
+    if (isSinglePlayer) return 0;
+    const seen = new Set<string>();
+    for (const fid of order) {
+      const c = lobbyClaims[fid];
+      if (c && c !== LOBBY_COMPUTER_ID) seen.add(c);
+    }
+    return seen.size;
+  })();
+
+  const canStartGame =
+    isSinglePlayer
+      ? allFactionsClaimed
+      : allFactionsClaimed && multiplayerHumanPlayerCount >= 2;
+
   const myClaimedAlliance = (() => {
     if (isSinglePlayer) return null;
     for (const fid of order) {
@@ -203,10 +249,14 @@ export default function LobbyView({
               const claimantId = lobbyClaims[fid];
               const claimantName = claimantId ? (playerUsernames[claimantId] ?? 'Player') : null;
               const isClaimedByMe = claimantId === String(player?.id);
-              const isClaimedByOther = claimantId != null && !isClaimedByMe;
+              const isClaimedByComputer = claimantId === LOBBY_COMPUTER_ID;
+              const blockedByOtherHuman =
+                claimantId != null &&
+                claimantId !== String(player?.id) &&
+                claimantId !== LOBBY_COMPUTER_ID;
               const alliance = f?.alliance ?? 'neutral';
-              const canClaim =
-                !isClaimedByOther &&
+              const canClaimHuman =
+                !blockedByOtherHuman &&
                 (isSinglePlayer || myClaimedAlliance == null || myClaimedAlliance === alliance);
               const loading = claimingFactionId === fid;
 
@@ -226,9 +276,9 @@ export default function LobbyView({
                   </div>
                   <div className="lobby-view__faction-info">
                     <span className="lobby-view__faction-name">{displayName}</span>
-                    {!isSinglePlayer && claimantName && (
+                    {!isSinglePlayer && claimantId && (
                       <span className="lobby-view__faction-claimant">
-                        {isClaimedByMe ? 'You' : claimantName}
+                        {isClaimedByMe ? 'You' : isClaimedByComputer ? 'Computer' : claimantName}
                       </span>
                     )}
                   </div>
@@ -254,30 +304,41 @@ export default function LobbyView({
                           {loading && !isClaimedByMe ? '…' : 'Computer'}
                         </button>
                       </div>
-                    ) : isClaimedByMe ? (
-                      <button
-                        type="button"
-                        className="lobby-view__pill lobby-view__pill--claimed"
-                        onClick={() => handleClaim(fid, false)}
-                        disabled={loading}
-                      >
-                        {loading ? '…' : 'Unclaim'}
-                      </button>
-                    ) : isClaimedByOther ? (
-                      <span className="lobby-view__pill lobby-view__pill--taken">Claimed</span>
-                    ) : canClaim ? (
-                      <button
-                        type="button"
-                        className="lobby-view__pill lobby-view__pill--claim"
-                        onClick={() => handleClaim(fid, true)}
-                        disabled={loading}
-                      >
-                        {loading ? '…' : 'Claim'}
-                      </button>
                     ) : (
-                      <span className="lobby-view__pill lobby-view__pill--disabled" title="Claim factions from one alliance only">
-                        Enemy alliance
-                      </span>
+                      <div className="lobby-view__multiplayer-actions">
+                        {isHost && (!claimantId || isClaimedByComputer) && (
+                          <button
+                            type="button"
+                            className={`lobby-view__pill lobby-view__pill--computer lobby-view__pill--compact${isClaimedByComputer ? ' lobby-view__pill--computer-selected' : ''}`}
+                            onClick={() => handleLobbyComputer(fid, !isClaimedByComputer)}
+                            disabled={loading}
+                            aria-pressed={isClaimedByComputer}
+                          >
+                            {loading ? '…' : 'Computer'}
+                          </button>
+                        )}
+                        {isClaimedByMe ? (
+                          <button
+                            type="button"
+                            className="lobby-view__pill lobby-view__pill--claimed lobby-view__pill--compact"
+                            onClick={() => handleClaim(fid, false)}
+                            disabled={loading}
+                          >
+                            {loading ? '…' : 'Unclaim'}
+                          </button>
+                        ) : blockedByOtherHuman ? (
+                          <span className="lobby-view__pill lobby-view__pill--taken lobby-view__pill--compact">Claimed</span>
+                        ) : canClaimHuman ? (
+                          <button
+                            type="button"
+                            className="lobby-view__pill lobby-view__pill--claim lobby-view__pill--compact"
+                            onClick={() => handleClaim(fid, true)}
+                            disabled={loading}
+                          >
+                            {loading ? '…' : 'Claim'}
+                          </button>
+                        ) : null}
+                      </div>
                     )}
                   </div>
                 </li>
@@ -297,8 +358,16 @@ export default function LobbyView({
                 type="button"
                 className="lobby-view__start-btn primary"
                 onClick={handleStartClick}
-                disabled={!allFactionsClaimed}
-                title={!allFactionsClaimed ? (isSinglePlayer ? 'Assign yourself to at least one faction to start' : 'Claim all factions to start') : undefined}
+                disabled={!canStartGame}
+                title={
+                  !canStartGame
+                    ? isSinglePlayer
+                      ? 'Assign yourself to at least one faction to start'
+                      : !allFactionsClaimed
+                        ? 'Claim all factions to start'
+                        : 'At least two players must claim factions before you can start'
+                    : undefined
+                }
               >
                 Start game
               </button>

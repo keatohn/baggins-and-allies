@@ -46,16 +46,17 @@
   color: var(--ink);
 }
 
-.forfeit-notification-toast {
-  position: fixed;
-  top: 0.75rem;
+/* Centered on the map pane (.map-wrap is position: relative) */
+.map-wrap .forfeit-notification-toast {
+  position: absolute;
+  top: 50%;
   left: 50%;
-  transform: translateX(-50%);
-  z-index: 999;
+  transform: translate(-50%, -50%);
+  z-index: 50;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.75rem;
-  max-width: min(90vw, 420px);
+  max-width: min(90%, 420px);
   padding: 0.75rem 1rem;
   background: var(--parchment, #f5f0e6);
   border: 1px solid var(--ink-faded, #8a8478);
@@ -64,6 +65,7 @@
   font-family: var(--font-parchment);
   font-size: 0.9rem;
   color: var(--ink);
+  box-sizing: border-box;
 }
 
 .forfeit-notification-toast p {

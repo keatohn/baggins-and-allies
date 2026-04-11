@@ -364,6 +364,12 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
                 </ul>
               </section>
               <section className="help-section">
+                <h3>Victory criteria</h3>
+                <p>
+                  The first alliance to control the required number of strongholds at the conclusion of a full turn cycle wins the game. The last faction in the turn order must complete their turn.
+                </p>
+              </section>
+              <section className="help-section">
                 <h3>Terminology</h3>
                 <ul className="help-icon-list">
                   <li><strong>Strongholds</strong> = Victory cities</li>
@@ -375,7 +381,7 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
                 </ul>
               </section>
               <section className="help-section">
-                <h3>Map icons</h3>
+                <h3>Map Icons</h3>
                 <ul className="help-icon-list">
                   <li><span className="help-icon" aria-hidden>⛺</span> <strong>Camp</strong> — mobilize new land units here.</li>
                   <li><span className="help-icon" aria-hidden>⚓</span> <strong>Port</strong> — mobilize new ships in adjacent sea zones.</li>
@@ -386,28 +392,40 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
                 </ul>
               </section>
               <section className="help-section">
-                <h3>Turn order</h3>
+                <h3>Phase Order</h3>
                 <p><strong>Purchase</strong> → <strong>Combat move</strong> → <strong>Combat</strong> → <strong>Non-combat move</strong> → <strong>Mobilization</strong></p>
+                <ul className="help-icon-list">
+                  <li><strong>Purchase</strong> — buy units with power to mobilize at the end of the turn.</li>
+                  <li><strong>Combat move</strong> — declare attacks by moving units into enemy or neutral territories.</li>
+                  <li><strong>Combat</strong> — resolve declared combat moves: roll attack vs defense, apply hits, remove casualties, repeat or retreat until a side is defeated. Some units have specials that can alter combat flow and attack/defense values. See the <strong>Specials</strong> modal (★ SP) for details.</li>
+                  <li><strong>Non-combat move</strong> — move units to friendly territories with remaining movement.</li>
+                  <li><strong>Mobilization</strong> — place purchased units: land units in territories with your camp (or home territory for units with the &quot;home&quot; special), ships in sea zones adjacent to your port. Place any camps you bought in eligible territories.</li>
+                </ul>
               </section>
               <section className="help-section">
-                <h3>Purchase</h3>
-                <p>Buy units with power to mobilize at the end of the turn.</p>
+                <h3>Combat Order</h3>
+                <p>Stealth or Siegeworks Round (if applicable) → Archer Round (if applicable) → Standard Combat Rounds (until retreat or completion)</p>
               </section>
               <section className="help-section">
-                <h3>Combat move</h3>
-                <p>Declare attacks by moving units into enemy or neutral territories.</p>
+                <h3>Stronghold HP</h3>
+                <p>
+                  Stronghold territories have hit points that soak the first hits of an attack. Once hit, strongholds can be repaired during the purchase phase of its owner.
+                </p>
               </section>
               <section className="help-section">
-                <h3>Combat</h3>
-                <p>Resolve declared combat moves: roll attack vs defense, apply hits, remove casualties, repeat or retreat until a side is defeated. Some units have specials that can alter combat flow and attack/defense values. See the <strong>Specials</strong> modal (★ SP) for details.</p>
-              </section>
-              <section className="help-section">
-                <h3>Non-combat move</h3>
-                <p>Move units to friendly territories with remaining movement.</p>
-              </section>
-              <section className="help-section">
-                <h3>Mobilization</h3>
-                <p>Place purchased units: land units in territories with your camp (or home territory for units with the "home" special), ships in sea zones adjacent to your port. Place any camps you bought in eligible territories.</p>
+                <h3>Unit Types</h3>
+                <ul className="help-icon-list">
+                  <li><strong>Infantry</strong> — base ground units.</li>
+                  <li><strong>Archer</strong> — ground units that can fire before combat rounds on defense.</li>
+                  <li><strong>Cavalry</strong> — ground units that can conquer empty territories in its combat movement path.</li>
+                  <li><strong>Siegeworks</strong> — ground units that only roll during the siegeworks combat round.</li>
+                  <ul className="help-icon-list">
+                    <li><strong>Ram</strong> — hits can only be directed at strongholds, not units.</li>
+                    <li><strong>Ladder</strong> — instead of rolling for hits, allows up to 2 infantry to bypass the defender's stronghold HP and allocate their hits directly at defending units.</li>
+                  </ul>
+                  <li><strong>Aerial</strong> — aerial units can ignore terrain obstacles (mountains, rivers, sea zones, etc.) and attack naval units before returning to land. They cannot conquer a territory without a ground unit.</li>
+                  <li><strong>Naval</strong> — naval units are limited to sea zones only.</li>
+                </ul>
               </section>
             </div>
           </div>

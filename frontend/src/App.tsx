@@ -3844,14 +3844,6 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
 
   return (
     <div className="app">
-      {showForfeitToast && (
-        <div className="forfeit-notification-toast" role="status">
-          <p>
-            {forfeitedNames} {gameMeta!.forfeited_player_ids!.length === 1 ? 'has' : 'have'} forfeited. Their turns will be skipped.{forfeitToastHostLine}
-          </p>
-          <button type="button" className="forfeit-notification-toast-close" onClick={dismissForfeitToast} aria-label="Dismiss">×</button>
-        </div>
-      )}
       {gameOverDisplay && (
         <div
           className="game-over-overlay"
@@ -4027,6 +4019,14 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               loadAllocation={pendingMoveConfirm?.loadAllocation}
               onLoadAllocationChange={handleLoadAllocationChange}
             />
+            {showForfeitToast && (
+              <div className="forfeit-notification-toast" role="status">
+                <p>
+                  {forfeitedNames} {gameMeta!.forfeited_player_ids!.length === 1 ? 'has' : 'have'} forfeited. Their factions were reassigned or taken over by the computer.{forfeitToastHostLine}
+                </p>
+                <button type="button" className="forfeit-notification-toast-close" onClick={dismissForfeitToast} aria-label="Dismiss">×</button>
+              </div>
+            )}
           </div>
         </div>
 

@@ -36,6 +36,9 @@ export default function StrongholdAllianceBar({ factionStats, variant }: Strongh
   const rootClass =
     variant === 'header' ? 'stronghold-alliance-bar stronghold-alliance-bar--header' : 'stronghold-alliance-bar stronghold-alliance-bar--game-list';
 
+  const goodCountLabel = goodNeed != null ? `${good}/${goodNeed}` : String(good);
+  const evilCountLabel = evilNeed != null ? `${evil}/${evilNeed}` : String(evil);
+
   return (
     <div className={rootClass}>
       <div className="stronghold-alliance-bar__track">
@@ -62,7 +65,7 @@ export default function StrongholdAllianceBar({ factionStats, variant }: Strongh
         )}
       </div>
       <span className="stronghold-alliance-bar__label">
-        Good {good} · Evil {evil}
+        Good {goodCountLabel} · Evil {evilCountLabel}
       </span>
     </div>
   );

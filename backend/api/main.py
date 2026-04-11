@@ -246,6 +246,11 @@ game_defs: dict[str, tuple] = {}
 GAME_CODE_CHARS = string.ascii_uppercase + string.digits
 GAME_CODE_LENGTH = 4
 
+# Multiplayer forfeit: assign faction to AI (stored in config ai_factions).
+FORFEIT_ASSIGN_COMPUTER = "computer"
+# Lobby: faction claimed for AI until a human claims it (host or any player can override by claiming).
+LOBBY_COMPUTER_PLAYER_ID = "__computer__"
+
 
 # ===== Pydantic Models =====
 
@@ -293,6 +298,13 @@ class JoinGameRequest(BaseModel):
 class ClaimFactionRequest(BaseModel):
     faction_id: str
     claim: bool  # True to claim, False to unclaim
+    # Multiplayer host: if set, assign (True) or clear (False) computer; omits normal claim/unclaim.
+    assign_computer: bool | None = None
+
+
+class ForfeitRequest(BaseModel):
+    """Per-faction reassignment when leaving a game. Each value is FORFEIT_ASSIGN_COMPUTER or another player's id."""
+    faction_assignments: dict[str, str]
 
 
 class NewGameRequest(BaseModel):
@@ -1904,6 +1916,113 @@ def _get_ai_factions_from_config(row) -> list[str]:
     return []
 
 
+def _faction_alliance(fd: dict, faction_id: str) -> str:
+    fdef = fd.get(faction_id) if isinstance(fd, dict) else None
+    if not fdef:
+        return "neutral"
+    return getattr(fdef, "alliance", None) or "neutral"
+
+
+def _forfeit_my_faction_ids(
+    row,
+    player_id_str: str,
+    players_list: list,
+    lobby_claims: dict[str, str],
+) -> list[str]:
+    """Faction IDs the player controls (active: players rows; lobby: lobby_claims)."""
+    if row.status == "lobby":
+        out = [str(f) for f, pid in lobby_claims.items() if str(pid) == player_id_str]
+        return sorted(set(out))
+    out = []
+    for p in players_list:
+        if str(p.get("player_id")) != player_id_str:
+            continue
+        fid = p.get("faction_id")
+        if fid is not None and str(fid).strip() != "":
+            out.append(str(fid))
+    return sorted(set(out))
+
+
+def _eligible_forfeit_assignee_ids(
+    fd: dict,
+    players_list: list,
+    lobby_claims: dict[str, str],
+    my_faction_ids: list[str],
+    forfeiter_id: str,
+) -> list[str]:
+    """
+    Other players who control at least one faction whose alliance matches
+    at least one of the forfeiting player's factions. Excludes the forfeiter.
+    """
+    if not my_faction_ids:
+        return []
+    my_alliances = {_faction_alliance(fd, fid) for fid in my_faction_ids}
+    holder_factions: dict[str, list[str]] = {}
+    for p in players_list:
+        pid = str(p.get("player_id", ""))
+        fid = p.get("faction_id")
+        if not pid or pid == forfeiter_id or fid is None or str(fid).strip() == "":
+            continue
+        holder_factions.setdefault(pid, []).append(str(fid))
+    for fid, pid in lobby_claims.items():
+        pid = str(pid)
+        if pid == forfeiter_id or pid == LOBBY_COMPUTER_PLAYER_ID:
+            continue
+        holder_factions.setdefault(pid, []).append(str(fid))
+    eligible: list[str] = []
+    for pid, fids in holder_factions.items():
+        theirs = {_faction_alliance(fd, f) for f in fids}
+        if my_alliances & theirs:
+            eligible.append(pid)
+    return sorted(set(eligible))
+
+
+@app.get("/games/{game_id}/forfeit-options")
+def get_forfeit_options(
+    game_id: str,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Factions the current player would forfeit, and valid assignees (Computer + allied humans)."""
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Game not found")
+    try:
+        players_list = json.loads(row.players)
+    except (TypeError, json.JSONDecodeError):
+        players_list = []
+    if not isinstance(players_list, list):
+        players_list = []
+    player_id_str = str(player.id)
+    if not any(str(p.get("player_id")) == player_id_str for p in players_list):
+        raise HTTPException(status_code=403, detail="Not in this game")
+    lobby_claims = _get_lobby_claims_from_config(row)
+    my_faction_ids = _forfeit_my_faction_ids(row, player_id_str, players_list, lobby_claims)
+    if not my_faction_ids:
+        raise HTTPException(status_code=400, detail="You have no factions to forfeit")
+    _, _, fd, _, _ = get_game_definitions(game_id, db)
+    if not isinstance(fd, dict):
+        fd = {}
+    eligible_ids = _eligible_forfeit_assignee_ids(
+        fd, players_list, lobby_claims, my_faction_ids, player_id_str,
+    )
+    id_rows = db.query(Player).filter(Player.id.in_(eligible_ids)).all() if eligible_ids else []
+    username_by_id = {str(r.id): (r.username or str(r.id)) for r in id_rows}
+    assignees = [{"id": FORFEIT_ASSIGN_COMPUTER, "label": "Computer"}]
+    for pid in sorted(eligible_ids, key=lambda x: username_by_id.get(x, x).lower()):
+        assignees.append({"id": pid, "label": username_by_id.get(pid, pid)})
+    factions_out = []
+    for fid in my_faction_ids:
+        fdef = fd.get(fid)
+        display = getattr(fdef, "display_name", None) or fid if fdef else fid
+        factions_out.append({
+            "faction_id": fid,
+            "display_name": display,
+            "alliance": _faction_alliance(fd, fid),
+        })
+    return {"factions": factions_out, "assignees": assignees}
+
+
 @app.get("/games/{game_id}/meta")
 def get_game_meta(
     game_id: str,
@@ -2005,8 +2124,32 @@ def claim_faction(
         lobby_claims = {}
     lobby_claims = dict(lobby_claims)
     player_id_str = str(player.id)
+
+    if request.assign_computer is not None:
+        if row.game_code is None:
+            raise HTTPException(status_code=400, detail="Not a multiplayer lobby")
+        if str(row.created_by) != str(player.id):
+            raise HTTPException(status_code=403, detail="Only the host can assign factions to the computer")
+        if not isinstance(fd, dict) or fid not in fd:
+            raise HTTPException(status_code=400, detail="Unknown faction")
+        if request.assign_computer:
+            lobby_claims[fid] = LOBBY_COMPUTER_PLAYER_ID
+        else:
+            if lobby_claims.get(fid) != LOBBY_COMPUTER_PLAYER_ID:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Faction is not assigned to the computer",
+                )
+            del lobby_claims[fid]
+        config["lobby_claims"] = lobby_claims
+        row.config = json.dumps(config)
+        db.commit()
+        return {"lobby_claims": lobby_claims}
+
     if request.claim:
-        if lobby_claims.get(fid) and lobby_claims.get(fid) != player_id_str:
+        cur = lobby_claims.get(fid)
+        cur_s = str(cur) if cur is not None else ""
+        if cur_s and cur_s != player_id_str and cur_s != LOBBY_COMPUTER_PLAYER_ID:
             raise HTTPException(status_code=400, detail="Faction already claimed by another player")
         is_single_player = row.game_code is None
         if not is_single_player:
@@ -2068,13 +2211,23 @@ def start_game(
                 status_code=400,
                 detail="All factions must be claimed before starting the game.",
             )
-    players_list = [{"player_id": pid, "faction_id": fid} for fid, pid in lobby_claims.items()]
+    players_list = []
+    ai_multiplayer: list[str] = []
+    for fid, pid in lobby_claims.items():
+        if not fid:
+            continue
+        if not is_single_player and str(pid) == LOBBY_COMPUTER_PLAYER_ID:
+            ai_multiplayer.append(str(fid))
+        else:
+            players_list.append({"player_id": str(pid), "faction_id": str(fid)})
     row.players = json.dumps(players_list)
     row.status = "active"
     config = json.loads(row.config) if isinstance(row.config, str) else {}
     if isinstance(config, dict):
         if is_single_player:
             config["ai_factions"] = [fid for fid in turn_order if fid and not lobby_claims.get(fid)]
+        else:
+            config["ai_factions"] = ai_multiplayer
         config.pop("lobby_claims", None)
         row.config = json.dumps(config)
     db.commit()
@@ -2085,14 +2238,22 @@ def start_game(
     return {"message": "Game started", "status": "active"}
 
 
+def _normalize_forfeit_assign_target(raw: str) -> str:
+    s = (raw or "").strip()
+    if s.lower() == FORFEIT_ASSIGN_COMPUTER:
+        return FORFEIT_ASSIGN_COMPUTER
+    return s
+
+
 @app.post("/games/{game_id}/forfeit")
 def forfeit_game(
     game_id: str,
-    request: Request,
+    http_request: Request,
+    body: ForfeitRequest,
     player: Player = Depends(get_current_player),
     db: Session = Depends(get_db),
 ):
-    """Remove yourself from the game. Your faction(s) will be auto-skipped; game stays for others. Forfeited games disappear from your list."""
+    """Leave the game and reassign each of your factions to the computer or an allied player."""
     row = db.query(GameModel).filter(GameModel.id == game_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Game not found")
@@ -2100,45 +2261,78 @@ def forfeit_game(
         players_list = json.loads(row.players)
     except (TypeError, json.JSONDecodeError):
         players_list = []
+    if not isinstance(players_list, list):
+        players_list = []
     player_id_str = str(player.id)
     if not any(str(p.get("player_id")) == player_id_str for p in players_list):
         raise HTTPException(status_code=403, detail="Not in this game")
     config = json.loads(row.config) if isinstance(row.config, str) else {}
     if not isinstance(config, dict):
         config = {}
+    lobby_claims_cfg = _get_lobby_claims_from_config(row)
+    _, _, fd, _, _ = get_game_definitions(game_id, db)
+    if not isinstance(fd, dict):
+        fd = {}
+    my_faction_ids = _forfeit_my_faction_ids(row, player_id_str, players_list, lobby_claims_cfg)
+    if not my_faction_ids:
+        raise HTTPException(status_code=400, detail="You have no factions to forfeit")
+    fa = body.faction_assignments or {}
+    if set(fa.keys()) != set(my_faction_ids):
+        raise HTTPException(
+            status_code=400,
+            detail="faction_assignments must include exactly your factions: "
+            + ", ".join(sorted(my_faction_ids)),
+        )
+    eligible = set(
+        _eligible_forfeit_assignee_ids(fd, players_list, lobby_claims_cfg, my_faction_ids, player_id_str)
+    )
+    for fid in my_faction_ids:
+        t = _normalize_forfeit_assign_target(fa[fid])
+        if t == FORFEIT_ASSIGN_COMPUTER:
+            continue
+        if t not in eligible:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid assignee for faction {fid}",
+            )
+
     forfeited = config.get("forfeited_player_ids")
     if not isinstance(forfeited, list):
         forfeited = []
     if player_id_str not in forfeited:
         forfeited = list(forfeited) + [player_id_str]
+    forfeited_set = set(str(x) for x in forfeited)
     config["forfeited_player_ids"] = forfeited
+
     if row.status == "lobby":
+        lobby_claims = dict(config.get("lobby_claims") or {})
+        for fid in my_faction_ids:
+            t = _normalize_forfeit_assign_target(fa[fid])
+            if t == FORFEIT_ASSIGN_COMPUTER:
+                lobby_claims[str(fid)] = LOBBY_COMPUTER_PLAYER_ID
+            else:
+                lobby_claims[str(fid)] = t
+        config["lobby_claims"] = lobby_claims
         new_players = [p for p in players_list if str(p.get("player_id")) != player_id_str]
-        lobby_claims = config.get("lobby_claims") or {}
-        if isinstance(lobby_claims, dict):
-            lobby_claims = {f: pid for f, pid in lobby_claims.items() if pid != player_id_str}
-            config["lobby_claims"] = lobby_claims
     else:
-        new_players = [p for p in players_list if str(p.get("player_id")) != player_id_str]
-        # If the forfeiting player is currently up, call skip-turn until current faction is not forfeited
+        # Advance past this player's turn while they still appear as owners in the DB (skip-turn auth).
         try:
             raw = json.loads(row.game_state) if isinstance(row.game_state, str) else row.game_state
             if isinstance(raw, dict):
                 state = GameState.from_dict(raw)
-                faction_to_player = {
+                faction_to_player_old = {
                     str(p["faction_id"]): str(p["player_id"])
                     for p in players_list
                     if p.get("faction_id") is not None and p.get("player_id") is not None
                 }
-                forfeited_set = set(forfeited)
-                _, _, fd, _, _ = get_game_definitions(game_id, db)
-                faction_ids = state.turn_order if state.turn_order else (sorted(fd.keys()) if fd else [])
+                _, _, fd_skip, _, _ = get_game_definitions(game_id, db)
+                faction_ids = state.turn_order if state.turn_order else (sorted(fd_skip.keys()) if fd_skip else [])
                 max_skips = len(faction_ids) if faction_ids else 1
-                auth = request.headers.get("Authorization") or request.headers.get("authorization")
+                auth = http_request.headers.get("Authorization") or http_request.headers.get("authorization")
                 headers = {"Authorization": auth} if auth else {}
                 with TestClient(app) as client:
                     for _ in range(max_skips):
-                        owner = faction_to_player.get(state.current_faction)
+                        owner = faction_to_player_old.get(state.current_faction)
                         if owner not in forfeited_set:
                             break
                         r = client.post(f"/games/{game_id}/skip-turn", headers=headers)
@@ -2152,6 +2346,19 @@ def forfeit_game(
                             break
         except Exception:
             pass
+
+        new_players = [p for p in players_list if str(p.get("player_id")) != player_id_str]
+        ai_existing = [str(x) for x in (config.get("ai_factions") or []) if x]
+        ai_set = set(ai_existing)
+        for fid in my_faction_ids:
+            t = _normalize_forfeit_assign_target(fa[fid])
+            if t == FORFEIT_ASSIGN_COMPUTER:
+                ai_set.add(str(fid))
+            else:
+                ai_set.discard(str(fid))
+                new_players.append({"player_id": str(t), "faction_id": str(fid)})
+        config["ai_factions"] = list(ai_set)
+
     row.players = json.dumps(new_players)
     # If host forfeited, promote first remaining player to host (by turn order in lobby, else first in list)
     if str(row.created_by) == player_id_str and new_players:
@@ -2167,7 +2374,11 @@ def forfeit_game(
             lobby_claims_after = config.get("lobby_claims") or {}
             for fid in turn_order:
                 pid = lobby_claims_after.get(fid)
-                if pid and pid in remaining_ids:
+                if (
+                    pid
+                    and str(pid) != LOBBY_COMPUTER_PLAYER_ID
+                    and str(pid) in remaining_ids
+                ):
                     new_host = pid
                     break
         if new_host is None and remaining_ids:
