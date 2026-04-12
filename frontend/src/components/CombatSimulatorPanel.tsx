@@ -702,16 +702,18 @@ export default function CombatSimulatorPanel({
 
   const attackingTerritoryOptions = useMemo(() => {
     if (!attackerFaction) return [];
+    const isSeaTerritory = (tid: string) =>
+      /^sea_zone_?\d+$/i.test(tid) ||
+      territoryData?.[tid]?.terrain === 'sea' ||
+      getTerrainTypeFromTerritoryId(definitions, tid) === 'sea';
     const entries = Object.entries(territoryUnits ?? {});
     const out = entries
       .filter(([tid, stacks]) => {
         if (!stacks?.length) return false;
-        const t = territoryData[tid];
-        if (!t || t.owner !== attackerFaction) return false;
         if (isLandCombat) {
-          if (t.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid)) return false;
-        } else {
-          if (!(t.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid))) return false;
+          if (isSeaTerritory(tid)) return false;
+        } else if (!isSeaTerritory(tid)) {
+          return false;
         }
         return stacks.some((s) => {
           const f = (definitions?.units?.[s.unit_id] as { faction?: string } | undefined)?.faction ?? unitDefs[s.unit_id]?.faction;
@@ -721,7 +723,7 @@ export default function CombatSimulatorPanel({
       .map(([tid]) => ({ id: tid, name: (definitions?.territories?.[tid] as { display_name?: string } | undefined)?.display_name ?? tid }));
     out.sort((a, b) => a.name.localeCompare(b.name));
     return out;
-  }, [attackerFaction, territoryUnits, territoryData, isLandCombat, definitions?.units, definitions?.territories, unitDefs]);
+  }, [attackerFaction, territoryUnits, territoryData, isLandCombat, definitions, unitDefs]);
 
   const defenderStacks = territoryId ? (territoryUnits[territoryId] ?? []).filter((s) => s.count > 0) : [];
   const defenderStacksFiltered = useMemo(
