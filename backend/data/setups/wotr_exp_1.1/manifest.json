@@ -20,8 +20,8 @@
     },
     "victory_criteria": {
         "strongholds": {
-            "good": 10,
-            "evil": 10
+            "good": 11,
+            "evil": 11
         }
     },
     "camp_cost": 10,

@@ -3,7 +3,9 @@
   "private": true,
   "scripts": {
     "dev": "concurrently -k -n backend,frontend -c blue,green \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:files": "concurrently -k -n backend,frontend -c blue,green \"npm run dev:backend:files\" \"npm run dev:frontend\"",
     "dev:backend": ".venv/bin/python -m backend.api.main",
+    "dev:backend:files": "SETUP_SOURCE=files .venv/bin/python -m backend.api.main",
     "dev:frontend": "npm run dev --prefix frontend",
     "kill-ports": "node scripts/kill-ports.js",
     "restart": "npm run kill-ports && npm run dev",

@@ -5,6 +5,7 @@ DB-backed game setups: seed from disk, load for gameplay and admin API.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,22 @@ from backend.engine.definitions import (
     scenario_display_from_setup_id as scenario_display_from_files,
 )
 from backend.api.models import Setup
+
+
+def get_setup_source() -> str:
+    """
+    Runtime source for setup data.
+    - db (default): use DB-backed setups when available, fallback to files if DB empty.
+    - files: force loading directly from backend/data/setups JSON files.
+    """
+    raw = (os.environ.get("SETUP_SOURCE") or "db").strip().lower()
+    if raw in ("files", "file", "json"):
+        return "files"
+    return "db"
+
+
+def is_files_setup_source() -> bool:
+    return get_setup_source() == "files"
 
 
 def _read_json_file(path: Path) -> dict[str, Any]:
@@ -372,6 +389,15 @@ def save_setup_bundle(db: Session, setup_id: str, payload: dict[str, Any]) -> No
     db.commit()
 
 
+def delete_setup(db: Session, setup_id: str) -> None:
+    """Delete a setup row by id."""
+    row = db.query(Setup).filter(Setup.id == setup_id).first()
+    if not row:
+        raise ValueError("setup not found")
+    db.delete(row)
+    db.commit()
+
+
 # ----- Optional DB: helpers used from definitions.py (no Session in tests) -----
 
 def db_has_any_setup(db: Session) -> bool:
@@ -379,6 +405,11 @@ def db_has_any_setup(db: Session) -> bool:
 
 
 def try_load_setup(setup_id: str, db: Session | None) -> dict[str, Any] | None:
+    if is_files_setup_source():
+        try:
+            return load_setup_from_files(setup_id)
+        except FileNotFoundError:
+            return None
     if db is not None and db_has_any_setup(db):
         return load_setup_dict_from_db(db, setup_id)
     try:
@@ -388,6 +419,8 @@ def try_load_setup(setup_id: str, db: Session | None) -> dict[str, Any] | None:
 
 
 def try_load_static_definitions(setup_id: str, db: Session | None):
+    if is_files_setup_source():
+        return load_static_definitions_from_files(setup_id=setup_id)
     if db is not None and db_has_any_setup(db):
         hit = load_static_definitions_from_db(db, setup_id)
         if hit is None:
@@ -397,6 +430,8 @@ def try_load_static_definitions(setup_id: str, db: Session | None):
 
 
 def try_load_specials(setup_id: str, db: Session | None):
+    if is_files_setup_source():
+        return load_specials_from_files(setup_id=setup_id)
     if db is not None and db_has_any_setup(db):
         hit = load_specials_from_db(db, setup_id)
         if hit is None:
@@ -406,12 +441,16 @@ def try_load_specials(setup_id: str, db: Session | None):
 
 
 def try_list_setups_menu(db: Session | None) -> list[dict[str, Any]]:
+    if is_files_setup_source():
+        return list_setups_from_files()
     if db is not None and db_has_any_setup(db):
         return list_setups_menu_from_db(db)
     return list_setups_from_files()
 
 
 def try_scenario_display(setup_id: str, db: Session | None) -> dict[str, Any] | None:
+    if is_files_setup_source():
+        return scenario_display_from_files(setup_id)
     if db is not None and db_has_any_setup(db):
         hit = scenario_display_from_setup_id_db(db, setup_id)
         if hit is not None:

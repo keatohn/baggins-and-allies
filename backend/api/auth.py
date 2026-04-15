@@ -7,6 +7,7 @@ We use bcrypt directly so the truncated bytes are passed through with no extra e
 import bcrypt
 import os
 import re
+import secrets
 from datetime import datetime, timedelta
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -19,7 +20,11 @@ from .models import Player
 # Username: alphanumeric and underscore only, 2–32 chars
 USERNAME_PATTERN = re.compile(r"^[a-zA-Z0-9_]{2,32}$")
 
-SECRET_KEY = os.environ.get("JWT_SECRET", "change-me-in-production-use-env")
+SECRET_KEY = os.environ.get("JWT_SECRET")
+if not SECRET_KEY:
+    # Avoid a hardcoded fallback secret. Local dev without JWT_SECRET gets an ephemeral key.
+    SECRET_KEY = secrets.token_urlsafe(64)
+    print("WARNING: JWT_SECRET is not set; using an ephemeral secret for this process only.")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 

@@ -40,6 +40,8 @@ const TAB_LABELS: Record<TabKey, string> = {
   specials: 'Specials',
 };
 
+const DELETE_SETUP_CONFIRM_PHRASE = 'DELETE SETUP';
+
 type DictEntityMap = Record<string, Record<string, unknown>>;
 
 function CreateSetupDialog({
@@ -163,6 +165,10 @@ export default function Admin() {
   const [saving, setSaving] = useState(false);
   const [loadingBundle, setLoadingBundle] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const useJson = jsonTab[activeTab] === true;
 
@@ -254,6 +260,40 @@ export default function Admin() {
     refreshList().then(() => {
       setSelectedId(id);
     });
+  };
+
+  const openDeleteDialog = () => {
+    if (!selectedId) return;
+    setDeleteOpen(true);
+    setDeleteConfirmText('');
+    setDeleteError(null);
+  };
+
+  const closeDeleteDialog = () => {
+    setDeleteOpen(false);
+    setDeleteConfirmText('');
+    setDeleteError(null);
+    setDeleting(false);
+  };
+
+  const confirmDeleteSetup = async () => {
+    if (!selectedId || deleteConfirmText !== DELETE_SETUP_CONFIRM_PHRASE || deleting) return;
+    setDeleteError(null);
+    setDeleting(true);
+    try {
+      const deletingId = selectedId;
+      await api.adminDeleteSetup(deletingId);
+      const list = await api.adminListSetups();
+      setSetups(list.setups);
+      const remaining = list.setups;
+      const nextSelected = remaining.find((s) => s.id !== deletingId)?.id ?? remaining[0]?.id ?? '';
+      setSelectedId(nextSelected);
+      if (!nextSelected) setBundle(null);
+      closeDeleteDialog();
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : 'Delete failed');
+      setDeleting(false);
+    }
   };
 
   const renderTabBody = () => {
@@ -463,12 +503,65 @@ export default function Admin() {
         >
           {saving ? 'Saving…' : 'Save'}
         </button>
+        <button
+          type="button"
+          className="admin-page__btn admin-page__btn--danger"
+          disabled={!bundle || saving || deleting}
+          onClick={openDeleteDialog}
+        >
+          Delete setup
+        </button>
       </div>
 
       {saveError ? <div className="admin-page__error">{saveError}</div> : null}
       {saveOk ? <p className="admin-page__success">Saved. New games will use this data.</p> : null}
 
       <CreateSetupDialog open={createOpen} onClose={() => setCreateOpen(false)} setups={setups} onCreated={onCreatedSetup} />
+      {deleteOpen && (
+        <div className="admin-modal-overlay" role="presentation" onClick={closeDeleteDialog}>
+          <div
+            className="admin-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-delete-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="admin-delete-title" className="admin-modal__title">
+              Delete setup?
+            </h2>
+            <p className="admin-form__micro">
+              This will permanently delete <strong>{selectedId}</strong>. Type <strong>{DELETE_SETUP_CONFIRM_PHRASE}</strong> to confirm.
+            </p>
+            <div className="admin-form__row">
+              <label className="admin-form__label" htmlFor="admin-delete-setup-confirm">
+                Confirmation
+              </label>
+              <input
+                id="admin-delete-setup-confirm"
+                className="admin-form__input"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder={DELETE_SETUP_CONFIRM_PHRASE}
+                autoFocus
+              />
+            </div>
+            {deleteError ? <div className="admin-page__error">{deleteError}</div> : null}
+            <div className="admin-modal__actions">
+              <button type="button" className="admin-page__btn" onClick={closeDeleteDialog} disabled={deleting}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="admin-page__btn admin-page__btn--danger"
+                onClick={confirmDeleteSetup}
+                disabled={deleteConfirmText !== DELETE_SETUP_CONFIRM_PHRASE || deleting}
+              >
+                {deleting ? 'Deleting…' : 'Delete setup'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

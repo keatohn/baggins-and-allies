@@ -367,7 +367,20 @@ export function UnitsPanel({
           )}
           {fieldRow(
             'Dice',
-            <input type="number" className="admin-form__input admin-form__input--narrow" value={u.dice != null ? String(u.dice) : '1'} onChange={(e) => patch({ dice: Number(e.target.value) || 1 })} />,
+            <input
+              type="number"
+              min={1}
+              className="admin-form__input admin-form__input--narrow"
+              value={u.dice != null ? String(u.dice) : ''}
+              onChange={(e) => {
+                const raw = e.target.value;
+                patch({ dice: raw === '' ? undefined : Number(raw) });
+              }}
+              onBlur={() => {
+                const current = Number(u.dice);
+                if (!Number.isFinite(current) || current < 1) patch({ dice: 1 });
+              }}
+            />,
           )}
           {fieldRow(
             'Cost (JSON)',
@@ -632,7 +645,6 @@ export function StartingSetupPanel({
       count: typeof prev?.count === 'number' && Number.isFinite(prev.count) ? Math.max(1, prev.count) : 1,
     };
     row[i] = { ...base, ...patch };
-    if (typeof row[i].count === 'number') row[i].count = Math.max(1, row[i].count);
     next[selTer] = row;
     setStartingUnits(next);
   };
@@ -733,8 +745,14 @@ export function StartingSetupPanel({
             type="number"
             min={1}
             className="admin-form__input admin-form__input--narrow"
-            value={st.count}
-            onChange={(e) => updateStack(i, { count: Math.max(1, Number(e.target.value) || 1) })}
+            value={st.count <= 0 ? '' : st.count}
+            onChange={(e) => {
+              const raw = e.target.value;
+              updateStack(i, { count: raw === '' ? 0 : Number(raw) });
+            }}
+            onBlur={() => {
+              if (!Number.isFinite(st.count) || st.count < 1) updateStack(i, { count: 1 });
+            }}
           />
           <button type="button" className="admin-page__btn" onClick={() => removeStack(i)}>
             Remove stack

@@ -122,7 +122,8 @@ export function eventLogMergeGroupKey(e: GameEvent): string | null {
     const terr = canonicalTerritoryIdForLog(String(p.territory ?? ''));
     const turn = typeof p.turn_number === 'number' ? p.turn_number : -1;
     const phase = String(p.phase ?? '');
-    return `combat_ended|${turn}|${terr}|${phase}`;
+    const faction = String(p.faction ?? p.attacker_faction ?? '');
+    return `combat_ended|${turn}|${faction}|${terr}|${phase}`;
   }
   if (e.type === 'units_moved') {
     const p = e.payload ?? {};

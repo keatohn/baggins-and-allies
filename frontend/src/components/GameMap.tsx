@@ -584,6 +584,22 @@ interface GameMapProps {
 
 const MAX_SCALE = 3;
 
+/**
+ * Per wheel event: scale multiplier from deltaY (gentler than a fixed ±10% step).
+ * Normalizes DOM_DELTA_LINE / PAGE so different devices feel similar; caps max change per event.
+ */
+function wheelZoomScaleMultiplier(e: WheelEvent): number {
+  let dy = e.deltaY;
+  if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+    dy *= 24;
+  } else if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+    dy *= 320;
+  }
+  const k = 0.00028;
+  const raw = Math.exp(-dy * k);
+  return Math.max(0.978, Math.min(1.022, raw));
+}
+
 const EMPTY_ELIGIBLE_SEA_ZONES_FOR_TRAY = new Set<string>();
 
 /**
@@ -618,8 +634,24 @@ const OSGILIATH_CENTROIDS: Record<string, { x: number; y: number }> = {
  */
 const TERRITORY_UNIT_OFFSET_FROM_MARKER: Record<string, { dx: number; dy: number }> = {
   dunharrow: { dx: 0, dy: 52 },
-  /** Extra vertical gap vs marker row; southern coast needs room before bottom clamp (see CLAMP_INSET_Y_BOTTOM). */
-  umbar: { dx: 0, dy: 108 },
+};
+
+/**
+ * Grey Havens and Umbar: the land path is a ring around sea that is not part of the territory fill, so the
+ * pole-of-inaccessibility algorithm only sees the coastal band. These anchors sit in the outer bbox
+ * interior (over the enclosed sea); icons may render outside the land fill. Coordinates are SVG viewBox
+ * px for `wotr_map_*.svg` (0 0 3500 2600). Adjust here if the map art changes.
+ */
+const RING_HARBOR_STACK_POSITIONS_SVG: Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number } }> = {
+  grey_havens: {
+    marker: { x: 497, y: 548 },
+    /** Just right of the marker stack — smaller offset so units stay off the neighbor border */
+    unit: { x: 575, y: 548 },
+  },
+  umbar: {
+    marker: { x: 1475, y: 2498 },
+    unit: { x: 1605, y: 2498 },
+  },
 };
 
 function toMapBase(name: string | null | undefined): string {
@@ -1366,6 +1398,12 @@ function GameMap({
         centroids[tid] = marker;
       }
 
+      for (const [tid, pts] of Object.entries(RING_HARBOR_STACK_POSITIONS_SVG)) {
+        if (!positions[tid]) continue;
+        positions[tid] = { marker: pts.marker, unit: pts.unit };
+        centroids[tid] = pts.marker;
+      }
+
       return { centroids, positions };
     };
 
@@ -1673,12 +1711,12 @@ function GameMap({
         unitDefs as Record<
           string,
           | {
-              specials?: string[];
-              tags?: string[];
-              archetype?: string;
-              transport_capacity?: number;
-              faction?: string;
-            }
+            specials?: string[];
+            tags?: string[];
+            archetype?: string;
+            transport_capacity?: number;
+            faction?: string;
+          }
           | undefined
         >,
         gameState.current_faction,
@@ -1822,12 +1860,12 @@ function GameMap({
           unitDefs as Record<
             string,
             | {
-                specials?: string[];
-                tags?: string[];
-                archetype?: string;
-                transport_capacity?: number;
-                faction?: string;
-              }
+              specials?: string[];
+              tags?: string[];
+              archetype?: string;
+              transport_capacity?: number;
+              faction?: string;
+            }
             | undefined
           >,
           currentFaction,
@@ -2504,14 +2542,14 @@ function GameMap({
         const availableLandInstanceIds =
           !unitForDrop.isNaval && fullForSource.length > 0
             ? fullForSource
-                .filter(
-                  u =>
-                    u.unit_id === unitForDrop.unitId &&
-                    !navalUnitIds.has(u.unit_id) &&
-                    !committedIdsThisHex.has(u.instance_id) &&
-                    movableInstanceIdsForDest.has(u.instance_id),
-                )
-                .map(u => u.instance_id)
+              .filter(
+                u =>
+                  u.unit_id === unitForDrop.unitId &&
+                  !navalUnitIds.has(u.unit_id) &&
+                  !committedIdsThisHex.has(u.instance_id) &&
+                  movableInstanceIdsForDest.has(u.instance_id),
+              )
+              .map(u => u.instance_id)
             : null;
         if (
           !unitForDrop.isNaval &&
@@ -3006,7 +3044,8 @@ function GameMap({
     };
   }, []);
 
-  // Non-passive wheel listener: pinch (ctrlKey) = zoom, 2-finger drag = pan
+  // Non-passive wheel listener: mouse wheel zooms toward cursor.
+  // Hold Shift to pan with trackpads when needed.
   useEffect(() => {
     const el = wrapperRef.current;
     if (!el) return;
@@ -3024,12 +3063,12 @@ function GameMap({
       const maxX = Math.max(0, wrapper.clientWidth - scaledW);
       const maxY = Math.max(0, wrapper.clientHeight - scaledH);
 
-      if (e.ctrlKey) {
-        // Pinch zoom: zoom toward cursor
+      if (!e.shiftKey) {
+        // Zoom toward cursor for wheel and pinch gestures.
         const rect = wrapper.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
-        const delta = e.deltaY > 0 ? 0.9 : 1.1;
+        const delta = wheelZoomScaleMultiplier(e);
         const minScale = Math.max(0.1, fitScaleRef.current);
         const newScale = Math.max(minScale, Math.min(MAX_SCALE, t.scale * delta));
         const scaleRatio = newScale / t.scale;
@@ -3045,7 +3084,7 @@ function GameMap({
         newY = Math.max(newMinY, Math.min(newMaxY, newY));
         setTransform({ x: newX, y: newY, scale: newScale });
       } else {
-        // 2-finger drag: pan by delta
+        // Optional trackpad pan while holding Shift.
         let newX = Math.max(minX, Math.min(maxX, t.x + e.deltaX));
         let newY = Math.max(minY, Math.min(maxY, t.y + e.deltaY));
         setTransform({ ...t, x: newX, y: newY });
@@ -3147,6 +3186,10 @@ function GameMap({
   const CLAMP_INSET_X = 80;
   const CLAMP_INSET_Y_TOP = 80;
   const CLAMP_INSET_Y_BOTTOM = 28;
+  const TERRITORY_UNIT_EXTRA_Y: Record<string, number> = {
+    grey_havens: 20,
+    umbar: 0,
+  };
   const clampToMap = (p: { x: number; y: number }) => ({
     x: Math.max(CLAMP_INSET_X, Math.min(IMG_DIMENSIONS.width - CLAMP_INSET_X, p.x)),
     y: Math.max(CLAMP_INSET_Y_TOP, Math.min(IMG_DIMENSIONS.height - CLAMP_INSET_Y_BOTTOM, p.y)),
@@ -3168,402 +3211,440 @@ function GameMap({
 
   return (
     <div className="game-map-root">
-    <DndContext
-      sensors={sensors}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
-      onDragCancel={handleDragCancel}
-      collisionDetection={mapCollisionDetection}
-    >
-      <div className={`map-container ${mobilizationTray || navalTray ? 'map-container--with-tray' : ''}`}>
-        <div className="map-content">
-          {mapKeyOpen && (
-            <div className="map-key-strip" role="region" aria-label="Map key">
-              <span className="map-key-item"><span className="map-key-icon" aria-hidden>⛺</span> Camp</span>
-              <span className="map-key-item"><span className="map-key-icon" aria-hidden>🌲</span> Forest</span>
-              <span className="map-key-item"><span className="map-key-icon" aria-hidden>🏠</span> Home</span>
-              <span className="map-key-item"><span className="map-key-icon" aria-hidden>⛰️</span> Mountains</span>
-              <span className="map-key-item"><span className="map-key-icon" aria-hidden>⚓</span> Port</span>
-              <span className="map-key-item">
-                <img src="/bridge.png" alt="" className="map-key-img" aria-hidden />
-                Bridge
-              </span>
-              <span className="map-key-item">
-                <img src="/ford.png" alt="" className="map-key-img" aria-hidden />
-                Ford
-              </span>
-              <span className="map-key-item"><span className="map-key-icon" aria-hidden></span> Strongholds have faction logo (capitals larger)</span>
-            </div>
-          )}
-          <div className="map-main">
-          <div
-            ref={wrapperRef}
-            className={`map-wrapper ${isDragging ? 'panning' : ''}`}
-            data-map-base={mapBase}
-            data-scale={transform.scale.toFixed(3)}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-            onClick={handleBackgroundClick}
-          >
-            <div
-              className="map-inner"
-              style={{
-                width: IMG_DIMENSIONS.width + 16,
-                height: IMG_DIMENSIONS.height + 16,
-                transform: `translate(${transform.x - 8}px, ${transform.y - 8}px) scale(${transform.scale})`,
-              }}
-            >
+      <DndContext
+        sensors={sensors}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
+        collisionDetection={mapCollisionDetection}
+      >
+        <div className={`map-container ${mobilizationTray || navalTray ? 'map-container--with-tray' : ''}`}>
+          <div className="map-content">
+            {mapKeyOpen && (
+              <div className="map-key-strip" role="region" aria-label="Map key">
+                <span className="map-key-item">
+                  <span className="map-key-badge map-key-badge--power" aria-hidden>1</span>
+                  Power Production
+                </span>
+                <span className="map-key-item">
+                  <span className="map-key-badge map-key-badge--sea" aria-hidden>1</span>
+                  Sea Zone
+                </span>
+                <span className="map-key-item"><span className="map-key-icon" aria-hidden>⛺</span> Camp</span>
+                <span className="map-key-item"><span className="map-key-icon" aria-hidden>🌲</span> Forest</span>
+                <span className="map-key-item"><span className="map-key-icon" aria-hidden>🏠</span> Home</span>
+                <span className="map-key-item"><span className="map-key-icon" aria-hidden>⛰️</span> Mountains</span>
+                <span className="map-key-item"><span className="map-key-icon" aria-hidden>⚓</span> Port</span>
+                <span className="map-key-item">
+                  <img src="/bridge.png" alt="" className="map-key-img" aria-hidden />
+                  Bridge
+                </span>
+                <span className="map-key-item">
+                  <img src="/ford.png" alt="" className="map-key-img" aria-hidden />
+                  Ford
+                </span>
+                <span className="map-key-item"><span className="map-key-icon" aria-hidden></span> Strongholds have faction logo (capitals larger)</span>
+              </div>
+            )}
+            <div className="map-main">
               <div
-                className="map-inner-content"
-                style={{
-                  width: IMG_DIMENSIONS.width,
-                  height: IMG_DIMENSIONS.height,
-                }}
+                ref={wrapperRef}
+                className={`map-wrapper ${isDragging ? 'panning' : ''}`}
+                data-map-base={mapBase}
+                data-scale={transform.scale.toFixed(3)}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseUp}
+                onClick={handleBackgroundClick}
               >
-                <svg
-                  ref={svgRef}
-                  className="map-svg"
-                  width={IMG_DIMENSIONS.width}
-                  height={IMG_DIMENSIONS.height}
-                  viewBox={`0 0 ${SVG_VIEWBOX.width} ${SVG_VIEWBOX.height}`}
-                  preserveAspectRatio="none"
+                <div
+                  className="map-inner"
+                  style={{
+                    width: IMG_DIMENSIONS.width + 16,
+                    height: IMG_DIMENSIONS.height + 16,
+                    transform: `translate(${transform.x - 8}px, ${transform.y - 8}px) scale(${transform.scale})`,
+                  }}
                 >
-                  {Array.from(svgPaths.entries())
-                    .sort(([idA], [idB]) => {
-                      const defA = territoryData[idA] ?? territoryData[resolveTerritoryDropId(idA)];
-                      const defB = territoryData[idB] ?? territoryData[resolveTerritoryDropId(idB)];
-                      const seaA = defA?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(String(idA));
-                      const seaB = defB?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(String(idB));
-                      if (seaA === seaB) return 0;
-                      return seaA ? 1 : -1;
-                    })
-                    .map(([tid, pathData]) => {
-                      const territoryId =
-                        typeof tid === 'string'
-                          ? tid
-                          : tid != null && typeof tid === 'object' && 'id' in (tid as object)
-                            ? String((tid as { id: string }).id)
-                            : tid != null && typeof tid === 'object' && 'territoryId' in (tid as object)
-                              ? String((tid as { territoryId: string }).territoryId)
-                              : String(tid ?? '');
-                      if (!territoryId || territoryId === '[object Object]') return null;
-                      const stateKey = resolveTerritoryDropId(territoryId);
-                      const territory = territoryData[territoryId] ?? territoryData[stateKey];
-                      const owner = territory?.owner;
-                      const isNonOwnable = territory && (territory.ownable === false);
-                      const isSeaZone = territory?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(territoryId);
-                      // Definitions may load after game state (e.g. create-game nav + getGame without embedded defs);
-                      // missing faction palette must not yield undefined — glow/filter code calls .replace on color.
-                      const color = isSeaZone
-                        ? '#2d4258'
-                        : owner
-                          ? (factionData[owner]?.color ?? '#d4c4a8')
-                          : isNonOwnable
-                            ? '#7a7a7a'
-                            : '#d4c4a8';
-                      const isSelected =
-                        selectedTerritory === territoryId ||
-                        selectedTerritory === stateKey;
-                      const isValidDrop = territoryMatchesValidDrop(territoryId);
-                      const hasUnitsToMobilize = (mobilizationTray?.purchases?.length ?? 0) > 0;
-                      const selectedLandUnitId = mobilizationTray?.selectedUnitId && !navalUnitIds.has(mobilizationTray.selectedUnitId) ? mobilizationTray.selectedUnitId : null;
-                      const capLand = remainingMobilizationCapacity[territoryId] ?? remainingMobilizationCapacity[stateKey] ?? 0;
-                      const homeForTerr = remainingHomeSlots[territoryId] ?? remainingHomeSlots[stateKey] ?? {};
-                      const hasMobilizationRoom =
-                        capLand > 0 ||
-                        (selectedLandUnitId ? (homeForTerr[selectedLandUnitId] ?? 0) > 0 : Object.values(homeForTerr).some((n: number) => n > 0));
-                      const isValidMobilizationTarget =
-                        isMobilizePhase &&
-                        (validMobilizeTerritories.includes(territoryId) || validMobilizeTerritories.includes(stateKey)) &&
-                        hasMobilizationRoom &&
-                        (activeDragId != null ? isValidDrop : (hasMobilizationSelected || hasUnitsToMobilize));
-                      const pendingSidebarDest = (mobilizationPendingDestination ?? '').trim();
-                      const matchesPendingSidebarDest =
-                        pendingSidebarDest.length > 0 &&
-                        (territoryId === pendingSidebarDest ||
-                          stateKey === pendingSidebarDest ||
-                          resolveTerritoryDropId(territoryId) === resolveTerritoryDropId(pendingSidebarDest));
-                      const isExternallyHighlighted =
-                        highlightedTerritories.includes(territoryId) ||
-                        highlightedTerritories.includes(stateKey) ||
-                        matchesPendingSidebarDest;
-                      const isCampPlacementTarget =
-                        isMobilizePhase &&
-                        ((validCampTerritories.length > 0 &&
-                          (validCampTerritories.includes(territoryId) || validCampTerritories.includes(stateKey))) ||
-                          territoryMatchesValidDrop(territoryId));
-                      const isValidMobilizationTargetSea =
-                        isMobilizePhase &&
-                        (validMobilizeSeaZones.includes(territoryId) || validMobilizeSeaZones.includes(stateKey)) &&
-                        hasMobilizationRoom &&
-                        (activeDragId != null ? isValidDrop : (hasMobilizationSelected || (mobilizationTray?.purchases?.length ?? 0) > 0));
-                      const isMobilizationZone = isValidMobilizationTarget || isValidMobilizationTargetSea;
-                      const thisCanon = resolveTerritoryDropId(territoryId) || territoryId;
-                      const mobilizationMuted =
-                        mobilizationDestinationClickCanon != null &&
-                        isMobilizationZone &&
-                        thisCanon !== mobilizationDestinationClickCanon;
-                      const mobilizationStrong = isMobilizationZone && !mobilizationMuted;
-                      const isTapMoveTarget =
-                        (tapSelectedUnit != null || tapBulkAllFromTerritory != null || tapMobilizationAll) &&
-                        territoryMatchesValidDrop(territoryId);
-                      return (
-                        <DroppableTerritory
-                          key={territoryId}
-                          territoryId={territoryId}
-                          pathData={pathData}
-                          color={color}
-                          isSeaZone={!!isSeaZone}
-                          isSelected={isSelected}
-                          isHighlighted={mobilizationStrong || isExternallyHighlighted || isCampPlacementTarget || isTapMoveTarget}
-                          isValidDrop={isValidDrop || mobilizationStrong || isExternallyHighlighted}
-                          highlightMuted={mobilizationMuted}
-                          onClick={(e) => handleTerritoryClick(territoryId, e)}
-                        />
-                      );
-                    })}
-                  <defs>
-                    {/* Native SVG glow filters so Safari shows the halo (Safari ignores CSS drop-shadow on SVG) */}
-                    {uniqueGlowColors.map((hex) => {
-                      const { glowRgba } = territoryGlowFromHex(hex);
-                      const id = `territory-glow-${hex.replace(/^#/, '')}`;
-                      return (
-                        <filter key={id} id={id} x="-50%" y="-50%" width="200%" height="200%">
-                          <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur" />
-                          <feFlood floodColor={glowRgba} result="flood" />
-                          <feComposite in2="blur" in="flood" operator="in" result="coloredBlur" />
-                          <feMerge>
-                            <feMergeNode in="coloredBlur" />
-                            <feMergeNode in="SourceGraphic" />
-                          </feMerge>
-                        </filter>
-                      );
-                    })}
-                    {/* Ocean wave texture for sea zones: base blue with repeating wave curves */}
-                    <pattern id="sea-wave-pattern" x="0" y="0" width="120" height="60" patternUnits="userSpaceOnUse">
-                      <rect width="120" height="60" fill="#2d4258" />
-                      {/* Lighter wave crests */}
-                      <path d="M0 20 Q30 12 60 20 T120 20 M0 45 Q30 37 60 45 T120 45" fill="none" stroke="rgba(120,160,200,0.42)" strokeWidth="3.5" strokeLinecap="round" />
-                      <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(160,195,220,0.32)" strokeWidth="2.25" strokeLinecap="round" />
-                      {/* Darker troughs for depth */}
-                      <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(15,30,45,0.52)" strokeWidth="2.75" strokeLinecap="round" />
-                    </pattern>
-                    <marker id="arrowhead-combat" markerWidth="5" markerHeight="5" refX="3.5" refY="2.5" orient="auto">
-                      <polygon points="0,0 5,2.5 0,5" fill="#c62828" />
-                    </marker>
-                    <marker id="arrowhead-move" markerWidth="5" markerHeight="5" refX="3.5" refY="2.5" orient="auto">
-                      <polygon points="0,0 5,2.5 0,5" fill="#2e7d32" />
-                    </marker>
-                  </defs>
-                  {moveArrows.map((arrow, idx) => arrow && (
-                    <g key={`arrow-${idx}`}>
-                      <line
-                        className="move-arrow"
-                        x1={arrow.startX}
-                        y1={arrow.startY}
-                        x2={arrow.endX}
-                        y2={arrow.endY}
-                        stroke={arrow.isCombat ? '#c62828' : '#2e7d32'}
-                        strokeWidth="4"
-                        strokeLinecap="round"
-                        strokeDasharray={arrow.isCombat ? 'none' : '8,4'}
-                        markerEnd={`url(#arrowhead-${arrow.isCombat ? 'combat' : 'move'})`}
-                        opacity="0.9"
-                      />
-                      {arrow.isLoad && (
-                        <text
-                          x={arrow.midX}
-                          y={arrow.midY}
-                          textAnchor="middle"
-                          dominantBaseline="middle"
-                          className="move-arrow-load-emoji"
-                          fontSize="14"
-                        >
-                          ⚓
-                        </text>
-                      )}
-                    </g>
-                  ))}
-                </svg>
+                  <div
+                    className="map-inner-content"
+                    style={{
+                      width: IMG_DIMENSIONS.width,
+                      height: IMG_DIMENSIONS.height,
+                    }}
+                  >
+                    <svg
+                      ref={svgRef}
+                      className="map-svg"
+                      width={IMG_DIMENSIONS.width}
+                      height={IMG_DIMENSIONS.height}
+                      viewBox={`0 0 ${SVG_VIEWBOX.width} ${SVG_VIEWBOX.height}`}
+                      preserveAspectRatio="none"
+                    >
+                      {Array.from(svgPaths.entries())
+                        .sort(([idA], [idB]) => {
+                          const defA = territoryData[idA] ?? territoryData[resolveTerritoryDropId(idA)];
+                          const defB = territoryData[idB] ?? territoryData[resolveTerritoryDropId(idB)];
+                          const seaA = defA?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(String(idA));
+                          const seaB = defB?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(String(idB));
+                          if (seaA === seaB) return 0;
+                          return seaA ? 1 : -1;
+                        })
+                        .map(([tid, pathData]) => {
+                          const territoryId =
+                            typeof tid === 'string'
+                              ? tid
+                              : tid != null && typeof tid === 'object' && 'id' in (tid as object)
+                                ? String((tid as { id: string }).id)
+                                : tid != null && typeof tid === 'object' && 'territoryId' in (tid as object)
+                                  ? String((tid as { territoryId: string }).territoryId)
+                                  : String(tid ?? '');
+                          if (!territoryId || territoryId === '[object Object]') return null;
+                          const stateKey = resolveTerritoryDropId(territoryId);
+                          const territory = territoryData[territoryId] ?? territoryData[stateKey];
+                          const owner = territory?.owner;
+                          const isNonOwnable = territory && (territory.ownable === false);
+                          const isSeaZone = territory?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(territoryId);
+                          // Definitions may load after game state (e.g. create-game nav + getGame without embedded defs);
+                          // missing faction palette must not yield undefined — glow/filter code calls .replace on color.
+                          const color = isSeaZone
+                            ? '#2d4258'
+                            : owner
+                              ? (factionData[owner]?.color ?? '#d4c4a8')
+                              : isNonOwnable
+                                ? '#7a7a7a'
+                                : '#d4c4a8';
+                          const isSelected =
+                            selectedTerritory === territoryId ||
+                            selectedTerritory === stateKey;
+                          const isValidDrop = territoryMatchesValidDrop(territoryId);
+                          const hasUnitsToMobilize = (mobilizationTray?.purchases?.length ?? 0) > 0;
+                          const selectedLandUnitId = mobilizationTray?.selectedUnitId && !navalUnitIds.has(mobilizationTray.selectedUnitId) ? mobilizationTray.selectedUnitId : null;
+                          const capLand = remainingMobilizationCapacity[territoryId] ?? remainingMobilizationCapacity[stateKey] ?? 0;
+                          const homeForTerr = remainingHomeSlots[territoryId] ?? remainingHomeSlots[stateKey] ?? {};
+                          const hasMobilizationRoom =
+                            capLand > 0 ||
+                            (selectedLandUnitId ? (homeForTerr[selectedLandUnitId] ?? 0) > 0 : Object.values(homeForTerr).some((n: number) => n > 0));
+                          const isValidMobilizationTarget =
+                            isMobilizePhase &&
+                            (validMobilizeTerritories.includes(territoryId) || validMobilizeTerritories.includes(stateKey)) &&
+                            hasMobilizationRoom &&
+                            (activeDragId != null ? isValidDrop : (hasMobilizationSelected || hasUnitsToMobilize));
+                          const pendingSidebarDest = (mobilizationPendingDestination ?? '').trim();
+                          const matchesPendingSidebarDest =
+                            pendingSidebarDest.length > 0 &&
+                            (territoryId === pendingSidebarDest ||
+                              stateKey === pendingSidebarDest ||
+                              resolveTerritoryDropId(territoryId) === resolveTerritoryDropId(pendingSidebarDest));
+                          const isExternallyHighlighted =
+                            highlightedTerritories.includes(territoryId) ||
+                            highlightedTerritories.includes(stateKey) ||
+                            matchesPendingSidebarDest;
+                          const isCampPlacementTarget =
+                            isMobilizePhase &&
+                            ((validCampTerritories.length > 0 &&
+                              (validCampTerritories.includes(territoryId) || validCampTerritories.includes(stateKey))) ||
+                              territoryMatchesValidDrop(territoryId));
+                          const isValidMobilizationTargetSea =
+                            isMobilizePhase &&
+                            (validMobilizeSeaZones.includes(territoryId) || validMobilizeSeaZones.includes(stateKey)) &&
+                            hasMobilizationRoom &&
+                            (activeDragId != null ? isValidDrop : (hasMobilizationSelected || (mobilizationTray?.purchases?.length ?? 0) > 0));
+                          const isMobilizationZone = isValidMobilizationTarget || isValidMobilizationTargetSea;
+                          const thisCanon = resolveTerritoryDropId(territoryId) || territoryId;
+                          const mobilizationMuted =
+                            mobilizationDestinationClickCanon != null &&
+                            isMobilizationZone &&
+                            thisCanon !== mobilizationDestinationClickCanon;
+                          const mobilizationStrong = isMobilizationZone && !mobilizationMuted;
+                          const isTapMoveTarget =
+                            (tapSelectedUnit != null || tapBulkAllFromTerritory != null || tapMobilizationAll) &&
+                            territoryMatchesValidDrop(territoryId);
+                          return (
+                            <DroppableTerritory
+                              key={territoryId}
+                              territoryId={territoryId}
+                              pathData={pathData}
+                              color={color}
+                              isSeaZone={!!isSeaZone}
+                              isSelected={isSelected}
+                              isHighlighted={mobilizationStrong || isExternallyHighlighted || isCampPlacementTarget || isTapMoveTarget}
+                              isValidDrop={isValidDrop || mobilizationStrong || isExternallyHighlighted}
+                              highlightMuted={mobilizationMuted}
+                              onClick={(e) => handleTerritoryClick(territoryId, e)}
+                            />
+                          );
+                        })}
+                      <defs>
+                        {/* Native SVG glow filters so Safari shows the halo (Safari ignores CSS drop-shadow on SVG) */}
+                        {uniqueGlowColors.map((hex) => {
+                          const { glowRgba } = territoryGlowFromHex(hex);
+                          const id = `territory-glow-${hex.replace(/^#/, '')}`;
+                          return (
+                            <filter key={id} id={id} x="-50%" y="-50%" width="200%" height="200%">
+                              <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur" />
+                              <feFlood floodColor={glowRgba} result="flood" />
+                              <feComposite in2="blur" in="flood" operator="in" result="coloredBlur" />
+                              <feMerge>
+                                <feMergeNode in="coloredBlur" />
+                                <feMergeNode in="SourceGraphic" />
+                              </feMerge>
+                            </filter>
+                          );
+                        })}
+                        {/* Ocean wave texture for sea zones: base blue with repeating wave curves */}
+                        <pattern id="sea-wave-pattern" x="0" y="0" width="120" height="60" patternUnits="userSpaceOnUse">
+                          <rect width="120" height="60" fill="#2d4258" />
+                          {/* Lighter wave crests */}
+                          <path d="M0 20 Q30 12 60 20 T120 20 M0 45 Q30 37 60 45 T120 45" fill="none" stroke="rgba(120,160,200,0.42)" strokeWidth="3.5" strokeLinecap="round" />
+                          <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(160,195,220,0.32)" strokeWidth="2.25" strokeLinecap="round" />
+                          {/* Darker troughs for depth */}
+                          <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(15,30,45,0.52)" strokeWidth="2.75" strokeLinecap="round" />
+                        </pattern>
+                        <marker id="arrowhead-combat" markerWidth="5" markerHeight="5" refX="3.5" refY="2.5" orient="auto">
+                          <polygon points="0,0 5,2.5 0,5" fill="#c62828" />
+                        </marker>
+                        <marker id="arrowhead-move" markerWidth="5" markerHeight="5" refX="3.5" refY="2.5" orient="auto">
+                          <polygon points="0,0 5,2.5 0,5" fill="#2e7d32" />
+                        </marker>
+                      </defs>
+                      {moveArrows.map((arrow, idx) => arrow && (
+                        <g key={`arrow-${idx}`}>
+                          <line
+                            className="move-arrow"
+                            x1={arrow.startX}
+                            y1={arrow.startY}
+                            x2={arrow.endX}
+                            y2={arrow.endY}
+                            stroke={arrow.isCombat ? '#c62828' : '#2e7d32'}
+                            strokeWidth="4"
+                            strokeLinecap="round"
+                            strokeDasharray={arrow.isCombat ? 'none' : '8,4'}
+                            markerEnd={`url(#arrowhead-${arrow.isCombat ? 'combat' : 'move'})`}
+                            opacity="0.9"
+                          />
+                          {arrow.isLoad && (
+                            <text
+                              x={arrow.midX}
+                              y={arrow.midY}
+                              textAnchor="middle"
+                              dominantBaseline="middle"
+                              className="move-arrow-load-emoji"
+                              fontSize="14"
+                            >
+                              ⚓
+                            </text>
+                          )}
+                        </g>
+                      ))}
+                    </svg>
 
-                {/* Map art PNG on top of territory colors so artwork (mountains, labels, etc.) is in front. Use a PNG with white/background areas made transparent so territory fill shows through; pointer-events: none so clicks hit the SVG. */}
-                <img
-                  key={mapBase}
-                  className="map-art-on-top"
-                  src={`${imageUrl}?v=1`}
-                  alt=""
-                  aria-hidden
-                  draggable={false}
-                  onError={handleBgImageError}
-                  style={{
-                    width: IMG_DIMENSIONS.width,
-                    height: IMG_DIMENSIONS.height,
-                    objectFit: 'fill',
-                    display: 'block',
-                  }}
-                />
+                    {/* Map art PNG on top of territory colors so artwork (mountains, labels, etc.) is in front. Use a PNG with white/background areas made transparent so territory fill shows through; pointer-events: none so clicks hit the SVG. */}
+                    <img
+                      key={mapBase}
+                      className="map-art-on-top"
+                      src={`${imageUrl}?v=1`}
+                      alt=""
+                      aria-hidden
+                      draggable={false}
+                      onError={handleBgImageError}
+                      style={{
+                        width: IMG_DIMENSIONS.width,
+                        height: IMG_DIMENSIONS.height,
+                        objectFit: 'fill',
+                        display: 'block',
+                      }}
+                    />
 
-                {/* Optional overlay: details (mountains, bridges, etc.) on top of territory colors; pointer-events: none so clicks hit the SVG below */}
-                <img
-                  key={`${mapBase}-overlay`}
-                  className="map-overlay"
-                  src={`/${mapBase}_overlay.png`}
-                  alt=""
-                  aria-hidden
-                  draggable={false}
-                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                  style={{
-                    width: IMG_DIMENSIONS.width,
-                    height: IMG_DIMENSIONS.height,
-                    objectFit: 'fill',
-                  }}
-                />
+                    {/* Optional overlay: details (mountains, bridges, etc.) on top of territory colors; pointer-events: none so clicks hit the SVG below */}
+                    <img
+                      key={`${mapBase}-overlay`}
+                      className="map-overlay"
+                      src={`/${mapBase}_overlay.png`}
+                      alt=""
+                      aria-hidden
+                      draggable={false}
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      style={{
+                        width: IMG_DIMENSIONS.width,
+                        height: IMG_DIMENSIONS.height,
+                        objectFit: 'fill',
+                      }}
+                    />
 
-                {/* Territory markers (camps, strongholds) and power production badges). Requires territory in game state (e.g. create new game for east/west Osgiliath if missing). */}
-                <div className="territory-markers-layer">
-                  {Object.keys(territoryCentroids).map((territoryId) => {
-                    const markerPos = territoryPositions[territoryId]?.marker ?? territoryCentroids[territoryId];
-                    const territory = territoryData[territoryId];
-                    if (!markerPos || !territory) return null;
-                    const screenPos = svgToScreen(markerPos.x, markerPos.y);
-                    const hasCamp = territory.hasCamp === true;
-                    const hasPort = territory.hasPort === true;
-                    const hasHome = Object.values(unitDefs).some((def) => {
-                      const ids = def.home_territory_ids ?? [];
-                      if (ids.length === 0 || !ids.includes(territoryId)) return false;
-                      return !territory.owner || def.faction === territory.owner;
-                    });
-                    const showFactionLogo = territory.stronghold && territory.owner && factionData[territory.owner];
-                    const showNeutralStronghold = territory.stronghold && !territory.owner;
-                    const isCapital =
-                      territory.isCapital === true ||
-                      Object.values(factionData).some((f) => f.capital === territoryId);
-                    const power = Number(territory.produces ?? 0);
-                    // Ownable territories with 0 power: no production icon on map (avoid showing "0")
-                    const showPower = power > 0;
-                    const showStronghold = showFactionLogo || showNeutralStronghold;
-                    const showCamp = hasCamp && !isCapital;
-                    const campAndStrongholdRow = showCamp && showStronghold;
-                    const isSeaZone = territory.terrain === 'sea' || /^sea_zone_?\d+$/i.test(territoryId);
-                    const seaZoneNum = isSeaZone ? (territoryId.match(/(\d+)$/)?.[1] ?? '') : null;
-                    const terrainType = (territory.terrain || '').toLowerCase();
-                    const showTerrainMountain = terrainType === 'mountains';
-                    const showTerrainForest = terrainType === 'forest';
-                    const showTerrainIcon = showTerrainMountain || showTerrainForest;
-                    // Inline row when we have power and any of camp/port/home/terrain (no stronghold) — keeps power beside markers, no overlap
-                    const powerAndMarkersInline = showPower && (showCamp || hasPort || hasHome || showTerrainIcon) && !showStronghold;
-                    if (!showCamp && !showStronghold && !showPower && !hasPort && !hasHome && !(isSeaZone && seaZoneNum) && !showTerrainIcon) return null;
-                    const clampedMarkerPos = clampToMap(screenPos);
-                    return (
-                      <div
-                        key={territoryId}
-                        className="territory-markers"
-                        style={{
-                          left: clampedMarkerPos.x,
-                          top: clampedMarkerPos.y,
-                        }}
-                      >
-                        {isSeaZone && seaZoneNum ? (
-                          <div
-                            className="sea-zone-number"
-                            title={`Sea zone ${seaZoneNum}`}
-                            aria-hidden
-                          >
-                            {seaZoneNum}
-                          </div>
-                        ) : powerAndMarkersInline ? (
-                          <div className="territory-markers-row territory-markers-row--power-camp">
-                            {showPower && (
-                              <div
-                                className="territory-power-badge territory-power-badge--inline"
-                                title={`${territory.name}: ${power} power`}
-                                aria-hidden
-                              >
-                                {power}
-                              </div>
-                            )}
-                            {hasHome && (
-                              <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
-                                <span className="home-marker-emoji" aria-hidden>🏠</span>
-                              </div>
-                            )}
-                            {showCamp && (
-                              <div className="territory-marker camp-marker" title="Camp (mobilization point)">
-                                <span className="camp-marker-emoji" aria-hidden>⛺</span>
-                              </div>
-                            )}
-                            {hasPort && (
-                              <div className="territory-marker port-marker" title="Port (naval mobilization)">
-                                <span className="port-marker-emoji" aria-hidden>⚓</span>
-                              </div>
-                            )}
-                            {showTerrainMountain && (
-                              <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
-                            )}
-                            {showTerrainForest && (
-                              <div className="territory-marker terrain-marker" title="Forest">🌲</div>
-                            )}
-                          </div>
-                        ) : (
-                          <>
-                            {showPower && !powerAndMarkersInline && (
-                              <div
-                                className={`territory-power-badge${showStronghold ? ' territory-power-badge--above-logo' : ''}`}
-                                title={`${territory.name}: ${power} power`}
-                                aria-hidden
-                              >
-                                {power}
-                              </div>
-                            )}
-                            {campAndStrongholdRow ? (
-                              <div className="territory-markers-row">
-                                {showFactionLogo && (
-                                  <div className="stronghold-faction-hp-group">
+                    {/* Territory markers (camps, strongholds) and power production badges). Requires territory in game state (e.g. create new game for east/west Osgiliath if missing). */}
+                    <div className="territory-markers-layer">
+                      {Object.keys(territoryCentroids).map((territoryId) => {
+                        const markerPos = territoryPositions[territoryId]?.marker ?? territoryCentroids[territoryId];
+                        const territory = territoryData[territoryId];
+                        if (!markerPos || !territory) return null;
+                        const screenPos = svgToScreen(markerPos.x, markerPos.y);
+                        const hasCamp = territory.hasCamp === true;
+                        const hasPort = territory.hasPort === true;
+                        const hasHome = Object.values(unitDefs).some((def) => {
+                          const ids = def.home_territory_ids ?? [];
+                          if (ids.length === 0 || !ids.includes(territoryId)) return false;
+                          return !territory.owner || def.faction === territory.owner;
+                        });
+                        const showFactionLogo = territory.stronghold && territory.owner && factionData[territory.owner];
+                        const showNeutralStronghold = territory.stronghold && !territory.owner;
+                        const isCapital =
+                          territory.isCapital === true ||
+                          Object.values(factionData).some((f) => f.capital === territoryId);
+                        const power = Number(territory.produces ?? 0);
+                        // Ownable territories with 0 power: no production icon on map (avoid showing "0")
+                        const showPower = power > 0;
+                        const showStronghold = showFactionLogo || showNeutralStronghold;
+                        const showCamp = hasCamp && !isCapital;
+                        const campAndStrongholdRow = showCamp && showStronghold;
+                        const isSeaZone = territory.terrain === 'sea' || /^sea_zone_?\d+$/i.test(territoryId);
+                        const seaZoneNum = isSeaZone ? (territoryId.match(/(\d+)$/)?.[1] ?? '') : null;
+                        const terrainType = (territory.terrain || '').toLowerCase();
+                        const showTerrainMountain = terrainType === 'mountains';
+                        const showTerrainForest = terrainType === 'forest';
+                        const showTerrainIcon = showTerrainMountain || showTerrainForest;
+                        const ringHarborFlatMarkers = RING_HARBOR_STACK_POSITIONS_SVG[territoryId] !== undefined;
+                        // Inline row when we have power and any of camp/port/home/terrain (no stronghold) — keeps power beside markers, no overlap
+                        const powerAndMarkersInline = showPower && (showCamp || hasPort || hasHome || showTerrainIcon) && !showStronghold;
+                        if (!showCamp && !showStronghold && !showPower && !hasPort && !hasHome && !(isSeaZone && seaZoneNum) && !showTerrainIcon) return null;
+                        const clampedMarkerPos = clampToMap(screenPos);
+                        if (ringHarborFlatMarkers && !isSeaZone) {
+                          const ringHarborMidRow =
+                            hasHome ||
+                            (showCamp && !isCapital) ||
+                            hasPort ||
+                            showTerrainMountain ||
+                            showTerrainForest;
+                          const ringHarborStrongholdRow = showFactionLogo || showNeutralStronghold;
+                          return (
+                            <div
+                              key={territoryId}
+                              className="territory-markers territory-markers--ring-harbor"
+                              style={{
+                                left: clampedMarkerPos.x,
+                                top: clampedMarkerPos.y,
+                              }}
+                            >
+                              <div className="territory-markers-ring-harbor-rows">
+                                {showPower && (
+                                  <div className="territory-markers-row territory-markers-row--ring-harbor-power">
                                     <div
-                                      className={`territory-marker faction-marker ${isCapital ? 'faction-marker--capital' : ''}`}
-                                      title={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
+                                      className="territory-power-badge territory-power-badge--inline"
+                                      title={`${territory.name}: ${power} power`}
+                                      aria-hidden
                                     >
-                                      <img
-                                        src={factionData[territory.owner!].icon}
-                                        alt=""
-                                        width={isCapital ? 60 : 44}
-                                        height={isCapital ? 60 : 44}
-                                      />
+                                      {power}
                                     </div>
-                                    {((territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0) > 0 && (() => {
-                                      const base = (territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0;
-                                      const current = (territory as { stronghold_current_health?: number }).stronghold_current_health ?? base;
-                                      return (
-                                        <div
-                                          className="stronghold-hp-bars"
-                                          title={`Stronghold HP: ${current}/${base}`}
-                                          style={{ ['--faction-color' as string]: factionData[territory.owner!]?.color ?? '#888' }}
-                                        >
-                                          {Array.from({ length: base }, (_, i) => (
-                                            <span key={i} className="stronghold-hp-bar" data-filled={i < current ? 'true' : 'false'} />
-                                          ))}
-                                        </div>
-                                      );
-                                    })()}
                                   </div>
                                 )}
-                                {showNeutralStronghold && (
+                                {ringHarborMidRow && (
+                                  <div className="territory-markers-row territory-markers-row--ring-harbor-mid">
+                                    {hasHome && (
+                                      <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
+                                        <span className="home-marker-emoji" aria-hidden>🏠</span>
+                                      </div>
+                                    )}
+                                    {showCamp && !isCapital && (
+                                      <div className="territory-marker camp-marker" title="Camp (mobilization point)">
+                                        <span className="camp-marker-emoji" aria-hidden>⛺</span>
+                                      </div>
+                                    )}
+                                    {hasPort && (
+                                      <div className="territory-marker port-marker" title="Port (naval mobilization)">
+                                        <span className="port-marker-emoji" aria-hidden>⚓</span>
+                                      </div>
+                                    )}
+                                    {showTerrainMountain && (
+                                      <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
+                                    )}
+                                    {showTerrainForest && (
+                                      <div className="territory-marker terrain-marker" title="Forest">🌲</div>
+                                    )}
+                                  </div>
+                                )}
+                                {ringHarborStrongholdRow && (
+                                  <div className="territory-markers-row territory-markers-row--ring-harbor-stronghold">
+                                    {showFactionLogo && (
+                                      <div className="stronghold-faction-hp-group">
+                                        <div
+                                          className={`territory-marker faction-marker ${isCapital ? 'faction-marker--capital' : ''}`}
+                                          title={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
+                                        >
+                                          <img
+                                            src={factionData[territory.owner!].icon}
+                                            alt=""
+                                            width={isCapital ? 60 : 44}
+                                            height={isCapital ? 60 : 44}
+                                          />
+                                        </div>
+                                        {((territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0) > 0 && (() => {
+                                          const base = (territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0;
+                                          const current = (territory as { stronghold_current_health?: number }).stronghold_current_health ?? base;
+                                          return (
+                                            <div
+                                              className="stronghold-hp-bars"
+                                              title={`Stronghold HP: ${current}/${base}`}
+                                              style={{ ['--faction-color' as string]: factionData[territory.owner!]?.color ?? '#888' }}
+                                            >
+                                              {Array.from({ length: base }, (_, i) => (
+                                                <span key={i} className="stronghold-hp-bar" data-filled={i < current ? 'true' : 'false'} />
+                                              ))}
+                                            </div>
+                                          );
+                                        })()}
+                                      </div>
+                                    )}
+                                    {showNeutralStronghold && (
+                                      <div
+                                        className="territory-marker neutral-stronghold-marker"
+                                        title={territory.name + ' (Neutral stronghold)'}
+                                        aria-hidden
+                                      />
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div
+                            key={territoryId}
+                            className="territory-markers"
+                            style={{
+                              left: clampedMarkerPos.x,
+                              top: clampedMarkerPos.y,
+                            }}
+                          >
+                            {isSeaZone && seaZoneNum ? (
+                              <div
+                                className="sea-zone-number"
+                                title={`Sea Zone ${seaZoneNum}`}
+                                aria-hidden
+                              >
+                                {seaZoneNum}
+                              </div>
+                            ) : powerAndMarkersInline ? (
+                              <div className="territory-markers-row territory-markers-row--power-camp">
+                                {showPower && (
                                   <div
-                                    className="territory-marker neutral-stronghold-marker"
-                                    title={territory.name + ' (Neutral stronghold)'}
+                                    className="territory-power-badge territory-power-badge--inline"
+                                    title={`${territory.name}: ${power} power`}
                                     aria-hidden
-                                  />
+                                  >
+                                    {power}
+                                  </div>
                                 )}
                                 {hasHome && (
                                   <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
                                     <span className="home-marker-emoji" aria-hidden>🏠</span>
                                   </div>
                                 )}
-                                <div className="territory-marker camp-marker" title="Camp (mobilization point)">
-                                  <span className="camp-marker-emoji" aria-hidden>⛺</span>
-                                </div>
+                                {showCamp && (
+                                  <div className="territory-marker camp-marker" title="Camp (mobilization point)">
+                                    <span className="camp-marker-emoji" aria-hidden>⛺</span>
+                                  </div>
+                                )}
                                 {hasPort && (
                                   <div className="territory-marker port-marker" title="Port (naval mobilization)">
                                     <span className="port-marker-emoji" aria-hidden>⚓</span>
@@ -3577,251 +3658,482 @@ function GameMap({
                                 )}
                               </div>
                             ) : (
-                              !powerAndMarkersInline && (
-                                <>
-                                  {(showCamp || hasPort || hasHome || showTerrainIcon) && (
-                                    <div className="territory-markers-row territory-markers-row--power-camp">
-                                      {hasHome && (
-                                        <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
-                                          <span className="home-marker-emoji" aria-hidden>🏠</span>
-                                        </div>
-                                      )}
-                                      {showCamp && (
-                                        <div className="territory-marker camp-marker" title="Camp (mobilization point)">
-                                          <span className="camp-marker-emoji" aria-hidden>⛺</span>
-                                        </div>
-                                      )}
-                                      {hasPort && (
-                                        <div className="territory-marker port-marker" title="Port (naval mobilization)">
-                                          <span className="port-marker-emoji" aria-hidden>⚓</span>
-                                        </div>
-                                      )}
-                                      {showTerrainMountain && (
-                                        <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
-                                      )}
-                                      {showTerrainForest && (
-                                        <div className="territory-marker terrain-marker" title="Forest">🌲</div>
-                                      )}
-                                    </div>
-                                  )}
-                                  {showFactionLogo && (
-                                    <div className="stronghold-faction-hp-group">
-                                      <div
-                                        className={`territory-marker faction-marker ${isCapital ? 'faction-marker--capital' : ''}`}
-                                        title={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
-                                      >
-                                        <img
-                                          src={factionData[territory.owner!].icon}
-                                          alt=""
-                                          width={isCapital ? 60 : 44}
-                                          height={isCapital ? 60 : 44}
-                                        />
-                                      </div>
-                                      {((territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0) > 0 && (
+                              <>
+                                {showPower && !powerAndMarkersInline && (
+                                  <div
+                                    className={`territory-power-badge${showStronghold ? ' territory-power-badge--above-logo' : ''}`}
+                                    title={`${territory.name}: ${power} power`}
+                                    aria-hidden
+                                  >
+                                    {power}
+                                  </div>
+                                )}
+                                {campAndStrongholdRow ? (
+                                  <div className="territory-markers-row">
+                                    {showFactionLogo && (
+                                      <div className="stronghold-faction-hp-group">
                                         <div
-                                          className="stronghold-hp-bars"
-                                          title={`Stronghold HP: ${(territory as { stronghold_current_health?: number }).stronghold_current_health ?? (territory as { stronghold_base_health?: number }).stronghold_base_health}/${(territory as { stronghold_base_health?: number }).stronghold_base_health}`}
-                                          style={{ ['--faction-color' as string]: factionData[territory.owner!]?.color ?? '#888' }}
+                                          className={`territory-marker faction-marker ${isCapital ? 'faction-marker--capital' : ''}`}
+                                          title={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
                                         >
-                                          {Array.from({ length: (territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0 }, (_, i) => {
-                                            const current = (territory as { stronghold_current_health?: number }).stronghold_current_health ?? (territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0;
-                                            return <span key={i} className="stronghold-hp-bar" data-filled={i < current ? 'true' : 'false'} />;
-                                          })}
+                                          <img
+                                            src={factionData[territory.owner!].icon}
+                                            alt=""
+                                            width={isCapital ? 60 : 44}
+                                            height={isCapital ? 60 : 44}
+                                          />
+                                        </div>
+                                        {((territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0) > 0 && (() => {
+                                          const base = (territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0;
+                                          const current = (territory as { stronghold_current_health?: number }).stronghold_current_health ?? base;
+                                          return (
+                                            <div
+                                              className="stronghold-hp-bars"
+                                              title={`Stronghold HP: ${current}/${base}`}
+                                              style={{ ['--faction-color' as string]: factionData[territory.owner!]?.color ?? '#888' }}
+                                            >
+                                              {Array.from({ length: base }, (_, i) => (
+                                                <span key={i} className="stronghold-hp-bar" data-filled={i < current ? 'true' : 'false'} />
+                                              ))}
+                                            </div>
+                                          );
+                                        })()}
+                                      </div>
+                                    )}
+                                    {showNeutralStronghold && (
+                                      <div
+                                        className="territory-marker neutral-stronghold-marker"
+                                        title={territory.name + ' (Neutral stronghold)'}
+                                        aria-hidden
+                                      />
+                                    )}
+                                    {hasHome && (
+                                      <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
+                                        <span className="home-marker-emoji" aria-hidden>🏠</span>
+                                      </div>
+                                    )}
+                                    <div className="territory-marker camp-marker" title="Camp (mobilization point)">
+                                      <span className="camp-marker-emoji" aria-hidden>⛺</span>
+                                    </div>
+                                    {hasPort && (
+                                      <div className="territory-marker port-marker" title="Port (naval mobilization)">
+                                        <span className="port-marker-emoji" aria-hidden>⚓</span>
+                                      </div>
+                                    )}
+                                    {showTerrainMountain && (
+                                      <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
+                                    )}
+                                    {showTerrainForest && (
+                                      <div className="territory-marker terrain-marker" title="Forest">🌲</div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  !powerAndMarkersInline && (
+                                    <>
+                                      {(showCamp || hasPort || hasHome || showTerrainIcon) && (
+                                        <div className="territory-markers-row territory-markers-row--power-camp">
+                                          {hasHome && (
+                                            <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
+                                              <span className="home-marker-emoji" aria-hidden>🏠</span>
+                                            </div>
+                                          )}
+                                          {showCamp && (
+                                            <div className="territory-marker camp-marker" title="Camp (mobilization point)">
+                                              <span className="camp-marker-emoji" aria-hidden>⛺</span>
+                                            </div>
+                                          )}
+                                          {hasPort && (
+                                            <div className="territory-marker port-marker" title="Port (naval mobilization)">
+                                              <span className="port-marker-emoji" aria-hidden>⚓</span>
+                                            </div>
+                                          )}
+                                          {showTerrainMountain && (
+                                            <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
+                                          )}
+                                          {showTerrainForest && (
+                                            <div className="territory-marker terrain-marker" title="Forest">🌲</div>
+                                          )}
                                         </div>
                                       )}
-                                    </div>
-                                  )}
-                                  {showNeutralStronghold && (
-                                    <div
-                                      className="territory-marker neutral-stronghold-marker"
-                                      title={territory.name + ' (Neutral stronghold)'}
-                                      aria-hidden
-                                    />
-                                  )}
-                                </>
-                              )
+                                      {showFactionLogo && (
+                                        <div className="stronghold-faction-hp-group">
+                                          <div
+                                            className={`territory-marker faction-marker ${isCapital ? 'faction-marker--capital' : ''}`}
+                                            title={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
+                                          >
+                                            <img
+                                              src={factionData[territory.owner!].icon}
+                                              alt=""
+                                              width={isCapital ? 60 : 44}
+                                              height={isCapital ? 60 : 44}
+                                            />
+                                          </div>
+                                          {((territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0) > 0 && (
+                                            <div
+                                              className="stronghold-hp-bars"
+                                              title={`Stronghold HP: ${(territory as { stronghold_current_health?: number }).stronghold_current_health ?? (territory as { stronghold_base_health?: number }).stronghold_base_health}/${(territory as { stronghold_base_health?: number }).stronghold_base_health}`}
+                                              style={{ ['--faction-color' as string]: factionData[territory.owner!]?.color ?? '#888' }}
+                                            >
+                                              {Array.from({ length: (territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0 }, (_, i) => {
+                                                const current = (territory as { stronghold_current_health?: number }).stronghold_current_health ?? (territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0;
+                                                return <span key={i} className="stronghold-hp-bar" data-filled={i < current ? 'true' : 'false'} />;
+                                              })}
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
+                                      {showNeutralStronghold && (
+                                        <div
+                                          className="territory-marker neutral-stronghold-marker"
+                                          title={territory.name + ' (Neutral stronghold)'}
+                                          aria-hidden
+                                        />
+                                      )}
+                                    </>
+                                  )
+                                )}
+                              </>
                             )}
-                          </>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                          </div>
+                        );
+                      })}
+                    </div>
 
-                <div className="unit-layer">
-                  {Object.entries(territoryUnits).map(([territoryId, units]) => {
-                    if (units.length === 0) return null;
-                    const unitPos = territoryPositions[territoryId]?.unit ?? territoryCentroids[territoryId];
-                    const markerPos = territoryPositions[territoryId]?.marker ?? territoryCentroids[territoryId];
-                    const territory = territoryData[territoryId];
-                    const hasStrongholdMarker = territory?.stronghold === true;
-                    const hasPowerBadge = Number(territory?.produces ?? 0) > 0;
-                    const useSeparateUnitSpot = unitPos && markerPos && (unitPos.x !== markerPos.x || unitPos.y !== markerPos.y);
-                    const screenPos = unitPos
-                      ? clampToMap(svgToScreen(unitPos.x, unitPos.y))
-                      : fallbackPositionForTerritory(territoryId);
-                    /* When territory has a dedicated unit spot, no offset; otherwise offset below markers */
-                    const unitOffsetY = useSeparateUnitSpot ? 0 : (hasStrongholdMarker ? 38 : 6);
-                    const powerBadgeOffsetY = useSeparateUnitSpot ? 0 : (hasPowerBadge ? (hasStrongholdMarker ? 26 : 52) : (hasStrongholdMarker ? 0 : 6));
+                    <div className="unit-layer">
+                      {Object.entries(territoryUnits).map(([territoryId, units]) => {
+                        if (units.length === 0) return null;
+                        const unitPos = territoryPositions[territoryId]?.unit ?? territoryCentroids[territoryId];
+                        const markerPos = territoryPositions[territoryId]?.marker ?? territoryCentroids[territoryId];
+                        const territory = territoryData[territoryId];
+                        const hasStrongholdMarker = territory?.stronghold === true;
+                        const hasPowerBadge = Number(territory?.produces ?? 0) > 0;
+                        const useSeparateUnitSpot = unitPos && markerPos && (unitPos.x !== markerPos.x || unitPos.y !== markerPos.y);
+                        const screenPos = unitPos
+                          ? clampToMap(svgToScreen(unitPos.x, unitPos.y))
+                          : fallbackPositionForTerritory(territoryId);
+                        /* When territory has a dedicated unit spot, no offset; otherwise offset below markers */
+                        const unitOffsetY = useSeparateUnitSpot ? 0 : (hasStrongholdMarker ? 38 : 6);
+                        const powerBadgeOffsetY = useSeparateUnitSpot ? 0 : (hasPowerBadge ? (hasStrongholdMarker ? 26 : 52) : (hasStrongholdMarker ? 0 : 6));
+                        const territorySpecificExtraOffsetY = TERRITORY_UNIT_EXTRA_Y[territoryId] ?? 0;
 
-                    const NEUTRAL_UNIT_BORDER = '#888888';
-                    const isSeaZone = territory?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(territoryId);
-                    const fullUnits = territoryUnitsFull?.[territoryId];
+                        const NEUTRAL_UNIT_BORDER = '#888888';
+                        const isSeaZone = territory?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(territoryId);
+                        const fullUnits = territoryUnitsFull?.[territoryId];
 
-                    // Sea zone with full unit data: ships (+ passengers on those rows). Non-naval surface units (e.g. aerial after naval battle) render in a second row — do not return null when boats are gone.
-                    if (isSeaZone && fullUnits?.length && navalUnitIds?.size) {
-                      const navalUnits = fullUnits.filter(u => navalUnitIds.has(u.unit_id));
-                      const totalBoats = navalUnits.length;
-                      const totalPassengers = fullUnits.filter(u => u.loaded_onto).length;
-                      const eligiblePending =
-                        seaZoneIdsEligibleForNavalTrayStackClick.has(territoryId) ||
-                        seaZoneIdsEligibleForNavalTrayStackClick.has(canonicalSeaZoneId(territoryId));
-                      const showTrayDblClick = totalBoats > 1;
+                        // Sea zone with full unit data: ships (+ passengers on those rows). Non-naval surface units (e.g. aerial after naval battle) render in a second row — do not return null when boats are gone.
+                        if (isSeaZone && fullUnits?.length && navalUnitIds?.size) {
+                          const navalUnits = fullUnits.filter(u => navalUnitIds.has(u.unit_id));
+                          const totalBoats = navalUnits.length;
+                          const totalPassengers = fullUnits.filter(u => u.loaded_onto).length;
+                          const eligiblePending =
+                            seaZoneIdsEligibleForNavalTrayStackClick.has(territoryId) ||
+                            seaZoneIdsEligibleForNavalTrayStackClick.has(canonicalSeaZoneId(territoryId));
+                          const showTrayDblClick = totalBoats > 1;
 
-                      const boatCountByType = new Map<string, number>();
-                      for (const u of navalUnits) {
-                        boatCountByType.set(u.unit_id, (boatCountByType.get(u.unit_id) ?? 0) + 1);
-                      }
-                      const navalTypes = [...boatCountByType.keys()];
-                      navalTypes.sort((a, b) =>
-                        compareMapUnitStacks(
-                          { unit_id: a, count: boatCountByType.get(a) ?? 0 },
-                          { unit_id: b, count: boatCountByType.get(b) ?? 0 },
-                          unitDefs,
-                          factionData,
-                        ),
-                      );
+                          const boatCountByType = new Map<string, number>();
+                          for (const u of navalUnits) {
+                            boatCountByType.set(u.unit_id, (boatCountByType.get(u.unit_id) ?? 0) + 1);
+                          }
+                          const navalTypes = [...boatCountByType.keys()];
+                          navalTypes.sort((a, b) =>
+                            compareMapUnitStacks(
+                              { unit_id: a, count: boatCountByType.get(a) ?? 0 },
+                              { unit_id: b, count: boatCountByType.get(b) ?? 0 },
+                              unitDefs,
+                              factionData,
+                            ),
+                          );
 
-                      const surfaceNonNaval = fullUnits.filter(
-                        (u) => !navalUnitIds.has(u.unit_id) && !u.loaded_onto,
-                      );
-                      const otherByType = new Map<string, typeof fullUnits>();
-                      for (const u of surfaceNonNaval) {
-                        if (!otherByType.has(u.unit_id)) otherByType.set(u.unit_id, []);
-                        otherByType.get(u.unit_id)!.push(u);
-                      }
-                      const otherTypes = [...otherByType.keys()];
-                      otherTypes.sort((a, b) =>
-                        compareMapUnitStacks(
-                          { unit_id: a, count: otherByType.get(a)?.length ?? 0 },
-                          { unit_id: b, count: otherByType.get(b)?.length ?? 0 },
-                          unitDefs,
-                          factionData,
-                        ),
-                      );
+                          const surfaceNonNaval = fullUnits.filter(
+                            (u) => !navalUnitIds.has(u.unit_id) && !u.loaded_onto,
+                          );
+                          const otherByType = new Map<string, typeof fullUnits>();
+                          for (const u of surfaceNonNaval) {
+                            if (!otherByType.has(u.unit_id)) otherByType.set(u.unit_id, []);
+                            otherByType.get(u.unit_id)!.push(u);
+                          }
+                          const otherTypes = [...otherByType.keys()];
+                          otherTypes.sort((a, b) =>
+                            compareMapUnitStacks(
+                              { unit_id: a, count: otherByType.get(a)?.length ?? 0 },
+                              { unit_id: b, count: otherByType.get(b)?.length ?? 0 },
+                              unitDefs,
+                              factionData,
+                            ),
+                          );
 
-                      if (navalTypes.length === 0 && otherTypes.length === 0) return null;
+                          if (navalTypes.length === 0 && otherTypes.length === 0) return null;
 
-                      const useStacked = navalTypes.length >= 3;
-                      const handleStackDoubleClick = showTrayDblClick
-                        ? (e: React.MouseEvent) => {
-                          e.stopPropagation();
-                          onSeaZoneStackClick?.(territoryId);
-                        }
-                        : undefined;
-                      const handleOpenNavalTrayClick = showTrayDblClick
-                        ? (e: React.MouseEvent) => {
-                          e.stopPropagation();
-                          onSeaZoneStackClick?.(territoryId);
-                        }
-                        : undefined;
-                      const cancelNavalTrayLongPress = () => {
-                        if (navalTrayLongPressTimerRef.current != null) {
-                          clearTimeout(navalTrayLongPressTimerRef.current);
-                          navalTrayLongPressTimerRef.current = null;
-                        }
-                        const s = navalTrayLongPressStartRef.current;
-                        if (s?.territoryId === territoryId) navalTrayLongPressStartRef.current = null;
-                      };
-                      const handleNavalStackPointerDown = (e: ReactPointerEvent) => {
-                        if (!coarsePointer || !showTrayDblClick || !onSeaZoneStackClick) return;
-                        if (e.button !== 0) return;
-                        cancelNavalTrayLongPress();
-                        navalTrayLongPressStartRef.current = { x: e.clientX, y: e.clientY, territoryId };
-                        navalTrayLongPressTimerRef.current = window.setTimeout(() => {
-                          navalTrayLongPressTimerRef.current = null;
-                          navalTrayLongPressStartRef.current = null;
-                          onSeaZoneStackClick(territoryId);
-                        }, 520);
-                      };
-                      const handleNavalStackPointerMove = (e: ReactPointerEvent) => {
-                        const s = navalTrayLongPressStartRef.current;
-                        if (!s || s.territoryId !== territoryId) return;
-                        const dx = e.clientX - s.x;
-                        const dy = e.clientY - s.y;
-                        if (dx * dx + dy * dy > 144) cancelNavalTrayLongPress();
-                      };
-                      const left = screenPos.x;
-                      const top = screenPos.y + unitOffsetY + powerBadgeOffsetY;
-                      return (
-                        <div
-                          key={territoryId}
-                          className="territory-units territory-units--sea-combined"
-                          style={{
-                            left,
-                            top,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'flex-start',
-                            gap: 4,
-                          }}
-                        >
-                          {navalTypes.length > 0 && (
+                          const useStacked = navalTypes.length >= 3;
+                          const handleStackDoubleClick = showTrayDblClick
+                            ? (e: React.MouseEvent) => {
+                              e.stopPropagation();
+                              onSeaZoneStackClick?.(territoryId);
+                            }
+                            : undefined;
+                          const handleOpenNavalTrayClick = showTrayDblClick
+                            ? (e: React.MouseEvent) => {
+                              e.stopPropagation();
+                              onSeaZoneStackClick?.(territoryId);
+                            }
+                            : undefined;
+                          const cancelNavalTrayLongPress = () => {
+                            if (navalTrayLongPressTimerRef.current != null) {
+                              clearTimeout(navalTrayLongPressTimerRef.current);
+                              navalTrayLongPressTimerRef.current = null;
+                            }
+                            const s = navalTrayLongPressStartRef.current;
+                            if (s?.territoryId === territoryId) navalTrayLongPressStartRef.current = null;
+                          };
+                          const handleNavalStackPointerDown = (e: ReactPointerEvent) => {
+                            if (!coarsePointer || !showTrayDblClick || !onSeaZoneStackClick) return;
+                            if (e.button !== 0) return;
+                            cancelNavalTrayLongPress();
+                            navalTrayLongPressStartRef.current = { x: e.clientX, y: e.clientY, territoryId };
+                            navalTrayLongPressTimerRef.current = window.setTimeout(() => {
+                              navalTrayLongPressTimerRef.current = null;
+                              navalTrayLongPressStartRef.current = null;
+                              onSeaZoneStackClick(territoryId);
+                            }, 520);
+                          };
+                          const handleNavalStackPointerMove = (e: ReactPointerEvent) => {
+                            const s = navalTrayLongPressStartRef.current;
+                            if (!s || s.territoryId !== territoryId) return;
+                            const dx = e.clientX - s.x;
+                            const dy = e.clientY - s.y;
+                            if (dx * dx + dy * dy > 144) cancelNavalTrayLongPress();
+                          };
+                          const left = screenPos.x;
+                          const top = screenPos.y + unitOffsetY + powerBadgeOffsetY;
+                          return (
                             <div
-                              className={`territory-units territory-units--sea-stack-row ${showTrayDblClick ? 'territory-units--sea-stack' : ''}`}
-                              style={{ position: 'relative', left: 0, top: 0, display: 'flex', alignItems: 'flex-end', gap: 6, flexWrap: 'wrap' }}
+                              key={territoryId}
+                              className="territory-units territory-units--sea-combined"
+                              style={{
+                                left,
+                                top: top + territorySpecificExtraOffsetY,
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'flex-start',
+                                gap: 4,
+                              }}
                             >
-                              {showTrayDblClick && onSeaZoneStackClick && (
-                                <button
-                                  type="button"
-                                  className="sea-zone-tray-open-btn sea-zone-tray-open-btn--fine-pointer"
-                                  onClick={handleOpenNavalTrayClick}
-                                  title="Ship list and passengers (double-click stack also works)"
-                                  aria-label={`Open ship list for ${territory?.name ?? territoryId}`}
+                              {navalTypes.length > 0 && (
+                                <div
+                                  className={`territory-units territory-units--sea-stack-row ${showTrayDblClick ? 'territory-units--sea-stack' : ''}`}
+                                  style={{ position: 'relative', left: 0, top: 0, display: 'flex', alignItems: 'flex-end', gap: 6, flexWrap: 'wrap' }}
                                 >
-                                  <span className="sea-zone-tray-open-btn__icon" aria-hidden>
-                                    ☰
-                                  </span>
-                                  <span className="sea-zone-tray-open-btn__text">Ships</span>
-                                </button>
+                                  {showTrayDblClick && onSeaZoneStackClick && (
+                                    <button
+                                      type="button"
+                                      className="sea-zone-tray-open-btn sea-zone-tray-open-btn--fine-pointer"
+                                      onClick={handleOpenNavalTrayClick}
+                                      title="Ship list and passengers (double-click stack also works)"
+                                      aria-label={`Open ship list for ${territory?.name ?? territoryId}`}
+                                    >
+                                      <span className="sea-zone-tray-open-btn__icon" aria-hidden>
+                                        ☰
+                                      </span>
+                                      <span className="sea-zone-tray-open-btn__text">Ships</span>
+                                    </button>
+                                  )}
+                                  <div
+                                    className={`territory-units ${useStacked ? 'territory-units--stacked' : ''}`}
+                                    style={{ position: 'relative', left: 0, top: 0 }}
+                                    onDoubleClick={handleStackDoubleClick}
+                                    onPointerDown={handleNavalStackPointerDown}
+                                    onPointerMove={handleNavalStackPointerMove}
+                                    onPointerUp={cancelNavalTrayLongPress}
+                                    onPointerCancel={cancelNavalTrayLongPress}
+                                    onPointerLeave={cancelNavalTrayLongPress}
+                                    title={
+                                      showTrayDblClick
+                                        ? coarsePointer
+                                          ? `Long-press this stack for ship list & passengers, or drag to move.${eligiblePending && totalPassengers < 1 ? ' Pending loads into this zone.' : ''
+                                          }`
+                                          : `Double-click stack or use the list control for ships & passengers. Drag a ship stack to move.${eligiblePending && totalPassengers < 1 ? ' Pending loads into this zone.' : ''
+                                          }`
+                                        : undefined
+                                    }
+                                  >
+                                    {navalTypes.map((unit_id) => {
+                                      const boatsOfType = fullUnits.filter(u => u.unit_id === unit_id);
+                                      const boatCount = boatsOfType.length;
+                                      const boatInstanceIds = boatsOfType.map(b => b.instance_id);
+                                      const passengerUnits = fullUnits.filter(u => u.loaded_onto && boatInstanceIds.includes(u.loaded_onto));
+                                      const passengerCount = passengerUnits.length;
+                                      const instanceIds = [...boatInstanceIds, ...passengerUnits.map(p => p.instance_id)];
+                                      const parts = unit_id.split('_');
+                                      const factionFromId = parts.find(p => factionData[p]);
+                                      const colorFromId = factionFromId ? factionData[factionFromId].color : null;
+                                      const defFaction = unitDefs[unit_id]?.faction;
+                                      const colorFromDef = defFaction && factionData[defFaction] ? factionData[defFaction].color : null;
+                                      const unitFactionColor = colorFromId ?? colorFromDef ?? NEUTRAL_UNIT_BORDER;
+                                      const unitFaction = factionFromId ?? defFaction ?? parts[0];
+                                      const canDrag =
+                                        canAct && isMovementPhase && unitFaction === gameState.current_faction;
+                                      return (
+                                        <span
+                                          key={`${territoryId}-${unit_id}`}
+                                          className={`unit-token-tap-wrapper${tapSelectedUnit?.territoryId === territoryId && tapSelectedUnit?.unitId === unit_id ? ' unit-token-tap-wrapper--selected' : ''}`}
+                                          onPointerDownCapture={(ev) => handleUnitPointerDownCapture(territoryId, unit_id, ev)}
+                                          style={{ display: 'inline-block' }}
+                                        >
+                                          <DraggableUnit
+                                            id={`${territoryId}-${unit_id}`}
+                                            unitId={unit_id}
+                                            territoryId={territoryId}
+                                            count={boatCount}
+                                            unitDef={unitDefs[unit_id]}
+                                            isSelected={selectedUnit?.territory === territoryId && selectedUnit?.unitType === unit_id}
+                                            disabled={!canDrag}
+                                            factionColor={unitFactionColor}
+                                            showAerialMustMove={aerialMustMoveKeySet.has(`${territoryId}_${unit_id}`)}
+                                            showNavalMustAttack={
+                                              gameState.phase === 'combat_move' &&
+                                              instanceIds.some((id) => loadedNavalMustAttackInstanceIdSet.has(id))
+                                            }
+                                            showForcedNavalStandoff={
+                                              gameState.phase === 'combat_move' &&
+                                              instanceIds.some(
+                                                (id) =>
+                                                  forcedNavalCombatInstanceIdSet.has(id) &&
+                                                  !loadedNavalMustAttackInstanceIdSet.has(id)
+                                              )
+                                            }
+                                            isNaval
+                                            passengerCount={passengerCount}
+                                            instanceIds={instanceIds}
+                                          />
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
                               )}
-                              <div
-                                className={`territory-units ${useStacked ? 'territory-units--stacked' : ''}`}
-                                style={{ position: 'relative', left: 0, top: 0 }}
-                                onDoubleClick={handleStackDoubleClick}
-                                onPointerDown={handleNavalStackPointerDown}
-                                onPointerMove={handleNavalStackPointerMove}
-                                onPointerUp={cancelNavalTrayLongPress}
-                                onPointerCancel={cancelNavalTrayLongPress}
-                                onPointerLeave={cancelNavalTrayLongPress}
-                                title={
-                                  showTrayDblClick
-                                    ? coarsePointer
-                                      ? `Long-press this stack for ship list & passengers, or drag to move.${
-                                          eligiblePending && totalPassengers < 1 ? ' Pending loads into this zone.' : ''
-                                        }`
-                                      : `Double-click stack or use the list control for ships & passengers. Drag a ship stack to move.${
-                                          eligiblePending && totalPassengers < 1 ? ' Pending loads into this zone.' : ''
-                                        }`
-                                    : undefined
-                                }
-                              >
-                              {navalTypes.map((unit_id) => {
-                                const boatsOfType = fullUnits.filter(u => u.unit_id === unit_id);
-                                const boatCount = boatsOfType.length;
-                                const boatInstanceIds = boatsOfType.map(b => b.instance_id);
-                                const passengerUnits = fullUnits.filter(u => u.loaded_onto && boatInstanceIds.includes(u.loaded_onto));
-                                const passengerCount = passengerUnits.length;
-                                const instanceIds = [...boatInstanceIds, ...passengerUnits.map(p => p.instance_id)];
+                              {otherTypes.length > 0 && (
+                                <div className="territory-units-token-row" style={{ position: 'relative', left: 0, top: 0 }}>
+                                  {otherTypes.map((unit_id) => {
+                                    const list = otherByType.get(unit_id)!;
+                                    const count = list.length;
+                                    const instanceIdsForUnit = list.map((u) => u.instance_id);
+                                    const parts = unit_id.split('_');
+                                    const factionFromId = parts.find(p => factionData[p]);
+                                    const colorFromId = factionFromId ? factionData[factionFromId].color : null;
+                                    const defFaction = unitDefs[unit_id]?.faction;
+                                    const colorFromDef = defFaction && factionData[defFaction] ? factionData[defFaction].color : null;
+                                    const unitFactionColor = colorFromId ?? colorFromDef ?? NEUTRAL_UNIT_BORDER;
+                                    const unitFaction = factionFromId ?? defFaction ?? parts[0];
+                                    const canDrag =
+                                      canAct && isMovementPhase && unitFaction === gameState.current_faction;
+                                    return (
+                                      <span
+                                        key={`${territoryId}-${unit_id}-sea-surface`}
+                                        className={`unit-token-tap-wrapper${tapSelectedUnit?.territoryId === territoryId && tapSelectedUnit?.unitId === unit_id ? ' unit-token-tap-wrapper--selected' : ''}`}
+                                        onPointerDownCapture={(ev) => handleUnitPointerDownCapture(territoryId, unit_id, ev)}
+                                        style={{ display: 'inline-block' }}
+                                      >
+                                        <DraggableUnit
+                                          id={`${territoryId}-${unit_id}-sea-surface`}
+                                          unitId={unit_id}
+                                          territoryId={territoryId}
+                                          count={count}
+                                          unitDef={unitDefs[unit_id]}
+                                          isSelected={selectedUnit?.territory === territoryId && selectedUnit?.unitType === unit_id}
+                                          disabled={!canDrag}
+                                          factionColor={unitFactionColor}
+                                          showAerialMustMove={aerialMustMoveKeySet.has(`${territoryId}_${unit_id}`)}
+                                          showNavalMustAttack={false}
+                                          showForcedNavalStandoff={false}
+                                          isNaval={false}
+                                          instanceIds={instanceIdsForUnit}
+                                        />
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+
+                        // Land (or sea without full data): stacked tokens by unit type
+                        const stackCount = units.length;
+                        const useStacked = stackCount >= 3;
+                        const sortedUnits = [...units].sort((a, b) =>
+                          compareMapUnitStacks(a, b, unitDefs, factionData),
+                        );
+
+                        const bulkMinRm = minRemainingMovementForBulkAll(
+                          territoryId,
+                          territoryUnits,
+                          territoryUnitsFull,
+                          gameState.current_faction,
+                          factionData,
+                          unitDefs,
+                          pendingMoves,
+                          gameState.phase,
+                        );
+                        /** Bulk "All" only when every stack is the current turn faction (not allies you can't command). */
+                        const allStacksAreCurrentTurnFaction = units.every((s) => {
+                          const parts = s.unit_id.split('_');
+                          const factionFromId = parts.find((p) => factionData[p]);
+                          const defFaction = unitDefs[s.unit_id]?.faction;
+                          const uf = factionFromId ?? defFaction ?? parts[0];
+                          return uf === gameState.current_faction;
+                        });
+                        const canShowAllDrag =
+                          canAct &&
+                          isMovementPhase &&
+                          allStacksAreCurrentTurnFaction &&
+                          stackCount > 1 &&
+                          bulkMinRm != null &&
+                          bulkMinRm > 0;
+                        return (
+                          <div
+                            key={territoryId}
+                            className={`territory-units ${useStacked ? 'territory-units--stacked' : ''} ${useStacked && expandedStackKey === territoryId ? 'territory-units--stack-expanded' : ''}`}
+                            style={{
+                              left: screenPos.x,
+                              top: screenPos.y + unitOffsetY + powerBadgeOffsetY + territorySpecificExtraOffsetY,
+                            }}
+                          >
+                            {canShowAllDrag && (
+                              <DraggableAllStacksButton
+                                territoryId={territoryId}
+                                disabled={!isMovementPhase || !canAct}
+                                onTapPrepPointerDown={(tid, ev) => {
+                                  bulkAllTapStartRef.current = { territoryId: tid, x: ev.clientX, y: ev.clientY };
+                                }}
+                              />
+                            )}
+                            <div className="territory-units-token-row">
+                              {sortedUnits.map(({ unit_id, count }) => {
+                                // Border = unit's faction ONLY. Never territory owner. Prefer faction name found in unit_id (e.g. rider_of_rohan → rohan) so Rohan units get Rohan color even when def.faction is "freepeoples".
                                 const parts = unit_id.split('_');
                                 const factionFromId = parts.find(p => factionData[p]);
                                 const colorFromId = factionFromId ? factionData[factionFromId].color : null;
                                 const defFaction = unitDefs[unit_id]?.faction;
                                 const colorFromDef = defFaction && factionData[defFaction] ? factionData[defFaction].color : null;
                                 const unitFactionColor = colorFromId ?? colorFromDef ?? NEUTRAL_UNIT_BORDER;
+                                // Draggable during movement phase if this unit belongs to the current faction (regardless of territory owner)
                                 const unitFaction = factionFromId ?? defFaction ?? parts[0];
                                 const canDrag =
                                   canAct && isMovementPhase && unitFaction === gameState.current_faction;
+                                const instanceIdsForUnit = (territoryUnitsFull?.[territoryId] || []).filter(u => u.unit_id === unit_id).map(u => u.instance_id);
+                                const showNavalMustAttackStacked =
+                                  gameState.phase === 'combat_move' &&
+                                  navalUnitIds.has(unit_id) &&
+                                  instanceIdsForUnit.some((id) => loadedNavalMustAttackInstanceIdSet.has(id));
+                                const showForcedNavalStandoffStacked =
+                                  gameState.phase === 'combat_move' &&
+                                  navalUnitIds.has(unit_id) &&
+                                  instanceIdsForUnit.some(
+                                    (id) =>
+                                      forcedNavalCombatInstanceIdSet.has(id) &&
+                                      !loadedNavalMustAttackInstanceIdSet.has(id)
+                                  );
+
                                 return (
                                   <span
                                     key={`${territoryId}-${unit_id}`}
@@ -3833,297 +4145,135 @@ function GameMap({
                                       id={`${territoryId}-${unit_id}`}
                                       unitId={unit_id}
                                       territoryId={territoryId}
-                                      count={boatCount}
-                                      unitDef={unitDefs[unit_id]}
-                                      isSelected={selectedUnit?.territory === territoryId && selectedUnit?.unitType === unit_id}
-                                      disabled={!canDrag}
-                                      factionColor={unitFactionColor}
-                                      showAerialMustMove={aerialMustMoveKeySet.has(`${territoryId}_${unit_id}`)}
-                                      showNavalMustAttack={
-                                        gameState.phase === 'combat_move' &&
-                                        instanceIds.some((id) => loadedNavalMustAttackInstanceIdSet.has(id))
-                                      }
-                                      showForcedNavalStandoff={
-                                        gameState.phase === 'combat_move' &&
-                                        instanceIds.some(
-                                          (id) =>
-                                            forcedNavalCombatInstanceIdSet.has(id) &&
-                                            !loadedNavalMustAttackInstanceIdSet.has(id)
-                                        )
-                                      }
-                                      isNaval
-                                      passengerCount={passengerCount}
-                                      instanceIds={instanceIds}
-                                    />
-                                  </span>
-                                );
-                              })}
-                              </div>
-                            </div>
-                          )}
-                          {otherTypes.length > 0 && (
-                            <div className="territory-units-token-row" style={{ position: 'relative', left: 0, top: 0 }}>
-                              {otherTypes.map((unit_id) => {
-                                const list = otherByType.get(unit_id)!;
-                                const count = list.length;
-                                const instanceIdsForUnit = list.map((u) => u.instance_id);
-                                const parts = unit_id.split('_');
-                                const factionFromId = parts.find(p => factionData[p]);
-                                const colorFromId = factionFromId ? factionData[factionFromId].color : null;
-                                const defFaction = unitDefs[unit_id]?.faction;
-                                const colorFromDef = defFaction && factionData[defFaction] ? factionData[defFaction].color : null;
-                                const unitFactionColor = colorFromId ?? colorFromDef ?? NEUTRAL_UNIT_BORDER;
-                                const unitFaction = factionFromId ?? defFaction ?? parts[0];
-                                const canDrag =
-                                  canAct && isMovementPhase && unitFaction === gameState.current_faction;
-                                return (
-                                  <span
-                                    key={`${territoryId}-${unit_id}-sea-surface`}
-                                    className={`unit-token-tap-wrapper${tapSelectedUnit?.territoryId === territoryId && tapSelectedUnit?.unitId === unit_id ? ' unit-token-tap-wrapper--selected' : ''}`}
-                                    onPointerDownCapture={(ev) => handleUnitPointerDownCapture(territoryId, unit_id, ev)}
-                                    style={{ display: 'inline-block' }}
-                                  >
-                                    <DraggableUnit
-                                      id={`${territoryId}-${unit_id}-sea-surface`}
-                                      unitId={unit_id}
-                                      territoryId={territoryId}
                                       count={count}
                                       unitDef={unitDefs[unit_id]}
                                       isSelected={selectedUnit?.territory === territoryId && selectedUnit?.unitType === unit_id}
                                       disabled={!canDrag}
                                       factionColor={unitFactionColor}
                                       showAerialMustMove={aerialMustMoveKeySet.has(`${territoryId}_${unit_id}`)}
-                                      showNavalMustAttack={false}
-                                      showForcedNavalStandoff={false}
-                                      isNaval={false}
-                                      instanceIds={instanceIdsForUnit}
+                                      showNavalMustAttack={showNavalMustAttackStacked}
+                                      showForcedNavalStandoff={showForcedNavalStandoffStacked}
+                                      isNaval={navalUnitIds.has(unit_id)}
+                                      instanceIds={instanceIdsForUnit.length > 0 ? instanceIdsForUnit : undefined}
                                     />
                                   </span>
                                 );
                               })}
+                              {useStacked && expandedStackKey !== territoryId && (
+                                <div
+                                  className="territory-units-expand-overlay"
+                                  onClick={(e) => { e.stopPropagation(); setExpandedStackKey(territoryId); }}
+                                  onPointerDown={(e) => e.stopPropagation()}
+                                  role="button"
+                                  tabIndex={0}
+                                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpandedStackKey(territoryId); } }}
+                                  aria-label="Expand unit stack"
+                                />
+                              )}
                             </div>
-                          )}
-                        </div>
-                      );
-                    }
-
-                    // Land (or sea without full data): stacked tokens by unit type
-                    const stackCount = units.length;
-                    const useStacked = stackCount >= 3;
-                    const sortedUnits = [...units].sort((a, b) =>
-                      compareMapUnitStacks(a, b, unitDefs, factionData),
-                    );
-
-                    const bulkMinRm = minRemainingMovementForBulkAll(
-                      territoryId,
-                      territoryUnits,
-                      territoryUnitsFull,
-                      gameState.current_faction,
-                      factionData,
-                      unitDefs,
-                      pendingMoves,
-                      gameState.phase,
-                    );
-                    /** Bulk "All" only when every stack is the current turn faction (not allies you can't command). */
-                    const allStacksAreCurrentTurnFaction = units.every((s) => {
-                      const parts = s.unit_id.split('_');
-                      const factionFromId = parts.find((p) => factionData[p]);
-                      const defFaction = unitDefs[s.unit_id]?.faction;
-                      const uf = factionFromId ?? defFaction ?? parts[0];
-                      return uf === gameState.current_faction;
-                    });
-                    const canShowAllDrag =
-                      canAct &&
-                      isMovementPhase &&
-                      allStacksAreCurrentTurnFaction &&
-                      stackCount > 1 &&
-                      bulkMinRm != null &&
-                      bulkMinRm > 0;
-                    return (
-                      <div
-                        key={territoryId}
-                        className={`territory-units ${useStacked ? 'territory-units--stacked' : ''} ${useStacked && expandedStackKey === territoryId ? 'territory-units--stack-expanded' : ''}`}
-                        style={{
-                          left: screenPos.x,
-                          top: screenPos.y + unitOffsetY + powerBadgeOffsetY,
-                        }}
-                      >
-                        {canShowAllDrag && (
-                          <DraggableAllStacksButton
-                            territoryId={territoryId}
-                            disabled={!isMovementPhase || !canAct}
-                            onTapPrepPointerDown={(tid, ev) => {
-                              bulkAllTapStartRef.current = { territoryId: tid, x: ev.clientX, y: ev.clientY };
-                            }}
-                          />
-                        )}
-                        <div className="territory-units-token-row">
-                        {sortedUnits.map(({ unit_id, count }) => {
-                          // Border = unit's faction ONLY. Never territory owner. Prefer faction name found in unit_id (e.g. rider_of_rohan → rohan) so Rohan units get Rohan color even when def.faction is "freepeoples".
-                          const parts = unit_id.split('_');
-                          const factionFromId = parts.find(p => factionData[p]);
-                          const colorFromId = factionFromId ? factionData[factionFromId].color : null;
-                          const defFaction = unitDefs[unit_id]?.faction;
-                          const colorFromDef = defFaction && factionData[defFaction] ? factionData[defFaction].color : null;
-                          const unitFactionColor = colorFromId ?? colorFromDef ?? NEUTRAL_UNIT_BORDER;
-                          // Draggable during movement phase if this unit belongs to the current faction (regardless of territory owner)
-                          const unitFaction = factionFromId ?? defFaction ?? parts[0];
-                          const canDrag =
-                            canAct && isMovementPhase && unitFaction === gameState.current_faction;
-                          const instanceIdsForUnit = (territoryUnitsFull?.[territoryId] || []).filter(u => u.unit_id === unit_id).map(u => u.instance_id);
-                          const showNavalMustAttackStacked =
-                            gameState.phase === 'combat_move' &&
-                            navalUnitIds.has(unit_id) &&
-                            instanceIdsForUnit.some((id) => loadedNavalMustAttackInstanceIdSet.has(id));
-                          const showForcedNavalStandoffStacked =
-                            gameState.phase === 'combat_move' &&
-                            navalUnitIds.has(unit_id) &&
-                            instanceIdsForUnit.some(
-                              (id) =>
-                                forcedNavalCombatInstanceIdSet.has(id) &&
-                                !loadedNavalMustAttackInstanceIdSet.has(id)
-                            );
-
-                          return (
-                            <span
-                              key={`${territoryId}-${unit_id}`}
-                              className={`unit-token-tap-wrapper${tapSelectedUnit?.territoryId === territoryId && tapSelectedUnit?.unitId === unit_id ? ' unit-token-tap-wrapper--selected' : ''}`}
-                              onPointerDownCapture={(ev) => handleUnitPointerDownCapture(territoryId, unit_id, ev)}
-                              style={{ display: 'inline-block' }}
-                            >
-                              <DraggableUnit
-                                id={`${territoryId}-${unit_id}`}
-                                unitId={unit_id}
-                                territoryId={territoryId}
-                                count={count}
-                                unitDef={unitDefs[unit_id]}
-                                isSelected={selectedUnit?.territory === territoryId && selectedUnit?.unitType === unit_id}
-                                disabled={!canDrag}
-                                factionColor={unitFactionColor}
-                                showAerialMustMove={aerialMustMoveKeySet.has(`${territoryId}_${unit_id}`)}
-                                showNavalMustAttack={showNavalMustAttackStacked}
-                                showForcedNavalStandoff={showForcedNavalStandoffStacked}
-                                isNaval={navalUnitIds.has(unit_id)}
-                                instanceIds={instanceIdsForUnit.length > 0 ? instanceIdsForUnit : undefined}
-                              />
-                            </span>
-                          );
-                        })}
-                        {useStacked && expandedStackKey !== territoryId && (
-                          <div
-                            className="territory-units-expand-overlay"
-                            onClick={(e) => { e.stopPropagation(); setExpandedStackKey(territoryId); }}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            role="button"
-                            tabIndex={0}
-                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpandedStackKey(territoryId); } }}
-                            aria-label="Expand unit stack"
-                          />
-                        )}
-                        </div>
-                      </div>
-                    );
-                  })}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
+              </div>
+
+              <DragOverlay
+                bulkDragOverlay={bulkDragOverlay}
+                activeUnit={activeUnit}
+                activeMobilizationItem={activeMobilizationItem}
+                activeCampDrag={activeCampDrag}
+                factionColor={mobilizationTray?.factionColor}
+              />
+
+              <div className={`map-controls ${mapControlsCollapsed ? 'map-controls--collapsed' : ''}`}>
+                {mapControlsCollapsed ? (
+                  <button
+                    type="button"
+                    className="map-controls-toggle"
+                    onClick={() => setMapControlsCollapsed(false)}
+                    title="Show map controls"
+                    aria-label="Show map controls"
+                  >
+                    ◀
+                  </button>
+                ) : (
+                  <>
+                    <div className="map-controls-top-row">
+                      <button
+                        type="button"
+                        className="map-controls-toggle map-controls-toggle--hide"
+                        onClick={() => setMapControlsCollapsed(true)}
+                        title="Hide map controls"
+                        aria-label="Hide map controls"
+                      >
+                        ▶
+                      </button>
+                      <button
+                        type="button"
+                        className="map-controls-key-btn"
+                        onClick={() => setMapKeyOpen(prev => !prev)}
+                        title={mapKeyOpen ? 'Hide map key' : 'Show map key'}
+                        aria-label={mapKeyOpen ? 'Hide map key' : 'Show map key'}
+                      >
+                        <svg className="map-controls-key-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="8" cy="15" r="4" /><path d="M10.85 12.15L19 4" /><path d="M18 5l2 2" /><path d="M15 8l2 2" /></svg>
+                      </button>
+                    </div>
+                    <div className="controls-row">
+                      <button onClick={panUp} title="Pan Up">▲</button>
+                    </div>
+                    <div className="controls-row">
+                      <button onClick={panLeft} title="Pan Left">◀</button>
+                      <button onClick={resetView} title="Reset View">⌂</button>
+                      <button onClick={panRight} title="Pan Right">▶</button>
+                    </div>
+                    <div className="controls-row">
+                      <button onClick={panDown} title="Pan Down">▼</button>
+                    </div>
+                    <div className="controls-row zoom-controls">
+                      <button onClick={zoomOut} title="Zoom Out">−</button>
+                      <button onClick={zoomIn} title="Zoom In">+</button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
 
-          <DragOverlay
-            bulkDragOverlay={bulkDragOverlay}
-            activeUnit={activeUnit}
-            activeMobilizationItem={activeMobilizationItem}
-            activeCampDrag={activeCampDrag}
-            factionColor={mobilizationTray?.factionColor}
-          />
-
-          <div className={`map-controls ${mapControlsCollapsed ? 'map-controls--collapsed' : ''}`}>
-            {mapControlsCollapsed ? (
-              <button
-                type="button"
-                className="map-controls-toggle"
-                onClick={() => setMapControlsCollapsed(false)}
-                title="Show map controls"
-                aria-label="Show map controls"
-              >
-                ◀
-              </button>
-            ) : (
-              <>
-                <div className="map-controls-top-row">
-                  <button
-                    type="button"
-                    className="map-controls-toggle map-controls-toggle--hide"
-                    onClick={() => setMapControlsCollapsed(true)}
-                    title="Hide map controls"
-                    aria-label="Hide map controls"
-                  >
-                    ▶
-                  </button>
-                  <button
-                    type="button"
-                    className="map-controls-key-btn"
-                    onClick={() => setMapKeyOpen(prev => !prev)}
-                    title={mapKeyOpen ? 'Hide map key' : 'Show map key'}
-                    aria-label={mapKeyOpen ? 'Hide map key' : 'Show map key'}
-                  >
-                    <svg className="map-controls-key-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="8" cy="15" r="4" /><path d="M10.85 12.15L19 4" /><path d="M18 5l2 2" /><path d="M15 8l2 2" /></svg>
-                  </button>
-                </div>
-                <div className="controls-row">
-                  <button onClick={panUp} title="Pan Up">▲</button>
-                </div>
-                <div className="controls-row">
-                  <button onClick={panLeft} title="Pan Left">◀</button>
-                  <button onClick={resetView} title="Reset View">⌂</button>
-                  <button onClick={panRight} title="Pan Right">▶</button>
-                </div>
-                <div className="controls-row">
-                  <button onClick={panDown} title="Pan Down">▼</button>
-                </div>
-                <div className="controls-row zoom-controls">
-                  <button onClick={zoomOut} title="Zoom Out">−</button>
-                  <button onClick={zoomIn} title="Zoom In">+</button>
-                </div>
-              </>
-            )}
-          </div>
-          </div>
+          {mobilizationTray && (
+            <MobilizationTray
+              isOpen={true}
+              purchases={mobilizationTray.purchases}
+              pendingCamps={mobilizationTray.pendingCamps}
+              faction={gameState.current_faction}
+              factionColor={mobilizationTray.factionColor}
+              canMobilizeAll={mobilizationTray.canMobilizeAll ?? false}
+              selectedUnitId={mobilizationTray.selectedUnitId}
+              selectedCampIndex={mobilizationTray.selectedCampIndex}
+              onSelectUnit={mobilizationTray.onSelectUnit}
+              onSelectCamp={mobilizationTray.onSelectCamp}
+              onTapMobilizeAll={handleTapMobilizeAllFromTray}
+              activeDragId={activeDragId}
+            />
+          )}
+          {navalTray && (
+            <NavalTray
+              isOpen={true}
+              seaZoneId={navalTray.seaZoneId}
+              seaZoneName={navalTray.seaZoneName}
+              boats={navalTray.boats}
+              factionColor={navalTray.factionColor}
+              onClose={onCloseNavalTray ?? (() => { })}
+              pendingLoadBoatOptions={pendingLoadBoatOptions}
+              onChooseBoatForLoad={onChooseBoatForLoad}
+              pendingLoadPassengers={pendingLoadPassengers}
+              loadAllocation={loadAllocation}
+              onLoadAllocationChange={onLoadAllocationChange}
+            />
+          )}
         </div>
-
-        {mobilizationTray && (
-          <MobilizationTray
-            isOpen={true}
-            purchases={mobilizationTray.purchases}
-            pendingCamps={mobilizationTray.pendingCamps}
-            faction={gameState.current_faction}
-            factionColor={mobilizationTray.factionColor}
-            canMobilizeAll={mobilizationTray.canMobilizeAll ?? false}
-            selectedUnitId={mobilizationTray.selectedUnitId}
-            selectedCampIndex={mobilizationTray.selectedCampIndex}
-            onSelectUnit={mobilizationTray.onSelectUnit}
-            onSelectCamp={mobilizationTray.onSelectCamp}
-            onTapMobilizeAll={handleTapMobilizeAllFromTray}
-            activeDragId={activeDragId}
-          />
-        )}
-        {navalTray && (
-          <NavalTray
-            isOpen={true}
-            seaZoneId={navalTray.seaZoneId}
-            seaZoneName={navalTray.seaZoneName}
-            boats={navalTray.boats}
-            factionColor={navalTray.factionColor}
-            onClose={onCloseNavalTray ?? (() => { })}
-            pendingLoadBoatOptions={pendingLoadBoatOptions}
-            onChooseBoatForLoad={onChooseBoatForLoad}
-            pendingLoadPassengers={pendingLoadPassengers}
-            loadAllocation={loadAllocation}
-            onLoadAllocationChange={onLoadAllocationChange}
-          />
-        )}
-      </div>
-    </DndContext>
+      </DndContext>
     </div>
   );
 }

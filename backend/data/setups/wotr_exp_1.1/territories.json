@@ -59,9 +59,10 @@
     "display_name": "Grey Havens",
     "terrain_type": "city",
     "produces": {
-      "power": 5
+      "power": 4
     },
-    "is_stronghold": false,
+    "is_stronghold": true,
+    "stronghold_base_health": 1,
     "ownable": true,
     "adjacent": [
       "tower_hills",
@@ -1676,7 +1677,8 @@
     "produces": {
       "power": 4
     },
-    "is_stronghold": false,
+    "is_stronghold": true,
+    "stronghold_base_health": 1,
     "ownable": true,
     "adjacent": [
       "harondor",

@@ -1595,7 +1595,6 @@
       "haradwaith",
       "near_harad",
       "sea_zone_10",
-      "sea_zone_11",
       "sea_zone_12"
     ],
     "aerial_adjacent": [
@@ -1854,7 +1853,6 @@
     "adjacent": [
       "sea_zone_8",
       "sea_zone_10",
-      "harondor",
       "umbar"
     ],
     "aerial_adjacent": []

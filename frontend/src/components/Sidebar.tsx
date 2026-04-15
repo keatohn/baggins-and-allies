@@ -15,6 +15,8 @@ interface SidebarProps {
   territoryData: Record<string, {
     name: string;
     owner?: string;
+    /** Starting-setup owner when present and not neutral (from backend). */
+    original_owner?: string | null;
     terrain: string;
     stronghold: boolean;
     produces: number;
@@ -45,6 +47,8 @@ interface SidebarProps {
   onInitiateCombat?: (battle: DeclaredBattle) => void;
   pendingEndPhaseConfirm?: string | null;
   hasPurchaseCart?: boolean;
+  hasPendingPurchases?: boolean;
+  pendingPurchaseSummary?: string | null;
   /** Combat phase: cannot end while battles remain */
   endPhaseDisabled?: boolean;
   endPhaseDisabledReason?: string;
@@ -301,6 +305,8 @@ function Sidebar({
   onInitiateCombat,
   pendingEndPhaseConfirm,
   hasPurchaseCart,
+  hasPendingPurchases = false,
+  pendingPurchaseSummary = null,
   endPhaseDisabled,
   endPhaseDisabledReason,
   onConfirmEndPhase,
@@ -426,6 +432,13 @@ function Sidebar({
       {canAct && (
         <div className="panel actions-panel">
           <h2>Actions</h2>
+          {gameState.phase === 'purchase' && pendingPurchaseSummary && (
+            <div className="pending-purchase-preview" aria-live="polite">
+              <div className="pending-move-item">
+                <span className="move-info">{pendingPurchaseSummary}</span>
+              </div>
+            </div>
+          )}
           <div className="phase-actions">
             {gameOver ? (
               <p className="phase-instruction">Game over.</p>
@@ -438,7 +451,7 @@ function Sidebar({
                   id={btn.id}
                   onClick={btn.id === 'btn-purchase' ? onOpenPurchase : undefined}
                 >
-                  {btn.label}
+                  {btn.id === 'btn-purchase' && hasPendingPurchases ? 'Edit Purchase' : btn.label}
                 </button>
               ))
             )}
@@ -1210,9 +1223,7 @@ function Sidebar({
                             <img src={icon} alt="" className="territory-unit-icon" />
                           </span>
                         )}
-                        <span className="territory-unit-label">
-                          {unitDef?.name || row.unit_id} with {row.remaining_movement}M
-                        </span>
+                        <span className="territory-unit-label">{unitDef?.name || row.unit_id}</span>
                         <span className="territory-unit-count-badge">{row.count}</span>
                       </div>
                     );
@@ -1252,39 +1263,59 @@ function Sidebar({
               </div>
             )}
 
-            {/* Defensive casualty priority: show for any selected territory; editable only when owned by current faction */}
+            {/* Bottom row: defensive casualty (left), original owner from starting setup (right) */}
             {selectedTerritory && territory && (
-              <div className="defender-casualty-order">
-                <span className="defender-casualty-order-label">Defensive Casualty Priority</span>
-                {territory.owner === gameState.current_faction && canAct && onSetTerritoryDefenderCasualtyOrder ? (
-                  <div className="defender-casualty-order-pills">
-                    <button
-                      type="button"
-                      className={`defender-pill${(territoryDefenderCasualtyOrder[selectedTerritory] ?? 'best_unit') === 'best_unit' ? ' defender-pill--active' : ''}`}
-                      onClick={() => onSetTerritoryDefenderCasualtyOrder(selectedTerritory, 'best_unit')}
-                      title="Lose cheap/weak units first (cost then defense)"
-                    >
-                      Best Unit
-                    </button>
-                    <button
-                      type="button"
-                      className={`defender-pill${(territoryDefenderCasualtyOrder[selectedTerritory] ?? 'best_unit') === 'best_defense' ? ' defender-pill--active' : ''}`}
-                      onClick={() => onSetTerritoryDefenderCasualtyOrder(selectedTerritory, 'best_defense')}
-                      title="Prioritize defense value (lose low defense first)"
-                    >
-                      Best Defense
-                    </button>
-                  </div>
-                ) : (
-                  <div className="defender-casualty-order-pills">
-                    <span
-                      className="defender-pill defender-pill--readonly defender-pill--active"
-                      title="Defensive casualty priority (set by territory owner)"
-                    >
-                      {(territoryDefenderCasualtyOrder[selectedTerritory] ?? 'best_unit') === 'best_defense' ? 'Best Defense' : 'Best Unit'}
-                    </span>
-                  </div>
-                )}
+              <div className="territory-panel-footer-row">
+                <div className="defender-casualty-order">
+                  <span className="defender-casualty-order-label">Defensive Casualty Priority</span>
+                  {territory.owner === gameState.current_faction && canAct && onSetTerritoryDefenderCasualtyOrder ? (
+                    <div className="defender-casualty-order-pills">
+                      <button
+                        type="button"
+                        className={`defender-pill${(territoryDefenderCasualtyOrder[selectedTerritory] ?? 'best_unit') === 'best_unit' ? ' defender-pill--active' : ''}`}
+                        onClick={() => onSetTerritoryDefenderCasualtyOrder(selectedTerritory, 'best_unit')}
+                        title="Lose cheap/weak units first (cost then defense)"
+                      >
+                        Best Unit
+                      </button>
+                      <button
+                        type="button"
+                        className={`defender-pill${(territoryDefenderCasualtyOrder[selectedTerritory] ?? 'best_unit') === 'best_defense' ? ' defender-pill--active' : ''}`}
+                        onClick={() => onSetTerritoryDefenderCasualtyOrder(selectedTerritory, 'best_defense')}
+                        title="Prioritize defense value (lose low defense first)"
+                      >
+                        Best Defense
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="defender-casualty-order-pills">
+                      <span
+                        className="defender-pill defender-pill--readonly defender-pill--active"
+                        title="Defensive casualty priority (set by territory owner)"
+                      >
+                        {(territoryDefenderCasualtyOrder[selectedTerritory] ?? 'best_unit') === 'best_defense' ? 'Best Defense' : 'Best Unit'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                {(() => {
+                  const oid = typeof territory.original_owner === 'string' ? territory.original_owner.trim() : '';
+                  if (!oid || oid.toLowerCase() === 'neutral') return null;
+                  const origFaction = factionData[oid];
+                  return (
+                    <div className="territory-original-owner">
+                      <span className="defender-casualty-order-label">Original Owner</span>
+                      {origFaction?.icon ? (
+                        <img
+                          className="territory-original-owner-logo"
+                          src={origFaction.icon}
+                          alt={origFaction.name ?? oid}
+                          title={origFaction.name ?? oid}
+                        />
+                      ) : null}
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>

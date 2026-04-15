@@ -88,7 +88,10 @@ from backend.engine.definitions import (
 )
 from backend.setup_data import (
     create_setup,
+    delete_setup,
+    get_setup_source,
     get_admin_setup_bundle,
+    is_files_setup_source,
     list_all_setups_admin,
     save_setup_bundle,
     try_list_setups_menu,
@@ -181,6 +184,25 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+
+def _is_production_env() -> bool:
+    env_candidates = [
+        os.environ.get("ENV"),
+        os.environ.get("APP_ENV"),
+        os.environ.get("ENVIRONMENT"),
+        os.environ.get("FASTAPI_ENV"),
+        os.environ.get("RAILWAY_ENVIRONMENT"),
+    ]
+    return any((v or "").strip().lower() == "production" for v in env_candidates)
+
+
+if _is_production_env() and is_files_setup_source():
+    raise RuntimeError(
+        "Unsafe configuration: SETUP_SOURCE=files is not allowed in production. "
+        "Use SETUP_SOURCE=db (or unset it)."
+    )
+print(f"[setup] source={get_setup_source()}", flush=True)
 
 # CORS configuration for frontend (add production origins via CORS_ORIGINS env, comma-separated).
 # Also accept CORS_ORIGIN (singular) if CORS_ORIGINS is unset — common dashboard typo.
@@ -788,7 +810,7 @@ def get_game(game_id: str, db: Session | None = None) -> GameState:
     return state
 
 
-EVENT_LOG_MAX = 1000
+EVENT_LOG_MAX = 5000
 
 
 def save_game(
@@ -818,8 +840,15 @@ def save_game(
                     log = []
                 for e in events:
                     if isinstance(e, GameEvent):
-                        log.append(e.to_dict())
+                        event_dict = e.to_dict()
+                        payload = event_dict.get("payload")
+                        if isinstance(payload, dict) and payload.get("debug_only") is True:
+                            continue
+                        log.append(event_dict)
                     elif isinstance(e, dict):
+                        payload = e.get("payload") if isinstance(e, dict) else None
+                        if isinstance(payload, dict) and payload.get("debug_only") is True:
+                            continue
                         log.append(e)
                 if len(log) > EVENT_LOG_MAX:
                     log = log[-EVENT_LOG_MAX:]
@@ -1292,6 +1321,19 @@ def admin_put_setup(
         save_setup_bundle(db, setup_id, payload)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "id": setup_id}
+
+
+@app.delete("/admin/setups/{setup_id}")
+def admin_delete_setup(
+    setup_id: str,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    try:
+        delete_setup(db, setup_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Setup not found")
     return {"ok": True, "id": setup_id}
 
 
@@ -2049,6 +2091,9 @@ def get_game_meta(
     forfeited_player_ids = config.get("forfeited_player_ids")
     if not isinstance(forfeited_player_ids, list):
         forfeited_player_ids = []
+    forfeit_reassignments = config.get("forfeit_reassignments")
+    if not isinstance(forfeit_reassignments, dict):
+        forfeit_reassignments = {}
     host_forfeited = config.get("host_forfeited") is True
     player_ids = set()
     for p in players_list:
@@ -2082,6 +2127,7 @@ def get_game_meta(
         "scenario": scenario,
         "ai_factions": ai_factions,
         "forfeited_player_ids": forfeited_player_ids,
+        "forfeit_reassignments": forfeit_reassignments,
         "host_forfeited": host_forfeited,
     }
     if is_host is not None:
@@ -2303,6 +2349,31 @@ def forfeit_game(
         forfeited = list(forfeited) + [player_id_str]
     forfeited_set = set(str(x) for x in forfeited)
     config["forfeited_player_ids"] = forfeited
+    # Persist a player-readable reassignment summary so the toast can be specific after refresh/rejoin.
+    reassign_cfg = config.get("forfeit_reassignments")
+    if not isinstance(reassign_cfg, dict):
+        reassign_cfg = {}
+    assignee_ids = [
+        _normalize_forfeit_assign_target(fa[fid])
+        for fid in my_faction_ids
+        if _normalize_forfeit_assign_target(fa[fid]) != FORFEIT_ASSIGN_COMPUTER
+    ]
+    assignee_names: dict[str, str] = {}
+    if assignee_ids:
+        for row_p in db.query(Player).filter(Player.id.in_(assignee_ids)).all():
+            assignee_names[str(row_p.id)] = row_p.username
+    summary_entries: list[str] = []
+    for fid in sorted(my_faction_ids):
+        target = _normalize_forfeit_assign_target(fa[fid])
+        faction_display = getattr(fd.get(fid), "display_name", None) if isinstance(fd, dict) else None
+        faction_label = str(faction_display or fid)
+        if target == FORFEIT_ASSIGN_COMPUTER:
+            assignee_label = "Computer"
+        else:
+            assignee_label = assignee_names.get(str(target), f"Player {target}")
+        summary_entries.append(f"{faction_label} → {assignee_label}")
+    reassign_cfg[player_id_str] = summary_entries
+    config["forfeit_reassignments"] = reassign_cfg
 
     if row.status == "lobby":
         lobby_claims = dict(config.get("lobby_claims") or {})

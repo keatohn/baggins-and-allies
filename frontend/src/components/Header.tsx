@@ -383,6 +383,14 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
               <section className="help-section">
                 <h3>Map Icons</h3>
                 <ul className="help-icon-list">
+                  <li>
+                    <span className="help-map-key-badge help-map-key-badge--power" aria-hidden>1</span>{' '}
+                    <strong>Power Production</strong> — the amount of power generated per turn for its territory owner.
+                  </li>
+                  <li>
+                    <span className="help-map-key-badge help-map-key-badge--sea" aria-hidden>1</span>{' '}
+                    <strong>Sea Zone</strong> — labels a sea zone.
+                  </li>
                   <li><span className="help-icon" aria-hidden>⛺</span> <strong>Camp</strong> — mobilize new land units here.</li>
                   <li><span className="help-icon" aria-hidden>⚓</span> <strong>Port</strong> — mobilize new ships in adjacent sea zones.</li>
                   <li><span className="help-icon" aria-hidden><img src="/ford.png" alt="" width={18} height={18} style={{ verticalAlign: 'text-bottom' }} /></span> <strong>Ford</strong> — shallow river crossing for certain units, along with up to 2 transport passengers (see "Ford Crosser" in the Specials button).</li>
@@ -449,12 +457,16 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
                     .map(key => {
                       const def = specials[key];
                       const termLabel = (def.display_code != null && String(def.display_code).trim() !== '') ? `${def.name} (${def.display_code})` : (def.name ?? key);
+                      const descriptionText =
+                        key === 'archer'
+                          ? 'Defending archers pre-fire before round 1 of combat'
+                          : def.description;
                       const unitList = unitsBySpecial[key] ?? [];
                       return (
                         <React.Fragment key={key}>
                           <dt className="specials-term">{termLabel}</dt>
                           <dd className="specials-desc">
-                            {def.description}
+                            {descriptionText}
                             {unitList.length > 0 && (
                               <ul className="specials-unit-list" aria-label={`Units with ${def.name}`}>
                                 {unitList.map(({ unitId, name, factionDisplayName, homeTerritoryDisplayNames }) => (

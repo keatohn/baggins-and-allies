@@ -7,10 +7,6 @@
         "id": "lothlorien_camp",
         "territory_id": "lothlorien"
     },
-    "dol_guldur_camp": {
-        "id": "dol_guldur_camp",
-        "territory_id": "dol_guldur"
-    },
     "erebor_camp": {
         "id": "erebor_camp",
         "territory_id": "erebor"

@@ -324,6 +324,31 @@ function factionHasPurchasableNavalForSeaDefense(definitions: Definitions | null
   return false;
 }
 
+function seaZoneHasEnemyShips(
+  territoryId: string,
+  attackerFaction: string,
+  territoryUnits: TerritoryUnitsMap,
+  definitions: Definitions | null,
+  unitDefs: Record<string, UnitDefForSim>,
+  factionData: Record<string, { alliance?: string; icon?: string; color?: string }>,
+): boolean {
+  const stacks = territoryUnits[territoryId] ?? [];
+  if (stacks.length === 0) return false;
+  const attackerAlliance = factionData[attackerFaction]?.alliance ?? '';
+  return stacks.some((s) => {
+    if ((s.count ?? 0) <= 0) return false;
+    if (!isNavalUnit(definitions, s.unit_id) || isAerialUnit(definitions, s.unit_id)) return false;
+    const unitFaction =
+      (definitions?.units?.[s.unit_id] as { faction?: string } | undefined)?.faction ??
+      unitDefs[s.unit_id]?.faction ??
+      '';
+    if (!unitFaction || unitFaction === attackerFaction) return false;
+    const unitAlliance = factionData[unitFaction]?.alliance ?? '';
+    if (!attackerAlliance) return true;
+    return unitAlliance !== attackerAlliance;
+  });
+}
+
 const CV_PREDICTABLE = 0.4;
 const CV_UNPREDICTABLE = 0.8;
 const MEAN_EPSILON = 0.5;
@@ -650,6 +675,7 @@ export default function CombatSimulatorPanel({
   const [simProgressTotal, setSimProgressTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SimulateCombatResponse | null>(null);
+  const [simInputTotals, setSimInputTotals] = useState<{ attacker: number; defender: number } | null>(null);
   const [addedDefenderStacks, setAddedDefenderStacks] = useState<{ unit_id: string; count: number }[]>([]);
   const [addDefenderDropdownOpen, setAddDefenderDropdownOpen] = useState(false);
   /** Editable counts for defenders that come from the territory; keyed by unit_id, defaults to actual territory count. */
@@ -671,13 +697,16 @@ export default function CombatSimulatorPanel({
       const stacks = territoryUnits[t.id];
       const hasUnits = stacks && stacks.length > 0 && stacks.some((s) => s.count > 0);
       if (!hasUnits) return false;
-      const owner = territoryData[t.id]?.owner;
-      if (owner && owner !== 'neutral' && factionData[owner]?.alliance === attackerAlliance && attackerAlliance !== '') return false;
-      if (isLandCombat) return !t.isSea;
-      return t.isSea;
+      if (isLandCombat) {
+        const owner = territoryData[t.id]?.owner;
+        if (owner && owner !== 'neutral' && factionData[owner]?.alliance === attackerAlliance && attackerAlliance !== '') return false;
+        return !t.isSea;
+      }
+      if (!t.isSea) return false;
+      return seaZoneHasEnemyShips(t.id, attackerFaction, territoryUnits, definitions, unitDefs, factionData);
     });
     return filtered.sort((a, b) => a.name.localeCompare(b.name));
-  }, [attackerFaction, allTerritoryList, territoryUnits, territoryData, factionData, isLandCombat]);
+  }, [attackerFaction, allTerritoryList, territoryUnits, territoryData, factionData, isLandCombat, definitions, unitDefs]);
 
   /** Dropdown: terrain types (alphabetically) first, then specific territories. */
   const territoryDropdownOptions = useMemo(
@@ -908,6 +937,7 @@ export default function CombatSimulatorPanel({
     setAttackerCounts({});
     setAddedDefenderStacks([]);
     setDefenderTerritoryCounts({});
+    setSimInputTotals(null);
     setResult(null);
     setError(null);
     setCasualtyOrderAttacker('best_unit');
@@ -916,6 +946,43 @@ export default function CombatSimulatorPanel({
     setIsSeaRaid(false);
     setRetreatEnabled(false);
     setRetreatWhenUnitsLe(null);
+  };
+
+  const canRefreshFromTerritories =
+    Boolean(attackerFaction && attackingTerritoryId.trim() && territoryId.trim());
+
+  const handleRefreshFromTerritories = () => {
+    if (!canRefreshFromTerritories) return;
+    const attackingStacks = territoryUnitsRef.current?.[attackingTerritoryId] ?? [];
+    const refreshedAttackerCounts: Record<string, number> = {};
+    attackingStacks.forEach((s) => {
+      const raw = definitions?.units?.[s.unit_id];
+      const unitFaction = (raw as { faction?: string } | undefined)?.faction ?? unitDefs[s.unit_id]?.faction;
+      if (unitFaction !== attackerFaction) return;
+      if (!unitAllowedForCombatType(definitions, s.unit_id, isLandCombat)) return;
+      if (getUnitMovement(definitions, s.unit_id) <= 0) return;
+      if (!isLandCombat && !isUnitPurchasableInDefs(raw)) return;
+      refreshedAttackerCounts[s.unit_id] = (refreshedAttackerCounts[s.unit_id] ?? 0) + s.count;
+    });
+    setAttackerCounts(refreshedAttackerCounts);
+
+    // Defender refresh only applies when a real territory is selected.
+    if (!territoryId.startsWith(TERRAIN_PREFIX)) {
+      const freshDefenderStacks = (territoryUnitsRef.current?.[territoryId] ?? [])
+        .filter((s) => s.count > 0)
+        .filter((s) => unitAllowedForCombatType(definitions, s.unit_id, isLandCombat));
+      const freshDefenderCounts: Record<string, number> = {};
+      freshDefenderStacks.forEach((s) => {
+        freshDefenderCounts[s.unit_id] = (freshDefenderCounts[s.unit_id] ?? 0) + s.count;
+      });
+      seededDefenderTerritoryIdRef.current = territoryId;
+      setDefenderTerritoryCounts(freshDefenderCounts);
+      setAddedDefenderStacks([]);
+    }
+
+    setResult(null);
+    setSimInputTotals(null);
+    setError(null);
   };
 
   const handleAttackerCount = (unitId: UnitId, value: number) => {
@@ -959,6 +1026,10 @@ export default function CombatSimulatorPanel({
       setup_id: gameId ? undefined : (setupId ?? undefined),
       options,
     };
+    setSimInputTotals({
+      attacker: attStacks.reduce((s, row) => s + row.count, 0),
+      defender: defStacks.reduce((s, row) => s + row.count, 0),
+    });
     const allOutcomes: Array<{
       winner: string;
       conquered: boolean;
@@ -1183,6 +1254,7 @@ export default function CombatSimulatorPanel({
     setAttackingTerritoryId(defendingWasTerrainOnly ? '' : prevDefenderTerritoryId);
     setCasualtyOrderAttacker('best_unit');
     setResult(null);
+    setSimInputTotals(null);
     setError(null);
   };
 
@@ -1700,6 +1772,19 @@ export default function CombatSimulatorPanel({
 
       <div className="combat-sim-actions">
         <button type="button" className="combat-sim-clear" onClick={handleClear}>Clear</button>
+        <button
+          type="button"
+          className="combat-sim-clear"
+          onClick={handleRefreshFromTerritories}
+          disabled={!canRefreshFromTerritories}
+          title={
+            canRefreshFromTerritories
+              ? 'Refresh units from selected attacking and defending territories'
+              : 'Select attacking faction, attacking territory, and defending terrain/territory first'
+          }
+        >
+          Refresh
+        </button>
         <div className="combat-sim-calculate-wrap">
           <button type="button" className="combat-sim-calculate" onClick={handleCalculate} disabled={loading}>
             {loading && simProgressTotal > 0
@@ -1944,7 +2029,8 @@ export default function CombatSimulatorPanel({
                     </thead>
                     <tbody>
                       {(() => {
-                        const totalDefenderUnits = defenderStacksMerged.reduce((s, { count }) => s + count, 0);
+                        const totalDefenderUnits = simInputTotals?.defender ?? defenderStacksMerged.reduce((s, { count }) => s + count, 0);
+                        const totalAttackerUnitsForResult = simInputTotals?.attacker ?? totalAttackerUnits;
                         const formatCasualties = (casualties: Record<string, number>, total: number) => {
                           const sum = Object.values(casualties).reduce((a, c) => a + c, 0);
                           if (sum === 0) return { list: 'None', totalP: 0 };
@@ -1977,7 +2063,7 @@ export default function CombatSimulatorPanel({
                         ].map(({ p, label, luckValue }) => {
                           const po = result!.percentile_outcomes!.find((o) => o.percentile === p);
                           if (!po) return null;
-                          const casualtyFmt = formatCasualties(po.attacker_casualties, totalAttackerUnits);
+                          const casualtyFmt = formatCasualties(po.attacker_casualties, totalAttackerUnitsForResult);
                           const destroyedFmt = formatCasualties(po.defender_casualties, totalDefenderUnits);
                           const casualtyStr = casualtyFmt.totalP > 0 ? `${casualtyFmt.totalP}P: ${casualtyFmt.list}` : casualtyFmt.list;
                           const destroyedStr = destroyedFmt.totalP > 0 ? `${destroyedFmt.totalP}P: ${destroyedFmt.list}` : destroyedFmt.list;

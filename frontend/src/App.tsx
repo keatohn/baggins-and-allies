@@ -7,6 +7,7 @@ import CombatSimulatorPanel from './components/CombatSimulatorPanel';
 import PurchaseModal from './components/PurchaseModal';
 import CombatDisplay, { type CombatRound } from './components/CombatDisplay';
 import api, {
+  getAuthToken,
   type ApiGameState,
   type ApiEvent,
   type ApiMoveableUnit,
@@ -166,7 +167,22 @@ export interface BulkMobilizeConfirmState {
 }
 
 const DEFAULT_GAME_ID = 'game_1';
-const FORFEIT_NOTIFICATION_STORAGE_KEY = (gameId: string) => `forfeit_notification_dismissed_${gameId}`;
+const FORFEIT_NOTIFICATION_STORAGE_KEY = (gameId: string, playerId: string | null) =>
+  `forfeit_notification_dismissed_${gameId}_${playerId ?? 'anon'}`;
+
+function getPlayerIdFromJwt(): string | null {
+  try {
+    const token = getAuthToken();
+    if (!token) return null;
+    const [, payload] = token.split('.');
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = JSON.parse(atob(normalized));
+    return typeof decoded?.sub === 'string' && decoded.sub.trim() ? decoded.sub.trim() : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Poll game state this often (ms) so other players' actions appear without refresh. */
 const GAME_POLL_INTERVAL_MS = 3000;
@@ -648,9 +664,10 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   const [pendingRetreat, setPendingRetreat] = useState<DeclaredBattle | null>(null);
   const [highlightedTerritories, setHighlightedTerritories] = useState<string[]>([]);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const w = localStorage.getItem('sidebarWidth');
-    if (w != null) return Math.min(780, Math.max(260, Number(w)));
     const vw = typeof window !== 'undefined' ? window.innerWidth : 1200;
+    const storedFloor = vw >= 768 ? 420 : 260;
+    const w = localStorage.getItem('sidebarWidth');
+    if (w != null) return Math.min(780, Math.max(storedFloor, Number(w)));
     // Wider default on desktop/tablet; mobile keeps a smaller intrinsic default (still capped below).
     return vw >= 768 ? 600 : 400;
   });
@@ -666,12 +683,13 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   const [combatSimModalOpen, setCombatSimModalOpen] = useState(false);
   /** Sea zone selected to show naval tray (boats + passengers) during combat_move or non_combat_move. */
   const [selectedSeaZoneForNavalTray, setSelectedSeaZoneForNavalTray] = useState<string | null>(null);
-  /** Purchase phase: cart of units to buy; applied on End phase, not on Confirm */
-  const [purchaseCart, setPurchaseCart] = useState<Record<string, number>>({});
-  /** Purchase phase: number of camps to buy; applied on End phase (after units). */
-  const [purchaseCampsCount, setPurchaseCampsCount] = useState(0);
-  /** Purchase phase: stronghold repairs to apply on End phase. List of { territory_id, hp_to_add }. */
-  const [purchaseRepairs, setPurchaseRepairs] = useState<{ territory_id: string; hp_to_add: number }[]>([]);
+  /**
+   * Purchase phase only: cart is client-side (like pending moves) until End Phase commits to the server.
+   * Server pool + resources stay unchanged until then — no duplicate API adds or spurious event-log entries.
+   */
+  const [purchaseDraftUnits, setPurchaseDraftUnits] = useState<Record<string, number>>({});
+  const [purchaseDraftCamps, setPurchaseDraftCamps] = useState(0);
+  const [purchaseDraftRepairs, setPurchaseDraftRepairs] = useState<{ territory_id: string; hp_to_add: number }[]>([]);
   const resizeStartRef = useRef<{ x: number; width: number } | null>(null);
   /** Turn order from create-game navigation so init() doesn't overwrite it with a stale/empty fetch. */
   const initialTurnOrderRef = useRef<string[] | null>(null);
@@ -776,23 +794,50 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         : viewportWidth < 1200
           ? Math.min(780, Math.max(380, Math.floor(viewportWidth * 0.52)))
           : 780;
-    return Math.min(sidebarWidth, Math.max(196, cap));
+    // Desktop should not collapse into an ultra-thin rail due to stale stored widths.
+    const floor = !isMobileViewport && !narrowLandscapeShort ? 420 : 196;
+    return Math.max(floor, Math.min(sidebarWidth, cap));
   }, [sidebarCollapsed, sidebarWidth, viewportWidth, viewportHeight]);
   useEffect(() => {
     localStorage.setItem('sidebarCollapsed', sidebarCollapsed ? '1' : '0');
   }, [sidebarCollapsed]);
 
-  /** Move confirmation lives in the sidebar — expand when any move needs confirming (esp. mobile). */
+  /** Sidebar has move/mobilize/camp confirmations — expand when any of those need the panel (esp. when collapsed). */
   useEffect(() => {
-    if (pendingMoveConfirm || bulkMoveConfirm || pendingOffloadSeaChoice || bulkMobilizeConfirm) {
+    if (
+      pendingMoveConfirm ||
+      bulkMoveConfirm ||
+      pendingOffloadSeaChoice ||
+      bulkMobilizeConfirm ||
+      pendingMobilization ||
+      pendingCampPlacement
+    ) {
       setSidebarCollapsed(false);
     }
-  }, [pendingMoveConfirm, bulkMoveConfirm, pendingOffloadSeaChoice, bulkMobilizeConfirm]);
+  }, [
+    pendingMoveConfirm,
+    bulkMoveConfirm,
+    pendingOffloadSeaChoice,
+    bulkMobilizeConfirm,
+    pendingMobilization,
+    pendingCampPlacement,
+  ]);
+
+  /** Territory / sea-zone selection shows details in the sidebar — expand when user picks a hex (any phase). */
+  useEffect(() => {
+    if (selectedTerritory) setSidebarCollapsed(false);
+  }, [selectedTerritory]);
+  useEffect(() => {
+    setPurchaseDraftUnits({});
+    setPurchaseDraftCamps(0);
+    setPurchaseDraftRepairs([]);
+  }, [GAME_ID]);
+
   useEffect(() => {
     if (backendState && backendState.phase !== 'purchase') {
-      setPurchaseCart({});
-      setPurchaseCampsCount(0);
-      setPurchaseRepairs([]);
+      setPurchaseDraftUnits({});
+      setPurchaseDraftCamps(0);
+      setPurchaseDraftRepairs([]);
     }
   }, [backendState?.phase]);
 
@@ -810,6 +855,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   const [combatMovesDeclaredThisPhase, setCombatMovesDeclaredThisPhase] = useState(0);
   /** Forfeit notification: dismissed this session; persisted in localStorage for once-per-user-per-game. */
   const [forfeitToastDismissed, setForfeitToastDismissed] = useState(false);
+  const currentPlayerId = useMemo(() => getPlayerIdFromJwt(), []);
   useEffect(() => {
     setForfeitToastDismissed(false);
   }, [GAME_ID]);
@@ -909,6 +955,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     const result: Record<string, {
       name: string;
       owner?: FactionId;
+      /** Starting-setup owner when set; omitted or neutral means no "Original Owner" UI. */
+      original_owner?: FactionId | null;
       terrain: string;
       stronghold: boolean;
       stronghold_base_health: number;
@@ -930,7 +978,12 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
 
     for (const [id, territory] of Object.entries(backendState.territories)) {
       const def = territoryDefs[id];
-      const backendT = territory as { stronghold_current_health?: number | null };
+      const backendT = territory as { stronghold_current_health?: number | null; original_owner?: string | null };
+      const rawOriginal = backendT.original_owner;
+      const originalOwner =
+        typeof rawOriginal === 'string' && rawOriginal.trim() && rawOriginal.trim().toLowerCase() !== 'neutral'
+          ? (rawOriginal.trim() as FactionId)
+          : null;
       const baseHp = def?.stronghold_base_health ?? 0;
       const currentHp = backendT.stronghold_current_health != null ? backendT.stronghold_current_health : baseHp;
       const ownerFromPending = pendingCaptures[id];
@@ -947,6 +1000,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         ? {
           ...def,
           owner: resolvedOwner,
+          ...(originalOwner ? { original_owner: originalOwner } : {}),
           hasCamp: territoryHasCamp(id),
           hasPort: territoryHasPort(id),
           isCapital: territoryIsCapital(id),
@@ -955,6 +1009,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         : {
           name: id.replace(/_/g, ' '),
           owner: resolvedOwner,
+          ...(originalOwner ? { original_owner: originalOwner } : {}),
           terrain: 'land',
           stronghold: false,
           stronghold_base_health: 0,
@@ -1018,20 +1073,12 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   }, [backendState]);
 
   // Per-stack unit rows with remaining movement (non-combat move phase only, for selected territory).
-  // Only units the current player may move (same faction as current turn — not allies).
   const territoryUnitStacksWithMovement = useMemo(() => {
     if (!backendState || !selectedTerritory || backendState.phase !== 'non_combat_move') return null;
     const territory = backendState.territories[selectedTerritory];
     if (!territory?.units?.length) return null;
-    const currentFaction = backendState.current_faction;
-    if (!currentFaction) return null;
     const keyed: Record<string, { unit_id: string; remaining_movement: number; count: number }> = {};
     for (const u of territory.units) {
-      const parts = u.unit_id.split('_');
-      const factionFromId = parts.find((p) => factionData[p]);
-      const defFaction = unitDefs[u.unit_id]?.faction;
-      const uf = factionFromId ?? defFaction ?? parts[0];
-      if (uf !== currentFaction) continue;
       const key = `${u.unit_id}:${u.remaining_movement}`;
       if (!keyed[key]) keyed[key] = { unit_id: u.unit_id, remaining_movement: u.remaining_movement, count: 0 };
       keyed[key].count += 1;
@@ -1620,12 +1667,29 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       factionResources[factionId] = resources;
     }
 
-    // Get pending purchases for current faction
-    const factionPurchases = backendState.faction_purchased_units?.[backendState.current_faction] || [];
+    // Pending purchases: during purchase phase prefer local draft; when draft is empty, use server (e.g. after pre–end-phase commit).
     const pendingPurchases: Record<string, number> = {};
-    factionPurchases.forEach(p => {
-      pendingPurchases[p.unit_id] = p.count;
-    });
+    if (backendState.phase === 'purchase') {
+      const purchaseDraftActive =
+        Object.values(purchaseDraftUnits).some((c) => c > 0) ||
+        purchaseDraftCamps > 0 ||
+        purchaseDraftRepairs.length > 0;
+      if (purchaseDraftActive) {
+        for (const [unitId, count] of Object.entries(purchaseDraftUnits)) {
+          if (count > 0) pendingPurchases[unitId] = count;
+        }
+      } else {
+        const factionPurchases = backendState.faction_purchased_units?.[backendState.current_faction] || [];
+        factionPurchases.forEach(p => {
+          pendingPurchases[p.unit_id] = p.count;
+        });
+      }
+    } else {
+      const factionPurchases = backendState.faction_purchased_units?.[backendState.current_faction] || [];
+      factionPurchases.forEach(p => {
+        pendingPurchases[p.unit_id] = p.count;
+      });
+    }
 
     // Declared battles: backend combat_territories only (includes sea raids with sea_zone_id from territory_sea_raid_from).
     // Do not merge sea_raid_targets — that lists every adjacent land to your navy and would show bogus duplicate battles.
@@ -1694,7 +1758,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       map_asset: backendState.map_asset ?? undefined,
       turn_order: initialTurnOrderRef.current ?? backendState.turn_order ?? undefined,
     };
-  }, [backendState, availableActions, definitions, factionData]);
+  }, [backendState, availableActions, definitions, factionData, purchaseDraftUnits, purchaseDraftCamps, purchaseDraftRepairs]);
 
   // Per-destination mobilization cap: territory_id/sea_zone_id -> power (land from camp territories, naval from port-adjacent sea zones)
   const mobilizationTerritoryPower = useMemo(() => {
@@ -2187,8 +2251,45 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     return n > 0 ? n : 0;
   }, [availableActions?.stronghold_repair_cost, backendState?.stronghold_repair_cost]);
 
+  const purchaseDraftActive = useMemo(() => {
+    if (backendState?.phase !== 'purchase') return false;
+    return (
+      Object.values(purchaseDraftUnits).some((c) => c > 0) ||
+      purchaseDraftCamps > 0 ||
+      purchaseDraftRepairs.length > 0
+    );
+  }, [backendState?.phase, purchaseDraftUnits, purchaseDraftCamps, purchaseDraftRepairs]);
+
+  const pendingPurchasedUnits = useMemo(() => {
+    if (!backendState || !gameState.current_faction) return [];
+    if (backendState.phase === 'purchase' && purchaseDraftActive) {
+      return Object.entries(purchaseDraftUnits)
+        .filter(([, c]) => c > 0)
+        .map(([unit_id, count]) => ({ unit_id, count }));
+    }
+    return (backendState.faction_purchased_units?.[gameState.current_faction] ?? []).filter((s) => s.count > 0);
+  }, [backendState, gameState.current_faction, purchaseDraftActive, purchaseDraftUnits]);
+  const pendingCampCount = useMemo(() => {
+    if (backendState?.phase === 'purchase' && purchaseDraftActive) return purchaseDraftCamps;
+    return ((backendState?.pending_camps ?? []) as Array<{ placed_territory_id?: string | null }>).filter(
+      (c) => !c?.placed_territory_id,
+    ).length;
+  }, [backendState?.phase, backendState?.pending_camps, purchaseDraftActive, purchaseDraftCamps]);
   const hasPurchaseCart =
-    Object.values(purchaseCart).some(qty => qty > 0) || purchaseCampsCount > 0 || purchaseRepairs.length > 0;
+    purchaseDraftActive || pendingPurchasedUnits.length > 0 || pendingCampCount > 0;
+  const pendingPurchaseSummary = useMemo(() => {
+    if (!hasPurchaseCart) return null;
+    const unitText = pendingPurchasedUnits
+      .map((s) => {
+        const name = definitions?.units?.[s.unit_id]?.display_name ?? unitDefs[s.unit_id]?.name ?? s.unit_id;
+        return `${s.count} ${name}`;
+      })
+      .join(', ');
+    const campText = pendingCampCount > 0 ? `${pendingCampCount} camp${pendingCampCount === 1 ? '' : 's'}` : '';
+    const segments = [unitText, campText].filter(Boolean);
+    if (segments.length === 0) return null;
+    return `Purchasing ${segments.join(' + ')}`;
+  }, [hasPurchaseCart, pendingPurchasedUnits, pendingCampCount, definitions?.units, unitDefs]);
 
   const aerialMustMove = availableActions?.aerial_units_must_move ?? [];
 
@@ -2207,6 +2308,37 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           : gameState.phase === 'combat_move' && availableActions?.can_end_phase === false
             ? 'Sea zones that received a load must attack (naval combat or sea raid) before ending phase'
             : undefined;
+
+  /** Apply purchase-phase draft to server once, then clear draft (so UI does not double-count vs committed resources). */
+  const commitPurchaseDraftToServer = useCallback(async () => {
+    if (!GAME_ID || GAME_ID === DEFAULT_GAME_ID) return;
+    const purchases: Record<string, number> = {};
+    for (const [uid, q] of Object.entries(purchaseDraftUnits)) {
+      if (q > 0) purchases[uid] = q;
+    }
+    const hasUnitPurchases = Object.keys(purchases).length > 0;
+    if (hasUnitPurchases) {
+      const purchaseResult = await api.purchase(GAME_ID, purchases);
+      setBackendState(purchaseResult.state);
+      if (purchaseResult.can_act !== undefined) setCanAct(purchaseResult.can_act);
+      if (purchaseResult.events) addBackendEvents(purchaseResult.events);
+    }
+    for (let i = 0; i < purchaseDraftCamps; i++) {
+      const campResult = await api.purchaseCamp(GAME_ID);
+      setBackendState(campResult.state);
+      if (campResult.can_act !== undefined) setCanAct(campResult.can_act);
+      if (campResult.events) addBackendEvents(campResult.events);
+    }
+    if (purchaseDraftRepairs.length > 0) {
+      const repairResult = await api.repairStronghold(GAME_ID, purchaseDraftRepairs);
+      setBackendState(repairResult.state);
+      if (repairResult.can_act !== undefined) setCanAct(repairResult.can_act);
+      if (repairResult.events) addBackendEvents(repairResult.events);
+    }
+    setPurchaseDraftUnits({});
+    setPurchaseDraftCamps(0);
+    setPurchaseDraftRepairs([]);
+  }, [GAME_ID, purchaseDraftUnits, purchaseDraftCamps, purchaseDraftRepairs, addBackendEvents]);
 
   const handleEndPhase = useCallback(async () => {
     if (gameState.phase === 'purchase' && !pendingEndPhaseConfirm) {
@@ -2245,31 +2377,9 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     setPendingEndPhaseConfirm(null);
 
     try {
-      if (gameState.phase === 'purchase' && hasPurchaseCart) {
-        const hasUnitPurchases = Object.values(purchaseCart).some(q => q > 0);
-        if (hasUnitPurchases) {
-          const purchaseResult = await api.purchase(GAME_ID, purchaseCart);
-          setBackendState(purchaseResult.state);
-          if (purchaseResult.can_act !== undefined) setCanAct(purchaseResult.can_act);
-          if (purchaseResult.events) addBackendEvents(purchaseResult.events);
-          setPurchaseCart({});
-        }
-        for (let i = 0; i < purchaseCampsCount; i++) {
-          const campResult = await api.purchaseCamp(GAME_ID);
-          setBackendState(campResult.state);
-          if (campResult.can_act !== undefined) setCanAct(campResult.can_act);
-          if (campResult.events) addBackendEvents(campResult.events);
-        }
-        setPurchaseCampsCount(0);
-        if (purchaseRepairs.length > 0) {
-          const repairResult = await api.repairStronghold(GAME_ID, purchaseRepairs);
-          setBackendState(repairResult.state);
-          if (repairResult.can_act !== undefined) setCanAct(repairResult.can_act);
-          if (repairResult.events) addBackendEvents(repairResult.events);
-          setPurchaseRepairs([]);
-        }
+      if (gameState.phase === 'purchase') {
+        await commitPurchaseDraftToServer();
       }
-
       const result = await api.endPhase(GAME_ID);
       setBackendState(result.state);
       if (result.can_act !== undefined) setCanAct(result.can_act);
@@ -2289,7 +2399,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       // Refetch so we sync pending_camps / units; may unstick mobilization if state was missing camps
       await refreshState();
     }
-  }, [gameState.phase, gameState.declared_battles, hasPurchaseCart, purchaseCart, purchaseCampsCount, purchaseRepairs, hasCombatMovedThisPhase, hasNonCombatMovedThisPhase, pendingEndPhaseConfirm, mobilizablePurchases, aerialMustMove, addLogEntry, addBackendEvents, refreshState]);
+  }, [gameState.phase, gameState.declared_battles, hasPurchaseCart, hasCombatMovedThisPhase, hasNonCombatMovedThisPhase, pendingEndPhaseConfirm, mobilizablePurchases, aerialMustMove, addLogEntry, addBackendEvents, refreshState, commitPurchaseDraftToServer, GAME_ID]);
 
   const handleConfirmEndPhase = useCallback(() => {
     setPendingEndPhaseConfirm(null);
@@ -2309,15 +2419,19 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     setIsPurchaseModalOpen(false);
   }, []);
 
-  /** Confirm = save cart only; resources stay unchanged until End phase */
+  /** Modal confirm: save draft locally only; server + event log update when purchase phase ends. */
   const handlePurchase = useCallback((
     purchases: Record<string, number>,
     campsCount: number = 0,
     repairs: { territory_id: string; hp_to_add: number }[] = []
   ) => {
-    setPurchaseCart(purchases);
-    setPurchaseCampsCount(campsCount);
-    setPurchaseRepairs(repairs);
+    const units: Record<string, number> = {};
+    for (const [k, v] of Object.entries(purchases)) {
+      if (v > 0) units[k] = v;
+    }
+    setPurchaseDraftUnits(units);
+    setPurchaseDraftCamps(campsCount);
+    setPurchaseDraftRepairs(repairs);
     setIsPurchaseModalOpen(false);
   }, []);
 
@@ -3289,7 +3403,11 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     const onMove = (e: MouseEvent) => {
       if (resizeStartRef.current === null) return;
       const dx = resizeStartRef.current.x - e.clientX;
-      const newWidth = Math.min(780, Math.max(260, resizeStartRef.current.width + dx));
+      const landscapeShort = viewportHeight < 520 && viewportWidth > viewportHeight;
+      const isMobileViewport = viewportWidth < 768;
+      const narrowLandscapeShort = landscapeShort && viewportWidth < 1024;
+      const minWidth = !isMobileViewport && !narrowLandscapeShort ? 420 : 260;
+      const newWidth = Math.min(780, Math.max(minWidth, resizeStartRef.current.width + dx));
       setSidebarWidth(newWidth);
       resizeStartRef.current = { x: e.clientX, width: newWidth };
     };
@@ -3300,7 +3418,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-  }, []);
+  }, [viewportHeight, viewportWidth]);
 
   const ac = backendState?.active_combat as
     | {
@@ -3773,11 +3891,11 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   const dismissForfeitToast = useCallback(() => {
     setForfeitToastDismissed(true);
     try {
-      localStorage.setItem(FORFEIT_NOTIFICATION_STORAGE_KEY(GAME_ID), '1');
+      localStorage.setItem(FORFEIT_NOTIFICATION_STORAGE_KEY(GAME_ID, currentPlayerId), '1');
     } catch {
       // ignore
     }
-  }, [GAME_ID]);
+  }, [GAME_ID, currentPlayerId]);
 
   const isLobby = gameMeta?.status === 'lobby';
   useEffect(() => {
@@ -3823,13 +3941,14 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     : undefined;
 
   const showForfeitToast = Boolean(
+    currentPlayerId &&
     GAME_ID &&
     gameMeta?.forfeited_player_ids?.length &&
     gameMeta?.status !== 'lobby' &&
     backendState &&
     !forfeitToastDismissed &&
     typeof localStorage !== 'undefined' &&
-    !localStorage.getItem(FORFEIT_NOTIFICATION_STORAGE_KEY(GAME_ID))
+    !localStorage.getItem(FORFEIT_NOTIFICATION_STORAGE_KEY(GAME_ID, currentPlayerId))
   );
   const forfeitedNames = showForfeitToast && gameMeta?.forfeited_player_ids?.length && gameMeta?.player_usernames
     ? gameMeta.forfeited_player_ids
@@ -3841,6 +3960,13 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       ? gameMeta.player_usernames[gameMeta.created_by] ?? `Player ${gameMeta.created_by}`
       : '';
   const forfeitToastHostLine = newHostName ? ` ${newHostName} is now the host.` : '';
+  const forfeitReassignmentSummary =
+    showForfeitToast && gameMeta?.forfeit_reassignments && gameMeta?.forfeited_player_ids?.length
+      ? gameMeta.forfeited_player_ids
+        .flatMap((pid) => gameMeta.forfeit_reassignments?.[pid] ?? [])
+        .filter((line) => typeof line === 'string' && line.trim())
+        .join('; ')
+      : '';
 
   return (
     <div className="app">
@@ -4022,7 +4148,9 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
             {showForfeitToast && (
               <div className="forfeit-notification-toast" role="status">
                 <p>
-                  {forfeitedNames} {gameMeta!.forfeited_player_ids!.length === 1 ? 'has' : 'have'} forfeited. Their factions were reassigned or taken over by the computer.{forfeitToastHostLine}
+                  {forfeitedNames} {gameMeta!.forfeited_player_ids!.length === 1 ? 'has' : 'have'} forfeited.
+                  {forfeitReassignmentSummary ? ` Reassigned factions: ${forfeitReassignmentSummary}.` : ' Their factions were reassigned.'}
+                  {forfeitToastHostLine}
                 </p>
                 <button type="button" className="forfeit-notification-toast-close" onClick={dismissForfeitToast} aria-label="Dismiss">×</button>
               </div>
@@ -4068,6 +4196,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               onInitiateCombat={handleOpenCombat}
               pendingEndPhaseConfirm={pendingEndPhaseConfirm}
               hasPurchaseCart={hasPurchaseCart}
+              hasPendingPurchases={hasPurchaseCart}
+              pendingPurchaseSummary={pendingPurchaseSummary}
               endPhaseDisabled={endPhaseDisabled}
               endPhaseDisabledReason={endPhaseDisabledReason}
               onConfirmEndPhase={handleConfirmEndPhase}
@@ -4127,18 +4257,18 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         availableResources={currentResources}
         availableUnits={availableUnits}
         hasPort={hasPort}
-        currentPurchases={gameState.phase === 'purchase' ? purchaseCart : gameState.pending_purchases}
-        currentCamps={gameState.phase === 'purchase' ? purchaseCampsCount : 0}
+        currentPurchases={gameState.pending_purchases}
+        currentCamps={pendingCampCount}
         maxCamps={maxCampsPurchasable}
         mobilizationCapacity={availableActions?.mobilization_capacity}
         mobilizationLandCapacity={availableActions?.mobilization_land_capacity}
         mobilizationCampLandCapacity={availableActions?.mobilization_camp_land_capacity}
         mobilizationSeaCapacity={availableActions?.mobilization_sea_capacity}
-        purchasedUnitsCount={gameState.phase === 'purchase' ? Object.values(purchaseCart).reduce((s, q) => s + q, 0) : (availableActions?.purchased_units_count ?? 0)}
+        purchasedUnitsCount={availableActions?.purchased_units_count ?? 0}
         campCost={availableActions?.camp_cost}
         strongholdRepairCost={strongholdRepairCostPerHp}
         repairableStrongholds={repairableStrongholds}
-        currentRepairs={purchaseRepairs}
+        currentRepairs={purchaseDraftRepairs}
         onPurchase={handlePurchase}
         onClose={handleClosePurchase}
       />

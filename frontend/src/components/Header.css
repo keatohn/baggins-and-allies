@@ -418,14 +418,28 @@
   border-radius: 5px 5px 0 0;
 }
 
+/* Help + Specials: slightly smaller than stats / unit stats (not as large as 1.55rem) */
+.help-modal .modal-header,
+.specials-modal .modal-header {
+  padding: 1.05rem 1.5rem;
+}
+
 .stats-modal .modal-header h2,
-.specials-modal .modal-header h2,
-.unit-stats-modal .modal-header h2,
-.help-modal .modal-header h2 {
+.unit-stats-modal .modal-header h2 {
   font-family: 'Cinzel', serif;
   font-size: 1.55rem;
   color: var(--ink);
   margin: 0;
+}
+
+.help-modal .modal-header h2,
+.specials-modal .modal-header h2 {
+  font-family: 'Cinzel', serif;
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0;
+  letter-spacing: 0.04em;
 }
 
 .stats-modal .close-btn,
@@ -522,6 +536,37 @@
   display: inline-block;
   margin-right: 0.2rem;
   font-style: normal;
+}
+
+/* Match in-map legend: land power (circle) vs sea zone (rounded square) */
+.help-map-key-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  margin-right: 0.25rem;
+  box-sizing: border-box;
+  min-width: 1.45em;
+  height: 1.45em;
+  padding: 0 0.22em;
+  font-size: 0.82em;
+  font-weight: 800;
+  line-height: 1;
+  color: #e8e8e8;
+  background: rgba(0, 0, 0, 0.25);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75), 0 0 1px rgba(0, 0, 0, 0.9);
+}
+
+.help-map-key-badge--power {
+  width: 1.45em;
+  min-width: 1.45em;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.help-map-key-badge--sea {
+  min-width: 1.45em;
+  border-radius: 1px;
 }
 
 .specials-modal-intro {

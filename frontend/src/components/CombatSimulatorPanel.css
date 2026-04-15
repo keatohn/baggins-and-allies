@@ -813,9 +813,9 @@
 }
 
 .combat-sim-clear {
-  flex-shrink: 0;
+  flex: 0 0 6.25rem;
   padding: 0.5rem 1rem;
-  min-width: 5rem;
+  min-width: 6.25rem;
   font-size: 0.9rem;
   font-weight: 500;
   background: var(--parchment);

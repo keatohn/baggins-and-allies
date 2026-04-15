@@ -635,6 +635,8 @@ export interface GameMeta {
   ai_factions?: string[];
   /** Player IDs who forfeited; their turns are auto-skipped. Used for forfeit notification toast. */
   forfeited_player_ids?: string[];
+  /** Forfeit summary by forfeited player id, e.g. ["Gondor -> Alice", "Rohan -> Computer"]. */
+  forfeit_reassignments?: Record<string, string[]>;
   /** True if the previous host forfeited and a new host was assigned. */
   host_forfeited?: boolean;
   /** True if the authenticated user is the current host (only present when request is authenticated). */
@@ -761,6 +763,10 @@ export const api = {
         id: body.id.trim(),
         duplicate_from: body.duplicate_from?.trim() || null,
       }),
+    }),
+  adminDeleteSetup: (setupId: string) =>
+    fetchJson<{ ok: boolean; id: string }>(`/admin/setups/${encodeURIComponent(setupId)}`, {
+      method: 'DELETE',
     }),
 
   // Games (create, list, join)
