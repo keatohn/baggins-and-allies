@@ -100,19 +100,20 @@
 /* Passenger count on ships (and draggable tokens) */
 .unit-token-passenger-badge {
   position: absolute;
-  top: -6px;
-  left: -6px;
-  min-width: 24px;
-  height: 24px;
-  padding: 0 5px;
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 24px;
+  top: -4px;
+  left: -4px;
+  min-width: clamp(18px, 5vmin, 20px);
+  height: clamp(18px, 5vmin, 20px);
+  padding: 0 4px;
+  font-size: clamp(0.65rem, 2.2vmin, 0.72rem);
+  font-weight: 800;
+  line-height: clamp(18px, 5vmin, 20px);
   text-align: center;
-  color: #fff;
-  background: var(--gold-dark, #6b5344);
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--gold-light) 0%, var(--gold) 100%);
   border-radius: 999px;
-  border: 2px solid rgba(255,255,255,0.5);
+  border: 1px solid var(--gold-dark);
+  box-shadow: 0 1px 2px var(--shadow);
 }
 
 .unit-token-caution {

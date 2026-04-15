@@ -2000,7 +2000,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     gameState.phase,
   ]);
 
-  /** Sea zones where stack click should open the tray after closing it: ≥2 boats + pending load into that zone this phase. */
+  /** Sea zones where stack tap should open the tray after closing it: ≥2 boats + pending load into that zone this phase. */
   const seaZoneIdsEligibleForNavalTrayStackClick = useMemo(() => {
     const out = new Set<string>();
     if (!backendState?.pending_moves) return out;

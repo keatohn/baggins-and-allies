@@ -503,7 +503,7 @@ interface GameMapProps {
   unitStats: Record<string, { movement: number }>;
   factionData: Record<string, { name: string; icon: string; color: string; alliance: string; capital?: string }>;
   onTerritorySelect: (territoryId: string | null) => void;
-  /** When provided (e.g. during movement phase), double-clicking a multi-boat stack in a sea zone opens the naval tray. */
+  /** When provided (e.g. during movement phase), a short tap/click on a multi-boat stack in a sea zone opens the naval tray. */
   onSeaZoneStackClick?: (territoryId: string) => void;
   onUnitSelect: (unit: SelectedUnit | null) => void;
   onUnitMove: (from: string, to: string, unitType: string, count: number) => void;
@@ -888,28 +888,6 @@ function GameMap({
     passengerCount?: number;
   } | null>(null);
   const tapStartRef = useRef<{ territoryId: string; unitId: string; x: number; y: number } | null>(null);
-  /** Touch: long-press boat stack (2+ ships) opens naval tray without a separate "list" control. */
-  const navalTrayLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const navalTrayLongPressStartRef = useRef<{ x: number; y: number; territoryId: string } | null>(null);
-  const [coarsePointer, setCoarsePointer] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches,
-  );
-  useEffect(() => {
-    const mq = window.matchMedia('(pointer: coarse)');
-    const fn = () => setCoarsePointer(mq.matches);
-    mq.addEventListener('change', fn);
-    return () => mq.removeEventListener('change', fn);
-  }, []);
-
-  useEffect(
-    () => () => {
-      if (navalTrayLongPressTimerRef.current != null) {
-        clearTimeout(navalTrayLongPressTimerRef.current);
-        navalTrayLongPressTimerRef.current = null;
-      }
-    },
-    [],
-  );
   /** Last pointer position while any map drag is active — prefer `elementsFromPoint` + valid targets over dnd-kit `over` (bbox collisions). */
   const lastMapDragPointerRef = useRef<{ x: number; y: number } | null>(null);
   /** Tap All (no drag) then tap destination — mobile-friendly bulk move */
@@ -1974,6 +1952,20 @@ function GameMap({
       tapStartRef.current = null;
       if (distanceSq >= 100) return; // 10px threshold
       if (activeDragIdRef.current !== null) return; // Was a drag
+      if (onSeaZoneStackClick && navalUnitIds.has(start.unitId)) {
+        const tid = start.territoryId;
+        const full = territoryUnitsFull?.[tid];
+        const isSea =
+          territoryData[tid]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid);
+        if (isSea && full?.length && navalUnitIds.size) {
+          const boatCount = full.filter((u) => navalUnitIds.has(u.unit_id)).length;
+          if (boatCount > 1) {
+            onSeaZoneStackClick(tid);
+            setTapMobilizationAll(false);
+            return;
+          }
+        }
+      }
       if (!canAct) return;
       setTapMobilizationAll(false);
       // Build tap-selected unit from territory/unit and show valid destinations
@@ -2026,6 +2018,7 @@ function GameMap({
     pendingMoves,
     computeBulkAllMoveData,
     canAct,
+    onSeaZoneStackClick,
   ]);
 
   const handleTapMobilizeAllFromTray = useCallback(() => {
@@ -2897,8 +2890,7 @@ function GameMap({
     if (target.closest('.unit-token')) return; // Don't start pan when pressing on a unit (so unit drag works)
     if (target.closest('.all-stacks-drag-btn')) return; // Bulk "All" stack drag uses dnd-kit
     if (target.closest('.mobilize-all-btn')) return; // Mobilization tray “All”: tap or dnd-kit drag
-    if (target.closest('.territory-units--sea-stack')) return; // Don't start pan when clicking boat stack (opens naval tray)
-    if (target.closest('.sea-zone-tray-open-btn')) return; // Open boat list (mobile / tap)
+    if (target.closest('.territory-units--sea-stack')) return; // Don't start pan when clicking boat stack (opens naval tray / drag)
 
     setIsDragging(true);
     setDragStart({ x: e.clientX - transform.x, y: e.clientY - transform.y });
@@ -2968,8 +2960,7 @@ function GameMap({
           target.closest('.unit-token') ||
           target.closest('.all-stacks-drag-btn') ||
           target.closest('.mobilize-all-btn') ||
-          target.closest('.territory-units--sea-stack') ||
-          target.closest('.sea-zone-tray-open-btn')
+          target.closest('.territory-units--sea-stack')
         )
           return;
         const x = e.touches[0].clientX;
@@ -3865,44 +3856,6 @@ function GameMap({
                           if (navalTypes.length === 0 && otherTypes.length === 0) return null;
 
                           const useStacked = navalTypes.length >= 3;
-                          const handleStackDoubleClick = showTrayDblClick
-                            ? (e: React.MouseEvent) => {
-                              e.stopPropagation();
-                              onSeaZoneStackClick?.(territoryId);
-                            }
-                            : undefined;
-                          const handleOpenNavalTrayClick = showTrayDblClick
-                            ? (e: React.MouseEvent) => {
-                              e.stopPropagation();
-                              onSeaZoneStackClick?.(territoryId);
-                            }
-                            : undefined;
-                          const cancelNavalTrayLongPress = () => {
-                            if (navalTrayLongPressTimerRef.current != null) {
-                              clearTimeout(navalTrayLongPressTimerRef.current);
-                              navalTrayLongPressTimerRef.current = null;
-                            }
-                            const s = navalTrayLongPressStartRef.current;
-                            if (s?.territoryId === territoryId) navalTrayLongPressStartRef.current = null;
-                          };
-                          const handleNavalStackPointerDown = (e: ReactPointerEvent) => {
-                            if (!coarsePointer || !showTrayDblClick || !onSeaZoneStackClick) return;
-                            if (e.button !== 0) return;
-                            cancelNavalTrayLongPress();
-                            navalTrayLongPressStartRef.current = { x: e.clientX, y: e.clientY, territoryId };
-                            navalTrayLongPressTimerRef.current = window.setTimeout(() => {
-                              navalTrayLongPressTimerRef.current = null;
-                              navalTrayLongPressStartRef.current = null;
-                              onSeaZoneStackClick(territoryId);
-                            }, 520);
-                          };
-                          const handleNavalStackPointerMove = (e: ReactPointerEvent) => {
-                            const s = navalTrayLongPressStartRef.current;
-                            if (!s || s.territoryId !== territoryId) return;
-                            const dx = e.clientX - s.x;
-                            const dy = e.clientY - s.y;
-                            if (dx * dx + dy * dy > 144) cancelNavalTrayLongPress();
-                          };
                           const left = screenPos.x;
                           const top = screenPos.y + unitOffsetY + powerBadgeOffsetY;
                           return (
@@ -3923,36 +3876,12 @@ function GameMap({
                                   className={`territory-units territory-units--sea-stack-row ${showTrayDblClick ? 'territory-units--sea-stack' : ''}`}
                                   style={{ position: 'relative', left: 0, top: 0, display: 'flex', alignItems: 'flex-end', gap: 6, flexWrap: 'wrap' }}
                                 >
-                                  {showTrayDblClick && onSeaZoneStackClick && (
-                                    <button
-                                      type="button"
-                                      className="sea-zone-tray-open-btn sea-zone-tray-open-btn--fine-pointer"
-                                      onClick={handleOpenNavalTrayClick}
-                                      title="Ship list and passengers (double-click stack also works)"
-                                      aria-label={`Open ship list for ${territory?.name ?? territoryId}`}
-                                    >
-                                      <span className="sea-zone-tray-open-btn__icon" aria-hidden>
-                                        ☰
-                                      </span>
-                                      <span className="sea-zone-tray-open-btn__text">Ships</span>
-                                    </button>
-                                  )}
                                   <div
                                     className={`territory-units ${useStacked ? 'territory-units--stacked' : ''}`}
                                     style={{ position: 'relative', left: 0, top: 0 }}
-                                    onDoubleClick={handleStackDoubleClick}
-                                    onPointerDown={handleNavalStackPointerDown}
-                                    onPointerMove={handleNavalStackPointerMove}
-                                    onPointerUp={cancelNavalTrayLongPress}
-                                    onPointerCancel={cancelNavalTrayLongPress}
-                                    onPointerLeave={cancelNavalTrayLongPress}
                                     title={
-                                      showTrayDblClick
-                                        ? coarsePointer
-                                          ? `Long-press this stack for ship list & passengers, or drag to move.${eligiblePending && totalPassengers < 1 ? ' Pending loads into this zone.' : ''
-                                          }`
-                                          : `Double-click stack or use the list control for ships & passengers. Drag a ship stack to move.${eligiblePending && totalPassengers < 1 ? ' Pending loads into this zone.' : ''
-                                          }`
+                                      showTrayDblClick && onSeaZoneStackClick
+                                        ? `Click stack for ships and passengers; drag to move.${eligiblePending && totalPassengers < 1 ? ' Pending loads into this zone.' : ''}`
                                         : undefined
                                     }
                                   >
