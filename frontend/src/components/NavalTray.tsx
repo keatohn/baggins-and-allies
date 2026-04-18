@@ -37,6 +37,17 @@ export interface PendingLoadPassenger {
   icon: string;
 }
 
+/** Payload for tap-then-tap move on coarse pointer (GameMap highlights + territory drop). */
+export interface NavalTrayBoatTapMovePayload {
+  unitId: string;
+  territoryId: string;
+  count: number;
+  unitDef?: { name: string; icon: string };
+  factionColor?: string;
+  instanceIds: string[];
+  passengerCount: number;
+}
+
 interface NavalTrayProps {
   isOpen: boolean;
   seaZoneId: string;
@@ -52,6 +63,10 @@ interface NavalTrayProps {
   /** Which boat each pending passenger is assigned to (boatInstanceId -> instanceIds[]). */
   loadAllocation?: Record<string, string[]>;
   onLoadAllocationChange?: (allocation: Record<string, string[]>) => void;
+  /** Coarse pointer: tap a boat card, then tap a map territory (same as map tap-to-move). */
+  onBoatTapSelectForMove?: (payload: NavalTrayBoatTapMovePayload) => void;
+  /** Boat instance id when that stack is armed for tap-to-move from the tray. */
+  selectedBoatInstanceIdForMove?: string | null;
 }
 
 const TRAY_PASSENGER_PREFIX = 'naval-tray-passenger-';
@@ -313,12 +328,18 @@ function DraggableBoatCard({
   factionColor,
   loadOption,
   onLoadIntoThisBoat,
+  coarsePointer,
+  onBoatTapSelectForMove,
+  isBoatTapSelected,
 }: {
   boat: BoatInTray;
   seaZoneId: string;
   factionColor: string;
   loadOption?: string[];
   onLoadIntoThisBoat?: () => void;
+  coarsePointer: boolean;
+  onBoatTapSelectForMove?: (payload: NavalTrayBoatTapMovePayload) => void;
+  isBoatTapSelected: boolean;
 }) {
   const confirmedPassengers = boat.passengers.filter((p): p is BoatPassenger & { instanceId: string } => !!p.instanceId);
   const instanceIds = [boat.boatInstanceId, ...confirmedPassengers.map((p) => p.instanceId)];
@@ -337,19 +358,60 @@ function DraggableBoatCard({
     },
   });
 
+  const tapStartRef = useRef<{ x: number; y: number } | null>(null);
+  const rawListeners = listeners as Record<string, ((e: PointerEvent) => void) | undefined> | undefined;
+  const tapPayload = useMemo(
+    (): NavalTrayBoatTapMovePayload => ({
+      unitId: boat.unitId,
+      territoryId: seaZoneId,
+      count: 1,
+      unitDef: { name: boat.name, icon: boat.icon },
+      factionColor,
+      instanceIds,
+      passengerCount,
+    }),
+    [boat.unitId, boat.name, boat.icon, seaZoneId, factionColor, instanceIds, passengerCount],
+  );
+
+  const mergedListeners = useMemo(() => {
+    if (!coarsePointer || !onBoatTapSelectForMove) return listeners;
+    return {
+      ...rawListeners,
+      onPointerDown: (e: PointerEvent) => {
+        tapStartRef.current = { x: e.clientX, y: e.clientY };
+        rawListeners?.onPointerDown?.(e);
+      },
+      onPointerUp: (e: PointerEvent) => {
+        rawListeners?.onPointerUp?.(e);
+        const s = tapStartRef.current;
+        tapStartRef.current = null;
+        if (!s) return;
+        const dx = e.clientX - s.x;
+        const dy = e.clientY - s.y;
+        if (dx * dx + dy * dy >= TAP_MOVE_THRESH_SQ) return;
+        onBoatTapSelectForMove(tapPayload);
+      },
+    };
+  }, [coarsePointer, onBoatTapSelectForMove, listeners, rawListeners, tapPayload]);
+
   const style: CSSProperties = {
     transform: CSS.Translate.toString(transform),
     opacity: isDragging ? 0.5 : 1,
     cursor: isDragging ? 'grabbing' : 'grab',
+    ...(coarsePointer && onBoatTapSelectForMove ? { touchAction: 'none' as const } : {}),
   };
+
+  const cardClass = ['naval-tray-boat-card', isBoatTapSelected ? 'naval-tray-boat-card--tap-selected' : '']
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <div
       ref={setNodeRef}
-      className="naval-tray-boat-card"
+      className={cardClass}
       style={{ borderColor: factionColor, ...style }}
     >
-      <div className="naval-tray-boat-card-inner" {...listeners} {...attributes}>
+      <div className="naval-tray-boat-card-inner" {...mergedListeners} {...attributes}>
         <div className="naval-tray-passengers">
           {boat.passengers.map((p, i) => (
             <img
@@ -400,6 +462,8 @@ function NavalTray({
   pendingLoadPassengers = [],
   loadAllocation,
   onLoadAllocationChange,
+  onBoatTapSelectForMove,
+  selectedBoatInstanceIdForMove = null,
 }: NavalTrayProps) {
   const coarsePointer = useCoarsePointer();
 
@@ -523,6 +587,9 @@ function NavalTray({
               onLoadIntoThisBoat={
                 loadOption != null && onChooseBoatForLoad ? () => onChooseBoatForLoad(loadOption) : undefined
               }
+              coarsePointer={coarsePointer}
+              onBoatTapSelectForMove={onBoatTapSelectForMove}
+              isBoatTapSelected={selectedBoatInstanceIdForMove === boat.boatInstanceId}
             />
           );
         })
@@ -547,6 +614,11 @@ function NavalTray({
       {isAllocationMode && coarsePointer && (
         <p className="naval-tray-allocation-hint">
           Tap a unit, then tap a boat to assign. Or drag a unit onto a boat.
+        </p>
+      )}
+      {!isAllocationMode && coarsePointer && onBoatTapSelectForMove && boats.length > 0 && (
+        <p className="naval-tray-move-hint">
+          Tap a boat, then tap a destination on the map. Or drag the boat.
         </p>
       )}
       {isAllocationMode ? (

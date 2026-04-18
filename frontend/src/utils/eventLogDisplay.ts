@@ -276,7 +276,7 @@ function mergeGroup(
     let msg = formatUnitsPurchasedMessage(p, unitDefs);
     if (campCount > 0) {
       const campPart = campCount === 1 ? '1 Camp' : `${campCount} Camps`;
-      msg = msg === 'Purchased nothing' ? `Purchased ${campPart}` : `${msg}; ${campPart}`;
+      msg = msg === 'Purchased nothing' ? `Purchased ${campPart}` : `${msg}, ${campPart}`;
     }
     return {
       ...baseEv,

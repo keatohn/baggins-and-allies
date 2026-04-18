@@ -146,13 +146,19 @@
   text-overflow: ellipsis;
 }
 
-.naval-tray-allocation-hint {
+.naval-tray-allocation-hint,
+.naval-tray-move-hint {
   font-family: 'IM Fell English', serif;
   font-size: 0.72rem;
   color: var(--ink-light);
   margin: 0 0 0.35rem 0;
   line-height: 1.35;
   text-align: center;
+}
+
+.naval-tray-boat-card--tap-selected {
+  box-shadow: 0 0 0 2px var(--ink);
+  background: rgba(0, 0, 0, 0.06);
 }
 
 .naval-tray-passenger-icon-wrap {

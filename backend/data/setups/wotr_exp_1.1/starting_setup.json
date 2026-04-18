@@ -499,6 +499,18 @@
         "unit_id": "black_ship",
         "count": 1
       }
+    ],
+    "sea_zone_12": [
+      {
+        "unit_id": "gondor_ship",
+        "count": 1
+      }
+    ],
+    "sea_zone_2": [
+      {
+        "unit_id": "lindon_ship",
+        "count": 1
+      }
     ]
   }
 }

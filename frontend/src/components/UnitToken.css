@@ -73,6 +73,18 @@
   opacity: 0.6;
 }
 
+/* Naval on map: drag may be disabled (wrong phase / not your action) but stack is still tappable (tray, etc.) */
+.unit-token.unit-token--naval.disabled {
+  cursor: pointer !important;
+}
+
+.unit-token.unit-token--naval.disabled img,
+.unit-token.unit-token--naval.disabled .count,
+.unit-token.unit-token--naval.disabled .unit-token-passenger-badge,
+.unit-token.unit-token--naval.disabled .unit-token-caution {
+  cursor: pointer !important;
+}
+
 .unit-token img {
   width: 100%;
   height: 100%;

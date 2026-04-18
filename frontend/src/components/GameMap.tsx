@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo, type PointerEvent as ReactPointerEvent } from 'react';
+import { Fragment, useState, useEffect, useRef, useCallback, useMemo, type PointerEvent as ReactPointerEvent } from 'react';
 import { DndContext, useDroppable, rectIntersection, pointerWithin, closestCenter, useSensors, useSensor, PointerSensor } from '@dnd-kit/core';
 import type { CollisionDetection, DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { useDraggable } from '@dnd-kit/core';
@@ -7,7 +7,7 @@ import type { GameState, SelectedUnit, MapTransform, PendingMove } from '../type
 import DraggableUnit from './DraggableUnit';
 import DragOverlay, { type BulkDragOverlayStack } from './DragOverlay';
 import MobilizationTray from './MobilizationTray';
-import NavalTray, { type BoatInTray } from './NavalTray';
+import NavalTray, { type BoatInTray, type NavalTrayBoatTapMovePayload } from './NavalTray';
 import './GameMap.css';
 import { sortSeaZoneIdsByNumericSuffix, seaZonesReachableBySailFrom } from '../seaZoneSort';
 import {
@@ -666,6 +666,38 @@ function getMapConfig(mapBase: string) {
 
 export type TerritoryPathData = { d: string; transform?: string };
 
+/** Optional Inkscape hint anchors: id `hint_<territory_id>_<suffix>` on `<circle>` or `<ellipse>` anywhere in the map SVG (same viewBox as paths). */
+export type SvgHintKind = 'units' | 'number' | 'icons' | 'logo';
+export type SvgHintAnchorsByTerritory = Record<string, Partial<Record<SvgHintKind, { x: number; y: number }>>>;
+
+const SVG_HINT_SUFFIXES: { suf: string; kind: SvgHintKind }[] = [
+  { suf: '_units', kind: 'units' },
+  { suf: '_number', kind: 'number' },
+  { suf: '_icons', kind: 'icons' },
+  { suf: '_logo', kind: 'logo' },
+];
+
+function parseSvgHintCircleId(id: string): { territoryId: string; kind: SvgHintKind } | null {
+  const idLower = id.trim().toLowerCase();
+  if (!idLower.startsWith('hint_')) return null;
+  for (const { suf, kind } of SVG_HINT_SUFFIXES) {
+    if (!idLower.endsWith(suf)) continue;
+    const territoryId = idLower.slice('hint_'.length, idLower.length - suf.length);
+    if (!territoryId) return null;
+    return { territoryId, kind };
+  }
+  return null;
+}
+
+/** Apply simple translate() on the circle only (Inkscape often uses translate on the element). */
+function svgHintCirclePoint(cx: number, cy: number, transform: string | null | undefined): { x: number; y: number } {
+  const t = transform?.trim();
+  if (!t) return { x: cx, y: cy };
+  const tr = t.match(/translate\(\s*([-\d.]+)(?:\s*,\s*|\s+)([-\d.]+)\s*\)/i);
+  if (tr) return { x: cx + parseFloat(tr[1]), y: cy + parseFloat(tr[2]) };
+  return { x: cx, y: cy };
+}
+
 // Droppable territory: fill layer (receives clicks) + stroke layer (drawn on top so border shows on shared edges)
 function DroppableTerritory({
   territoryId,
@@ -843,6 +875,7 @@ function GameMap({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [svgPaths, setSvgPaths] = useState<Map<string, TerritoryPathData>>(new Map());
+  const [svgHintAnchors, setSvgHintAnchors] = useState<SvgHintAnchorsByTerritory>({});
   const [loadedSvgDimensions, setLoadedSvgDimensions] = useState<{
     viewBox: { width: number; height: number };
     dimensions: { width: number; height: number };
@@ -886,6 +919,8 @@ function GameMap({
     isNaval?: boolean;
     instanceIds?: string[];
     passengerCount?: number;
+    /** Armed from naval tray tap (clear when tray closes without map). */
+    fromNavalTray?: boolean;
   } | null>(null);
   const tapStartRef = useRef<{ territoryId: string; unitId: string; x: number; y: number } | null>(null);
   /** Last pointer position while any map drag is active — prefer `elementsFromPoint` + valid targets over dnd-kit `over` (bbox collisions). */
@@ -1002,6 +1037,7 @@ function GameMap({
   const INKSCAPE_NS = 'http://www.inkscape.org/namespaces/inkscape';
   useEffect(() => {
     setSvgPaths(new Map());
+    setSvgHintAnchors({});
     setLoadedSvgDimensions(null);
     const loadSvg = (url: string) =>
       fetch(url, { cache: 'no-store' })
@@ -1045,6 +1081,7 @@ function GameMap({
           }
           const pathRoot = pathParent ?? svgDoc;
           const pathMap = new Map<string, TerritoryPathData>();
+          const hintAnchors: SvgHintAnchorsByTerritory = {};
           const getTerritoryId = (el: Element): string | null => {
             const id = el.getAttribute('id')?.trim();
             const label = el.getAttributeNS(INKSCAPE_NS, 'label');
@@ -1067,6 +1104,8 @@ function GameMap({
             pathMap.set(territoryId, { d, transform });
           });
           pathRoot.querySelectorAll('circle').forEach((circle) => {
+            const idRaw = circle.getAttribute('id')?.trim() ?? '';
+            if (parseSvgHintCircleId(idRaw)) return;
             const cx = parseFloat(circle.getAttribute('cx') ?? '0');
             const cy = parseFloat(circle.getAttribute('cy') ?? '0');
             const r = parseFloat(circle.getAttribute('r') ?? '0');
@@ -1077,6 +1116,21 @@ function GameMap({
             const d = `M ${cx + r} ${cy} a ${r} ${r} 0 1 1 ${-2 * r} 0 a ${r} ${r} 0 1 1 ${2 * r} 0`;
             pathMap.set(territoryId, { d });
           });
+          const svgForHints = root ?? svgDoc.querySelector('svg');
+          if (svgForHints) {
+            svgForHints.querySelectorAll('circle, ellipse').forEach((el) => {
+              const idRaw = el.getAttribute('id')?.trim() ?? '';
+              const hintParsed = parseSvgHintCircleId(idRaw);
+              if (!hintParsed) return;
+              const cx = parseFloat(el.getAttribute('cx') ?? '');
+              const cy = parseFloat(el.getAttribute('cy') ?? '');
+              if (!Number.isFinite(cx) || !Number.isFinite(cy)) return;
+              const pt = svgHintCirclePoint(cx, cy, el.getAttribute('transform'));
+              if (!hintAnchors[hintParsed.territoryId]) hintAnchors[hintParsed.territoryId] = {};
+              hintAnchors[hintParsed.territoryId]![hintParsed.kind] = pt;
+            });
+          }
+          setSvgHintAnchors(hintAnchors);
           setSvgPaths(pathMap);
         });
     loadSvg(pathsUrl).catch(() => {
@@ -1178,21 +1232,68 @@ function GameMap({
                     }
                   }
                 }
-                const unit = { x: bestSpot.x, y: bestSpot.y };
-                let bestMarker = { x: unit.x, y: unit.y, score: 0 };
-                for (let i = 0; i <= gridSteps; i++) {
-                  for (let j = 0; j <= gridSteps; j++) {
-                    const x = bbox.x + (bbox.width * i) / gridSteps;
-                    const y = bbox.y + (bbox.height * j) / gridSteps;
-                    if (isInside(x, y)) {
-                      const toBoundary = distToBoundary(x, y);
-                      const toUnit = dist(unit, { x, y });
-                      const score = Math.min(toBoundary, toUnit);
-                      if (score > bestMarker.score) bestMarker = { x, y, score };
+                let unit = { x: bestSpot.x, y: bestSpot.y };
+                let marker: { x: number; y: number };
+                if (isSeaZone) {
+                  // Prefer a second "lobe" (e.g. sea zone 12 bulge): best interior point far from the deepest pole.
+                  const minFromUnit = Math.max(24, 0.14 * Math.max(bbox.width, bbox.height));
+                  let secondary = { x: unit.x, y: unit.y, d: -1 };
+                  for (let i = 0; i <= gridSteps; i++) {
+                    for (let j = 0; j <= gridSteps; j++) {
+                      const x = bbox.x + (bbox.width * i) / gridSteps;
+                      const y = bbox.y + (bbox.height * j) / gridSteps;
+                      if (!isInside(x, y)) continue;
+                      if (dist(unit, { x, y }) < minFromUnit) continue;
+                      const dB = distToBoundary(x, y);
+                      if (dB > secondary.d) secondary = { x, y, d: dB };
                     }
                   }
+                  if (secondary.d > 0) {
+                    marker = { x: secondary.x, y: secondary.y };
+                  } else {
+                    let bestMarker = { x: unit.x, y: unit.y, score: 0 };
+                    for (let i = 0; i <= gridSteps; i++) {
+                      for (let j = 0; j <= gridSteps; j++) {
+                        const x = bbox.x + (bbox.width * i) / gridSteps;
+                        const y = bbox.y + (bbox.height * j) / gridSteps;
+                        if (isInside(x, y)) {
+                          const toBoundary = distToBoundary(x, y);
+                          const toUnit = dist(unit, { x, y });
+                          const score = Math.min(toBoundary, toUnit);
+                          if (score > bestMarker.score) bestMarker = { x, y, score };
+                        }
+                      }
+                    }
+                    marker = { x: bestMarker.x, y: bestMarker.y };
+                  }
+                  // Sea digit on the tighter spot; ship stacks on the roomier spot. Tie → digit north (smaller y).
+                  const du = distToBoundary(unit.x, unit.y);
+                  const dm = distToBoundary(marker.x, marker.y);
+                  if (dm > du) {
+                    const t = unit;
+                    unit = marker;
+                    marker = t;
+                  } else if (Math.abs(dm - du) < 1e-4 && unit.y < marker.y) {
+                    const t = unit;
+                    unit = marker;
+                    marker = t;
+                  }
+                } else {
+                  let bestMarker = { x: unit.x, y: unit.y, score: 0 };
+                  for (let i = 0; i <= gridSteps; i++) {
+                    for (let j = 0; j <= gridSteps; j++) {
+                      const x = bbox.x + (bbox.width * i) / gridSteps;
+                      const y = bbox.y + (bbox.height * j) / gridSteps;
+                      if (isInside(x, y)) {
+                        const toBoundary = distToBoundary(x, y);
+                        const toUnit = dist(unit, { x, y });
+                        const score = Math.min(toBoundary, toUnit);
+                        if (score > bestMarker.score) bestMarker = { x, y, score };
+                      }
+                    }
+                  }
+                  marker = { x: bestMarker.x, y: bestMarker.y };
                 }
-                const marker = { x: bestMarker.x, y: bestMarker.y };
                 const markerUnitDist = dist(marker, unit);
                 if (isSeaZone && markerUnitDist < 2) {
                   // Sea zone: two spots ended up same/overlapping — line them up along bbox
@@ -1388,6 +1489,12 @@ function GameMap({
     let timer2: ReturnType<typeof setTimeout> | null = null;
     const run = () => {
       const { centroids, positions } = computeCentroidsAndPositions();
+      for (const [tid, h] of Object.entries(svgHintAnchors)) {
+        if (h.units && positions[tid]) {
+          positions[tid] = { ...positions[tid], unit: h.units };
+          centroids[tid] = h.units;
+        }
+      }
       setTerritoryCentroids(centroids);
       setTerritoryPositions(positions);
       if (Object.keys(centroids).length < svgPaths.size) {
@@ -1400,7 +1507,7 @@ function GameMap({
       clearTimeout(timer1);
       if (timer2 != null) clearTimeout(timer2);
     };
-  }, [svgPaths]);
+  }, [svgPaths, svgHintAnchors]);
 
   // Compute move arrows to render - only for current phase moves
   const moveArrows = useMemo(() => {
@@ -2041,6 +2148,50 @@ function GameMap({
     setTapSelectedUnit(null);
     setTapBulkAllFromTerritory(null);
   }, [mobilizationTray, navalUnitIds]);
+
+  const handleNavalTrayBoatTapSelect = useCallback(
+    (payload: NavalTrayBoatTapMovePayload) => {
+      setTapMobilizationAll(false);
+      setTapBulkAllFromTerritory(null);
+      bulkAllTapStartRef.current = null;
+      setBulkDragOverlay(null);
+      const boatId = payload.instanceIds[0];
+      const prev = tapSelectedUnit;
+      const curBoatId = prev?.instanceIds?.[0];
+      const same =
+        prev?.fromNavalTray &&
+        curBoatId === boatId &&
+        prev.territoryId === payload.territoryId &&
+        prev.unitId === payload.unitId;
+      if (same) {
+        setTapSelectedUnit(null);
+        setValidDropTargets(new Set());
+        return;
+      }
+      const navalDrag = { passengerCount: payload.passengerCount, instanceIds: payload.instanceIds };
+      setTapSelectedUnit({
+        unitId: payload.unitId,
+        territoryId: payload.territoryId,
+        count: payload.count,
+        unitDef: payload.unitDef,
+        factionColor: payload.factionColor,
+        isNaval: true,
+        instanceIds: payload.instanceIds,
+        passengerCount: payload.passengerCount,
+        fromNavalTray: true,
+      });
+      setValidDropTargets(getValidTargets(payload.territoryId, payload.unitId, navalDrag));
+    },
+    [tapSelectedUnit, getValidTargets],
+  );
+
+  /** Tray unmount / close without going through map: drop tap-to-move armed from the tray. */
+  useEffect(() => {
+    if (navalTray) return;
+    if (!tapSelectedUnit?.fromNavalTray) return;
+    setTapSelectedUnit(null);
+    setValidDropTargets(new Set());
+  }, [navalTray, tapSelectedUnit?.fromNavalTray]);
 
   // Handle drag start
   const handleDragStart = useCallback((event: DragStartEvent) => {
@@ -3174,17 +3325,21 @@ function GameMap({
 
   // Clamp overlay anchors to the map image. Sides/top stay generous (e.g. far_harad); bottom is tighter so
   // southern territories (Umbar, etc.) can place unit stacks without the cap yanking them onto the marker row.
+  // SVG hint circles (hint_*_units / _number / …) bypass this clamp so Inkscape cx/cy match the overlay pixel-for-pixel.
   const CLAMP_INSET_X = 80;
   const CLAMP_INSET_Y_TOP = 80;
   const CLAMP_INSET_Y_BOTTOM = 28;
-  const TERRITORY_UNIT_EXTRA_Y: Record<string, number> = {
-    grey_havens: 20,
-    umbar: 0,
+  /** Pixel nudge after centroid→screen (SVG geometry vs visible map art). */
+  const TERRITORY_UNIT_PIXEL_NUDGE: Record<string, { x?: number; y?: number }> = {
+    grey_havens: { y: 20 },
+    /* sea_zone_2 path bbox is very wide; pole can sit past the illustrated water — nudge east into the gulf (keep y tiny so stacks don’t read as sea zone 3) */
+    sea_zone_2: { x: 54, y: 45 },
   };
   const clampToMap = (p: { x: number; y: number }) => ({
     x: Math.max(CLAMP_INSET_X, Math.min(IMG_DIMENSIONS.width - CLAMP_INSET_X, p.x)),
     y: Math.max(CLAMP_INSET_Y_TOP, Math.min(IMG_DIMENSIONS.height - CLAMP_INSET_Y_BOTTOM, p.y)),
   });
+  const svgHintPointToOverlay = (p: { x: number; y: number }) => svgToScreen(p.x, p.y);
 
   // Fallback position when territory has units but no centroid (e.g. not in SVG yet). Deterministic per territoryId so they don't stack.
   const fallbackPositionForTerritory = (territoryId: string) => {
@@ -3466,9 +3621,12 @@ function GameMap({
                     {/* Territory markers (camps, strongholds) and power production badges). Requires territory in game state (e.g. create new game for east/west Osgiliath if missing). */}
                     <div className="territory-markers-layer">
                       {Object.keys(territoryCentroids).map((territoryId) => {
-                        const markerPos = territoryPositions[territoryId]?.marker ?? territoryCentroids[territoryId];
+                        const tp = territoryPositions[territoryId];
+                        const markerPos = tp?.marker ?? territoryCentroids[territoryId];
                         const territory = territoryData[territoryId];
                         if (!markerPos || !territory) return null;
+                        const isSeaZone = territory.terrain === 'sea' || /^sea_zone_?\d+$/i.test(territoryId);
+                        const seaZoneNum = isSeaZone ? (territoryId.match(/(\d+)$/)?.[1] ?? '') : null;
                         const screenPos = svgToScreen(markerPos.x, markerPos.y);
                         const hasCamp = territory.hasCamp === true;
                         const hasPort = territory.hasPort === true;
@@ -3488,8 +3646,6 @@ function GameMap({
                         const showStronghold = showFactionLogo || showNeutralStronghold;
                         const showCamp = hasCamp && !isCapital;
                         const campAndStrongholdRow = showCamp && showStronghold;
-                        const isSeaZone = territory.terrain === 'sea' || /^sea_zone_?\d+$/i.test(territoryId);
-                        const seaZoneNum = isSeaZone ? (territoryId.match(/(\d+)$/)?.[1] ?? '') : null;
                         const terrainType = (territory.terrain || '').toLowerCase();
                         const showTerrainMountain = terrainType === 'mountains';
                         const showTerrainForest = terrainType === 'forest';
@@ -3499,6 +3655,9 @@ function GameMap({
                         const powerAndMarkersInline = showPower && (showCamp || hasPort || hasHome || showTerrainIcon) && !showStronghold;
                         if (!showCamp && !showStronghold && !showPower && !hasPort && !hasHome && !(isSeaZone && seaZoneNum) && !showTerrainIcon) return null;
                         const clampedMarkerPos = clampToMap(screenPos);
+                        const h = svgHintAnchors[territoryId];
+                        const useSvgHintAnchors = !!(h?.number || h?.icons || h?.logo);
+                        const hintScr = (p: { x: number; y: number }) => svgHintPointToOverlay(p);
                         if (ringHarborFlatMarkers && !isSeaZone) {
                           const ringHarborMidRow =
                             hasHome ||
@@ -3598,15 +3757,8 @@ function GameMap({
                             </div>
                           );
                         }
-                        return (
-                          <div
-                            key={territoryId}
-                            className="territory-markers"
-                            style={{
-                              left: clampedMarkerPos.x,
-                              top: clampedMarkerPos.y,
-                            }}
-                          >
+                        const legacyMarkerChildren = (
+                          <>
                             {isSeaZone && seaZoneNum ? (
                               <div
                                 className="sea-zone-number"
@@ -3785,7 +3937,343 @@ function GameMap({
                                 )}
                               </>
                             )}
-                          </div>
+                          </>
+                        );
+
+                        if (!useSvgHintAnchors) {
+                          return (
+                            <div
+                              key={territoryId}
+                              className="territory-markers"
+                              style={{
+                                left: clampedMarkerPos.x,
+                                top: clampedMarkerPos.y,
+                              }}
+                            >
+                              {legacyMarkerChildren}
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <Fragment key={territoryId}>
+                            {h?.number && (
+                              <div
+                                className="territory-markers territory-markers--svg-hint"
+                                style={{ left: hintScr(h.number).x, top: hintScr(h.number).y }}
+                              >
+                                {isSeaZone && seaZoneNum ? (
+                                  <div className="sea-zone-number" title={`Sea Zone ${seaZoneNum}`} aria-hidden>
+                                    {seaZoneNum}
+                                  </div>
+                                ) : showPower ? (
+                                  <div
+                                    className={`territory-power-badge${showStronghold && !h?.logo ? ' territory-power-badge--above-logo' : ''}`}
+                                    title={`${territory.name}: ${power} power`}
+                                    aria-hidden
+                                  >
+                                    {power}
+                                  </div>
+                                ) : null}
+                              </div>
+                            )}
+                            {h?.icons && (
+                              <div
+                                className="territory-markers territory-markers--svg-hint"
+                                style={{ left: hintScr(h.icons).x, top: hintScr(h.icons).y }}
+                              >
+                                <div className="territory-markers-row territory-markers-row--power-camp">
+                                  {hasHome && (
+                                    <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
+                                      <span className="home-marker-emoji" aria-hidden>🏠</span>
+                                    </div>
+                                  )}
+                                  {showCamp && (
+                                    <div className="territory-marker camp-marker" title="Camp (mobilization point)">
+                                      <span className="camp-marker-emoji" aria-hidden>⛺</span>
+                                    </div>
+                                  )}
+                                  {hasPort && (
+                                    <div className="territory-marker port-marker" title="Port (naval mobilization)">
+                                      <span className="port-marker-emoji" aria-hidden>⚓</span>
+                                    </div>
+                                  )}
+                                  {showTerrainMountain && (
+                                    <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
+                                  )}
+                                  {showTerrainForest && (
+                                    <div className="territory-marker terrain-marker" title="Forest">🌲</div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            {h?.logo && (
+                              <div
+                                className="territory-markers territory-markers--svg-hint"
+                                style={{ left: hintScr(h.logo).x, top: hintScr(h.logo).y }}
+                              >
+                                {showFactionLogo && (
+                                  <div className="stronghold-faction-hp-group">
+                                    <div
+                                      className={`territory-marker faction-marker ${isCapital ? 'faction-marker--capital' : ''}`}
+                                      title={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
+                                    >
+                                      <img
+                                        src={factionData[territory.owner!].icon}
+                                        alt=""
+                                        width={isCapital ? 60 : 44}
+                                        height={isCapital ? 60 : 44}
+                                      />
+                                    </div>
+                                    {((territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0) > 0 && (
+                                      <div
+                                        className="stronghold-hp-bars"
+                                        title={`Stronghold HP: ${(territory as { stronghold_current_health?: number }).stronghold_current_health ?? (territory as { stronghold_base_health?: number }).stronghold_base_health}/${(territory as { stronghold_base_health?: number }).stronghold_base_health}`}
+                                        style={{ ['--faction-color' as string]: factionData[territory.owner!]?.color ?? '#888' }}
+                                      >
+                                        {Array.from({ length: (territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0 }, (_, i) => {
+                                          const current = (territory as { stronghold_current_health?: number }).stronghold_current_health ?? (territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0;
+                                          return <span key={i} className="stronghold-hp-bar" data-filled={i < current ? 'true' : 'false'} />;
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                {showNeutralStronghold && (
+                                  <div
+                                    className="territory-marker neutral-stronghold-marker"
+                                    title={territory.name + ' (Neutral stronghold)'}
+                                    aria-hidden
+                                  />
+                                )}
+                              </div>
+                            )}
+                            <div
+                              className="territory-markers"
+                              style={{
+                                left: clampedMarkerPos.x,
+                                top: clampedMarkerPos.y,
+                              }}
+                            >
+                              {!h?.number && isSeaZone && seaZoneNum && (
+                                <div className="sea-zone-number" title={`Sea Zone ${seaZoneNum}`} aria-hidden>
+                                  {seaZoneNum}
+                                </div>
+                              )}
+                              {powerAndMarkersInline && (
+                                <>
+                                  {!h?.number && !h?.icons && (
+                                    <div className="territory-markers-row territory-markers-row--power-camp">
+                                      {showPower && (
+                                        <div
+                                          className="territory-power-badge territory-power-badge--inline"
+                                          title={`${territory.name}: ${power} power`}
+                                          aria-hidden
+                                        >
+                                          {power}
+                                        </div>
+                                      )}
+                                      {hasHome && (
+                                        <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
+                                          <span className="home-marker-emoji" aria-hidden>🏠</span>
+                                        </div>
+                                      )}
+                                      {showCamp && (
+                                        <div className="territory-marker camp-marker" title="Camp (mobilization point)">
+                                          <span className="camp-marker-emoji" aria-hidden>⛺</span>
+                                        </div>
+                                      )}
+                                      {hasPort && (
+                                        <div className="territory-marker port-marker" title="Port (naval mobilization)">
+                                          <span className="port-marker-emoji" aria-hidden>⚓</span>
+                                        </div>
+                                      )}
+                                      {showTerrainMountain && (
+                                        <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
+                                      )}
+                                      {showTerrainForest && (
+                                        <div className="territory-marker terrain-marker" title="Forest">🌲</div>
+                                      )}
+                                    </div>
+                                  )}
+                                  {!h?.number && h?.icons && showPower && (
+                                    <div className="territory-markers-row territory-markers-row--power-camp">
+                                      <div
+                                        className="territory-power-badge territory-power-badge--inline"
+                                        title={`${territory.name}: ${power} power`}
+                                        aria-hidden
+                                      >
+                                        {power}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {h?.number && !h?.icons && (
+                                    <div className="territory-markers-row territory-markers-row--power-camp">
+                                      {hasHome && (
+                                        <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
+                                          <span className="home-marker-emoji" aria-hidden>🏠</span>
+                                        </div>
+                                      )}
+                                      {showCamp && (
+                                        <div className="territory-marker camp-marker" title="Camp (mobilization point)">
+                                          <span className="camp-marker-emoji" aria-hidden>⛺</span>
+                                        </div>
+                                      )}
+                                      {hasPort && (
+                                        <div className="territory-marker port-marker" title="Port (naval mobilization)">
+                                          <span className="port-marker-emoji" aria-hidden>⚓</span>
+                                        </div>
+                                      )}
+                                      {showTerrainMountain && (
+                                        <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
+                                      )}
+                                      {showTerrainForest && (
+                                        <div className="territory-marker terrain-marker" title="Forest">🌲</div>
+                                      )}
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                              {!powerAndMarkersInline && (
+                                <>
+                                  {showPower && !h?.number && (
+                                    <div
+                                      className={`territory-power-badge${showStronghold && !h?.logo ? ' territory-power-badge--above-logo' : ''}`}
+                                      title={`${territory.name}: ${power} power`}
+                                      aria-hidden
+                                    >
+                                      {power}
+                                    </div>
+                                  )}
+                                  {campAndStrongholdRow && !(h?.logo && h?.icons) && (
+                                    <div className="territory-markers-row">
+                                      {showFactionLogo && !h?.logo && (
+                                        <div className="stronghold-faction-hp-group">
+                                          <div
+                                            className={`territory-marker faction-marker ${isCapital ? 'faction-marker--capital' : ''}`}
+                                            title={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
+                                          >
+                                            <img
+                                              src={factionData[territory.owner!].icon}
+                                              alt=""
+                                              width={isCapital ? 60 : 44}
+                                              height={isCapital ? 60 : 44}
+                                            />
+                                          </div>
+                                          {((territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0) > 0 && (() => {
+                                            const base = (territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0;
+                                            const current = (territory as { stronghold_current_health?: number }).stronghold_current_health ?? base;
+                                            return (
+                                              <div
+                                                className="stronghold-hp-bars"
+                                                title={`Stronghold HP: ${current}/${base}`}
+                                                style={{ ['--faction-color' as string]: factionData[territory.owner!]?.color ?? '#888' }}
+                                              >
+                                                {Array.from({ length: base }, (_, i) => (
+                                                  <span key={i} className="stronghold-hp-bar" data-filled={i < current ? 'true' : 'false'} />
+                                                ))}
+                                              </div>
+                                            );
+                                          })()}
+                                        </div>
+                                      )}
+                                      {showNeutralStronghold && !h?.logo && (
+                                        <div
+                                          className="territory-marker neutral-stronghold-marker"
+                                          title={territory.name + ' (Neutral stronghold)'}
+                                          aria-hidden
+                                        />
+                                      )}
+                                      {hasHome && !h?.icons && (
+                                        <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
+                                          <span className="home-marker-emoji" aria-hidden>🏠</span>
+                                        </div>
+                                      )}
+                                      {showCamp && !h?.icons && (
+                                        <div className="territory-marker camp-marker" title="Camp (mobilization point)">
+                                          <span className="camp-marker-emoji" aria-hidden>⛺</span>
+                                        </div>
+                                      )}
+                                      {hasPort && !h?.icons && (
+                                        <div className="territory-marker port-marker" title="Port (naval mobilization)">
+                                          <span className="port-marker-emoji" aria-hidden>⚓</span>
+                                        </div>
+                                      )}
+                                      {showTerrainMountain && !h?.icons && (
+                                        <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
+                                      )}
+                                      {showTerrainForest && !h?.icons && (
+                                        <div className="territory-marker terrain-marker" title="Forest">🌲</div>
+                                      )}
+                                    </div>
+                                  )}
+                                  {!powerAndMarkersInline && !campAndStrongholdRow && (
+                                    <>
+                                      {(showCamp || hasPort || hasHome || showTerrainIcon) && !h?.icons && (
+                                        <div className="territory-markers-row territory-markers-row--power-camp">
+                                          {hasHome && (
+                                            <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
+                                              <span className="home-marker-emoji" aria-hidden>🏠</span>
+                                            </div>
+                                          )}
+                                          {showCamp && (
+                                            <div className="territory-marker camp-marker" title="Camp (mobilization point)">
+                                              <span className="camp-marker-emoji" aria-hidden>⛺</span>
+                                            </div>
+                                          )}
+                                          {hasPort && (
+                                            <div className="territory-marker port-marker" title="Port (naval mobilization)">
+                                              <span className="port-marker-emoji" aria-hidden>⚓</span>
+                                            </div>
+                                          )}
+                                          {showTerrainMountain && (
+                                            <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
+                                          )}
+                                          {showTerrainForest && (
+                                            <div className="territory-marker terrain-marker" title="Forest">🌲</div>
+                                          )}
+                                        </div>
+                                      )}
+                                      {showFactionLogo && !h?.logo && (
+                                        <div className="stronghold-faction-hp-group">
+                                          <div
+                                            className={`territory-marker faction-marker ${isCapital ? 'faction-marker--capital' : ''}`}
+                                            title={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
+                                          >
+                                            <img
+                                              src={factionData[territory.owner!].icon}
+                                              alt=""
+                                              width={isCapital ? 60 : 44}
+                                              height={isCapital ? 60 : 44}
+                                            />
+                                          </div>
+                                          {((territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0) > 0 && (
+                                            <div
+                                              className="stronghold-hp-bars"
+                                              title={`Stronghold HP: ${(territory as { stronghold_current_health?: number }).stronghold_current_health ?? (territory as { stronghold_base_health?: number }).stronghold_base_health}/${(territory as { stronghold_base_health?: number }).stronghold_base_health}`}
+                                              style={{ ['--faction-color' as string]: factionData[territory.owner!]?.color ?? '#888' }}
+                                            >
+                                              {Array.from({ length: (territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0 }, (_, i) => {
+                                                const current = (territory as { stronghold_current_health?: number }).stronghold_current_health ?? (territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0;
+                                                return <span key={i} className="stronghold-hp-bar" data-filled={i < current ? 'true' : 'false'} />;
+                                              })}
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
+                                      {showNeutralStronghold && !h?.logo && (
+                                        <div
+                                          className="territory-marker neutral-stronghold-marker"
+                                          title={territory.name + ' (Neutral stronghold)'}
+                                          aria-hidden
+                                        />
+                                      )}
+                                    </>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </Fragment>
                         );
                       })}
                     </div>
@@ -3798,14 +4286,23 @@ function GameMap({
                         const territory = territoryData[territoryId];
                         const hasStrongholdMarker = territory?.stronghold === true;
                         const hasPowerBadge = Number(territory?.produces ?? 0) > 0;
-                        const useSeparateUnitSpot = unitPos && markerPos && (unitPos.x !== markerPos.x || unitPos.y !== markerPos.y);
-                        const screenPos = unitPos
-                          ? clampToMap(svgToScreen(unitPos.x, unitPos.y))
+                        const hasSvgUnitsHint = !!svgHintAnchors[territoryId]?.units;
+                        const useSeparateUnitSpot =
+                          hasSvgUnitsHint ||
+                          !!(unitPos && markerPos && (unitPos.x !== markerPos.x || unitPos.y !== markerPos.y));
+                        const baseScreenPos = unitPos
+                          ? hasSvgUnitsHint
+                            ? svgHintPointToOverlay(unitPos)
+                            : clampToMap(svgToScreen(unitPos.x, unitPos.y))
                           : fallbackPositionForTerritory(territoryId);
+                        const pixelNudge = hasSvgUnitsHint ? {} : (TERRITORY_UNIT_PIXEL_NUDGE[territoryId] ?? {});
+                        const screenPos = {
+                          x: baseScreenPos.x + (pixelNudge.x ?? 0),
+                          y: baseScreenPos.y + (pixelNudge.y ?? 0),
+                        };
                         /* When territory has a dedicated unit spot, no offset; otherwise offset below markers */
                         const unitOffsetY = useSeparateUnitSpot ? 0 : (hasStrongholdMarker ? 38 : 6);
                         const powerBadgeOffsetY = useSeparateUnitSpot ? 0 : (hasPowerBadge ? (hasStrongholdMarker ? 26 : 52) : (hasStrongholdMarker ? 0 : 6));
-                        const territorySpecificExtraOffsetY = TERRITORY_UNIT_EXTRA_Y[territoryId] ?? 0;
 
                         const NEUTRAL_UNIT_BORDER = '#888888';
                         const isSeaZone = territory?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(territoryId);
@@ -3864,7 +4361,7 @@ function GameMap({
                               className="territory-units territory-units--sea-combined"
                               style={{
                                 left,
-                                top: top + territorySpecificExtraOffsetY,
+                                top,
                                 display: 'flex',
                                 flexDirection: 'column',
                                 alignItems: 'flex-start',
@@ -4024,7 +4521,7 @@ function GameMap({
                             className={`territory-units ${useStacked ? 'territory-units--stacked' : ''} ${useStacked && expandedStackKey === territoryId ? 'territory-units--stack-expanded' : ''}`}
                             style={{
                               left: screenPos.x,
-                              top: screenPos.y + unitOffsetY + powerBadgeOffsetY + territorySpecificExtraOffsetY,
+                              top: screenPos.y + unitOffsetY + powerBadgeOffsetY,
                             }}
                           >
                             {canShowAllDrag && (
@@ -4193,12 +4690,22 @@ function GameMap({
               seaZoneName={navalTray.seaZoneName}
               boats={navalTray.boats}
               factionColor={navalTray.factionColor}
-              onClose={onCloseNavalTray ?? (() => { })}
+              onClose={() => {
+                if (tapSelectedUnit?.fromNavalTray) {
+                  setTapSelectedUnit(null);
+                  setValidDropTargets(new Set());
+                }
+                onCloseNavalTray?.();
+              }}
               pendingLoadBoatOptions={pendingLoadBoatOptions}
               onChooseBoatForLoad={onChooseBoatForLoad}
               pendingLoadPassengers={pendingLoadPassengers}
               loadAllocation={loadAllocation}
               onLoadAllocationChange={onLoadAllocationChange}
+              onBoatTapSelectForMove={canAct ? handleNavalTrayBoatTapSelect : undefined}
+              selectedBoatInstanceIdForMove={
+                tapSelectedUnit?.fromNavalTray ? tapSelectedUnit.instanceIds?.[0] ?? null : null
+              }
             />
           )}
         </div>

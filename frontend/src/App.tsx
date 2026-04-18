@@ -2285,10 +2285,11 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         return `${s.count} ${name}`;
       })
       .join(', ');
-    const campText = pendingCampCount > 0 ? `${pendingCampCount} camp${pendingCampCount === 1 ? '' : 's'}` : '';
+    const campText =
+      pendingCampCount > 0 ? (pendingCampCount === 1 ? '1 Camp' : `${pendingCampCount} Camps`) : '';
     const segments = [unitText, campText].filter(Boolean);
     if (segments.length === 0) return null;
-    return `Purchasing ${segments.join(' + ')}`;
+    return `Purchasing ${segments.join(', ')}`;
   }, [hasPurchaseCart, pendingPurchasedUnits, pendingCampCount, definitions?.units, unitDefs]);
 
   const aerialMustMove = availableActions?.aerial_units_must_move ?? [];
