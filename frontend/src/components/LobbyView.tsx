@@ -10,6 +10,19 @@ const LOBBY_POLL_MS = 3000;
 /** Matches backend LOBBY_COMPUTER_PLAYER_ID — lobby_claims value for AI-controlled slot. */
 const LOBBY_COMPUTER_ID = '__computer__';
 
+function allianceDisplayLabel(alliance: string): string {
+  const a = alliance.trim();
+  if (!a) return 'Neutral';
+  if (a === 'good') return 'Good';
+  if (a === 'evil') return 'Evil';
+  if (a === 'neutral') return 'Neutral';
+  return a
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
 interface LobbyViewProps {
   gameId: string;
   meta: GameMeta;
@@ -187,7 +200,7 @@ export default function LobbyView({
 
   return (
     <div className="lobby-view-overlay">
-      <div className="lobby-view">
+      <div className={`lobby-view${isSinglePlayer ? ' lobby-view--single-player' : ''}`}>
         <header className="lobby-view__header">
           <h1 className="lobby-view__title">
             {isSinglePlayer ? 'Single player' : 'Lobby'}: {meta.name}
@@ -255,10 +268,12 @@ export default function LobbyView({
                 claimantId !== String(player?.id) &&
                 claimantId !== LOBBY_COMPUTER_ID;
               const alliance = f?.alliance ?? 'neutral';
+              const allianceLabel = allianceDisplayLabel(alliance);
               const canClaimHuman =
                 !blockedByOtherHuman &&
                 (isSinglePlayer || myClaimedAlliance == null || myClaimedAlliance === alliance);
               const loading = claimingFactionId === fid;
+              const factionRowLabel = `${displayName} | ${allianceLabel}`;
 
               return (
                 <li key={fid} className="lobby-view__faction-row">
@@ -275,7 +290,13 @@ export default function LobbyView({
                     </div>
                   </div>
                   <div className="lobby-view__faction-info">
-                    <span className="lobby-view__faction-name">{displayName}</span>
+                    <div className="lobby-view__faction-title" title={factionRowLabel}>
+                      <span className="lobby-view__faction-name">{displayName}</span>
+                      <span className="lobby-view__faction-title-sep" aria-hidden>
+                        |
+                      </span>
+                      <span className="lobby-view__faction-alliance">{allianceLabel}</span>
+                    </div>
                     {!isSinglePlayer && claimantId && (
                       <span className="lobby-view__faction-claimant">
                         {isClaimedByMe ? 'You' : isClaimedByComputer ? 'Computer' : claimantName}
@@ -284,7 +305,11 @@ export default function LobbyView({
                   </div>
                   <div className="lobby-view__faction-actions">
                     {isSinglePlayer ? (
-                      <div className="lobby-view__binary-pills" role="group" aria-label={`${displayName}: you or computer`}>
+                      <div
+                        className="lobby-view__binary-pills"
+                        role="group"
+                        aria-label={`${factionRowLabel}: you or computer`}
+                      >
                         <button
                           type="button"
                           className={`lobby-view__pill lobby-view__pill--you ${isClaimedByMe ? 'lobby-view__pill--selected' : ''}`}
