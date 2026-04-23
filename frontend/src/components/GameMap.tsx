@@ -620,7 +620,7 @@ const MAP_CONFIG: Record<string, { viewBox: { width: number; height: number }; d
   'wotr_map_1.0': { viewBox: { width: 3500, height: 2600 }, dimensions: { width: 3500, height: 2600 } },
   'wotr_map_1.1': { viewBox: { width: 3500, height: 2600 }, dimensions: { width: 3500, height: 2600 } },
   'wotr_map_1.2': { viewBox: { width: 3500, height: 2600 }, dimensions: { width: 3500, height: 2600 } },
-  'motw_map_1.1': { viewBox: { width: 3500, height: 1650 }, dimensions: { width: 3500, height: 1650 } },
+  'motw_map_1.2': { viewBox: { width: 3500, height: 1650 }, dimensions: { width: 3500, height: 1650 } },
 };
 /** Fallback when `map_asset` is missing or not listed above; must exist in `frontend/public/`. */
 const DEFAULT_MAP_BASE = 'wotr_map_1.2';
@@ -634,15 +634,15 @@ const OSGILIATH_CENTROIDS_WOTR: Record<string, { x: number; y: number }> = {
   west_osgiliath: { x: 2217.97 - OSGILIATH_OFFSET, y: 1761.089 },
 };
 
-/** Men of the West crop (`motw_map_1.1`, viewBox 3500×1650). Arc centers from path + rotate(±90), not WOTR coords. */
-const OSGILIATH_CENTROIDS_MOTW_1_1: Record<string, { x: number; y: number }> = {
+/** Men of the West crop (`motw_map_1.2`, viewBox 3500×1650). Arc centers from path + rotate(±90), not WOTR coords. */
+const OSGILIATH_CENTROIDS_MOTW_1_2: Record<string, { x: number; y: number }> = {
   east_osgiliath: { x: 2210.6035 + OSGILIATH_OFFSET, y: 809.675 },
   west_osgiliath: { x: 2209.97 - OSGILIATH_OFFSET, y: 809.089 },
 };
 
 function osgiliathCentroidsForMap(mapBase: string): Record<string, { x: number; y: number }> | undefined {
   if (mapBase.startsWith('wotr_map_')) return OSGILIATH_CENTROIDS_WOTR;
-  if (mapBase === 'motw_map_1.1') return OSGILIATH_CENTROIDS_MOTW_1_1;
+  if (mapBase === 'motw_map_1.2') return OSGILIATH_CENTROIDS_MOTW_1_2;
   return undefined;
 }
 
@@ -660,7 +660,7 @@ const TERRITORY_UNIT_OFFSET_FROM_MARKER: Record<string, { dx: number; dy: number
  * per map SVG viewBox. Marker row still uses anchor `marker`; units use `unit`. Flat marker chrome (3-row layout)
  * applies to these territory ids whenever the territory exists on the map (`RING_HARBOR_RING_LAYOUT_TERRITORY_IDS`).
  *
- * See `motw_map_1.1.svg`: viewBox `0 0 3500 1650`. Umbar/Dol Amroth anchors tuned from path bbox centres + Umbar-like
+ * See `motw_map_1.2.svg`: viewBox `0 0 3500 1650`. Umbar/Dol Amroth anchors tuned from path bbox centres + Umbar-like
  * horizontal unit offset (~130 SVG px).
  */
 const RING_HARBOR_RING_LAYOUT_TERRITORY_IDS = new Set(['grey_havens', 'umbar', 'dol_amroth']);
@@ -676,8 +676,8 @@ const RING_HARBOR_STACK_POSITIONS_WOTR: Record<string, { marker: { x: number; y:
   },
 };
 
-/** `motw_map_1.1.svg` — not the same territory geometry as WOTR; dedicated anchors only. */
-const RING_HARBOR_STACK_POSITIONS_MOTW_1_1: Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number } }> =
+/** `motw_map_1.2.svg` — not the same territory geometry as WOTR; dedicated anchors only. */
+const RING_HARBOR_STACK_POSITIONS_MOTW_1_2: Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number } }> =
   {
     umbar: {
       marker: { x: 1475, y: 1549 },
@@ -693,7 +693,7 @@ const RING_HARBOR_STACK_POSITIONS_BY_MAP_BASE: Record<string, Record<string, { m
   'wotr_map_1.0': RING_HARBOR_STACK_POSITIONS_WOTR,
   'wotr_map_1.1': RING_HARBOR_STACK_POSITIONS_WOTR,
   'wotr_map_1.2': RING_HARBOR_STACK_POSITIONS_WOTR,
-  'motw_map_1.1': RING_HARBOR_STACK_POSITIONS_MOTW_1_1,
+  'motw_map_1.2': RING_HARBOR_STACK_POSITIONS_MOTW_1_2,
 };
 
 function toMapBase(name: string | null | undefined): string {
