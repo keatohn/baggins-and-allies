@@ -16,6 +16,7 @@ build/
 
 # IDE & OS
 .DS_Store
+.cursor/
 .idea/
 .vscode/
 *.swp
