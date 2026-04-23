@@ -2,7 +2,7 @@
     "id": "motw_1.0",
     "display_name": "Men of the West",
     "is_active": true,
-    "map_asset": "motw_map_1.0",
+    "map_asset": "motw_map_1.1",
     "context": {
         "year": "TA 3019",
         "map": "Southern Kingdoms",
