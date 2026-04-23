@@ -188,6 +188,11 @@ def _build_round_unit_display(
     sp = empty_round_special_payload() if not unit_def else specials_flags_for_round_payload(
         unit.instance_id, is_attacker, spec_result
     )
+    # UI unit tint / borders: always the unit definition's owning faction, never territory "defender_faction".
+    display_faction = getattr(unit_def, "faction", None) if unit_def else None
+    if display_faction is None:
+        display_faction = faction
+
     if not unit_def:
         out_missing = {
             "instance_id": unit.instance_id,
@@ -201,7 +206,7 @@ def _build_round_unit_display(
             "remaining_health": unit.remaining_health,
             "remaining_movement": getattr(unit, "remaining_movement", 0),
             "is_archer": False,
-            "faction": faction,
+            "faction": display_faction,
             **sp,
             "siegework_archetype": False,
         }
@@ -230,7 +235,7 @@ def _build_round_unit_display(
         "remaining_health": unit.remaining_health,
         "remaining_movement": getattr(unit, "remaining_movement", 0),
         "is_archer": is_archer,
-        "faction": faction,
+        "faction": display_faction,
         **sp,
         "siegework_archetype": archetype == "siegework",
     }

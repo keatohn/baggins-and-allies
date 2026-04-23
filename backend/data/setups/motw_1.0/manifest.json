@@ -1,28 +1,28 @@
 {
-    "id": "wotr_1.1",
-    "display_name": "War of the Ring",
+    "id": "motw_1.0",
+    "display_name": "Men of the West",
     "is_active": true,
-    "map_asset": "wotr_map_1.2",
+    "map_asset": "motw_map_1.0",
     "context": {
         "year": "TA 3019",
-        "map": "Middle-earth",
+        "map": "Southern Kingdoms",
         "faction_count": 5,
         "factions": [
-            "Free Peoples",
             "Isengard",
             "Rohan",
             "Mordor",
-            "Gondor"
+            "Gondor",
+            "Harad"
         ]
     },
     "victory_criteria": {
         "strongholds": {
-            "good": 10,
+            "good": 8,
             "evil": 8
         }
     },
     "camp_cost": 10,
     "stronghold_repair_cost": 2,
     "prefire_penalty": false,
-    "menu_order": 1
+    "menu_order": 3
 }

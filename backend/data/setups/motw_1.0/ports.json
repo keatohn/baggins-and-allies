@@ -1,0 +1,10 @@
+{
+    "pelargir_port": {
+        "id": "pelargir_port",
+        "territory_id": "pelargir"
+    },
+    "umbar_port": {
+        "id": "umbar_port",
+        "territory_id": "umbar"
+    }
+}

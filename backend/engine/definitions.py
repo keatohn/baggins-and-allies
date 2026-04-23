@@ -10,6 +10,21 @@ from pathlib import Path
 from typing import Any, Optional
 
 
+def menu_order_sort_value(manifest: dict[str, Any]) -> int:
+    """
+    Create-game menu / GET /setups ordering: lower values list first.
+    Defaults to 1000 when omitted so explicit small orders (0, 1, …) float to the top.
+    Non-numeric values are treated as 1000.
+    """
+    raw = manifest.get("menu_order")
+    if raw is None:
+        return 1000
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 1000
+
+
 def parse_prefire_penalty_from_manifest(raw: Any) -> bool:
     """
     Manifest `prefire_penalty` is a boolean: True applies -1 to stealth/archer prefire, False uses 0.
@@ -91,10 +106,11 @@ def list_setups() -> list[dict]:
     """Return [{ id, display_name, map_asset, context }, ...] for the create-game menu.
 
     Requires manifest `is_active` to be exactly true (no default). Also requires non-empty context.
+    Sort order: ``manifest.menu_order`` (ascending, lower first), then setup id for stability.
     """
-    out = []
+    rows: list[tuple[int, str, dict]] = []
     if not SETUPS_DIR.exists():
-        return out
+        return []
     for d in sorted(SETUPS_DIR.iterdir()):
         if not d.is_dir():
             continue
@@ -114,14 +130,16 @@ def list_setups() -> list[dict]:
         ctx = m.get("context")
         if not isinstance(ctx, dict) or not ctx:
             continue
+        sid = m.get("id", setup_id)
         entry = {
-            "id": m.get("id", setup_id),
+            "id": sid,
             "display_name": m.get("display_name", setup_id),
             "map_asset": m.get("map_asset", setup_id),
             "context": ctx,
         }
-        out.append(entry)
-    return out
+        rows.append((menu_order_sort_value(m), sid, entry))
+    rows.sort(key=lambda t: (t[0], t[1]))
+    return [t[2] for t in rows]
 
 
 def load_setup(setup_id: str) -> dict:

@@ -87,6 +87,7 @@ from backend.engine.definitions import (
     parse_prefire_penalty_from_manifest,
 )
 from backend.setup_data import (
+    create_setup_from_bundle,
     create_setup,
     delete_setup,
     get_setup_source,
@@ -1265,8 +1266,23 @@ class AdminSetupPayload(BaseModel):
 
 
 class AdminCreateSetupBody(BaseModel):
+    """POST body: optional ``bundle`` / ``bundle_json`` (master JSON) xor ``duplicate_from``."""
+
     id: str = Field(..., min_length=1, max_length=127)
     duplicate_from: str | None = None
+    bundle: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Master JSON object: keys manifest, units, territories, factions, camps, ports, starting_setup, specials"
+        ),
+    )
+    bundle_json: str | None = Field(
+        default=None,
+        description=(
+            "Same as bundle but as a raw JSON string (parsed server-side). Prefer for large imports so the "
+            "client sends one JSON document instead of double-encoding nested objects."
+        ),
+    )
 
 
 @app.get("/admin/setups")
@@ -1283,9 +1299,34 @@ def admin_create_setup(
     _admin: Player = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    """Create a new setup: empty draft or duplicate of an existing id. Setup id must be unique."""
+    """Create a new setup: empty draft, duplicate of an existing id, or import a master JSON bundle. Setup id must be unique."""
+    if body.bundle is not None and body.bundle_json is not None:
+        raise HTTPException(status_code=400, detail="Use either bundle or bundle_json, not both")
+    resolved_bundle: dict[str, Any] | None = None
+    if body.bundle_json is not None:
+        raw = body.bundle_json.strip()
+        if not raw:
+            raise HTTPException(status_code=400, detail="bundle_json is empty")
+        try:
+            parsed_bundle = json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=400, detail=f"bundle_json is not valid JSON: {e}") from e
+        if not isinstance(parsed_bundle, dict):
+            raise HTTPException(status_code=400, detail="bundle_json must be a JSON object")
+        resolved_bundle = parsed_bundle
+    elif body.bundle is not None:
+        resolved_bundle = body.bundle
+
+    if resolved_bundle is not None and body.duplicate_from:
+        raise HTTPException(
+            status_code=400,
+            detail="Use either duplicate_from or bundle/bundle_json, not both",
+        )
     try:
-        out = create_setup(db, body.id.strip(), body.duplicate_from)
+        if resolved_bundle is not None:
+            out = create_setup_from_bundle(db, body.id.strip(), resolved_bundle)
+        else:
+            out = create_setup(db, body.id.strip(), body.duplicate_from)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True, **out}
@@ -1846,7 +1887,7 @@ def create_game_legacy(request: NewGameRequest):
         starting_setup=starting_setup,
         camp_defs=camp_defs,
     )
-    state.map_asset = request.map_asset if request.map_asset is not None else "test_map"
+    state.map_asset = request.map_asset if request.map_asset is not None else "wotr_map_1.2"
     games[request.game_id] = state
     game_defs[request.game_id] = (unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
     return {

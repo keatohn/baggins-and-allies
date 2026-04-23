@@ -171,6 +171,32 @@ export function ManifestPanel({
         />,
       )}
       {fieldRow(
+        'Create-game menu order',
+        <>
+          <input
+            type="number"
+            className="admin-form__input admin-form__input--narrow"
+            placeholder="default 1000"
+            value={manifest.menu_order != null && manifest.menu_order !== '' ? String(manifest.menu_order) : ''}
+            onChange={(e) => {
+              const v = e.target.value.trim();
+              if (v === '') {
+                const next = { ...manifest };
+                delete next.menu_order;
+                onManifestChange(next);
+                return;
+              }
+              const n = Number(v);
+              onManifestChange({
+                ...manifest,
+                menu_order: Number.isFinite(n) ? Math.trunc(n) : manifest.menu_order,
+              });
+            }}
+          />
+          <p className="admin-form__micro">Lower numbers appear first in the scenario list. Omit for default (1000).</p>
+        </>,
+      )}
+      {fieldRow(
         'Camp cost',
         <input
           type="number"

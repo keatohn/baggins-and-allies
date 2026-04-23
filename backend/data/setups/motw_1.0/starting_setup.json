@@ -1,0 +1,384 @@
+{
+  "turn_order": [
+    "isengard",
+    "rohan",
+    "mordor",
+    "gondor",
+    "harad"
+  ],
+  "territory_owners": {
+    "field_of_celebrant": "rohan",
+    "fangorn": "rohan",
+    "rhun_hills": "mordor",
+    "minas_tirith": "gondor",
+    "pelennor": "gondor",
+    "anorien": "gondor",
+    "cair_andros": "gondor",
+    "west_osgiliath": "gondor",
+    "east_osgiliath": "gondor",
+    "south_ithilien": "gondor",
+    "north_ithilien": "gondor",
+    "lossarnach": "gondor",
+    "lebennin": "gondor",
+    "pelargir": "gondor",
+    "belfalas": "gondor",
+    "dol_amroth": "gondor",
+    "anfalas": "gondor",
+    "andrast": "gondor",
+    "erech_lamedon": "gondor",
+    "minas_morgul": "mordor",
+    "the_black_gate": "mordor",
+    "barad_dur": "mordor",
+    "mount_doom": "mordor",
+    "gorgoroth": "mordor",
+    "nurn": "mordor",
+    "udun": "mordor",
+    "cirith_ungol": "mordor",
+    "isengard": "isengard",
+    "south_dunland": "isengard",
+    "gap_of_rohan": "rohan",
+    "westfold": "rohan",
+    "westemnet": "rohan",
+    "edoras": "rohan",
+    "helms_deep": "rohan",
+    "dunharrow": "rohan",
+    "eastfold": "rohan",
+    "eastemnet": "rohan",
+    "entwash": "rohan",
+    "fenmarch": "rohan",
+    "the_wold": "rohan",
+    "fords_of_isen": "rohan",
+    "west_march": "rohan",
+    "khand": "harad",
+    "near_harad": "harad",
+    "far_harad": "harad",
+    "haradwaith": "harad",
+    "umbar": "harad"
+  },
+  "starting_units": {
+    "fangorn": [
+      {
+        "unit_id": "ent",
+        "count": 2
+      }
+    ],
+    "rhun_hills": [
+      {
+        "unit_id": "easterling_pikeman",
+        "count": 2
+      }
+    ],
+    "minas_tirith": [
+      {
+        "unit_id": "trebuchet",
+        "count": 1
+      },
+      {
+        "unit_id": "citadel_guard",
+        "count": 1
+      },
+      {
+        "unit_id": "gondor_archer",
+        "count": 2
+      },
+      {
+        "unit_id": "gondor_soldier",
+        "count": 1
+      },
+      {
+        "unit_id": "gondor_knight",
+        "count": 1
+      }
+    ],
+    "cair_andros": [
+      {
+        "unit_id": "ithilien_ranger",
+        "count": 2
+      },
+      {
+        "unit_id": "gondor_archer",
+        "count": 1
+      },
+      {
+        "unit_id": "gondor_soldier",
+        "count": 1
+      }
+    ],
+    "west_osgiliath": [
+      {
+        "unit_id": "gondor_soldier",
+        "count": 1
+      }
+    ],
+    "east_osgiliath": [
+      {
+        "unit_id": "gondor_archer",
+        "count": 2
+      },
+      {
+        "unit_id": "gondor_soldier",
+        "count": 3
+      },
+      {
+        "unit_id": "captain_of_gondor",
+        "count": 1
+      }
+    ],
+    "south_ithilien": [
+      {
+        "unit_id": "ithilien_ranger",
+        "count": 2
+      }
+    ],
+    "north_ithilien": [
+      {
+        "unit_id": "ithilien_ranger",
+        "count": 3
+      }
+    ],
+    "lebennin": [
+      {
+        "unit_id": "gondor_soldier",
+        "count": 1
+      }
+    ],
+    "pelargir": [
+      {
+        "unit_id": "gondor_soldier",
+        "count": 2
+      }
+    ],
+    "belfalas": [
+      {
+        "unit_id": "gondor_soldier",
+        "count": 1
+      }
+    ],
+    "dol_amroth": [
+      {
+        "unit_id": "gondor_knight",
+        "count": 3
+      },
+      {
+        "unit_id": "citadel_guard",
+        "count": 1
+      }
+    ],
+    "anfalas": [
+      {
+        "unit_id": "gondor_soldier",
+        "count": 1
+      }
+    ],
+    "andrast": [
+      {
+        "unit_id": "gondor_soldier",
+        "count": 1
+      }
+    ],
+    "minas_morgul": [
+      {
+        "unit_id": "nazgul",
+        "count": 1
+      },
+      {
+        "unit_id": "orc_warrior",
+        "count": 6
+      }
+    ],
+    "the_black_gate": [
+      {
+        "unit_id": "armored_troll",
+        "count": 1
+      },
+      {
+        "unit_id": "black_uruk",
+        "count": 1
+      },
+      {
+        "unit_id": "orc_archer",
+        "count": 2
+      }
+    ],
+    "barad_dur": [
+      {
+        "unit_id": "black_uruk",
+        "count": 2
+      },
+      {
+        "unit_id": "orc_archer",
+        "count": 1
+      },
+      {
+        "unit_id": "mordor_warg_rider",
+        "count": 1
+      }
+    ],
+    "gorgoroth": [
+      {
+        "unit_id": "orc_warrior",
+        "count": 3
+      }
+    ],
+    "udun": [
+      {
+        "unit_id": "orc_warrior",
+        "count": 3
+      }
+    ],
+    "cirith_ungol": [
+      {
+        "unit_id": "orc_warrior",
+        "count": 1
+      },
+      {
+        "unit_id": "black_uruk",
+        "count": 1
+      }
+    ],
+    "isengard": [
+      {
+        "unit_id": "uruk_crossbowman",
+        "count": 2
+      },
+      {
+        "unit_id": "uruk_pikeman",
+        "count": 3
+      },
+      {
+        "unit_id": "urukhai_warrior",
+        "count": 5
+      },
+      {
+        "unit_id": "berserker",
+        "count": 1
+      },
+      {
+        "unit_id": "isengard_warg_rider",
+        "count": 3
+      },
+      {
+        "unit_id": "dunland_wildman",
+        "count": 1
+      },
+      {
+        "unit_id": "bomb",
+        "count": 1
+      },
+      {
+        "unit_id": "siege_ladder",
+        "count": 1
+      }
+    ],
+    "south_dunland": [
+      {
+        "unit_id": "dunland_wildman",
+        "count": 2
+      }
+    ],
+    "westfold": [
+      {
+        "unit_id": "rohan_peasant",
+        "count": 2
+      }
+    ],
+    "westemnet": [
+      {
+        "unit_id": "rohan_peasant",
+        "count": 1
+      }
+    ],
+    "edoras": [
+      {
+        "unit_id": "royal_guard",
+        "count": 1
+      },
+      {
+        "unit_id": "rohirrim_soldier",
+        "count": 2
+      }
+    ],
+    "helms_deep": [
+      {
+        "unit_id": "rohirrim_archer",
+        "count": 3
+      },
+      {
+        "unit_id": "rohirrim_soldier",
+        "count": 1
+      }
+    ],
+    "dunharrow": [
+      {
+        "unit_id": "rohirrim_soldier",
+        "count": 1
+      }
+    ],
+    "eastfold": [
+      {
+        "unit_id": "rohan_peasant",
+        "count": 1
+      }
+    ],
+    "eastemnet": [
+      {
+        "unit_id": "rider_of_rohan",
+        "count": 3
+      },
+      {
+        "unit_id": "rohirrim_archer_rider",
+        "count": 1
+      },
+      {
+        "unit_id": "marshal_of_the_riddermark",
+        "count": 1
+      }
+    ],
+    "fords_of_isen": [
+      {
+        "unit_id": "rider_of_rohan",
+        "count": 2
+      }
+    ],
+    "khand": [
+      {
+        "unit_id": "khandish_rider",
+        "count": 1
+      }
+    ],
+    "far_harad": [
+      {
+        "unit_id": "war_mumakil",
+        "count": 1
+      },
+      {
+        "unit_id": "haradrim_archer",
+        "count": 3
+      }
+    ],
+    "haradwaith": [
+      {
+        "unit_id": "haradrim_warrior",
+        "count": 1
+      }
+    ],
+    "umbar": [
+      {
+        "unit_id": "corsair_of_umbar",
+        "count": 3
+      }
+    ],
+    "sea_zone_10": [
+      {
+        "unit_id": "black_ship",
+        "count": 2
+      }
+    ],
+    "sea_zone_12": [
+      {
+        "unit_id": "gondor_ship",
+        "count": 1
+      }
+    ]
+  }
+}

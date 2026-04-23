@@ -93,7 +93,7 @@
     "stealth": {
         "name": "Stealth",
         "display_code": "ST",
-        "description": "If everyone in attack has stealth, they pre-fire with a -1 attack penalty and cancel any defensive archer prefire"
+        "description": "If everyone in attack has stealth, they pre-fire and cancel any defensive archer prefire"
     },
     "terror": {
         "name": "Terror",

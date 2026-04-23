@@ -75,9 +75,11 @@
   left: 8px;
   top: 8px;
   /* width/height from inline style (IMG_DIMENSIONS) */
+  /* Flatten 3D so pan/zoom transform on .map-inner does not reorder SVG vs raster in Chrome. */
+  transform-style: flat;
 }
 
-/* Territory SVG: pointer-events auto so path children receive hover/click (sea zones and land both get hover); images on top have pointer-events: none so events reach the SVG */
+/* Territory SVG: pointer-events auto so path children receive hover/click. Map PNG/overlay are sibling <image> nodes inside this SVG (above paths, below arrows) so raster is never an HTML sibling of the SVG — avoids Chrome compositing filtered paths above a separate <img> on sea-heavy maps. */
 .map-svg {
   position: absolute;
   top: 0;
@@ -88,8 +90,13 @@
   z-index: 0;
 }
 
-/* Map art PNG on top of territory colors. Use a PNG with white/background made transparent so territory fill shows through; pointer-events: none so clicks hit the SVG. */
-.map-art-on-top {
+.map-svg .map-svg-decor-image,
+.map-svg .map-svg-overlay-image {
+  pointer-events: none;
+}
+
+/* Rare: PNG 404 — show full SVG as HTML fallback above the interactive paths. */
+.map-raster-fallback-img {
   position: absolute;
   top: 0;
   left: 0;
@@ -97,19 +104,7 @@
   height: 100%;
   pointer-events: none;
   user-select: none;
-  z-index: 1;
-}
-
-/* Optional overlay PNG on top (e.g. {map_asset}_overlay.png); pointer-events: none so clicks hit SVG */
-.map-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  display: block;
-  z-index: 2;
+  z-index: 12;
 }
 
 /* Territory stroke and glow. Fill path: no filter for svg-glow (glow is on stroke layer). */
@@ -216,14 +211,14 @@
   cursor: grabbing;
 }
 
-/* Territory markers (camp icon, power, sea zone number) - above units so sea zone number isn't hidden by ships */
+/* Territory markers — above map raster (z-index 12); below unit-layer */
 .territory-markers-layer {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  z-index: 8;
+  z-index: 18;
   pointer-events: none;
 }
 
@@ -272,7 +267,7 @@
   z-index: 1;
 }
 
-/* Grey Havens / Umbar: 3 rows — power | home/port/camp/terrain | faction + HP */
+/* Ring harbours (Grey Havens, Umbar, Dol Amroth, …): 3 rows — power | home/port/camp/terrain | faction + HP */
 .territory-markers.territory-markers--ring-harbor {
   gap: 0;
 }
@@ -490,7 +485,7 @@
   left: 0;
   width: 100%;
   height: 100%;
-  z-index: 9;
+  z-index: 19;
   pointer-events: none;
 }
 

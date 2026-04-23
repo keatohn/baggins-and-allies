@@ -12,7 +12,6 @@
         "home",
         "hope",
         "ladder",
-        "mountain",
         "ram",
         "sea_raider",
         "stealth",
@@ -75,11 +74,6 @@
         "display_code": "L",
         "description": "Allows up to 2 attacking infantry to bypass stronghold HP and direct hits at defending units"
     },
-    "mountain": {
-        "name": "Mountain",
-        "display_code": "M",
-        "description": "+1 attack/defense in mountain terrain"
-    },
     "ram": {
         "name": "Ram",
         "display_code": "R",
@@ -93,7 +87,7 @@
     "stealth": {
         "name": "Stealth",
         "display_code": "ST",
-        "description": "If everyone in attack has stealth, they pre-fire and cancel any defensive archer pre-fire"
+        "description": "If everyone in attack has stealth, they pre-fire and cancel any defensive archer prefire"
     },
     "terror": {
         "name": "Terror",

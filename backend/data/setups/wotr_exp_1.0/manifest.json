@@ -26,5 +26,6 @@
     },
     "camp_cost": 10,
     "stronghold_repair_cost": 2,
-    "prefire_penalty": true
+    "prefire_penalty": true,
+    "menu_order": 2
 }

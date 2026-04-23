@@ -229,7 +229,8 @@ def combat_round_resolved(
       unit at round start (before dice), with effective_attack/effective_defense and
       specials from compute_battle_specials_and_modifiers (combat_specials.py). Each item:
       instance_id, unit_id, display_name, attack, defense, effective_attack,
-      effective_defense, health, remaining_health, remaining_movement, is_archer, faction,
+      effective_defense, health, remaining_health, remaining_movement, is_archer, faction
+      (unit definition owning faction for UI borders; not territory owner),
       terror, terrain_mountain, terrain_forest, captain_bonus, anti_cavalry, sea_raider,
       archer (defender, archer prefire round only), stealth (attacker stealth prefire round only),
       bombikazi, fearless, hope,

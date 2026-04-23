@@ -1195,7 +1195,23 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     if (!definitions?.units || !definitions?.territories) return {};
     const territories = definitions.territories;
     const factions = definitions.factions ?? {};
+    /** Prefer setup turn order (matches manifest / starting_setup); else legacy good/evil alphabetical. */
     const factionOrder: string[] = (() => {
+      const to = backendState?.turn_order;
+      if (Array.isArray(to) && to.length > 0) {
+        const seen = new Set<string>();
+        const out: string[] = [];
+        for (const fid of to) {
+          if (fid && factions[fid] && !seen.has(fid)) {
+            seen.add(fid);
+            out.push(fid);
+          }
+        }
+        for (const fid of Object.keys(factions)) {
+          if (!seen.has(fid)) out.push(fid);
+        }
+        return out;
+      }
       const good: string[] = [];
       const evil: string[] = [];
       const other: string[] = [];
@@ -1235,7 +1251,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       });
     }
     return bySpecial;
-  }, [definitions?.units, definitions?.territories, definitions?.factions, getUnitSpecialIds, getHomeTerritoryDisplayNames]);
+  }, [definitions?.units, definitions?.territories, definitions?.factions, getUnitSpecialIds, getHomeTerritoryDisplayNames, backendState?.turn_order]);
 
   // Naval unit IDs (for purchase modal Sea tab and mobilization: naval -> sea zone)
   const navalUnitIds = useMemo(() => {

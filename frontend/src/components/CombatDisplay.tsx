@@ -700,7 +700,7 @@ function UnitRow({
                   key={`ladder-unit-${segIdx}-${seg.onLadder}-${seg.unitType}`}
                   className={`combat-unit-group ${showEliminated ? 'eliminated' : ''}`}
                   title={u0?.name ?? seg.unitType}
-                  style={(u0?.factionColor ?? hitColor) ? { borderColor: u0?.factionColor ?? hitColor } : undefined}
+                  style={u0?.factionColor ? { borderColor: u0.factionColor } : undefined}
                 >
                   {codes.length > 0 && (
                     <span className="unit-specials-badge" title={badgeTitle}>
@@ -809,7 +809,7 @@ function UnitRow({
                         <div
                           className={`combat-unit-group ${showEliminatedNodice ? 'eliminated' : ''}`}
                           title={uu.name}
-                          style={(uu.factionColor ?? hitColor) ? { borderColor: uu.factionColor ?? hitColor } : undefined}
+                          style={uu.factionColor ? { borderColor: uu.factionColor } : undefined}
                         >
                           {codes.length > 0 && (
                             <span className="unit-specials-badge" title={badgeTitle}>
@@ -877,7 +877,7 @@ function UnitRow({
           key={group.groupKey ?? group.unitKey}
           className={`combat-unit-group ${showEliminated ? 'eliminated' : ''}`}
           title={group.name}
-          style={(group.factionColor ?? hitColor) ? { borderColor: group.factionColor ?? hitColor } : undefined}
+          style={group.factionColor ? { borderColor: group.factionColor } : undefined}
         >
           {specialCodes.length > 0 && (
             <span className="unit-specials-badge" title={badgeTitle}>
@@ -986,7 +986,7 @@ function UnitRow({
               key={group.groupKey ?? group.unitKey}
               className={`combat-unit-group ${showEliminated ? 'eliminated' : ''}`}
               title={group.name}
-              style={(group.factionColor ?? hitColor) ? { borderColor: group.factionColor ?? hitColor } : undefined}
+              style={group.factionColor ? { borderColor: group.factionColor } : undefined}
             >
               {specialCodes.length > 0 && (
                 <span className="unit-specials-badge" title={badgeTitle}>

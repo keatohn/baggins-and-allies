@@ -251,7 +251,8 @@ def build_message(
         return ""
 
     if event_type == VICTORY:
-        winner = payload.get("winner", "")
-        return f"{winner} alliance wins!"
+        winner = str(payload.get("winner") or "").strip()
+        label = winner.capitalize() if winner else "Unknown"
+        return f"Game over: {label} alliance wins!"
 
     return ""

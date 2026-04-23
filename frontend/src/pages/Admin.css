@@ -50,6 +50,11 @@
   font-size: 0.95rem;
 }
 
+.admin-page__select--full {
+  width: 100%;
+  max-width: 100%;
+}
+
 .admin-page__select {
   min-width: 14rem;
   padding: 0.45rem 0.65rem;
@@ -307,6 +312,11 @@
   box-sizing: border-box;
 }
 
+.admin-modal--wide {
+  width: min(100%, 42rem);
+  max-height: min(92vh, 44rem);
+}
+
 .admin-modal__title {
   font-family: 'Cinzel', serif;
   font-size: 1.15rem;
@@ -423,6 +433,40 @@
   font-size: 0.78rem;
   line-height: 1.45;
   min-height: 8rem;
+}
+
+.admin-form__textarea--master-bundle {
+  min-height: 14rem;
+}
+
+.admin-form__radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-top: 0.25rem;
+}
+
+.admin-form__radio-group--create-setup {
+  flex-flow: row wrap;
+  gap: 0.65rem 1.1rem;
+  align-items: center;
+}
+
+.admin-form__radio-label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.admin-form__radio-label--disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.admin-form__row--stack {
+  grid-template-columns: 1fr;
 }
 
 /* Entity picker + editor split */

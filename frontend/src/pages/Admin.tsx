@@ -44,6 +44,22 @@ const DELETE_SETUP_CONFIRM_PHRASE = 'DELETE SETUP';
 
 type DictEntityMap = Record<string, Record<string, unknown>>;
 
+const MASTER_BUNDLE_KEYS = [
+  'manifest',
+  'units',
+  'territories',
+  'factions',
+  'camps',
+  'ports',
+  'starting_setup',
+  'specials',
+] as const;
+
+/** Leading UTF-8 BOM from some editors breaks `JSON.parse` in the browser. */
+function normalizeImportedMasterJsonText(raw: string): string {
+  return raw.replace(/^\uFEFF/, '').trim();
+}
+
 function CreateSetupDialog({
   open,
   onClose,
@@ -57,6 +73,8 @@ function CreateSetupDialog({
 }) {
   const [newId, setNewId] = useState('');
   const [duplicateFrom, setDuplicateFrom] = useState('');
+  const [createMode, setCreateMode] = useState<'empty' | 'copy' | 'import'>('empty');
+  const [masterJsonText, setMasterJsonText] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -64,6 +82,8 @@ function CreateSetupDialog({
     if (open) {
       setNewId('');
       setDuplicateFrom('');
+      setCreateMode('empty');
+      setMasterJsonText('');
       setErr(null);
     }
   }, [open]);
@@ -76,13 +96,49 @@ function CreateSetupDialog({
       setErr('Use a unique id: start with a letter or digit; only letters, digits, underscore, hyphen, dot; max 127 chars.');
       return;
     }
+    if (createMode === 'copy' && !duplicateFrom.trim()) {
+      setErr('Choose which setup to copy.');
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
-      await api.adminCreateSetup({
-        id,
-        duplicate_from: duplicateFrom.trim() || null,
-      });
+      if (createMode === 'import') {
+        let parsed: unknown;
+        const jsonText = normalizeImportedMasterJsonText(masterJsonText) || '{}';
+        try {
+          parsed = JSON.parse(jsonText);
+        } catch (e) {
+          const detail = e instanceof Error ? e.message : String(e);
+          setErr(`Master JSON is not valid JSON: ${detail}`);
+          setBusy(false);
+          return;
+        }
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          setErr('Master JSON must be a single object.');
+          setBusy(false);
+          return;
+        }
+        const o = parsed as Record<string, unknown>;
+        const missing = MASTER_BUNDLE_KEYS.filter((k) => !(k in o));
+        if (missing.length) {
+          setErr(`Master JSON is missing keys: ${missing.join(', ')}`);
+          setBusy(false);
+          return;
+        }
+        await api.adminCreateSetup({
+          id,
+          duplicate_from: null,
+          bundle_json: jsonText,
+        });
+      } else if (createMode === 'copy') {
+        await api.adminCreateSetup({
+          id,
+          duplicate_from: duplicateFrom.trim(),
+        });
+      } else {
+        await api.adminCreateSetup({ id, duplicate_from: null });
+      }
       onCreated(id);
       onClose();
     } catch (e) {
@@ -95,7 +151,7 @@ function CreateSetupDialog({
   return (
     <div className="admin-modal-overlay" role="presentation" onClick={onClose}>
       <div
-        className="admin-modal"
+        className={`admin-modal${createMode === 'import' ? ' admin-modal--wide' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="admin-create-title"
@@ -105,6 +161,42 @@ function CreateSetupDialog({
           New setup
         </h2>
         <p className="admin-form__micro">Setup id cannot be changed after creation. It must be unique.</p>
+        <div className="admin-form__row admin-form__row--radio-row">
+          <span className="admin-form__label">Source</span>
+          <div className="admin-form__radio-group admin-form__radio-group--create-setup">
+            <label className="admin-form__radio-label">
+              <input
+                type="radio"
+                name="admin-create-mode"
+                checked={createMode === 'empty'}
+                onChange={() => setCreateMode('empty')}
+              />
+              Empty
+            </label>
+            <label
+              className={`admin-form__radio-label${setups.length === 0 ? ' admin-form__radio-label--disabled' : ''}`}
+              title={setups.length === 0 ? 'No setups to copy yet' : undefined}
+            >
+              <input
+                type="radio"
+                name="admin-create-mode"
+                checked={createMode === 'copy'}
+                disabled={setups.length === 0}
+                onChange={() => setCreateMode('copy')}
+              />
+              Copy
+            </label>
+            <label className="admin-form__radio-label">
+              <input
+                type="radio"
+                name="admin-create-mode"
+                checked={createMode === 'import'}
+                onChange={() => setCreateMode('import')}
+              />
+              Import JSON
+            </label>
+          </div>
+        </div>
         <div className="admin-form__row">
           <label className="admin-form__label" htmlFor="admin-new-id">
             Setup id
@@ -118,24 +210,44 @@ function CreateSetupDialog({
             placeholder="e.g. my_scenario_1"
           />
         </div>
-        <div className="admin-form__row">
-          <label className="admin-form__label" htmlFor="admin-dup-from">
-            Start from
-          </label>
-          <select
-            id="admin-dup-from"
-            className="admin-page__select"
-            value={duplicateFrom}
-            onChange={(e) => setDuplicateFrom(e.target.value)}
-          >
-            <option value="">Empty draft (inactive, empty maps)</option>
-            {setups.map((s) => (
-              <option key={s.id} value={s.id}>
-                Copy of {s.display_name} ({s.id})
-              </option>
-            ))}
-          </select>
-        </div>
+        {createMode === 'copy' ? (
+          <div className="admin-form__row">
+            <label className="admin-form__label" htmlFor="admin-dup-from">
+              Copy from
+            </label>
+            <select
+              id="admin-dup-from"
+              className="admin-page__select admin-page__select--full"
+              value={duplicateFrom}
+              onChange={(e) => setDuplicateFrom(e.target.value)}
+            >
+              <option value="">Select a setup…</option>
+              {setups.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.display_name} ({s.id})
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+        {createMode === 'import' ? (
+          <div className="admin-form__row admin-form__row--stack">
+            <label className="admin-form__label" htmlFor="admin-master-json">
+              Bundle JSON
+            </label>
+            <textarea
+              id="admin-master-json"
+              className="admin-form__textarea admin-form__textarea--json admin-form__textarea--master-bundle"
+              spellCheck={false}
+              placeholder={`{\n  "manifest": { ... },\n  "units": { ... },\n  ...\n}`}
+              value={masterJsonText}
+              onChange={(e) => setMasterJsonText(e.target.value)}
+            />
+            <p className="admin-form__micro">
+              Keys: {MASTER_BUNDLE_KEYS.join(', ')}
+            </p>
+          </div>
+        ) : null}
         {err ? <div className="admin-page__error">{err}</div> : null}
         <div className="admin-modal__actions">
           <button type="button" className="admin-page__btn" onClick={onClose} disabled={busy}>

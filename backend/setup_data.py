@@ -23,6 +23,7 @@ from backend.engine.definitions import (
     load_specials as load_specials_from_files,
     load_static_definitions as load_static_definitions_from_files,
     list_setups as list_setups_from_files,
+    menu_order_sort_value,
     parse_prefire_penalty_from_manifest,
     scenario_display_from_setup_id as scenario_display_from_files,
 )
@@ -206,9 +207,12 @@ def load_specials_from_db(db: Session, setup_id: str) -> tuple[dict[str, dict], 
 
 
 def list_setups_menu_from_db(db: Session) -> list[dict[str, Any]]:
-    """Active setups with non-empty context (create-game menu)."""
-    out: list[dict[str, Any]] = []
-    for row in db.query(Setup).order_by(Setup.id).all():
+    """Active setups with non-empty context (create-game menu).
+
+    Sorted by ``manifest.menu_order`` (asc), then setup id. See ``menu_order_sort_value`` in definitions.
+    """
+    rows: list[tuple[int, str, dict[str, Any]]] = []
+    for row in db.query(Setup).all():
         try:
             m = json.loads(row.manifest_json)
         except json.JSONDecodeError:
@@ -218,15 +222,21 @@ def list_setups_menu_from_db(db: Session) -> list[dict[str, Any]]:
         ctx = m.get("context")
         if not isinstance(ctx, dict) or not ctx:
             continue
-        out.append(
-            {
-                "id": m.get("id", row.id),
-                "display_name": m.get("display_name", row.id),
-                "map_asset": m.get("map_asset", row.id),
-                "context": ctx,
-            }
+        sid = m.get("id", row.id)
+        rows.append(
+            (
+                menu_order_sort_value(m),
+                sid,
+                {
+                    "id": sid,
+                    "display_name": m.get("display_name", row.id),
+                    "map_asset": m.get("map_asset", row.id),
+                    "context": ctx,
+                },
+            )
         )
-    return out
+    rows.sort(key=lambda t: (t[0], t[1]))
+    return [t[2] for t in rows]
 
 
 def list_all_setups_admin(db: Session) -> list[dict[str, Any]]:
@@ -341,6 +351,44 @@ def create_setup(
         }
     else:
         payload = empty_setup_payload(new_id)
+
+    v_errs = validate_setup_payload(payload)
+    if v_errs:
+        raise ValueError("; ".join(v_errs[:12]))
+
+    row = Setup(
+        id=new_id,
+        manifest_json=json.dumps(payload["manifest"], ensure_ascii=False),
+        units_json=json.dumps(payload["units"], ensure_ascii=False),
+        territories_json=json.dumps(payload["territories"], ensure_ascii=False),
+        factions_json=json.dumps(payload["factions"], ensure_ascii=False),
+        camps_json=json.dumps(payload["camps"], ensure_ascii=False),
+        ports_json=json.dumps(payload["ports"], ensure_ascii=False),
+        starting_setup_json=json.dumps(payload["starting_setup"], ensure_ascii=False),
+        specials_json=json.dumps(payload["specials"], ensure_ascii=False),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise ValueError("A setup with this id already exists") from None
+    return {"id": new_id}
+
+
+def create_setup_from_bundle(db: Session, new_id: str, bundle: dict[str, Any]) -> dict[str, Any]:
+    """Insert a new setup from a master JSON object (same keys as PUT /admin/setups/{id})."""
+    err = validate_setup_id(new_id)
+    if err:
+        raise ValueError(err)
+    if db.query(Setup).filter(Setup.id == new_id).first():
+        raise ValueError("A setup with this id already exists")
+
+    payload = dict(bundle)
+    manifest = dict(payload.get("manifest") or {})
+    manifest["id"] = new_id
+    payload["manifest"] = manifest
 
     v_errs = validate_setup_payload(payload)
     if v_errs:

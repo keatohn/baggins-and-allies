@@ -217,6 +217,13 @@ def validate_setup_documents(
         if not isinstance(ctx, dict) or not ctx:
             errors.append("manifest.context must be a non-empty object when is_active is true")
 
+    mo = manifest.get("menu_order")
+    if mo is not None:
+        try:
+            int(mo)
+        except (TypeError, ValueError):
+            errors.append("manifest.menu_order must be an integer when set")
+
     return errors
 
 

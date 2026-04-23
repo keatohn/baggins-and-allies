@@ -612,20 +612,39 @@ const EMPTY_ELIGIBLE_SEA_ZONES_FOR_TRAY = new Set<string>();
  * - Keep viewBox and dimensions equal so 1 SVG unit = 1 display pixel at scale 1.
  * - In Inkscape: set document size to these dimensions, draw paths, set each path's
  *   label (or id) to the backend territory id so the app can match them.
+ *
+ * Keys here should match `map_asset` in setup manifests and files in `frontend/public/<base>.{svg,png}`.
+ * Values are the initial layout before the SVG is fetched; the loaded file's viewBox overwrites when present.
  */
 const MAP_CONFIG: Record<string, { viewBox: { width: number; height: number }; dimensions: { width: number; height: number } }> = {
-  'test_map': { viewBox: { width: 1226.6667, height: 1013.3333 }, dimensions: { width: 1840, height: 1520 } },
-  'baggins_and_allies_map_0.1': { viewBox: { width: 1303.07, height: 980.47 }, dimensions: { width: 1303.07, height: 980.47 } },
-  'baggins_and_allies_map_1.0': { viewBox: { width: 3500, height: 2600 }, dimensions: { width: 3500, height: 2600 } },
+  'wotr_map_1.0': { viewBox: { width: 3500, height: 2600 }, dimensions: { width: 3500, height: 2600 } },
+  'wotr_map_1.1': { viewBox: { width: 3500, height: 2600 }, dimensions: { width: 3500, height: 2600 } },
+  'wotr_map_1.2': { viewBox: { width: 3500, height: 2600 }, dimensions: { width: 3500, height: 2600 } },
+  'motw_map_1.0': { viewBox: { width: 3500, height: 1650 }, dimensions: { width: 3500, height: 1650 } },
 };
-const DEFAULT_MAP_BASE = 'test_map';
+/** Fallback when `map_asset` is missing or not listed above; must exist in `frontend/public/`. */
+const DEFAULT_MAP_BASE = 'wotr_map_1.2';
 
 /** Semi-circle centroids in viewBox coords. Each path is half a circle; arc center after transform is shared, so we offset by 4r/(3π) along the bisector so east = right half, west = left half. r=90, 4*90/(3*π) ≈ 38.197. */
 const OSGILIATH_OFFSET = (4 * 90) / (3 * Math.PI);
-const OSGILIATH_CENTROIDS: Record<string, { x: number; y: number }> = {
+
+/** War of the Ring full map (`wotr_map_*`, viewBox height 2600). */
+const OSGILIATH_CENTROIDS_WOTR: Record<string, { x: number; y: number }> = {
   east_osgiliath: { x: 2218.6035 + OSGILIATH_OFFSET, y: 1761.675 },
   west_osgiliath: { x: 2217.97 - OSGILIATH_OFFSET, y: 1761.089 },
 };
+
+/** Men of the West crop (`motw_map_1.0`, viewBox 3500×1650). Arc centers from path + rotate(±90), not WOTR coords. */
+const OSGILIATH_CENTROIDS_MOTW_1_0: Record<string, { x: number; y: number }> = {
+  east_osgiliath: { x: 2210.6035 + OSGILIATH_OFFSET, y: 809.675 },
+  west_osgiliath: { x: 2209.97 - OSGILIATH_OFFSET, y: 809.089 },
+};
+
+function osgiliathCentroidsForMap(mapBase: string): Record<string, { x: number; y: number }> | undefined {
+  if (mapBase.startsWith('wotr_map_')) return OSGILIATH_CENTROIDS_WOTR;
+  if (mapBase === 'motw_map_1.0') return OSGILIATH_CENTROIDS_MOTW_1_0;
+  return undefined;
+}
 
 /**
  * Shift unit stacks relative to the marker anchor (SVG viewBox px). Medium territories often get a
@@ -637,21 +656,44 @@ const TERRITORY_UNIT_OFFSET_FROM_MARKER: Record<string, { dx: number; dy: number
 };
 
 /**
- * Grey Havens and Umbar: the land path is a ring around sea that is not part of the territory fill, so the
- * pole-of-inaccessibility algorithm only sees the coastal band. These anchors sit in the outer bbox
- * interior (over the enclosed sea); icons may render outside the land fill. Coordinates are SVG viewBox
- * px for `wotr_map_*.svg` (0 0 3500 2600). Adjust here if the map art changes.
+ * Ring harbours (coastal band around enclosed water): pole-of-inaccessibility often lands on water; overrides are
+ * per map SVG viewBox. Marker row still uses anchor `marker`; units use `unit`. Flat marker chrome (3-row layout)
+ * applies to these territory ids whenever the territory exists on the map (`RING_HARBOR_RING_LAYOUT_TERRITORY_IDS`).
+ *
+ * See `motw_map_1.0.svg`: viewBox `0 0 3500 1650`. Umbar/Dol Amroth anchors tuned from path bbox centres + Umbar-like
+ * horizontal unit offset (~130 SVG px).
  */
-const RING_HARBOR_STACK_POSITIONS_SVG: Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number } }> = {
+const RING_HARBOR_RING_LAYOUT_TERRITORY_IDS = new Set(['grey_havens', 'umbar', 'dol_amroth']);
+
+const RING_HARBOR_STACK_POSITIONS_WOTR: Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number } }> = {
   grey_havens: {
     marker: { x: 497, y: 548 },
-    /** Just right of the marker stack — smaller offset so units stay off the neighbor border */
     unit: { x: 575, y: 548 },
   },
   umbar: {
     marker: { x: 1475, y: 2498 },
     unit: { x: 1605, y: 2498 },
   },
+};
+
+/** `motw_map_1.0.svg` — not the same territory geometry as WOTR; dedicated anchors only. */
+const RING_HARBOR_STACK_POSITIONS_MOTW_1_0: Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number } }> =
+  {
+    umbar: {
+      marker: { x: 1475, y: 1549 },
+      unit: { x: 1605, y: 1549 },
+    },
+    dol_amroth: {
+      marker: { x: 1192, y: 1034 },
+      unit: { x: 1322, y: 1034 },
+    },
+  };
+
+const RING_HARBOR_STACK_POSITIONS_BY_MAP_BASE: Record<string, Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number } }>> = {
+  'wotr_map_1.0': RING_HARBOR_STACK_POSITIONS_WOTR,
+  'wotr_map_1.1': RING_HARBOR_STACK_POSITIONS_WOTR,
+  'wotr_map_1.2': RING_HARBOR_STACK_POSITIONS_WOTR,
+  'motw_map_1.0': RING_HARBOR_STACK_POSITIONS_MOTW_1_0,
 };
 
 function toMapBase(name: string | null | undefined): string {
@@ -666,7 +708,7 @@ function getMapConfig(mapBase: string) {
 
 export type TerritoryPathData = { d: string; transform?: string };
 
-/** Optional Inkscape hint anchors: id `hint_<territory_id>_<suffix>` on `<circle>` or `<ellipse>` anywhere in the map SVG (same viewBox as paths). */
+/** Optional Inkscape hint anchors: id `hint_<territory_id>_<suffix>` on `<circle>` or `<ellipse>` anywhere in the map SVG (same viewBox as paths). Centers are read in root SVG user space (ancestor `<g transform="…">` included). */
 export type SvgHintKind = 'units' | 'number' | 'icons' | 'logo';
 export type SvgHintAnchorsByTerritory = Record<string, Partial<Record<SvgHintKind, { x: number; y: number }>>>;
 
@@ -689,12 +731,59 @@ function parseSvgHintCircleId(id: string): { territoryId: string; kind: SvgHintK
   return null;
 }
 
-/** Apply simple translate() on the circle only (Inkscape often uses translate on the element). */
-function svgHintCirclePoint(cx: number, cy: number, transform: string | null | undefined): { x: number; y: number } {
-  const t = transform?.trim();
-  if (!t) return { x: cx, y: cy };
-  const tr = t.match(/translate\(\s*([-\d.]+)(?:\s*,\s*|\s+)([-\d.]+)\s*\)/i);
-  if (tr) return { x: cx + parseFloat(tr[1]), y: cy + parseFloat(tr[2]) };
+function readHintCircleLikeCenter(el: SVGGraphicsElement): { cx: number; cy: number } | null {
+  if (el instanceof SVGCircleElement || el instanceof SVGEllipseElement) {
+    return { cx: el.cx.baseVal.value, cy: el.cy.baseVal.value };
+  }
+  const cx = parseFloat(el.getAttribute('cx') ?? '');
+  const cy = parseFloat(el.getAttribute('cy') ?? '');
+  if (Number.isFinite(cx) && Number.isFinite(cy)) return { cx, cy };
+  return null;
+}
+
+/** Map hint geometry (cx/cy before each node’s own `transform`) into the root `<svg>` user coordinate system (viewBox space). Required when hints live under transformed Inkscape layers / groups. */
+function hintCircleCenterInRootSvgUserSpace(svgRoot: SVGSVGElement, el: SVGGraphicsElement): { x: number; y: number } | null {
+  const raw = readHintCircleLikeCenter(el);
+  if (!raw) return null;
+  const { cx, cy } = raw;
+
+  try {
+    const pt = svgRoot.createSVGPoint();
+    pt.x = cx;
+    pt.y = cy;
+    const toRoot = (el as SVGGraphicsElement & { getTransformToElement?(other: SVGGraphicsElement): DOMMatrix }).getTransformToElement;
+    if (typeof toRoot === 'function') {
+      const m = toRoot.call(el, svgRoot);
+      const r = pt.matrixTransform(m);
+      if (Number.isFinite(r.x) && Number.isFinite(r.y)) return { x: r.x, y: r.y };
+    }
+  } catch {
+    /* fall through */
+  }
+
+  try {
+    let p = new DOMPoint(cx, cy);
+    let n: Element | null = el;
+    while (n) {
+      const tr = n.getAttribute('transform')?.trim();
+      if (tr) {
+        try {
+          p = p.matrixTransform(new DOMMatrix(tr));
+        } catch {
+          const trOnly = tr.match(/translate\(\s*([-\d.eE]+)(?:\s*,\s*|\s+)([-\d.eE]+)\s*\)/i);
+          if (trOnly) {
+            p = new DOMPoint(p.x + parseFloat(trOnly[1]), p.y + parseFloat(trOnly[2]));
+          }
+        }
+      }
+      if (n === svgRoot) break;
+      n = n.parentElement;
+    }
+    if (Number.isFinite(p.x) && Number.isFinite(p.y)) return { x: p.x, y: p.y };
+  } catch {
+    /* fall through */
+  }
+
   return { x: cx, y: cy };
 }
 
@@ -1004,16 +1093,23 @@ function GameMap({
   const pngUrl = `${publicBase}/${mapBase}.png`;
   const svgFallbackUrl = `${publicBase}/${mapBase}.svg`;
   const [pngFailedForMap, setPngFailedForMap] = useState<string | null>(null);
+  const [mapOverlayRasterHidden, setMapOverlayRasterHidden] = useState(false);
   useEffect(() => {
     setPngFailedForMap(null);
+    setMapOverlayRasterHidden(false);
   }, [mapBase]);
   const handleBgImageError = useCallback(
-    (e: React.SyntheticEvent<HTMLImageElement>) => {
-      const failedSrc = (e.currentTarget as HTMLImageElement)?.currentSrc ?? '';
-      if (failedSrc.includes(`${mapBase}.png`)) setPngFailedForMap(mapBase);
+    (e: React.SyntheticEvent<HTMLImageElement | SVGImageElement>) => {
+      const el = e.currentTarget;
+      const src =
+        el instanceof HTMLImageElement
+          ? el.currentSrc || el.src
+          : (el as SVGImageElement).href?.baseVal ?? '';
+      if (src.includes(`${mapBase}.png`)) setPngFailedForMap(mapBase);
     },
     [mapBase]
   );
+  /** PNG when available; full-map SVG only as fallback if the PNG fails to load. */
   const imageUrl = pngFailedForMap === mapBase ? svgFallbackUrl : pngUrl;
 
   const activeMobilizationItem = useMemo(() => {
@@ -1118,14 +1214,13 @@ function GameMap({
           });
           const svgForHints = root ?? svgDoc.querySelector('svg');
           if (svgForHints) {
+            const svgRootEl = svgForHints as SVGSVGElement;
             svgForHints.querySelectorAll('circle, ellipse').forEach((el) => {
               const idRaw = el.getAttribute('id')?.trim() ?? '';
               const hintParsed = parseSvgHintCircleId(idRaw);
               if (!hintParsed) return;
-              const cx = parseFloat(el.getAttribute('cx') ?? '');
-              const cy = parseFloat(el.getAttribute('cy') ?? '');
-              if (!Number.isFinite(cx) || !Number.isFinite(cy)) return;
-              const pt = svgHintCirclePoint(cx, cy, el.getAttribute('transform'));
+              const pt = hintCircleCenterInRootSvgUserSpace(svgRootEl, el as SVGGraphicsElement);
+              if (!pt) return;
               if (!hintAnchors[hintParsed.territoryId]) hintAnchors[hintParsed.territoryId] = {};
               hintAnchors[hintParsed.territoryId]![hintParsed.kind] = pt;
             });
@@ -1157,10 +1252,18 @@ function GameMap({
       const positions: Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number } }> = {};
       const bboxCenter = (b: DOMRect) => ({ x: b.x + b.width / 2, y: b.y + b.height / 2 });
 
+      const osgiliathForThisMap = osgiliathCentroidsForMap(mapBase);
+
       // First pass: from path data (temp SVG) so every territory has a fallback
       svgPaths.forEach((pathData, territoryId) => {
-        const known = OSGILIATH_CENTROIDS[territoryId];
-        if (known) {
+        const known = osgiliathForThisMap?.[territoryId];
+        const knownFitsMap =
+          known &&
+          known.x >= 0 &&
+          known.y >= 0 &&
+          known.x <= SVG_VIEWBOX.width &&
+          known.y <= SVG_VIEWBOX.height;
+        if (knownFitsMap) {
           centroids[territoryId] = known;
           positions[territoryId] = { marker: known, unit: known };
           return;
@@ -1477,10 +1580,13 @@ function GameMap({
         centroids[tid] = marker;
       }
 
-      for (const [tid, pts] of Object.entries(RING_HARBOR_STACK_POSITIONS_SVG)) {
-        if (!positions[tid]) continue;
-        positions[tid] = { marker: pts.marker, unit: pts.unit };
-        centroids[tid] = pts.marker;
+      const ringHarborForMap = RING_HARBOR_STACK_POSITIONS_BY_MAP_BASE[mapBase];
+      if (ringHarborForMap) {
+        for (const [tid, pts] of Object.entries(ringHarborForMap)) {
+          if (!positions[tid]) continue;
+          positions[tid] = { marker: pts.marker, unit: pts.unit };
+          centroids[tid] = pts.marker;
+        }
       }
 
       return { centroids, positions };
@@ -1507,7 +1613,7 @@ function GameMap({
       clearTimeout(timer1);
       if (timer2 != null) clearTimeout(timer2);
     };
-  }, [svgPaths, svgHintAnchors]);
+  }, [svgPaths, svgHintAnchors, SVG_VIEWBOX.width, SVG_VIEWBOX.height, mapBase]);
 
   // Compute move arrows to render - only for current phase moves
   const moveArrows = useMemo(() => {
@@ -3017,7 +3123,7 @@ function GameMap({
   const handleBackgroundClick = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     const isBackground = target.classList?.contains('map-wrapper') ||
-      target.classList?.contains('map-art-on-top') ||
+      target.classList?.contains('map-raster-fallback-img') ||
       target.classList?.contains('map-inner') ||
       target.classList?.contains('map-svg');
     if (!isBackground) return;
@@ -3554,6 +3660,35 @@ function GameMap({
                           <polygon points="0,0 5,2.5 0,5" fill="#2e7d32" />
                         </marker>
                       </defs>
+                      {/* Raster lives inside this SVG (after territory paths) so paint order is correct in Chrome/WebKit. HTML <img> as a sibling of <svg> can composite under filtered paths on sea-heavy crops (e.g. MotW) — there is no separate WOTR-only stacking path; WOTR just tripped the bug less often. */}
+                      {pngFailedForMap !== mapBase && (
+                        <image
+                          key={`map-decor-${mapBase}`}
+                          className="map-svg-decor-image"
+                          href={`/${mapBase}.png?v=1`}
+                          x={0}
+                          y={0}
+                          width={SVG_VIEWBOX.width}
+                          height={SVG_VIEWBOX.height}
+                          preserveAspectRatio="none"
+                          pointerEvents="none"
+                          onError={handleBgImageError}
+                        />
+                      )}
+                      {!mapOverlayRasterHidden && pngFailedForMap !== mapBase && (
+                        <image
+                          key={`map-overlay-${mapBase}`}
+                          className="map-svg-overlay-image"
+                          href={`/${mapBase}_overlay.png?v=1`}
+                          x={0}
+                          y={0}
+                          width={SVG_VIEWBOX.width}
+                          height={SVG_VIEWBOX.height}
+                          preserveAspectRatio="none"
+                          pointerEvents="none"
+                          onError={() => setMapOverlayRasterHidden(true)}
+                        />
+                      )}
                       {moveArrows.map((arrow, idx) => arrow && (
                         <g key={`arrow-${idx}`}>
                           <line
@@ -3585,38 +3720,23 @@ function GameMap({
                       ))}
                     </svg>
 
-                    {/* Map art PNG on top of territory colors so artwork (mountains, labels, etc.) is in front. Use a PNG with white/background areas made transparent so territory fill shows through; pointer-events: none so clicks hit the SVG. */}
-                    <img
-                      key={mapBase}
-                      className="map-art-on-top"
-                      src={`${imageUrl}?v=1`}
-                      alt=""
-                      aria-hidden
-                      draggable={false}
-                      onError={handleBgImageError}
-                      style={{
-                        width: IMG_DIMENSIONS.width,
-                        height: IMG_DIMENSIONS.height,
-                        objectFit: 'fill',
-                        display: 'block',
-                      }}
-                    />
-
-                    {/* Optional overlay: details (mountains, bridges, etc.) on top of territory colors; pointer-events: none so clicks hit the SVG below */}
-                    <img
-                      key={`${mapBase}-overlay`}
-                      className="map-overlay"
-                      src={`/${mapBase}_overlay.png`}
-                      alt=""
-                      aria-hidden
-                      draggable={false}
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                      style={{
-                        width: IMG_DIMENSIONS.width,
-                        height: IMG_DIMENSIONS.height,
-                        objectFit: 'fill',
-                      }}
-                    />
+                    {/* If the PNG fails, show the full-map SVG as a flat HTML layer (rare); normal path uses <image> inside the interactive SVG above. */}
+                    {pngFailedForMap === mapBase && (
+                      <img
+                        key={`${mapBase}-svg-fallback`}
+                        className="map-raster-fallback-img"
+                        src={imageUrl}
+                        alt=""
+                        aria-hidden
+                        draggable={false}
+                        style={{
+                          width: IMG_DIMENSIONS.width,
+                          height: IMG_DIMENSIONS.height,
+                          objectFit: 'fill',
+                          display: 'block',
+                        }}
+                      />
+                    )}
 
                     {/* Territory markers (camps, strongholds) and power production badges). Requires territory in game state (e.g. create new game for east/west Osgiliath if missing). */}
                     <div className="territory-markers-layer">
@@ -3650,7 +3770,8 @@ function GameMap({
                         const showTerrainMountain = terrainType === 'mountains';
                         const showTerrainForest = terrainType === 'forest';
                         const showTerrainIcon = showTerrainMountain || showTerrainForest;
-                        const ringHarborFlatMarkers = RING_HARBOR_STACK_POSITIONS_SVG[territoryId] !== undefined;
+                        const ringHarborFlatMarkers =
+                          RING_HARBOR_RING_LAYOUT_TERRITORY_IDS.has(territoryId) && !isSeaZone;
                         // Inline row when we have power and any of camp/port/home/terrain (no stronghold) — keeps power beside markers, no overlap
                         const powerAndMarkersInline = showPower && (showCamp || hasPort || hasHome || showTerrainIcon) && !showStronghold;
                         if (!showCamp && !showStronghold && !showPower && !hasPort && !hasHome && !(isSeaZone && seaZoneNum) && !showTerrainIcon) return null;
@@ -3658,7 +3779,8 @@ function GameMap({
                         const h = svgHintAnchors[territoryId];
                         const useSvgHintAnchors = !!(h?.number || h?.icons || h?.logo);
                         const hintScr = (p: { x: number; y: number }) => svgHintPointToOverlay(p);
-                        if (ringHarborFlatMarkers && !isSeaZone) {
+                        /* Ring-harbor chrome must not run when Inkscape hints place power/icons/logo — otherwise we return early and skip _number / _icons / _logo entirely. */
+                        if (ringHarborFlatMarkers && !useSvgHintAnchors) {
                           const ringHarborMidRow =
                             hasHome ||
                             (showCamp && !isCapital) ||

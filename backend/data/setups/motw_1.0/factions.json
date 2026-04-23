@@ -1,0 +1,65 @@
+{
+  "mordor": {
+    "id": "mordor",
+    "display_name": "Mordor",
+    "alliance": "evil",
+    "capital": "barad_dur",
+    "color": "#8b2500",
+    "icon": "mordor.png",
+    "music": [
+      "mordor.m4a"
+    ]
+  },
+  "isengard": {
+    "id": "isengard",
+    "display_name": "Isengard",
+    "alliance": "evil",
+    "capital": "isengard",
+    "color": "#2a2a2a",
+    "icon": "isengard.png",
+    "music": [
+      "isengard.m4a"
+    ]
+  },
+  "gondor": {
+    "id": "gondor",
+    "display_name": "Gondor",
+    "alliance": "good",
+    "capital": "minas_tirith",
+    "color": "#265399",
+    "icon": "gondor.png",
+    "music": [
+      "gondor.m4a"
+    ]
+  },
+  "rohan": {
+    "id": "rohan",
+    "display_name": "Rohan",
+    "alliance": "good",
+    "capital": "edoras",
+    "color": "#c9a227",
+    "icon": "rohan.png",
+    "music": [
+      "rohan.m4a"
+    ]
+  },
+  "harad": {
+    "id": "harad",
+    "display_name": "Harad",
+    "alliance": "evil",
+    "capital": "haradwaith",
+    "color": "#b85a22",
+    "icon": "harad.png",
+    "music": [
+      "ring.m4a"
+    ]
+  },
+  "neutral": {
+    "id": "neutral",
+    "display_name": "Neutral",
+    "alliance": "neutral",
+    "capital": "",
+    "color": "#888888",
+    "icon": "neutral.png"
+  }
+}

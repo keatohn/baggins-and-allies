@@ -169,6 +169,17 @@ function formatEventLogEntryLine(
   gameState: GameState,
   factionData: Record<string, { name: string }>,
 ): string {
+  if (event.type === 'victory') {
+    const m = (event.message || '').trim();
+    if (/^game over:/i.test(m)) return m;
+    const w =
+      typeof event.payload?.winner === 'string' ? event.payload.winner.trim() : '';
+    if (w) {
+      const label = w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+      return `Game over: ${label} alliance wins!`;
+    }
+    return m || 'Game over';
+  }
   const p = event.payload;
   const factionId =
     typeof p?.faction === 'string' && p.faction.trim()

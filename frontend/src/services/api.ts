@@ -756,12 +756,24 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
-  adminCreateSetup: (body: { id: string; duplicate_from?: string | null }) =>
+  adminCreateSetup: (body: {
+    id: string;
+    duplicate_from?: string | null;
+    /** Master JSON: same keys as setup files (manifest, units, …). Mutually exclusive with duplicate_from. */
+    bundle?: AdminSetupSavePayload | null;
+    /** Raw pasted JSON string; preferred for import so the server parses once (avoids nested encoding issues). */
+    bundle_json?: string | null;
+  }) =>
     fetchJson<{ ok: boolean; id: string }>('/admin/setups', {
       method: 'POST',
       body: JSON.stringify({
         id: body.id.trim(),
         duplicate_from: body.duplicate_from?.trim() || null,
+        ...(body.bundle_json != null && body.bundle_json !== ''
+          ? { bundle_json: body.bundle_json }
+          : body.bundle != null
+            ? { bundle: body.bundle }
+            : {}),
       }),
     }),
   adminDeleteSetup: (setupId: string) =>
