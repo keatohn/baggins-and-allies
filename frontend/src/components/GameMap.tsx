@@ -1823,7 +1823,7 @@ function GameMap({
       return _unitStats[unitId]?.movement ?? 0;
     };
 
-    if ((gameState.phase === 'combat_move' || gameState.phase === 'non_combat_move') && navalUnitIds?.has(unitId) && validTargets.size > 0) {
+    if ((gameState.phase === 'combat_move' || gameState.phase === 'non_combat_move') && navalUnitIds?.has(unitId)) {
       const isSeaT = (tid: string) => territoryData[tid]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid);
       const emptySeaNaval = navalDragSeaNoPassengers(
         fromTerritory,
@@ -1851,9 +1851,22 @@ function GameMap({
           territoryData,
         );
         if (onBoat + pendingPax > 0) {
-          const seaZoneIds = [...validTargets].filter(isSeaT);
-          for (const sz of seaZoneIds) {
-            for (const adjId of territoryData[sz]?.adjacent || []) {
+          // Offload/raid land must be adjacent to a sea zone where the fleet can sit. Backend may omit
+          // sea hexes from `availableMoveTargets` during non_combat_move (e.g. no "sail" destinations),
+          // so always include the sea hex being dragged from — not only seas that appear in validTargets.
+          const seaZonesForLandAdj = new Set<string>();
+          for (const tid of validTargets) {
+            if (isSeaT(tid)) seaZonesForLandAdj.add(tid);
+          }
+          if (isSeaT(fromTerritory)) {
+            seaZonesForLandAdj.add(fromTerritory);
+            const fc = canonicalSeaZoneId(fromTerritory);
+            if (fc !== fromTerritory) seaZonesForLandAdj.add(fc);
+          }
+          const tdAdj = territoryData as Record<string, { adjacent?: string[] } | undefined>;
+          for (const sz of seaZonesForLandAdj) {
+            const gk = resolveTerritoryGraphKey(sz, tdAdj);
+            for (const adjId of tdAdj[gk]?.adjacent ?? tdAdj[sz]?.adjacent ?? []) {
               if (!territoryData[adjId] || isSeaT(adjId)) continue;
               if (
                 gameState.phase === 'non_combat_move' &&
