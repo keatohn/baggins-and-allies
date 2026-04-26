@@ -848,8 +848,6 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
 
 
   // Track if actions have been performed this phase (for confirmation dialogs)
-  const [hasCombatMovedThisPhase, setHasCombatMovedThisPhase] = useState(false);
-  const [hasNonCombatMovedThisPhase, setHasNonCombatMovedThisPhase] = useState(false);
   const [battlesCompletedThisPhase, setBattlesCompletedThisPhase] = useState(0);
   /** Snapshot of how many combat moves were declared when we left combat_move (so we can tell "no battles" vs "all uncontested" in combat). */
   const [combatMovesDeclaredThisPhase, setCombatMovesDeclaredThisPhase] = useState(0);
@@ -1609,16 +1607,6 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
 
     const currentPhase = backendState.phase;
 
-    // Clear combat move tracking when leaving combat_move phase
-    if (currentPhase !== 'combat_move') {
-      setHasCombatMovedThisPhase(false);
-    }
-
-    // Clear non-combat move tracking when leaving non_combat_move phase
-    if (currentPhase !== 'non_combat_move') {
-      setHasNonCombatMovedThisPhase(false);
-    }
-
     // Clear combat tracking when leaving combat phase
     if (currentPhase !== 'combat') {
       setBattlesCompletedThisPhase(0);
@@ -2303,10 +2291,29 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       .join(', ');
     const campText =
       pendingCampCount > 0 ? (pendingCampCount === 1 ? '1 Camp' : `${pendingCampCount} Camps`) : '';
-    const segments = [unitText, campText].filter(Boolean);
+    const repairText =
+      purchaseDraftActive && purchaseDraftRepairs.length > 0
+        ? purchaseDraftRepairs
+            .map((r) => {
+              const territoryName = currentTerritoryData[r.territory_id]?.name ?? r.territory_id;
+              const hp = Math.max(0, r.hp_to_add ?? 0);
+              return `Made ${hp} stronghold repair${hp === 1 ? '' : 's'} in ${territoryName}`;
+            })
+            .join(', ')
+        : '';
+    const segments = [unitText, campText, repairText].filter(Boolean);
     if (segments.length === 0) return null;
     return `Purchasing ${segments.join(', ')}`;
-  }, [hasPurchaseCart, pendingPurchasedUnits, pendingCampCount, definitions?.units, unitDefs]);
+  }, [
+    hasPurchaseCart,
+    pendingPurchasedUnits,
+    pendingCampCount,
+    purchaseDraftActive,
+    purchaseDraftRepairs,
+    currentTerritoryData,
+    definitions?.units,
+    unitDefs,
+  ]);
 
   const aerialMustMove = availableActions?.aerial_units_must_move ?? [];
 
@@ -2358,6 +2365,11 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   }, [GAME_ID, purchaseDraftUnits, purchaseDraftCamps, purchaseDraftRepairs, addBackendEvents]);
 
   const handleEndPhase = useCallback(async () => {
+    const pendingCombatMovesCount =
+      (backendState?.pending_moves ?? []).filter((m) => m.phase === 'combat_move').length;
+    const pendingNonCombatMovesCount =
+      (backendState?.pending_moves ?? []).filter((m) => m.phase === 'non_combat_move').length;
+
     if (gameState.phase === 'purchase' && !pendingEndPhaseConfirm) {
       if (!hasPurchaseCart) {
         setPendingEndPhaseConfirm('purchase');
@@ -2365,12 +2377,12 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       }
     }
 
-    if (gameState.phase === 'combat_move' && !hasCombatMovedThisPhase && !pendingEndPhaseConfirm) {
+    if (gameState.phase === 'combat_move' && pendingCombatMovesCount === 0 && !pendingEndPhaseConfirm) {
       setPendingEndPhaseConfirm('combat_move');
       return;
     }
 
-    if (gameState.phase === 'non_combat_move' && !hasNonCombatMovedThisPhase && !pendingEndPhaseConfirm) {
+    if (gameState.phase === 'non_combat_move' && pendingNonCombatMovesCount === 0 && !pendingEndPhaseConfirm) {
       setPendingEndPhaseConfirm('non_combat_move');
       return;
     }
@@ -2405,8 +2417,6 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       // Refetch full state so pending_camps and faction_purchased_units are authoritative (avoids stuck mobilization)
       await refreshState();
 
-      setHasCombatMovedThisPhase(false);
-      setHasNonCombatMovedThisPhase(false);
       setBattlesCompletedThisPhase(0);
 
       setSelectedTerritory(null);
@@ -2416,7 +2426,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       // Refetch so we sync pending_camps / units; may unstick mobilization if state was missing camps
       await refreshState();
     }
-  }, [gameState.phase, gameState.declared_battles, hasPurchaseCart, hasCombatMovedThisPhase, hasNonCombatMovedThisPhase, pendingEndPhaseConfirm, mobilizablePurchases, aerialMustMove, addLogEntry, addBackendEvents, refreshState, commitPurchaseDraftToServer, GAME_ID]);
+  }, [backendState?.pending_moves, gameState.phase, gameState.declared_battles, hasPurchaseCart, pendingEndPhaseConfirm, mobilizablePurchases, aerialMustMove, addLogEntry, addBackendEvents, refreshState, commitPurchaseDraftToServer, GAME_ID]);
 
   const handleConfirmEndPhase = useCallback(() => {
     setPendingEndPhaseConfirm(null);
@@ -2692,8 +2702,6 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           setBackendState(result.state);
           if (result.can_act !== undefined) setCanAct(result.can_act);
           if (result.events) addBackendEvents(result.events);
-          if (gameState.phase === 'combat_move') setHasCombatMovedThisPhase(true);
-          else if (gameState.phase === 'non_combat_move') setHasNonCombatMovedThisPhase(true);
           setPendingMoveConfirm(null);
           setSelectedUnit(null);
           const actionsRes = await api.getAvailableActions(GAME_ID);
@@ -2724,8 +2732,6 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           if (result.can_act !== undefined) setCanAct(result.can_act);
           if (result.events) addBackendEvents(result.events);
         }
-        if (gameState.phase === 'combat_move') setHasCombatMovedThisPhase(true);
-        else if (gameState.phase === 'non_combat_move') setHasNonCombatMovedThisPhase(true);
         loadAllocationRef.current = null;
         setPendingMoveConfirm(null);
         setSelectedUnit(null);
@@ -2748,6 +2754,22 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         definitions?.units,
         availableActions?.forced_naval_combat_instance_ids,
       );
+      // Sea→land direct (no intermediate sail in this request): server requires offload_sea_zone_id when
+      // multiple sea hexes border the land, or it returns need_offload_sea_choice — a second picker after
+      // the client already chose a zone. Always send the staging sea (chosen > single option > current).
+      const landRaidTargetOk =
+        valid(storedTo) &&
+        currentTerritoryData[storedTo]?.terrain !== 'sea' &&
+        !/^sea_zone_?\d+$/i.test(storedTo);
+      let offloadSeaZoneIdForRaid: string | undefined;
+      if ((isSeaRaid || isOffload) && landRaidTargetOk && destination === storedTo.trim()) {
+        const s = (
+          pendingMoveConfirm.chosenSeaZoneId?.trim() ||
+          singleSeaRaidZone ||
+          fromStr
+        ).trim();
+        offloadSeaZoneIdForRaid = s || undefined;
+      }
       const result = await api.move(
         String(GAME_ID),
         fromStr,
@@ -2755,7 +2777,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         unitInstanceIds,
         chargeThrough,
         loadOntoBoatId,
-        undefined,
+        offloadSeaZoneIdForRaid,
         avoidForcedMain,
       );
       if (result.need_offload_sea_choice && result.valid_offload_sea_zones?.length) {
@@ -2772,8 +2794,6 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         setBackendState(result.state);
         if (result.can_act !== undefined) setCanAct(result.can_act);
         if (result.events) addBackendEvents(result.events);
-        if (gameState.phase === 'combat_move') setHasCombatMovedThisPhase(true);
-        else if (gameState.phase === 'non_combat_move') setHasNonCombatMovedThisPhase(true);
         setPendingMoveConfirm(null);
         setSelectedUnit(null);
         const actionsRes = await api.getAvailableActions(GAME_ID);
@@ -2856,8 +2876,6 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         setBackendState(res.state);
         if (res.can_act !== undefined) setCanAct(res.can_act);
         if (res.events?.length) addBackendEvents(res.events);
-        if (gameState.phase === 'combat_move') setHasCombatMovedThisPhase(true);
-        else if (gameState.phase === 'non_combat_move') setHasNonCombatMovedThisPhase(true);
       } catch (err) {
         addLogEntry(err instanceof Error ? err.message : 'Bulk move failed', 'error');
         break;
@@ -2908,8 +2926,6 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       setBackendState(result.state);
       if (result.can_act !== undefined) setCanAct(result.can_act);
       if (result.events) addBackendEvents(result.events);
-      if (backendState?.phase === 'combat_move') setHasCombatMovedThisPhase(true);
-      else if (backendState?.phase === 'non_combat_move') setHasNonCombatMovedThisPhase(true);
       setPendingMoveConfirm(null);
       setSelectedUnit(null);
       const actionsRes = await api.getAvailableActions(GAME_ID);

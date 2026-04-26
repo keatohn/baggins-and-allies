@@ -16,9 +16,6 @@ import {
 import { isValidSetupId } from './admin/setupId';
 import './Admin.css';
 
-/** TEMP: remove this strip + constant after prod MOTW ford fix is applied. */
-const TEMP_FORD_PATCH_GAME_ID = 'f82a2ac6-8e66-45de-9d87-d9b35ca35c6a';
-
 const TAB_KEYS = [
   'manifest',
   'units',
@@ -284,9 +281,6 @@ export default function Admin() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [fordPatchBusy, setFordPatchBusy] = useState(false);
-  const [fordPatchErr, setFordPatchErr] = useState<string | null>(null);
-  const [fordPatchOk, setFordPatchOk] = useState<string | null>(null);
 
   const useJson = jsonTab[activeTab] === true;
 
@@ -392,51 +386,6 @@ export default function Admin() {
     setDeleteConfirmText('');
     setDeleteError(null);
     setDeleting(false);
-  };
-
-  const onFordPatchPreview = async () => {
-    setFordPatchErr(null);
-    setFordPatchOk(null);
-    setFordPatchBusy(true);
-    try {
-      const r = await api.adminPatchFordAdjacentPair(TEMP_FORD_PATCH_GAME_ID, {
-        territory_a: 'pelennor',
-        territory_b: 'south_ithilien',
-        apply: false,
-      });
-      setFordPatchOk(
-        `Preview: would_change=${String(r.would_change)} ford_adjacent=${JSON.stringify(r.ford_adjacent ?? {})}`,
-      );
-    } catch (e) {
-      setFordPatchErr(e instanceof Error ? e.message : 'Preview failed');
-    } finally {
-      setFordPatchBusy(false);
-    }
-  };
-
-  const onFordPatchApply = async () => {
-    if (
-      !window.confirm(
-        'Write pelennor ↔ south_ithilien ford_adjacent to this game config on the server?',
-      )
-    ) {
-      return;
-    }
-    setFordPatchErr(null);
-    setFordPatchOk(null);
-    setFordPatchBusy(true);
-    try {
-      const r = await api.adminPatchFordAdjacentPair(TEMP_FORD_PATCH_GAME_ID, {
-        territory_a: 'pelennor',
-        territory_b: 'south_ithilien',
-        apply: true,
-      });
-      setFordPatchOk(`Applied: changed=${String(r.changed)} ford_adjacent=${JSON.stringify(r.ford_adjacent ?? {})}`);
-    } catch (e) {
-      setFordPatchErr(e instanceof Error ? e.message : 'Apply failed');
-    } finally {
-      setFordPatchBusy(false);
-    }
   };
 
   const confirmDeleteSetup = async () => {
@@ -563,42 +512,6 @@ export default function Admin() {
         <Link to="/" className="page-menu-btn">
           Menu
         </Link>
-      </div>
-
-      <div
-        className="admin-page__toolbar admin-page__toolbar--wrap"
-        style={{
-          border: '1px dashed rgba(255, 200, 120, 0.45)',
-          borderRadius: 6,
-          padding: '0.5rem 0.75rem',
-          marginBottom: '0.35rem',
-        }}
-      >
-        <span className="admin-form__micro" style={{ flex: '1 1 100%' }}>
-          TEMP: ford pair on game <code>{TEMP_FORD_PATCH_GAME_ID}</code> — remove this block from{' '}
-          <code>Admin.tsx</code> when done.
-        </span>
-        <button type="button" className="admin-page__btn" disabled={fordPatchBusy} onClick={onFordPatchPreview}>
-          Preview ford patch
-        </button>
-        <button
-          type="button"
-          className="admin-page__btn admin-page__btn--primary"
-          disabled={fordPatchBusy}
-          onClick={onFordPatchApply}
-        >
-          Apply ford patch
-        </button>
-        {fordPatchErr ? (
-          <span className="admin-page__error" style={{ flex: '1 1 100%' }}>
-            {fordPatchErr}
-          </span>
-        ) : null}
-        {fordPatchOk ? (
-          <span className="admin-page__success" style={{ flex: '1 1 100%', wordBreak: 'break-word' }}>
-            {fordPatchOk}
-          </span>
-        ) : null}
       </div>
 
       <div className="admin-page__toolbar admin-page__toolbar--wrap">

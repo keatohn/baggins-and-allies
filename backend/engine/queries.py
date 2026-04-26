@@ -313,6 +313,25 @@ def participates_in_sea_hex_naval_combat(unit, unit_def: UnitDefinition | None) 
     return is_aerial_unit(unit_def)
 
 
+def _land_combat_unit_side_for_queries(
+    unit: Unit,
+    attacker_faction: str,
+    attacker_alliance: str | None,
+    unit_defs: dict[str, UnitDefinition],
+    faction_defs: dict[str, FactionDefinition],
+) -> str | None:
+    """Mirror reducer._land_combat_unit_side for initiate_combat validation."""
+    uo = get_unit_faction(unit, unit_defs)
+    if uo is None:
+        return None
+    if uo == attacker_faction:
+        return "attacker"
+    ua = getattr(faction_defs.get(uo), "alliance", None)
+    if ua != attacker_alliance:
+        return "defender"
+    return None
+
+
 def validate_move_as_sea_offload_if_applicable(
     state: GameState,
     origin: str,
@@ -1008,21 +1027,25 @@ def _validate_initiate_combat(
             land_adj = getattr(territory_def, "adjacent", []) or []
             if territory_id not in sea_adj and sea_zone_id not in land_adj:
                 return ValidationResult(False, f"Territory {territory_id} is not adjacent to sea zone {sea_zone_id}")
-        # Sea raid: land units attack (from sea before offload, or on land after combat_move apply).
-        # Must match _handle_initiate_combat: try sea first, then land territory.
-        attacker_units = [
-            u for u in sea_zone.units
-            if get_unit_faction(u, unit_defs) == attacker_faction
-            and is_land_unit(unit_defs.get(u.unit_id))
-            and not _is_naval_unit(unit_defs.get(u.unit_id))
-        ]
-        if not attacker_units:
-            attacker_units = [
-                u for u in territory.units
-                if get_unit_faction(u, unit_defs) == attacker_faction
-                and is_land_unit(unit_defs.get(u.unit_id))
-                and not _is_naval_unit(unit_defs.get(u.unit_id))
-            ]
+        # Sea raid land battle roster must match _handle_initiate_combat: fleet passengers in sea
+        # plus attacker-faction non-naval units on the land hex (e.g. aerial joining the same assault).
+        raid_attackers: dict[str, Unit] = {}
+        for u in sea_zone.units:
+            ud = unit_defs.get(u.unit_id)
+            if get_unit_faction(u, unit_defs) != attacker_faction:
+                continue
+            if not is_land_unit(ud) or _is_naval_unit(ud):
+                continue
+            raid_attackers[u.instance_id] = u
+        for u in territory.units:
+            if _is_naval_unit(unit_defs.get(u.unit_id)):
+                continue
+            if _land_combat_unit_side_for_queries(
+                u, attacker_faction, attacker_alliance, unit_defs, faction_defs
+            ) != "attacker":
+                continue
+            raid_attackers[u.instance_id] = u
+        attacker_units = list(raid_attackers.values())
         defender_units = [
             u for u in territory.units
             if get_unit_faction(u, unit_defs) is not None
@@ -1031,7 +1054,7 @@ def _validate_initiate_combat(
         if not attacker_units:
             return ValidationResult(
                 False,
-                f"No attacking land units in sea zone {sea_zone_id} or on territory {territory_id}",
+                f"No attacking units for sea raid in sea zone {sea_zone_id} or on territory {territory_id}",
             )
         # Allow empty defenders (conquer without battle)
         return ValidationResult(True)
@@ -1936,6 +1959,31 @@ def count_open_home_mobilization_slots_for_unit(
     return total
 
 
+def _faction_has_sea_raid_passengers_in_sea_zone(
+    sea_zone: TerritoryState | None,
+    faction_id: str,
+    unit_defs: dict[str, UnitDefinition],
+) -> bool:
+    """
+    True if this faction has land (non-naval) units in the sea hex — the same units the sea-raid land
+    roster pulls from the sea zone (see reducer._sea_raid_attacker_units_from_board). Boats alone do not count.
+
+    Used so we do not tag a land battle with sea_zone_id just because territory_sea_raid_from recorded an
+    offload from that sea (e.g. the enemy sea-raided onto this hex earlier); the current attacker must still
+    have passengers in that sea for a sea-raid-style initiate to be meaningful.
+    """
+    if not sea_zone:
+        return False
+    for u in sea_zone.units:
+        if get_unit_faction(u, unit_defs) != faction_id:
+            continue
+        ud = unit_defs.get(u.unit_id)
+        if not is_land_unit(ud) or _is_naval_unit(ud):
+            continue
+        return True
+    return False
+
+
 def get_contested_territories(
     state: GameState,
     faction_id: str,
@@ -1950,8 +1998,9 @@ def get_contested_territories(
     land territories use all units.
 
     Sea raid: after combat_move ends, passengers offload onto the land hex (same as combative offload).
-    Attackers are on that land territory; `sea_zone_id` on an entry (from `territory_sea_raid_from`) is only
-    for initiate_combat to know which sea zone held the fleet.
+    Attackers are on that land territory; `sea_zone_id` on an entry (from `territory_sea_raid_from`) tells
+    initiate_combat which sea held the attacking fleet — only included when this faction still has land
+    (non-naval) units in that sea so we never mis-label a pure land assault after an unrelated offload.
     """
     attacker_alliance = faction_defs.get(faction_id, FactionDefinition(
         "", "", "", "", "")).alliance
@@ -1989,8 +2038,13 @@ def get_contested_territories(
                 "defender_unit_ids": [u.instance_id for u in defender_units],
             }
             sea_raid_from = getattr(state, "territory_sea_raid_from", None) or {}
-            if territory_id in sea_raid_from:
-                entry["sea_zone_id"] = sea_raid_from[territory_id]
+            staged_sea = sea_raid_from.get(territory_id)
+            if staged_sea and _faction_has_sea_raid_passengers_in_sea_zone(
+                state.territories.get(staged_sea),
+                faction_id,
+                unit_defs,
+            ):
+                entry["sea_zone_id"] = staged_sea
             result.append(entry)
 
     return result

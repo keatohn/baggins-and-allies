@@ -781,22 +781,6 @@ export const api = {
       method: 'DELETE',
     }),
 
-  /** One-off: patch definitions ford_adjacent on a game config snapshot (admin only). */
-  adminPatchFordAdjacentPair: (
-    gameId: string,
-    body: { territory_a: string; territory_b: string; apply: boolean },
-  ) =>
-    fetchJson<{
-      ok: boolean;
-      apply: boolean;
-      changed?: boolean;
-      would_change?: boolean;
-      ford_adjacent?: Record<string, string[]>;
-    }>(`/admin/games/${encodeURIComponent(gameId)}/ford-adjacent-pair`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-
   // Games (create, list, join)
   getSetups: () =>
     fetchJson<{ setups: SetupInfo[] }>('/setups'),

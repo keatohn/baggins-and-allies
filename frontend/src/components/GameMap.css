@@ -651,6 +651,11 @@
 
 .territory-units--stacked:hover {
   gap: 4px;
+  z-index: 40;
+}
+
+.territory-units--stacked.territory-units--stack-expanded {
+  z-index: 40;
 }
 
 /* Keep wrapper z-index from nth-of-type rules above: left/front stays on top, right/back stays

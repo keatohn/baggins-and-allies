@@ -150,12 +150,38 @@ def get_siegework_attacker_rolling_units(
         if _is_bomb_carrier_unit(ud):
             if u.instance_id not in paired_bombs or not fuse_bomb:
                 continue
+            # Paired fused bomb rolls here vs stronghold HP; must not depend on archetype
+            # (some setups mis-typed bomb as non-siegework).
+            out.append(u)
+            continue
         if _is_siegework_unit(ud) and has_unit_special(ud, SIEGEWORK_SPECIAL_LADDER):
             continue
         if _is_siegework_unit(ud):
             out.append(u)
         elif has_unit_special(ud, SIEGEWORK_SPECIAL_RAM) and ram_ok:
             out.append(u)
+    return out
+
+
+def get_siegework_defender_rolling_units(
+    defender_units: list[Unit],
+    unit_defs: dict[str, UnitDefinition],
+) -> list[Unit]:
+    """
+    Defenders who roll dice in the dedicated siegeworks round: siegework except ladder and ram.
+    Ladders do not roll here; rams only roll when attacking stronghold walls (see get_siegework_attacker_rolling_units),
+    so a defending battering ram contributes no siegework dice.
+    """
+    out: list[Unit] = []
+    for u in defender_units:
+        ud = unit_defs.get(u.unit_id)
+        if not _is_siegework_unit(ud):
+            continue
+        if has_unit_special(ud, SIEGEWORK_SPECIAL_LADDER):
+            continue
+        if has_unit_special(ud, SIEGEWORK_SPECIAL_RAM):
+            continue
+        out.append(u)
     return out
 
 
@@ -169,7 +195,7 @@ def get_siegework_dice_counts(
     fuse_bomb: bool = True,
 ) -> tuple[int, int]:
     """Return (attacker_siegework_round_dice, defender_siegework_dice).
-    Ladder and ram when walls gone / non-stronghold excluded.
+    Ladder and ram when walls gone / non-stronghold excluded on attack; defending rams do not roll.
     When both are 0, there is no dedicated siegework *dice* round (e.g. siege ladders alone)."""
     rolling = get_siegework_attacker_rolling_units(
         attacker_units, unit_defs, defender_territory_is_stronghold,
@@ -178,15 +204,10 @@ def get_siegework_dice_counts(
     )
     att = sum(getattr(unit_defs.get(u.unit_id), "dice", 1) for u in rolling)
 
-    def def_dice(units: list[Unit]) -> int:
-        return sum(
-            getattr(unit_defs.get(u.unit_id), "dice", 1)
-            for u in units
-            if _is_siegework_unit(unit_defs.get(u.unit_id))
-            and not has_unit_special(unit_defs.get(u.unit_id), SIEGEWORK_SPECIAL_LADDER)
-        )
+    def_rolling = get_siegework_defender_rolling_units(defender_units, unit_defs)
+    d = sum(getattr(unit_defs.get(u.unit_id), "dice", 1) for u in def_rolling)
 
-    return att, def_dice(defender_units)
+    return att, d
 
 
 def siegework_dice_round_applies(
@@ -448,10 +469,9 @@ def compute_sea_raider_stat_modifiers(
     """
     Sea Raider special: attackers with the sea_raider special get +bonus attack when
     they are fighting as part of a sea raid — i.e. passengers who came ashore from
-    ships. The battle itself is still normal land combat (land units roll; boats are
-    not attacking units in that fight). In the live game, sea_zone_id on the combat
-    marks that staging; in the sim, the caller passes is_sea_raid=True to model the
-    same bonus. Does not imply naval combat rules or naval casualty targeting.
+    ships.
+    The battle itself is still normal land combat (land units roll; boats are
+    not attacking units in that fight). Does not imply naval combat rules or naval casualty targeting.
     Returns (attacker_modifiers, defender_modifiers); defender_modifiers is always {}.
     """
     if not is_sea_raid or bonus == 0:
@@ -460,8 +480,9 @@ def compute_sea_raider_stat_modifiers(
     mods: dict[str, int] = {}
     for unit in attacker_units:
         unit_def = unit_defs.get(unit.unit_id)
-        if unit_def and has_unit_special(unit_def, "sea_raider"):
-            mods[unit.instance_id] = bonus
+        if not unit_def or not has_unit_special(unit_def, "sea_raider"):
+            continue
+        mods[unit.instance_id] = bonus
     return mods, {}
 
 
@@ -1207,9 +1228,9 @@ def get_siegework_round_defender_display_units(
     defender_units: list[Unit],
     unit_defs: dict[str, UnitDefinition],
 ) -> list[Unit]:
-    """Defenders shown during the dedicated siegeworks round: only siegework archetype units."""
+    """Defenders shown during the dedicated siegeworks round: only units that roll (excl. ladder, defending ram)."""
     return sorted(
-        [u for u in defender_units if _is_siegework_unit(unit_defs.get(u.unit_id))],
+        get_siegework_defender_rolling_units(defender_units, unit_defs),
         key=lambda u: u.instance_id,
     )
 
@@ -1492,8 +1513,7 @@ def resolve_siegeworks_round(
     """
     attacker_siegework = [
         u for u in attacker_units if _is_siegework_unit(unit_defs.get(u.unit_id))]
-    defender_siegework = [
-        u for u in defender_units if _is_siegework_unit(unit_defs.get(u.unit_id))]
+    defender_siegework_rolling = get_siegework_defender_rolling_units(defender_units, unit_defs)
     attacker_rolls = list(dice_rolls.get("attacker", []))
     defender_rolls = dice_rolls.get("defender", [])
 
@@ -1558,9 +1578,9 @@ def resolve_siegeworks_round(
         normal_to_stronghold + hits_to_defender_units  # for RoundResult
 
     defender_hits = _count_hits(
-        defender_siegework, defender_rolls, unit_defs, is_attacker=False,
+        defender_siegework_rolling, defender_rolls, unit_defs, is_attacker=False,
         stat_modifiers=stat_modifiers_defender,
-    ) if defender_siegework else 0
+    ) if defender_siegework_rolling else 0
 
     attacker_casualties, attacker_wounded = _apply_hits(
         attacker_units, defender_hits, unit_defs, is_attacker=True,

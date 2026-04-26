@@ -1,5 +1,8 @@
 """Tests for the combat specials engine (single source of truth for terror, captain, bombikazi, etc.)."""
+from dataclasses import replace
+
 import pytest
+from backend.engine.combat import get_siegework_dice_counts, siegework_dice_round_applies
 from backend.engine.definitions import load_static_definitions
 from backend.engine.state import Unit
 from backend.engine.combat_specials import (
@@ -261,3 +264,85 @@ def test_stacks_to_synthetic_units():
     assert def_[0].unit_id == "c"
     assert all(u.instance_id.startswith("att_") for u in att)
     assert all(u.instance_id.startswith("def_") for u in def_)
+
+
+def test_paired_bomb_siegework_dice_when_bomb_not_siegework_archetype():
+    """
+    Regression: paired bombikazi + bomb must count attacker siegework dice even if the bomb
+    unit_def archetype is wrong (e.g. legacy MOTW typed as archer). Otherwise no siegeworks
+    round runs and bombikazi rolls in standard combat.
+    """
+    unit_defs, *_ = load_static_definitions(setup_id="motw_1.0")
+    if "bomb" not in unit_defs or "berserker" not in unit_defs:
+        pytest.skip("motw_1.0 needs bomb and berserker")
+    ud = dict(unit_defs)
+    ud["bomb"] = replace(unit_defs["bomb"], archetype="archer")
+    att_units, def_units = stacks_to_synthetic_units(
+        [
+            {"unit_id": "berserker", "count": 1},
+            {"unit_id": "bomb", "count": 1},
+        ],
+        [{"unit_id": "gondor_soldier", "count": 1}],
+    )
+    att_dice, _def_dice = get_siegework_dice_counts(
+        att_units,
+        def_units,
+        ud,
+        defender_territory_is_stronghold=True,
+        defender_stronghold_hp=4,
+        fuse_bomb=True,
+    )
+    assert att_dice == unit_defs["bomb"].dice
+
+
+def test_defending_battering_ram_no_siegework_defender_dice(defs):
+    """Defending ram is siegework but does not roll in the siegeworks round (walls are attacked, not defended)."""
+    unit_defs, territory_defs = defs
+    if "battering_ram" not in unit_defs or "gondor_soldier" not in unit_defs:
+        pytest.skip("need battering_ram and gondor_soldier")
+    minas = territory_defs.get("minas_tirith")
+    if not minas or not getattr(minas, "is_stronghold", False):
+        pytest.skip("need stronghold territory id minas_tirith")
+    att_units, def_units = stacks_to_synthetic_units(
+        [{"unit_id": "gondor_soldier", "count": 1}],
+        [{"unit_id": "battering_ram", "count": 1}],
+    )
+    att_d, def_d = get_siegework_dice_counts(
+        att_units,
+        def_units,
+        unit_defs,
+        defender_territory_is_stronghold=True,
+        defender_stronghold_hp=4,
+    )
+    assert att_d == 0
+    assert def_d == 0
+    applies, _, _ = siegework_dice_round_applies(
+        att_units,
+        def_units,
+        unit_defs,
+        defender_territory_is_stronghold=True,
+        defender_stronghold_hp=4,
+    )
+    assert applies is False
+
+
+def test_attacker_catapult_defender_ram_still_has_attacker_siegework_dice(defs):
+    """Attacker siegework rolls vs stronghold; defender ram still contributes 0 defender dice."""
+    unit_defs, territory_defs = defs
+    if "battering_ram" not in unit_defs or "catapult" not in unit_defs:
+        pytest.skip("need battering_ram and catapult")
+    if "minas_tirith" not in territory_defs:
+        pytest.skip("need minas_tirith")
+    att_units, def_units = stacks_to_synthetic_units(
+        [{"unit_id": "catapult", "count": 1}],
+        [{"unit_id": "battering_ram", "count": 1}],
+    )
+    att_d, def_d = get_siegework_dice_counts(
+        att_units,
+        def_units,
+        unit_defs,
+        defender_territory_is_stronghold=True,
+        defender_stronghold_hp=4,
+    )
+    assert att_d == unit_defs["catapult"].dice
+    assert def_d == 0

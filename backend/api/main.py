@@ -24,11 +24,6 @@ from sqlalchemy.orm import Session
 
 from .database import get_db, get_db_file_path, init_db, SessionLocal
 from .models import Game as GameModel, Player
-from .game_config_ford_patch import (
-    dump_config_for_storage,
-    patch_ford_adjacent_pair_in_config,
-    preview_ford_adjacent_pair,
-)
 from .auth import (
     create_access_token,
     get_current_player,
@@ -70,6 +65,7 @@ from backend.engine.combat import (
     get_terror_reroll_targets,
     get_siegework_dice_counts,
     get_siegework_attacker_rolling_units,
+    get_siegework_defender_rolling_units,
     get_siegework_round_attacker_display_units,
     get_siegework_round_defender_display_units,
     group_dice_by_stat,
@@ -875,6 +871,7 @@ def _sort_attackers_for_ladder_dice_if_needed(
     ladder_ids = set(getattr(combat, "ladder_infantry_instance_ids", []) or [])
     if not ladder_ids:
         return
+    sz_id = getattr(combat, "sea_zone_id", None)
     territory_def = td.get(combat.territory_id)
     terrain_att, terrain_def = compute_terrain_stat_modifiers(
         territory_def, attackers, defenders, ud
@@ -886,7 +883,7 @@ def _sort_attackers_for_ladder_dice_if_needed(
         attackers, defenders, ud
     )
     sea_raider_att, _ = compute_sea_raider_stat_modifiers(
-        attackers, ud, is_sea_raid=bool(getattr(combat, "sea_zone_id", None))
+        attackers, ud, is_sea_raid=bool(sz_id)
     )
     attacker_mods = merge_stat_modifiers(
         terrain_att, anticav_att, captain_att, sea_raider_att
@@ -1381,54 +1378,6 @@ def admin_delete_setup(
     except ValueError:
         raise HTTPException(status_code=404, detail="Setup not found")
     return {"ok": True, "id": setup_id}
-
-
-class AdminFordAdjacentPairBody(BaseModel):
-    territory_a: str
-    territory_b: str
-    """When false, only returns preview; no DB write."""
-    apply: bool = False
-
-
-@app.post("/admin/games/{game_id}/ford-adjacent-pair")
-def admin_patch_game_ford_adjacent_pair(
-    game_id: str,
-    body: AdminFordAdjacentPairBody,
-    _admin: Player = Depends(get_current_admin),
-    db: Session = Depends(get_db),
-):
-    """
-    Add reciprocal ford_adjacent on this game's config definitions snapshot only (not game_state).
-    Run with apply=false first to preview. Clears in-memory caches for this game when apply=true.
-    """
-    row = db.query(GameModel).filter(GameModel.id == game_id).first()
-    if not row:
-        raise HTTPException(status_code=404, detail="Game not found")
-    if not row.config:
-        raise HTTPException(status_code=400, detail="Game has no config snapshot")
-    try:
-        config = json.loads(row.config) if isinstance(row.config, str) else row.config
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid config JSON: {e}") from e
-    if not isinstance(config, dict):
-        raise HTTPException(status_code=400, detail="config must be a JSON object")
-    try:
-        preview = preview_ford_adjacent_pair(config, body.territory_a, body.territory_b)
-        would_change = patch_ford_adjacent_pair_in_config(
-            deepcopy(config), body.territory_a, body.territory_b
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    if not body.apply:
-        return {"ok": True, "apply": False, "would_change": would_change, **preview}
-    changed = patch_ford_adjacent_pair_in_config(config, body.territory_a, body.territory_b)
-    if not changed:
-        return {"ok": True, "apply": True, "changed": False, **preview}
-    row.config = dump_config_for_storage(config)
-    db.commit()
-    games.pop(game_id, None)
-    game_defs.pop(game_id, None)
-    return {"ok": True, "apply": True, "changed": True, **preview}
 
 
 @app.post("/games/create")
@@ -3286,7 +3235,7 @@ def _generate_initiate_combat_payload(
             attackers, ud, def_sh_battle, defender_stronghold_hp=def_sh_hp_battle,
             fuse_bomb=fuse_bomb,
         )
-        def_sw = [u for u in defenders if combat_is_siegework_unit(ud.get(u.unit_id))]
+        def_sw = get_siegework_defender_rolling_units(defenders, ud)
         dice_rolls = {
             "attacker": generate_dice_rolls_for_units(att_rolling, ud),
             "defender": generate_dice_rolls_for_units(def_sw, ud),
@@ -3501,7 +3450,7 @@ def do_continue_combat(
             attackers, ud, def_sh, defender_stronghold_hp=def_sh_hp_continue,
             fuse_bomb=fuse_cont,
         )
-        def_sw = [u for u in defenders if combat_is_siegework_unit(ud.get(u.unit_id))]
+        def_sw = get_siegework_defender_rolling_units(defenders, ud)
         dice_rolls = {
             "attacker": generate_dice_rolls_for_units(att_rolling, ud),
             "defender": generate_dice_rolls_for_units(def_sw, ud),
@@ -3927,7 +3876,7 @@ def _generate_dice_rolls_for_active_combat(state, ud, td) -> dict:
             attackers, ud, def_sh, defender_stronghold_hp=def_sh_hp_en,
             fuse_bomb=fuse_roll,
         )
-        def_sw = [u for u in defenders if combat_is_siegework_unit(ud.get(u.unit_id))]
+        def_sw = get_siegework_defender_rolling_units(defenders, ud)
         return {
             "attacker": generate_dice_rolls_for_units(att_rolling, ud),
             "defender": generate_dice_rolls_for_units(def_sw, ud),

@@ -1,9 +1,47 @@
 import { useState, useMemo } from 'react';
-import type { GameState, GamePhase, GameEvent, DeclaredBattle } from '../types/game';
+import type { GameState, GamePhase, GameEvent, DeclaredBattle, PendingMove } from '../types/game';
 import { mergeGroupedEventLogForDisplay } from '../utils/eventLogDisplay';
+import { compareUnitStacksByMapOrder } from '../utils/unitStackSort';
 import type { PendingMoveConfirm } from './GameMap';
 import type { BulkMoveConfirmState, PendingMobilization, BulkMobilizeConfirmState } from '../App';
 import './Sidebar.css';
+
+type UnitDefsSidebar = Record<string, {
+  archetype?: string;
+  tags?: string[];
+} | undefined>;
+
+function isNavalUnitType(unitId: string, unitDefs: UnitDefsSidebar): boolean {
+  const d = unitDefs[unitId];
+  return d?.archetype === 'naval' || !!(d?.tags && d.tags.includes('naval'));
+}
+
+/**
+ * Sea raid / offload: pending move lists every instance (ship + passengers). Sidebar should show
+ * passenger count, not total instance count.
+ */
+function passengerCountForSeaToLandPendingMove(
+  move: PendingMove,
+  unitDefs: UnitDefsSidebar,
+  gameState: GameState,
+): number | null {
+  const ids = move.unit_instance_ids;
+  if (!ids?.length) return null;
+  const unitIdByInstance = new Map<string, string>();
+  for (const t of Object.values(gameState.territories)) {
+    for (const u of (t.units || []) as Array<{ instance_id?: string; unit_id?: string }>) {
+      if (!u.instance_id || !u.unit_id) continue;
+      unitIdByInstance.set(u.instance_id, u.unit_id);
+    }
+  }
+  let boats = 0;
+  for (const iid of ids) {
+    const uid = unitIdByInstance.get(iid);
+    if (uid && isNavalUnitType(uid, unitDefs)) boats += 1;
+  }
+  const pax = ids.length - boats;
+  return pax >= 0 ? pax : null;
+}
 
 interface SidebarProps {
   /** When false (e.g. not your turn in multiplayer), the Actions panel is hidden; territory select and event log still show. */
@@ -815,17 +853,25 @@ function Sidebar({
                         const fromSea = territoryData[move.from]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(move.from);
                         const toSea = territoryData[move.to]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(move.to);
                         const isSeaRaidMove = fromSea && !toSea;
+                        const paxOnlyCombat =
+                          isSeaRaidMove && move.move_type !== 'load'
+                            ? passengerCountForSeaToLandPendingMove(move, unitDefs, gameState)
+                            : null;
+                        const countShownCombat = paxOnlyCombat != null ? paxOnlyCombat : move.count;
                         const moveTypeLabel = plannedCombatMoveTypeLabel(move, territoryData, unitDefs);
                         return (
                           <div key={move.id} className="pending-move-item">
                             <span className="move-info">
-                              {unitDef?.name || move.unitType} ({move.count}) from {fromName}
+                              {unitDef?.name || move.unitType} ({countShownCombat}
+                              {paxOnlyCombat != null ? ' passengers' : ''}) from {fromName}
                               {moveTypeLabel && (
                                 <span
                                   className="move-type-label"
                                   title={
                                     isSeaRaidMove
-                                      ? 'Sea raid (sea unit attacking land)'
+                                      ? (paxOnlyCombat != null
+                                        ? `Sea raid: ${paxOnlyCombat} passenger(s) (ship not included in count)`
+                                        : 'Sea raid (sea unit attacking land)')
                                       : moveTypeLabel === 'Attack'
                                         ? 'Combat move into enemy naval hex'
                                         : `Move type: ${move.move_type ?? ''}`
@@ -874,15 +920,27 @@ function Sidebar({
                       {moves.map(move => {
                         const unitDef = unitDefs[move.unitType];
                         const fromName = territoryData[move.from]?.name || move.from;
+                        const fromSeaNcm = territoryData[move.from]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(move.from);
+                        const toSeaNcm = territoryData[move.to]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(move.to);
+                        const isOffloadPending = fromSeaNcm && !toSeaNcm && move.move_type !== 'load';
+                        const paxOnlyNcm = isOffloadPending
+                          ? passengerCountForSeaToLandPendingMove(move, unitDefs, gameState)
+                          : null;
+                        const countShownNcm = paxOnlyNcm != null ? paxOnlyNcm : move.count;
                         const ncmTypeLabel = plannedNonCombatMoveTypeLabel(move, territoryData, unitDefs);
                         return (
                           <div key={move.id} className="pending-move-item">
                             <span className="move-info">
-                              {unitDef?.name || move.unitType} ({move.count}) from {fromName}
+                              {unitDef?.name || move.unitType} ({countShownNcm}
+                              {paxOnlyNcm != null ? ' passengers' : ''}) from {fromName}
                               {ncmTypeLabel && (
                                 <span
                                   className="move-type-label"
-                                  title={`Move type: ${move.move_type ?? ''}`}
+                                  title={
+                                    paxOnlyNcm != null
+                                      ? `Offload: ${paxOnlyNcm} passenger(s) (ship not included). Move type: ${move.move_type ?? ''}`
+                                      : `Move type: ${move.move_type ?? ''}`
+                                  }
                                 >
                                   {' '}
                                   — {ncmTypeLabel}
@@ -1213,11 +1271,8 @@ function Sidebar({
               <div className="territory-units-list">
                 {[...territoryUnitStacksWithMovement]
                   .sort((a, b) => {
-                    if (b.count !== a.count) return b.count - a.count;
-                    const costA = unitDefs[a.unit_id]?.cost ?? 0;
-                    const costB = unitDefs[b.unit_id]?.cost ?? 0;
-                    if (costB !== costA) return costB - costA;
-                    if (a.unit_id !== b.unit_id) return a.unit_id.localeCompare(b.unit_id);
+                    const byMapOrder = compareUnitStacksByMapOrder(a, b, unitDefs, factionData);
+                    if (byMapOrder !== 0) return byMapOrder;
                     return (b.remaining_movement ?? 0) - (a.remaining_movement ?? 0);
                   })
                   .map((row, index) => {
@@ -1234,7 +1289,9 @@ function Sidebar({
                             <img src={icon} alt="" className="territory-unit-icon" />
                           </span>
                         )}
-                        <span className="territory-unit-label">{unitDef?.name || row.unit_id}</span>
+                        <span className="territory-unit-label">
+                          {unitDef?.name || row.unit_id} with {row.remaining_movement ?? 0}M
+                        </span>
                         <span className="territory-unit-count-badge">{row.count}</span>
                       </div>
                     );
@@ -1243,13 +1300,7 @@ function Sidebar({
             ) : units.length > 0 && (
               <div className="territory-units-list">
                 {[...units]
-                  .sort((a, b) => {
-                    if (b.count !== a.count) return b.count - a.count;
-                    const costA = unitDefs[a.unit_id]?.cost ?? 0;
-                    const costB = unitDefs[b.unit_id]?.cost ?? 0;
-                    if (costB !== costA) return costB - costA;
-                    return a.unit_id.localeCompare(b.unit_id);
-                  })
+                  .sort((a, b) => compareUnitStacksByMapOrder(a, b, unitDefs, factionData))
                   .map(({ unit_id, count }, index) => {
                     const unitDef = unitDefs[unit_id];
                     const icon = unitDef?.icon;

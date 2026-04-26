@@ -8,6 +8,7 @@ import DraggableUnit from './DraggableUnit';
 import DragOverlay, { type BulkDragOverlayStack } from './DragOverlay';
 import MobilizationTray from './MobilizationTray';
 import NavalTray, { type BoatInTray, type NavalTrayBoatTapMovePayload } from './NavalTray';
+import { compareUnitStacksByMapOrder } from '../utils/unitStackSort';
 import './GameMap.css';
 import { sortSeaZoneIdsByNumericSuffix, seaZonesReachableBySailFrom } from '../seaZoneSort';
 import {
@@ -101,35 +102,6 @@ function canonicalSeaZoneId(tid: string): string {
   if (!tid || typeof tid !== 'string') return tid || '';
   const m = tid.trim().match(/^sea_zone_*(\d+)$/i);
   return m ? 'sea_zone_' + m[1] : tid.trim();
-}
-
-/** Faction id for map stack order (same as unit token border: segment in factionData, else unit def faction, else first segment). */
-function factionKeyForUnitType(
-  unit_id: string,
-  unitDefs: Record<string, { faction?: string; cost?: number } | undefined>,
-  factionData: Record<string, { name?: string; color?: string } | undefined>,
-): string {
-  const parts = unit_id.split('_');
-  const factionFromId = parts.find((p) => factionData[p]);
-  const defFaction = unitDefs[unit_id]?.faction;
-  return factionFromId ?? defFaction ?? parts[0] ?? '';
-}
-
-/** Land / overlay: faction, then count (desc), then cost/power (desc), then unit_id. */
-function compareMapUnitStacks(
-  a: { unit_id: string; count: number },
-  b: { unit_id: string; count: number },
-  unitDefs: Record<string, { faction?: string; cost?: number } | undefined>,
-  factionData: Record<string, { name?: string; color?: string } | undefined>,
-): number {
-  const fa = factionKeyForUnitType(a.unit_id, unitDefs, factionData);
-  const fb = factionKeyForUnitType(b.unit_id, unitDefs, factionData);
-  if (fa !== fb) return fa.localeCompare(fb);
-  if (b.count !== a.count) return b.count - a.count;
-  const costA = unitDefs[a.unit_id]?.cost ?? 0;
-  const costB = unitDefs[b.unit_id]?.cost ?? 0;
-  if (costB !== costA) return costB - costA;
-  return a.unit_id.localeCompare(b.unit_id);
 }
 
 /** Every instance ID already on a pending move from this hex (same phase). */
@@ -2028,7 +2000,7 @@ function GameMap({
         return uf === currentFaction;
       });
       const sortedFriendly = [...friendlyStacks].sort((a, b) =>
-        compareMapUnitStacks(a, b, unitDefs, factionData),
+        compareUnitStacksByMapOrder(a, b, unitDefs, factionData),
       );
       const crosserStacks = sortedFriendly.filter((s) => isFordCrosser(unitDefs[s.unit_id]));
       const escortStacks = sortedFriendly.filter((s) => usesFordEscortBudget(unitDefs[s.unit_id]));
@@ -4459,7 +4431,7 @@ function GameMap({
                           }
                           const navalTypes = [...boatCountByType.keys()];
                           navalTypes.sort((a, b) =>
-                            compareMapUnitStacks(
+                            compareUnitStacksByMapOrder(
                               { unit_id: a, count: boatCountByType.get(a) ?? 0 },
                               { unit_id: b, count: boatCountByType.get(b) ?? 0 },
                               unitDefs,
@@ -4477,7 +4449,7 @@ function GameMap({
                           }
                           const otherTypes = [...otherByType.keys()];
                           otherTypes.sort((a, b) =>
-                            compareMapUnitStacks(
+                            compareUnitStacksByMapOrder(
                               { unit_id: a, count: otherByType.get(a)?.length ?? 0 },
                               { unit_id: b, count: otherByType.get(b)?.length ?? 0 },
                               unitDefs,
@@ -4622,7 +4594,7 @@ function GameMap({
                         const stackCount = units.length;
                         const useStacked = stackCount >= 3;
                         const sortedUnits = [...units].sort((a, b) =>
-                          compareMapUnitStacks(a, b, unitDefs, factionData),
+                          compareUnitStacksByMapOrder(a, b, unitDefs, factionData),
                         );
 
                         const bulkMinRm = minRemainingMovementForBulkAll(

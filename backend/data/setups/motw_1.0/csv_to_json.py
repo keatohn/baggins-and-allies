@@ -16,8 +16,12 @@ starting_setup_units examples: "2 hobbit" or "1 rivendell_knight, 3 rivendell_wa
 
 Run from repo root or this folder:
   python3 backend/data/setups/motw_1.0/csv_to_json.py
+  python3 backend/data/setups/motw_1.0/csv_to_json.py --units-only   # only units.json (ignore terr CSV if present)
 
-Writes: units.json, territories.json, starting_setup.json, factions.json
+If no terr.csv / territories.csv / motw_terr.csv is present, only units.json is written (no error).
+
+Writes (when territory CSV exists): units.json, territories.json, starting_setup.json, factions.json
+Always writes units.json when a units CSV exists.
 Does not overwrite: manifest.json, specials.json, camps.json, ports.json (edit those by hand).
 """
 from __future__ import annotations
@@ -264,6 +268,8 @@ def build_factions_json(
 
 
 def main() -> None:
+    units_only = "--units-only" in sys.argv
+
     units_path = _first_existing_csv(*UNITS_CSV_NAMES)
     if units_path is None:
         print(f"ERROR: No units CSV in {SETUP_DIR}. Expected one of: {UNITS_CSV_NAMES}", file=sys.stderr)
@@ -278,10 +284,17 @@ def main() -> None:
         json.dump(units_by_id, f, indent=2)
     print(f"Wrote units.json ({len(units_by_id)} units)")
 
+    if units_only:
+        print("Skipping territories, starting_setup, factions (--units-only).")
+        return
+
     terr_csv = _first_existing_csv(*TERR_CSV_NAMES)
     if terr_csv is None:
-        print(f"ERROR: No territories CSV. Expected one of: {TERR_CSV_NAMES}", file=sys.stderr)
-        sys.exit(1)
+        print(
+            f"No territories CSV (expected one of: {TERR_CSV_NAMES}); "
+            "skipping territories.json, starting_setup.json, factions.json."
+        )
+        return
     print(f"Using territories CSV: {terr_csv.name}")
     terr_rows, owners, units_by_terr, turn_order = load_territories_csv(terr_csv)
     # Neutral is a faction for units / ownership, not a seat in turn_order (matches wotr setups).

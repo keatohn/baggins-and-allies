@@ -14,6 +14,7 @@ from backend.engine.combat import (
     get_ladder_infantry_instance_ids,
     get_siegework_dice_counts,
     get_siegework_attacker_rolling_units,
+    get_siegework_defender_rolling_units,
     get_siegework_round_attacker_display_units,
     get_siegework_round_defender_display_units,
     SIEGEWORK_SPECIAL_LADDER,
@@ -158,7 +159,8 @@ def _land_combat_unit_side(
     faction_defs: dict[str, FactionDefinition],
 ) -> str | None:
     """
-    Land / sea-raid-land combat roster: must stay identical between initiate_combat and continue_combat.
+    Land / sea-raid-land combat roster: must stay identical between initiate_combat and continue_combat
+    (including non-passenger attackers on the land hex, e.g. aerial joining the same assault).
     attacker = attacking faction's units; defender = other faction with a different alliance;
     None = bystander (no faction on unit def, or allied non-attacker sharing attacker's alliance).
     """
@@ -171,6 +173,41 @@ def _land_combat_unit_side(
     if ua != attacker_alliance:
         return "defender"
     return None
+
+
+def _sea_raid_attacker_units_from_board(
+    sea_zone: TerritoryState,
+    land_territory: TerritoryState,
+    attacker_faction: str,
+    attacker_alliance: str | None,
+    unit_defs: dict[str, UnitDefinition],
+    faction_defs: dict[str, FactionDefinition],
+    *,
+    surviving_ids: set[str] | None = None,
+) -> list[Unit]:
+    """
+    Sea raid land battle: fleet passengers in sea_zone plus any attacker-side non-naval units
+    on land_territory (walk-in land, aerial, etc.). Boats never roll on land.
+    """
+    out: dict[str, Unit] = {}
+    for u in sea_zone.units:
+        if surviving_ids is not None and u.instance_id not in surviving_ids:
+            continue
+        ud = unit_defs.get(u.unit_id)
+        if get_unit_faction(u, unit_defs) != attacker_faction:
+            continue
+        if not is_land_unit(ud) or _is_naval_unit(ud):
+            continue
+        out[u.instance_id] = u
+    for u in land_territory.units:
+        if surviving_ids is not None and u.instance_id not in surviving_ids:
+            continue
+        if _is_naval_unit(unit_defs.get(u.unit_id)):
+            continue
+        if _land_combat_unit_side(u, attacker_faction, attacker_alliance, unit_defs, faction_defs) != "attacker":
+            continue
+        out[u.instance_id] = u
+    return [out[i] for i in sorted(out.keys())]
 
 
 def _build_round_unit_display(
@@ -2296,7 +2333,8 @@ def _handle_initiate_combat(
         raise ValueError(f"Cannot attack own territory {territory_id}")
 
     attacker_alliance = getattr(faction_defs.get(attacker_faction), "alliance", None)
-    attacker_territory = territory  # Where attacker units live; for sea raid = sea zone
+    attacker_territory = territory  # Casualty removal on non-sea-raid land battles
+    sea_zone: TerritoryState | None = None
     if sea_zone_id:
         sea_zone = state.territories.get(sea_zone_id)
         sea_def = territory_defs.get(sea_zone_id)
@@ -2309,26 +2347,21 @@ def _handle_initiate_combat(
             land_adj = getattr(territory_defs.get(territory_id), "adjacent", []) or []
             if territory_id not in sea_adj and sea_zone_id not in land_adj:
                 raise ValueError(f"Territory {territory_id} is not adjacent to sea zone {sea_zone_id}")
-        attacker_territory = sea_zone
         _normalize_unit_health_for_combat(sea_zone.units, unit_defs)
         _normalize_unit_health_for_combat(territory.units, unit_defs)
-        # Sea raid: only land units (passengers) fight; boats stay in sea zone. Naval units cannot attack land.
-        # After phase end, land units may already be on territory (offloaded); use them then.
+        # Sea raid land battle: fleet passengers (in sea) plus any attacker-side units on land
+        # (aerial, walk-in land, etc.); boats stay in the sea zone and do not roll on land.
         attacker_units = [
-            deepcopy(u) for u in sea_zone.units
-            if get_unit_faction(u, unit_defs) == attacker_faction
-            and is_land_unit(unit_defs.get(u.unit_id))
-            and not _is_naval_unit(unit_defs.get(u.unit_id))
+            deepcopy(u)
+            for u in _sea_raid_attacker_units_from_board(
+                sea_zone,
+                territory,
+                attacker_faction,
+                attacker_alliance,
+                unit_defs,
+                faction_defs,
+            )
         ]
-        if not attacker_units:
-            attacker_units = [
-                deepcopy(u) for u in territory.units
-                if get_unit_faction(u, unit_defs) == attacker_faction
-                and is_land_unit(unit_defs.get(u.unit_id))
-                and not _is_naval_unit(unit_defs.get(u.unit_id))
-            ]
-            if attacker_units:
-                attacker_territory = territory  # Attackers already offloaded to land
         defender_units = [
             deepcopy(u) for u in territory.units
             if _land_combat_unit_side(u, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "defender"
@@ -2384,6 +2417,10 @@ def _handle_initiate_combat(
         if len(defender_units) == 0:
             raise ValueError(f"No defending units in {territory_id}")
 
+    passenger_lookup_units = (
+        sea_zone.units if sea_zone_id and sea_zone is not None else attacker_territory.units
+    )
+
     defender_faction = territory.owner or get_unit_faction(defender_units[0], unit_defs) or "neutral"
 
     # Get attacker/defender instance IDs for tracking
@@ -2425,7 +2462,9 @@ def _handle_initiate_combat(
         attacker_units, defender_units, unit_defs
     )
     sea_raider_att, _ = compute_sea_raider_stat_modifiers(
-        attacker_units, unit_defs, is_sea_raid=bool(sea_zone_id)
+        attacker_units,
+        unit_defs,
+        is_sea_raid=bool(sea_zone_id),
     )
     attacker_mods = merge_stat_modifiers(terrain_att, anticav_att, captain_att, sea_raider_att)
     defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
@@ -2443,7 +2482,7 @@ def _handle_initiate_combat(
             territory_def,
             unit_defs,
             is_sea_raid=bool(sea_zone_id),
-            archer_prefire_applicable=False,
+                archer_prefire_applicable=False,
             stealth_prefire_applicable=True,
         )
         attacker_units_at_start_stealth = [
@@ -2451,7 +2490,7 @@ def _handle_initiate_combat(
                 u, unit_defs.get(u.unit_id),
                 pd_prefire + attacker_mods.get(u.instance_id, 0), True, attacker_faction,
                 territory_def, spec_stealth,
-                passenger_aboard=_passengers_aboard_on_boat(u, attacker_territory.units, unit_defs),
+                passenger_aboard=_passengers_aboard_on_boat(u, passenger_lookup_units, unit_defs),
             )
             for u in attacker_units
         ]
@@ -2503,7 +2542,7 @@ def _handle_initiate_combat(
         for casualty_id in round_result.defender_casualties:
             unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
             events.append(unit_destroyed(casualty_id, unit_type, defender_faction, territory_id, "combat"))
-        passenger_att = _remove_casualties(attacker_territory, round_result.attacker_casualties, unit_defs)
+        passenger_att = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result.attacker_casualties, unit_defs)
         passenger_def = _remove_casualties(territory, round_result.defender_casualties, unit_defs)
         for pid in passenger_att:
             unit_type = pid.split("_")[1] if "_" in pid else "unknown"
@@ -2511,7 +2550,9 @@ def _handle_initiate_combat(
         for pid in passenger_def:
             unit_type = pid.split("_")[1] if "_" in pid else "unknown"
             events.append(unit_destroyed(pid, unit_type, defender_faction, territory_id, "combat"))
-        _sync_survivor_health(territory, attacker_units, defender_units, attacker_territory=attacker_territory if sea_zone_id else None)
+        _maybe_sea_raid_sync_attacker_survivor_health(
+            sea_zone_id, sea_zone, territory, attacker_units, defender_units, attacker_territory,
+        )
 
         if round_result.defenders_eliminated:
             end_round_result = RoundResult(
@@ -2613,7 +2654,7 @@ def _handle_initiate_combat(
             territory_def,
             unit_defs,
             is_sea_raid=bool(sea_zone_id),
-            archer_prefire_applicable=False,
+                archer_prefire_applicable=False,
             ram_applicable=True,
         )
         disp_att_sw = get_siegework_round_attacker_display_units(
@@ -2630,7 +2671,7 @@ def _handle_initiate_combat(
                 attacker_mods.get(u.instance_id, 0), True, attacker_faction,
                 territory_def, spec_sw,
                 attacker_effective_attack_override=att_attack_ov_siege,
-                passenger_aboard=_passengers_aboard_on_boat(u, attacker_territory.units, unit_defs),
+                passenger_aboard=_passengers_aboard_on_boat(u, passenger_lookup_units, unit_defs),
             )
             for u in disp_att_sw
         ]
@@ -2648,7 +2689,7 @@ def _handle_initiate_combat(
             defender_stronghold_hp=defender_stronghold_hp_cur_sw,
             fuse_bomb=fuse_bomb,
         )
-        def_sw_units = [u for u in defender_units if _is_siegework_unit(unit_defs.get(u.unit_id))]
+        def_sw_units = get_siegework_defender_rolling_units(defender_units, unit_defs)
         round_result_sw, defender_stronghold_hp_after_sw, ladder_count_sw = resolve_siegeworks_round(
             attacker_units, defender_units, unit_defs, dice_rolls,
             stat_modifiers_attacker=attacker_mods or None,
@@ -2707,7 +2748,7 @@ def _handle_initiate_combat(
         for casualty_id in round_result_sw.defender_casualties:
             unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
             events.append(unit_destroyed(casualty_id, unit_type, defender_faction, territory_id, "combat"))
-        passenger_att_sw = _remove_casualties(attacker_territory, round_result_sw.attacker_casualties, unit_defs)
+        passenger_att_sw = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result_sw.attacker_casualties, unit_defs)
         passenger_def_sw = _remove_casualties(territory, round_result_sw.defender_casualties, unit_defs)
         for pid in passenger_att_sw:
             unit_type = pid.split("_")[1] if "_" in pid else "unknown"
@@ -2715,7 +2756,9 @@ def _handle_initiate_combat(
         for pid in passenger_def_sw:
             unit_type = pid.split("_")[1] if "_" in pid else "unknown"
             events.append(unit_destroyed(pid, unit_type, defender_faction, territory_id, "combat"))
-        _sync_survivor_health(territory, attacker_units, defender_units, attacker_territory=attacker_territory if sea_zone_id else None)
+        _maybe_sea_raid_sync_attacker_survivor_health(
+            sea_zone_id, sea_zone, territory, attacker_units, defender_units, attacker_territory,
+        )
         attacker_units[:] = [u for u in attacker_units if u.instance_id in round_result_sw.surviving_attacker_ids]
         bomb_pair_casualties_sw: list[str] = []
         if fuse_bomb:
@@ -2723,7 +2766,7 @@ def _handle_initiate_combat(
             bomb_pair_casualties_sw = list(paired_bombikazi_sw | paired_bombs_sw)
         if bomb_pair_casualties_sw:
             attacker_units[:] = [u for u in attacker_units if u.instance_id not in bomb_pair_casualties_sw]
-            passenger_att_bomb_sw = _remove_casualties(attacker_territory, bomb_pair_casualties_sw, unit_defs)
+            passenger_att_bomb_sw = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, bomb_pair_casualties_sw, unit_defs)
             for iid in bomb_pair_casualties_sw:
                 unit_type = iid.split("_")[1] if "_" in iid else "unknown"
                 events.append(unit_destroyed(iid, unit_type, attacker_faction, territory_id, "combat"))
@@ -2841,7 +2884,7 @@ def _handle_initiate_combat(
             territory_def,
             unit_defs,
             is_sea_raid=bool(sea_zone_id),
-            archer_prefire_applicable=True,
+                archer_prefire_applicable=True,
         )
         _, _, att_attack_ov_prefire = get_attacker_effective_dice_and_bombikazi_self_destruct(
             attacker_units, unit_defs
@@ -2857,7 +2900,7 @@ def _handle_initiate_combat(
                 territory_def,
                 spec_archer_prefire,
                 attacker_effective_attack_override=att_attack_ov_prefire,
-                passenger_aboard=_passengers_aboard_on_boat(u, attacker_territory.units, unit_defs),
+                passenger_aboard=_passengers_aboard_on_boat(u, passenger_lookup_units, unit_defs),
             )
             for u in attacker_units
         ]
@@ -2888,7 +2931,7 @@ def _handle_initiate_combat(
         for casualty_id in round_result.attacker_casualties:
             unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
             events.append(unit_destroyed(casualty_id, unit_type, attacker_faction, territory_id, "combat"))
-        passenger_att = _remove_casualties(attacker_territory, round_result.attacker_casualties, unit_defs)
+        passenger_att = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result.attacker_casualties, unit_defs)
         passenger_def = _remove_casualties(territory, round_result.defender_casualties, unit_defs)
         for pid in passenger_att:
             unit_type = pid.split("_")[1] if "_" in pid else "unknown"
@@ -2896,7 +2939,9 @@ def _handle_initiate_combat(
         for pid in passenger_def:
             unit_type = pid.split("_")[1] if "_" in pid else "unknown"
             events.append(unit_destroyed(pid, unit_type, defender_faction, territory_id, "combat"))
-        _sync_survivor_health(territory, attacker_units, defender_units, attacker_territory=attacker_territory if sea_zone_id else None)
+        _maybe_sea_raid_sync_attacker_survivor_health(
+            sea_zone_id, sea_zone, territory, attacker_units, defender_units, attacker_territory,
+        )
 
         if round_result.attackers_eliminated:
             # All attackers dead from prefire; defender wins, no round 1
@@ -2979,7 +3024,7 @@ def _handle_initiate_combat(
             attacker_mods.get(u.instance_id, 0), True, attacker_faction,
             territory_def, spec_round,
             attacker_effective_attack_override=att_attack_override,
-            passenger_aboard=_passengers_aboard_on_boat(u, attacker_territory.units, unit_defs),
+            passenger_aboard=_passengers_aboard_on_boat(u, passenger_lookup_units, unit_defs),
         )
         for u in attacker_units
     ]
@@ -3084,7 +3129,7 @@ def _handle_initiate_combat(
         unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
         events.append(unit_destroyed(casualty_id, unit_type, defender_faction, territory_id, "combat"))
 
-    passenger_att = _remove_casualties(attacker_territory, round_result.attacker_casualties, unit_defs)
+    passenger_att = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result.attacker_casualties, unit_defs)
     passenger_def = _remove_casualties(territory, round_result.defender_casualties, unit_defs)
     for pid in passenger_att:
         unit_type = pid.split("_")[1] if "_" in pid else "unknown"
@@ -3092,7 +3137,9 @@ def _handle_initiate_combat(
     for pid in passenger_def:
         unit_type = pid.split("_")[1] if "_" in pid else "unknown"
         events.append(unit_destroyed(pid, unit_type, defender_faction, territory_id, "combat"))
-    _sync_survivor_health(territory, attacker_units, defender_units, attacker_territory=attacker_territory if sea_zone_id else None)
+    _maybe_sea_raid_sync_attacker_survivor_health(
+        sea_zone_id, sea_zone, territory, attacker_units, defender_units, attacker_territory,
+    )
 
     full_combat_log_init = combat_log_prefix + [combat_log_entry]
     prefix_cum_att = sum(r.defender_hits for r in combat_log_prefix)
@@ -3157,50 +3204,62 @@ def _handle_continue_combat(
     )
     use_paired_fused_siegework_rules = (not had_siegeworks_in_battle) or fuse_bomb
 
-    # Get the contested territory (land) and where attackers live (same or sea zone for sea raid; after offload, they're on territory)
+    # Get the contested territory (land) and attacker roster (sea raid: sea + land, same as initiate_combat)
     territory = state.territories[combat.territory_id]
     surviving_attacker_ids = set(combat.attacker_instance_ids)
-    if sea_zone_id:
-        sea_zone = state.territories.get(sea_zone_id)
-        land_attackers_on_land = [
-            u.instance_id for u in territory.units
-            if u.instance_id in surviving_attacker_ids
-            and is_land_unit(unit_defs.get(u.unit_id))
-            and not _is_naval_unit(unit_defs.get(u.unit_id))
-        ]
-        if land_attackers_on_land:
-            attacker_territory = territory
-        else:
-            in_sea = [
-                u for u in (sea_zone.units if sea_zone else [])
-                if u.instance_id in surviving_attacker_ids
-            ]
-            attacker_territory = sea_zone if in_sea else territory
-    else:
-        attacker_territory = territory
-
-    # Normalize multi-HP unit health from unit_defs (fixes legacy/corrupt state)
-    _normalize_unit_health_for_combat(attacker_territory.units, unit_defs)
-    _normalize_unit_health_for_combat(territory.units, unit_defs)
-
-    # Separate attackers and defenders — same rules as initiate_combat (not merely "not in attacker ids")
     attacker_faction = combat.attacker_faction
     attacker_alliance = getattr(faction_defs.get(attacker_faction), "alliance", None)
-    attacker_units = sorted(
-        [
-            deepcopy(u) for u in attacker_territory.units
-            if u.instance_id in surviving_attacker_ids
-            and _land_combat_unit_side(u, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "attacker"
-        ],
-        key=lambda u: u.instance_id,
-    )
-    defender_units = sorted(
-        [
-            deepcopy(u) for u in territory.units
-            if _land_combat_unit_side(u, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "defender"
-        ],
-        key=lambda u: u.instance_id,
-    )
+    sea_zone: TerritoryState | None = None
+    attacker_territory = territory
+
+    if sea_zone_id:
+        sea_zone = state.territories.get(sea_zone_id)
+        if not sea_zone:
+            raise ValueError(f"Sea zone {sea_zone_id} not found for continue_combat")
+        _normalize_unit_health_for_combat(sea_zone.units, unit_defs)
+        _normalize_unit_health_for_combat(territory.units, unit_defs)
+        attacker_units = sorted(
+            [
+                deepcopy(u)
+                for u in _sea_raid_attacker_units_from_board(
+                    sea_zone,
+                    territory,
+                    attacker_faction,
+                    attacker_alliance,
+                    unit_defs,
+                    faction_defs,
+                    surviving_ids=surviving_attacker_ids,
+                )
+            ],
+            key=lambda u: u.instance_id,
+        )
+        defender_units = sorted(
+            [
+                deepcopy(u) for u in territory.units
+                if _land_combat_unit_side(u, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "defender"
+            ],
+            key=lambda u: u.instance_id,
+        )
+        passenger_lookup_units = sea_zone.units
+    else:
+        _normalize_unit_health_for_combat(attacker_territory.units, unit_defs)
+        _normalize_unit_health_for_combat(territory.units, unit_defs)
+        attacker_units = sorted(
+            [
+                deepcopy(u) for u in attacker_territory.units
+                if u.instance_id in surviving_attacker_ids
+                and _land_combat_unit_side(u, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "attacker"
+            ],
+            key=lambda u: u.instance_id,
+        )
+        defender_units = sorted(
+            [
+                deepcopy(u) for u in territory.units
+                if _land_combat_unit_side(u, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "defender"
+            ],
+            key=lambda u: u.instance_id,
+        )
+        passenger_lookup_units = attacker_territory.units
 
     territory_def = territory_defs.get(combat.territory_id)
     if territory_def and _is_sea_zone(territory_def):
@@ -3226,7 +3285,9 @@ def _handle_continue_combat(
         attacker_units, defender_units, unit_defs
     )
     sea_raider_att, _ = compute_sea_raider_stat_modifiers(
-        attacker_units, unit_defs, is_sea_raid=bool(sea_zone_id)
+        attacker_units,
+        unit_defs,
+        is_sea_raid=bool(sea_zone_id),
     )
     attacker_mods = merge_stat_modifiers(terrain_att, anticav_att, captain_att, sea_raider_att)
     defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
@@ -3306,7 +3367,7 @@ def _handle_continue_combat(
             attacker_mods.get(u.instance_id, 0), True, combat.attacker_faction,
             territory_def, spec_continue,
             attacker_effective_attack_override=att_attack_override,
-            passenger_aboard=_passengers_aboard_on_boat(u, attacker_territory.units, unit_defs),
+            passenger_aboard=_passengers_aboard_on_boat(u, passenger_lookup_units, unit_defs),
         )
         for u in attacker_units
     ]
@@ -3362,7 +3423,7 @@ def _handle_continue_combat(
             territory_def,
             unit_defs,
             is_sea_raid=bool(sea_zone_id),
-            archer_prefire_applicable=False,
+                archer_prefire_applicable=False,
             ram_applicable=True,
         )
         att_rolling = get_siegework_attacker_rolling_units(
@@ -3370,7 +3431,7 @@ def _handle_continue_combat(
             defender_stronghold_hp=defender_stronghold_hp_cur,
             fuse_bomb=fuse_bomb,
         )
-        def_sw = [u for u in defender_units if _is_siegework_unit(unit_defs.get(u.unit_id))]
+        def_sw = get_siegework_defender_rolling_units(defender_units, unit_defs)
         # Run siegeworks round with provided dice (client sends only siegework unit dice)
         round_result, defender_stronghold_hp_after, ladder_count = resolve_siegeworks_round(
             attacker_units, defender_units, unit_defs, dice_rolls,
@@ -3424,7 +3485,7 @@ def _handle_continue_combat(
                 attacker_mods.get(u.instance_id, 0), True, combat.attacker_faction,
                 territory_def, spec_siege_ram,
                 attacker_effective_attack_override=att_attack_override,
-                passenger_aboard=_passengers_aboard_on_boat(u, attacker_territory.units, unit_defs),
+                passenger_aboard=_passengers_aboard_on_boat(u, passenger_lookup_units, unit_defs),
             )
             for u in disp_att_siege
         ]
@@ -3457,7 +3518,7 @@ def _handle_continue_combat(
         for casualty_id in round_result.defender_casualties:
             unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
             events.append(unit_destroyed(casualty_id, unit_type, defender_faction, combat.territory_id, "combat"))
-        passenger_att = _remove_casualties(attacker_territory, round_result.attacker_casualties, unit_defs)
+        passenger_att = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result.attacker_casualties, unit_defs)
         passenger_def = _remove_casualties(territory, round_result.defender_casualties, unit_defs)
         for pid in passenger_att:
             unit_type = pid.split("_")[1] if "_" in pid else "unknown"
@@ -3465,7 +3526,9 @@ def _handle_continue_combat(
         for pid in passenger_def:
             unit_type = pid.split("_")[1] if "_" in pid else "unknown"
             events.append(unit_destroyed(pid, unit_type, defender_faction, combat.territory_id, "combat"))
-        _sync_survivor_health(territory, attacker_units, defender_units, attacker_territory=attacker_territory if sea_zone_id else None)
+        _maybe_sea_raid_sync_attacker_survivor_health(
+            sea_zone_id, sea_zone, territory, attacker_units, defender_units, attacker_territory,
+        )
         # "bomb" tag: paired bomb + bombikazi destroyed after siegeworks when fuse_bomb
         attacker_units[:] = [u for u in attacker_units if u.instance_id in round_result.surviving_attacker_ids]
         bomb_pair_casualties: list[str] = []
@@ -3474,7 +3537,7 @@ def _handle_continue_combat(
             bomb_pair_casualties = list(paired_bombikazi | paired_bombs)
         if bomb_pair_casualties:
             attacker_units[:] = [u for u in attacker_units if u.instance_id not in bomb_pair_casualties]
-            passenger_att_bomb = _remove_casualties(attacker_territory, bomb_pair_casualties, unit_defs)
+            passenger_att_bomb = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, bomb_pair_casualties, unit_defs)
             for iid in bomb_pair_casualties:
                 unit_type = iid.split("_")[1] if "_" in iid else "unknown"
                 events.append(unit_destroyed(iid, unit_type, combat.attacker_faction, combat.territory_id, "combat"))
@@ -3581,7 +3644,7 @@ def _handle_continue_combat(
             territory_def,
             unit_defs,
             is_sea_raid=bool(sea_zone_id),
-            archer_prefire_applicable=True,
+                archer_prefire_applicable=True,
         )
         attacker_units_at_start_ar = [
             _build_round_unit_display(
@@ -3593,7 +3656,7 @@ def _handle_continue_combat(
                 territory_def,
                 spec_archer_c,
                 attacker_effective_attack_override=att_attack_override,
-                passenger_aboard=_passengers_aboard_on_boat(u, attacker_territory.units, unit_defs),
+                passenger_aboard=_passengers_aboard_on_boat(u, passenger_lookup_units, unit_defs),
             )
             for u in attacker_units
         ]
@@ -3624,7 +3687,7 @@ def _handle_continue_combat(
         for casualty_id in round_result_ar.attacker_casualties:
             unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
             events.append(unit_destroyed(casualty_id, unit_type, combat.attacker_faction, combat.territory_id, "combat"))
-        passenger_att_ar = _remove_casualties(attacker_territory, round_result_ar.attacker_casualties, unit_defs)
+        passenger_att_ar = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result_ar.attacker_casualties, unit_defs)
         passenger_def_ar = _remove_casualties(territory, round_result_ar.defender_casualties, unit_defs)
         for pid in passenger_att_ar:
             unit_type = pid.split("_")[1] if "_" in pid else "unknown"
@@ -3632,7 +3695,9 @@ def _handle_continue_combat(
         for pid in passenger_def_ar:
             unit_type = pid.split("_")[1] if "_" in pid else "unknown"
             events.append(unit_destroyed(pid, unit_type, defender_faction, combat.territory_id, "combat"))
-        _sync_survivor_health(territory, attacker_units, defender_units, attacker_territory=attacker_territory if sea_zone_id else None)
+        _maybe_sea_raid_sync_attacker_survivor_health(
+            sea_zone_id, sea_zone, territory, attacker_units, defender_units, attacker_territory,
+        )
         combat.combat_log.append(prefire_log_entry_ar)
         combat.cumulative_hits_received_by_attacker += round_result_ar.defender_hits
         combat.attacker_instance_ids = round_result_ar.surviving_attacker_ids
@@ -3734,7 +3799,7 @@ def _handle_continue_combat(
         events.append(unit_destroyed(casualty_id, unit_type, defender_faction, combat.territory_id, "combat"))
 
     # Remove casualties (attackers may be in sea zone for sea raid). Passengers die when their boat is destroyed.
-    passenger_att = _remove_casualties(attacker_territory, round_result.attacker_casualties, unit_defs)
+    passenger_att = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result.attacker_casualties, unit_defs)
     passenger_def = _remove_casualties(territory, round_result.defender_casualties, unit_defs)
     for pid in passenger_att:
         unit_type = pid.split("_")[1] if "_" in pid else "unknown"
@@ -3742,7 +3807,9 @@ def _handle_continue_combat(
     for pid in passenger_def:
         unit_type = pid.split("_")[1] if "_" in pid else "unknown"
         events.append(unit_destroyed(pid, unit_type, defender_faction, combat.territory_id, "combat"))
-    _sync_survivor_health(territory, attacker_units, defender_units, attacker_territory=attacker_territory if sea_zone_id else None)
+    _maybe_sea_raid_sync_attacker_survivor_health(
+        sea_zone_id, sea_zone, territory, attacker_units, defender_units, attacker_territory,
+    )
 
     # Update combat log and cumulative hits
     combat.combat_log.append(combat_log_entry)
@@ -3939,6 +4006,71 @@ def _sync_survivor_health(
             unit.remaining_health = survivor_health[unit.instance_id]
 
 
+def _sea_raid_remove_attacker_casualties(
+    sea_zone: TerritoryState | None,
+    land_territory: TerritoryState,
+    casualty_ids: list[str],
+    unit_defs: dict[str, UnitDefinition] | None,
+) -> list[str]:
+    """Remove attacker casualties from sea and/or land (sea raid attackers may be split across both)."""
+    extra: list[str] = []
+    if sea_zone is not None:
+        extra.extend(_remove_casualties(sea_zone, casualty_ids, unit_defs))
+    extra.extend(_remove_casualties(land_territory, casualty_ids, unit_defs))
+    return extra
+
+
+def _sea_raid_sync_attacker_survivor_health(
+    sea_zone: TerritoryState | None,
+    land_territory: TerritoryState,
+    attacker_unit_copies: list[Unit],
+    defender_unit_copies: list[Unit],
+) -> None:
+    """Write remaining_health from round copies back to board units for sea-raid split attackers."""
+    containers: list[TerritoryState] = []
+    if sea_zone is not None:
+        containers.append(sea_zone)
+    containers.append(land_territory)
+    for u in attacker_unit_copies:
+        for t in containers:
+            for mu in t.units:
+                if mu.instance_id == u.instance_id:
+                    mu.remaining_health = u.remaining_health
+                    break
+    for unit in land_territory.units:
+        for u in defender_unit_copies:
+            if u.instance_id == unit.instance_id:
+                unit.remaining_health = u.remaining_health
+                break
+
+
+def _maybe_sea_raid_remove_attacker_casualties(
+    sea_zone_id: str | None,
+    sea_zone: TerritoryState | None,
+    land_territory: TerritoryState,
+    attacker_territory: TerritoryState,
+    casualty_ids: list[str],
+    unit_defs: dict[str, UnitDefinition] | None,
+) -> list[str]:
+    if sea_zone_id and sea_zone is not None:
+        return _sea_raid_remove_attacker_casualties(sea_zone, land_territory, casualty_ids, unit_defs)
+    return _remove_casualties(attacker_territory, casualty_ids, unit_defs)
+
+
+def _maybe_sea_raid_sync_attacker_survivor_health(
+    sea_zone_id: str | None,
+    sea_zone: TerritoryState | None,
+    land_territory: TerritoryState,
+    attacker_unit_copies: list[Unit],
+    defender_unit_copies: list[Unit],
+    attacker_territory: TerritoryState,
+) -> None:
+    if sea_zone_id and sea_zone is not None:
+        _sea_raid_sync_attacker_survivor_health(sea_zone, land_territory, attacker_unit_copies, defender_unit_copies)
+    else:
+        _sync_survivor_health(land_territory, attacker_unit_copies, defender_unit_copies)
+
+
 def _purge_sea_raid_staging_after_lost_naval(
     state: GameState,
     sea_territory_id: str,
@@ -3964,11 +4096,7 @@ def _purge_sea_raid_staging_after_lost_naval(
         kept: list[Unit] = []
         for u in t.units:
             ud = unit_defs.get(u.unit_id)
-            if (
-                get_unit_faction(u, unit_defs) == attacker_faction
-                and is_land_unit(ud)
-                and not _is_naval_unit(ud)
-            ):
+            if get_unit_faction(u, unit_defs) == attacker_faction and not _is_naval_unit(ud):
                 unit_type = u.instance_id.split("_")[1] if "_" in u.instance_id else "unknown"
                 events.append(
                     unit_destroyed(u.instance_id, unit_type, attacker_faction, lid, "sea_raid_naval_lost")

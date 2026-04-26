@@ -59,6 +59,7 @@ from backend.engine.combat import (
     get_ladder_infantry_instance_ids,
     sort_attackers_for_ladder_dice_order,
     get_siegework_attacker_rolling_units,
+    get_siegework_defender_rolling_units,
     get_terror_reroll_targets,
     merge_stat_modifiers,
     resolve_archer_prefire,
@@ -66,7 +67,6 @@ from backend.engine.combat import (
     resolve_siegeworks_round,
     resolve_stealth_prefire,
     siegework_dice_round_applies,
-    _is_siegework_unit,
 )
 from backend.engine.definitions import TerritoryDefinition, UnitDefinition
 from backend.engine.movement import _is_sea_zone
@@ -323,7 +323,7 @@ def run_one_battle(
                 defender_stronghold_hp=stronghold_hp,
                 fuse_bomb=fuse_sim,
             )
-            def_sw = [u for u in defender_units if _is_siegework_unit(unit_defs.get(u.unit_id))]
+            def_sw = get_siegework_defender_rolling_units(defender_units, unit_defs)
             siege_att_rolls = (
                 [random.randint(1, DICE_SIDES) for _ in range(siegework_att_dice)] if siegework_att_dice > 0 else []
             )
