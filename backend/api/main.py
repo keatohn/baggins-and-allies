@@ -24,6 +24,11 @@ from sqlalchemy.orm import Session
 
 from .database import get_db, get_db_file_path, init_db, SessionLocal
 from .models import Game as GameModel, Player
+from .game_config_ford_patch import (
+    dump_config_for_storage,
+    patch_ford_adjacent_pair_in_config,
+    preview_ford_adjacent_pair,
+)
 from .auth import (
     create_access_token,
     get_current_player,
@@ -1376,6 +1381,54 @@ def admin_delete_setup(
     except ValueError:
         raise HTTPException(status_code=404, detail="Setup not found")
     return {"ok": True, "id": setup_id}
+
+
+class AdminFordAdjacentPairBody(BaseModel):
+    territory_a: str
+    territory_b: str
+    """When false, only returns preview; no DB write."""
+    apply: bool = False
+
+
+@app.post("/admin/games/{game_id}/ford-adjacent-pair")
+def admin_patch_game_ford_adjacent_pair(
+    game_id: str,
+    body: AdminFordAdjacentPairBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Add reciprocal ford_adjacent on this game's config definitions snapshot only (not game_state).
+    Run with apply=false first to preview. Clears in-memory caches for this game when apply=true.
+    """
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Game not found")
+    if not row.config:
+        raise HTTPException(status_code=400, detail="Game has no config snapshot")
+    try:
+        config = json.loads(row.config) if isinstance(row.config, str) else row.config
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid config JSON: {e}") from e
+    if not isinstance(config, dict):
+        raise HTTPException(status_code=400, detail="config must be a JSON object")
+    try:
+        preview = preview_ford_adjacent_pair(config, body.territory_a, body.territory_b)
+        would_change = patch_ford_adjacent_pair_in_config(
+            deepcopy(config), body.territory_a, body.territory_b
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not body.apply:
+        return {"ok": True, "apply": False, "would_change": would_change, **preview}
+    changed = patch_ford_adjacent_pair_in_config(config, body.territory_a, body.territory_b)
+    if not changed:
+        return {"ok": True, "apply": True, "changed": False, **preview}
+    row.config = dump_config_for_storage(config)
+    db.commit()
+    games.pop(game_id, None)
+    game_defs.pop(game_id, None)
+    return {"ok": True, "apply": True, "changed": True, **preview}
 
 
 @app.post("/games/create")

@@ -25,8 +25,18 @@ else:
     if _sqlite_path:
         _sqlite_abs = os.path.abspath(_sqlite_path)
         parent = os.path.dirname(_sqlite_abs)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
+        # Only auto-create parent dirs for relative SQLITE paths (e.g. var/db/game.db under cwd).
+        # For absolute paths (e.g. /data/game.db on Railway), never call makedirs: the mount must
+        # already exist; on a dev machine /data is often missing and mkdir("/data") hits EROFS.
+        _sqlite_raw = os.path.normpath(_sqlite_path.strip())
+        if parent and not os.path.isdir(parent) and not os.path.isabs(_sqlite_raw):
+            try:
+                os.makedirs(parent, exist_ok=True)
+            except OSError as e:
+                raise RuntimeError(
+                    f"Cannot create SQLite data directory {parent!r} ({e}). "
+                    "Create it manually or use a relative path under a writable tree."
+                ) from e
         DATABASE_URL = f"sqlite:///{_sqlite_abs}"
     else:
         DB_DIR = os.path.dirname(os.path.abspath(__file__))
