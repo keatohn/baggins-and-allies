@@ -9,7 +9,11 @@ import math
 from collections import defaultdict
 
 from backend.engine.actions import Action, move_units, end_phase
-from backend.engine.movement import _is_sea_zone
+from backend.engine.movement import (
+    _is_sea_zone,
+    instance_allowed_in_new_move_from_territory,
+    is_friendly_territory_for_landing,
+)
 from backend.engine.queries import (
     get_movable_units,
     get_unit_move_targets,
@@ -17,7 +21,6 @@ from backend.engine.queries import (
     _is_naval_unit,
     filter_unit_instances_that_can_reach,
 )
-from backend.engine.movement import is_friendly_territory_for_landing
 
 from backend.ai.context import AIContext
 from backend.ai.geography import (
@@ -373,6 +376,10 @@ def _try_move_aerial_out_of_unfriendly_landing(
         if not iid or not entry.get("territory_id"):
             continue
         from_tid = str(entry["territory_id"])
+        if not instance_allowed_in_new_move_from_territory(
+            state, str(iid), from_tid, "non_combat_move", td
+        ):
+            continue
         targets, _ = get_unit_move_targets(state, iid, ud, td, fd)
         if not targets:
             continue

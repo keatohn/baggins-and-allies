@@ -2632,12 +2632,12 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                 # Allow end phase once every boat that must attack has declared (pending load moves will apply on end_phase)
                 actions["can_end_phase"] = len(effective_boat_ids) == 0
             if phase == "non_combat_move":
-                aerial_must_move = get_aerial_units_must_move(state, ud, td, fd, faction)
-                actions["aerial_units_must_move"] = aerial_must_move
-                # Can end phase only if, after applying pending moves, no aerial is left in enemy territory
+                # Apply pending moves first so aerial_units_must_move matches board state after declared
+                # moves (units still on-map until phase ends still appear stuck on raw state).
                 state_after_moves = get_state_after_pending_moves(state, "non_combat_move", ud, td, fd)
-                aerial_still_stuck = get_aerial_units_must_move(state_after_moves, ud, td, fd, faction)
-                actions["can_end_phase"] = len(aerial_still_stuck) == 0
+                aerial_must_move = get_aerial_units_must_move(state_after_moves, ud, td, fd, faction)
+                actions["aerial_units_must_move"] = aerial_must_move
+                actions["can_end_phase"] = len(aerial_must_move) == 0
         elif phase == "combat":
             combat_territories = get_contested_territories(state, faction, fd, ud, td)
             actions["combat_territories"] = combat_territories
