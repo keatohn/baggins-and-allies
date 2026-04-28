@@ -55,7 +55,11 @@ from backend.engine.actions import (
     end_turn,
     skip_turn,
 )
-from backend.engine.reducer import apply_action, get_state_after_pending_moves
+from backend.engine.reducer import (
+    apply_action,
+    get_state_after_pending_moves,
+    _sea_raid_attacker_units_from_board,
+)
 from backend.engine.combat import (
     _is_naval_unit as combat_is_naval_unit,
     get_attacker_effective_dice_and_bombikazi_self_destruct,
@@ -914,37 +918,30 @@ def _get_combat_modifiers_and_specials(
     Returns (combat_stat_modifiers, combat_specials, combat_attacker_effective_attack_override). The override is for paired bombikazi (bomb's attack) so UI can show them on the bomb's shelf."""
     if not state.active_combat:
         return {}, {}, {}
-    territory = state.territories.get(state.active_combat.territory_id)
+    combat = state.active_combat
+    territory = state.territories.get(combat.territory_id)
     if not territory:
         return {}, {}, {}
-    attacker_faction = state.current_faction
+    # Use combat roster faction (the attacker), not current_faction, so sea raid / UI modifiers match the engine.
+    attacker_faction = combat.attacker_faction
     attacker_alliance = getattr(fd.get(attacker_faction), "alliance", None) if fd.get(attacker_faction) else None
-    attacker_ids = set(state.active_combat.attacker_instance_ids)
-    sea_zone_id = getattr(state.active_combat, "sea_zone_id", None)
+    attacker_ids = set(combat.attacker_instance_ids)
+    sea_zone_id = getattr(combat, "sea_zone_id", None)
     if sea_zone_id:
         sea_zone = state.territories.get(sea_zone_id)
-        from backend.engine.utils import is_land_unit
-        attackers_from_sea: list = []
         if sea_zone:
-            attackers_from_sea = [
-                u for u in sea_zone.units
-                if u.instance_id in attacker_ids
-                and is_land_unit(ud.get(u.unit_id))
-                and not _is_naval_unit(ud.get(u.unit_id))
-            ]
-        if attackers_from_sea:
-            attackers = sorted(attackers_from_sea, key=lambda u: u.instance_id)
-        else:
-            # After offload, raiders are on land; sea hex may still have only boats.
+            # Full sea-raid land roster: passengers in the sea zone plus attacker-side non-naval on the land
+            # hex (aerial, etc.) — same as _handle_initiate_combat / _handle_continue_combat, so e.g. Sea
+            # Raider +attack applies whenever the unit is part of the raid, not only while still in the boat.
+            full_raid = _sea_raid_attacker_units_from_board(
+                sea_zone, territory, attacker_faction, attacker_alliance, ud, fd
+            )
             attackers = sorted(
-                [
-                    u for u in territory.units
-                    if u.instance_id in attacker_ids
-                    and is_land_unit(ud.get(u.unit_id))
-                    and not _is_naval_unit(ud.get(u.unit_id))
-                ],
+                [u for u in full_raid if u.instance_id in attacker_ids],
                 key=lambda u: u.instance_id,
             )
+        else:
+            attackers = []
     else:
         attackers = sorted(
             [u for u in territory.units if u.instance_id in attacker_ids],
@@ -959,7 +956,7 @@ def _get_combat_modifiers_and_specials(
         ],
         key=lambda u: u.instance_id,
     )
-    territory_def = td.get(state.active_combat.territory_id)
+    territory_def = td.get(combat.territory_id)
     if territory_def and _is_sea_zone(territory_def):
         attackers = [
             u for u in attackers
@@ -969,7 +966,7 @@ def _get_combat_modifiers_and_specials(
             u for u in defenders
             if participates_in_sea_hex_naval_combat(u, ud.get(u.unit_id))
         ]
-    combat_log = getattr(state.active_combat, "combat_log", []) or []
+    combat_log = getattr(combat, "combat_log", []) or []
     first_round = combat_log[0] if len(combat_log) >= 1 else None
     archer_prefire_applicable = bool(
         first_round is not None and getattr(first_round, "is_archer_prefire", False)
@@ -981,12 +978,12 @@ def _get_combat_modifiers_and_specials(
         if getattr(territory_def, "is_stronghold", False) and base_hp > 0:
             cur = getattr(territory, "stronghold_current_health", None)
             defender_stronghold_hp_for_ram = cur if cur is not None else base_hp
-    fuse_ram = getattr(state.active_combat, "fuse_bomb", True)
+    fuse_ram = getattr(combat, "fuse_bomb", True)
     if not isinstance(fuse_ram, bool):
         fuse_ram = True
     ram_applicable = ram_special_applicable_for_active_combat(
         combat_log,
-        getattr(state.active_combat, "round_number", 0),
+        getattr(combat, "round_number", 0),
         attackers,
         defenders,
         territory_def,
@@ -997,7 +994,7 @@ def _get_combat_modifiers_and_specials(
     )
     stealth_prefire_applicable = stealth_prefire_applicable_for_active_combat(
         combat_log,
-        getattr(state.active_combat, "round_number", 0),
+        getattr(combat, "round_number", 0),
         attackers,
         ud,
     )
@@ -1055,7 +1052,7 @@ def state_for_response(state: GameState, game_id: str | None = None, db: Session
         if state.active_combat:
             ac_out = out.get("active_combat")
             if isinstance(ac_out, dict):
-                _enrich_active_combat_siegework_display_ids(ac_out, state, ud, td)
+                _enrich_active_combat_siegework_display_ids(ac_out, state, ud, td, fd)
     except Exception:
         out["faction_stats"] = {"factions": {}, "alliances": {}}
     return out
@@ -1585,18 +1582,22 @@ def _build_games_list(player: Player, db: Session) -> list[dict[str, Any]]:
         except Exception:
             faction_stats = dict(DEFAULT_FACTION_STATS)
 
+        ai_faction_ids = set(_get_ai_factions_from_config(r))
         # Use this game's setup faction defs (fd), not global default, so old games with different setups show correct names/icons
         if current_faction and fd and fd.get(current_faction):
             current_fd = fd[current_faction]
             current_faction_display_name = getattr(current_fd, "display_name", None) or current_faction
             icon = getattr(current_fd, "icon", None) or f"{current_faction}.png"
             current_faction_icon = f"/assets/factions/{icon}"
+        if current_faction and current_faction in ai_faction_ids:
+            current_player_username = "Computer"
+        elif current_faction and fd and fd.get(current_faction):
             for p in pl:
                 if str(p.get("faction_id")) == str(current_faction):
                     current_player_username = players_by_id.get(str(p.get("player_id")))
                     if current_player_username is not None:
                         break
-        if current_player_username is None and pl:
+        if current_player_username is None and pl and (not current_faction or current_faction not in ai_faction_ids):
             unique_player_ids = list({str(p.get("player_id")) for p in pl if p.get("player_id") is not None})
             if len(unique_player_ids) == 1:
                 current_player_username = players_by_id.get(unique_player_ids[0])
@@ -2643,7 +2644,7 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
             actions["sea_raid_targets"] = get_sea_raid_targets(state, faction, fd, ud, td)
             if state.active_combat:
                 ac_dict = state.active_combat.to_dict()
-                attackers_ac, defenders_ac = _get_active_combat_units(state, td, ud)
+                attackers_ac, defenders_ac = _get_active_combat_units(state, td, ud, fd)
                 combat_tid = getattr(state.active_combat, "territory_id", "") or ""
                 tdef_combat = td.get(combat_tid)
                 def_stronghold = bool(tdef_combat and getattr(tdef_combat, "is_stronghold", False))
@@ -2674,7 +2675,7 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                 ac_dict["combat_siegeworks_pending"] = siegeworks_pending
                 ac_dict["combat_archer_prefire_pending"] = archer_prefire_pending
                 ac_dict["combat_siegeworks_dice"] = {"attacker": att_sw_dice, "defender": def_sw_dice}
-                _enrich_active_combat_siegework_display_ids(ac_dict, state, ud, td)
+                _enrich_active_combat_siegework_display_ids(ac_dict, state, ud, td, fd)
                 actions["active_combat"] = ac_dict
                 retreat_destinations = get_retreat_options(state, td, fd, ud)
                 actions["retreat_options"] = {
@@ -3414,7 +3415,7 @@ def do_continue_combat(
     if not state.active_combat:
         raise HTTPException(status_code=400, detail="No active combat")
 
-    attackers, defenders = _get_active_combat_units(state, td, ud)
+    attackers, defenders = _get_active_combat_units(state, td, ud, fd)
     if not attackers or not defenders:
         raise HTTPException(status_code=400, detail="Invalid combat units")
 
@@ -3763,25 +3764,50 @@ def _get_active_combat_units(
     state,
     territory_defs: dict | None = None,
     unit_defs: dict | None = None,
+    faction_defs: dict | None = None,
 ):
-    """Return (attackers, defenders) for current active combat. Handles sea raid (attackers in sea zone)."""
+    """Return (attackers, defenders) for current active combat. Handles sea raid (sea + land roster)."""
     if not state.active_combat:
         return [], []
-    territory = state.territories.get(state.active_combat.territory_id)
+    combat = state.active_combat
+    territory = state.territories.get(combat.territory_id)
     if not territory:
         return [], []
-    attacker_ids = set(state.active_combat.attacker_instance_ids)
-    sea_zone_id = getattr(state.active_combat, "sea_zone_id", None)
-    if sea_zone_id:
+    attacker_ids = set(combat.attacker_instance_ids)
+    sea_zone_id = getattr(combat, "sea_zone_id", None)
+    if (
+        sea_zone_id
+        and faction_defs
+        and unit_defs
+        and territory_defs
+    ):
         sea_zone = state.territories.get(sea_zone_id)
-        in_sea = [u for u in (sea_zone.units if sea_zone else []) if u.instance_id in attacker_ids]
-        attacker_territory = sea_zone if in_sea else territory
+        if not sea_zone:
+            return [], []
+        af = combat.attacker_faction
+        aa = (
+            getattr(faction_defs.get(af), "alliance", None)
+            if af and faction_defs.get(af)
+            else None
+        )
+        full_raid = _sea_raid_attacker_units_from_board(
+            sea_zone, territory, af, aa, unit_defs, faction_defs
+        )
+        attackers = sorted(
+            [u for u in full_raid if u.instance_id in attacker_ids],
+            key=lambda u: u.instance_id,
+        )
     else:
-        attacker_territory = territory
-    attackers = sorted(
-        [u for u in attacker_territory.units if u.instance_id in attacker_ids],
-        key=lambda u: u.instance_id,
-    )
+        if sea_zone_id:
+            sea_zone = state.territories.get(sea_zone_id)
+            in_sea = [u for u in (sea_zone.units if sea_zone else []) if u.instance_id in attacker_ids]
+            attacker_territory = sea_zone if in_sea else territory
+        else:
+            attacker_territory = territory
+        attackers = sorted(
+            [u for u in attacker_territory.units if u.instance_id in attacker_ids],
+            key=lambda u: u.instance_id,
+        )
     defenders = sorted(
         [u for u in territory.units if u.instance_id not in attacker_ids],
         key=lambda u: u.instance_id,
@@ -3790,7 +3816,7 @@ def _get_active_combat_units(
         territory_defs is not None
         and unit_defs is not None
     ):
-        tdef = territory_defs.get(state.active_combat.territory_id)
+        tdef = territory_defs.get(combat.territory_id)
         if tdef and _is_sea_zone(tdef):
             attackers = [
                 u for u in attackers
@@ -3803,7 +3829,7 @@ def _get_active_combat_units(
     return attackers, defenders
 
 
-def _enrich_active_combat_siegework_display_ids(ac_dict: dict, state: GameState, ud, td) -> None:
+def _enrich_active_combat_siegework_display_ids(ac_dict: dict, state: GameState, ud, td, fd) -> None:
     """When the next step is the siegeworks round, expose which units belong on shelves (same rules as combat_round_resolved)."""
     if not state.active_combat:
         return
@@ -3811,7 +3837,7 @@ def _enrich_active_combat_siegework_display_ids(ac_dict: dict, state: GameState,
     combat = state.active_combat
     tdef_c = td.get(combat.territory_id)
     def_sh = bool(tdef_c and getattr(tdef_c, "is_stronghold", False))
-    attackers, defenders = _get_active_combat_units(state, td, ud)
+    attackers, defenders = _get_active_combat_units(state, td, ud, fd)
     land_en = state.territories.get(combat.territory_id)
     def_sh_hp_enrich = _combat_territory_stronghold_hp(land_en, tdef_c)
     fuse_en = getattr(state.active_combat, "fuse_bomb", True)
@@ -3839,11 +3865,11 @@ def _enrich_active_combat_siegework_display_ids(ac_dict: dict, state: GameState,
         ac_dict["combat_siegeworks_defender_instance_ids"] = [u.instance_id for u in disp_def]
 
 
-def _generate_dice_rolls_for_active_combat(state, ud, td) -> dict:
+def _generate_dice_rolls_for_active_combat(state, ud, td, fd) -> dict:
     """Generate random dice_rolls for current active combat (for AI continue_combat)."""
     if not state.active_combat:
         return {"attacker": [], "defender": []}
-    attackers, defenders = _get_active_combat_units(state, td, ud)
+    attackers, defenders = _get_active_combat_units(state, td, ud, fd)
     if not attackers or not defenders:
         return {"attacker": [], "defender": []}
     combat = state.active_combat
@@ -3970,7 +3996,7 @@ def do_ai_step(
     if action.type == "continue_combat" and state.active_combat:
         dr = action.payload.get("dice_rolls") or {}
         if not dr.get("attacker") and not dr.get("defender"):
-            action.payload["dice_rolls"] = _generate_dice_rolls_for_active_combat(state, ud, td)
+            action.payload["dice_rolls"] = _generate_dice_rolls_for_active_combat(state, ud, td, fd)
 
     validation = validate_action(state, action, ud, td, fd, cd, port_d)
     if not validation.valid:

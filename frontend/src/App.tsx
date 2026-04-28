@@ -5,7 +5,12 @@ import GameMap, { type PendingMoveConfirm } from './components/GameMap';
 import Sidebar from './components/Sidebar';
 import CombatSimulatorPanel from './components/CombatSimulatorPanel';
 import PurchaseModal from './components/PurchaseModal';
-import CombatDisplay, { type CombatRound } from './components/CombatDisplay';
+import CombatDisplay, {
+  type CombatRound,
+  type GroupedAttackerDicePayload,
+  groupedPayloadToAttackerRolls,
+  groupedPayloadToDefenderRolls,
+} from './components/CombatDisplay';
 import api, {
   getAuthToken,
   type ApiGameState,
@@ -185,7 +190,7 @@ function getPlayerIdFromJwt(): string | null {
 }
 
 /** Poll game state this often (ms) so other players' actions appear without refresh. */
-const GAME_POLL_INTERVAL_MS = 3000;
+const GAME_POLL_INTERVAL_MS = 2000;
 
 /** Delay between each AI action so the human can follow what the computer is doing (ms). */
 const AI_STEP_DELAY_MS = 2500;
@@ -1553,7 +1558,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     init();
   }, [addLogEntry, GAME_ID]);
 
-  // Poll game state only in multiplayer so other players' actions appear live (1s when spectating a battle, else 3s)
+  // Poll game state only in multiplayer (2s default; 1s while spectating a battle for faster combat sync)
   const isMultiplayer = gameMeta?.is_multiplayer ?? Boolean(gameMeta?.game_code);
   const pollIntervalMs = spectatingBattle ? 1000 : GAME_POLL_INTERVAL_MS;
   useEffect(() => {
@@ -3044,110 +3049,6 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         defender_units_at_start: BackendCombatUnit[];
       };
 
-      const toDefenderRolls = (diceByStat: Record<string, { rolls: number[]; hits: number }>) => {
-        const out: Record<number, { value: number; target: number; isHit: boolean }[]> = {};
-        for (const [statStr, data] of Object.entries(diceByStat || {})) {
-          const stat = Number(statStr);
-          out[stat] = (data.rolls || []).map((value: number) => ({
-            value,
-            target: stat,
-            isHit: value <= stat,
-          }));
-        }
-        return out;
-      };
-
-      type AttackerDicePayload = {
-        rolls?: number[];
-        segments?: Array<{
-          rolls: number[];
-          hits?: number;
-          on_ladder?: boolean;
-          unit_type?: string;
-          unit_count?: number;
-        }>;
-      };
-      const toAttackerRolls = (diceByStat: Record<string, AttackerDicePayload>) => {
-        const swSplit = p.attacker_dice_siegework_split;
-        if (swSplit && Object.keys(swSplit).length > 0) {
-          const out: Record<
-            number,
-            | { mode: 'flat'; rolls: { value: number; target: number; isHit: boolean }[] }
-            | {
-              mode: 'ladder';
-              segments: Array<{
-                rolls: { value: number; target: number; isHit: boolean }[];
-                onLadder: boolean;
-                unitType: string;
-                unitCount: number;
-              }>;
-            }
-            | {
-              mode: 'siegework_ram_flex';
-              ram: { rolls: { value: number; target: number; isHit: boolean }[] };
-              flex: { rolls: { value: number; target: number; isHit: boolean }[] };
-            }
-          > = {};
-          for (const [statStr, buckets] of Object.entries(swSplit)) {
-            const stat = Number(statStr);
-            const mapRolls = (raw: number[] | undefined) =>
-              (raw ?? []).map((value: number) => ({
-                value,
-                target: stat,
-                isHit: value <= stat,
-              }));
-            out[stat] = {
-              mode: 'siegework_ram_flex',
-              ram: { rolls: mapRolls(buckets.ram?.rolls) },
-              flex: { rolls: mapRolls(buckets.flex?.rolls) },
-            };
-          }
-          return out;
-        }
-        const out: Record<
-          number,
-          | { mode: 'flat'; rolls: { value: number; target: number; isHit: boolean }[] }
-          | {
-            mode: 'ladder';
-            segments: Array<{
-              rolls: { value: number; target: number; isHit: boolean }[];
-              onLadder: boolean;
-              unitType: string;
-              unitCount: number;
-            }>;
-          }
-        > = {};
-        for (const [statStr, data] of Object.entries(diceByStat || {})) {
-          const stat = Number(statStr);
-          const segs = data.segments;
-          if (Array.isArray(segs) && segs.length > 0) {
-            out[stat] = {
-              mode: 'ladder',
-              segments: segs.map((s) => ({
-                rolls: (s.rolls || []).map((value: number) => ({
-                  value,
-                  target: stat,
-                  isHit: value <= stat,
-                })),
-                onLadder: !!s.on_ladder,
-                unitType: String(s.unit_type || ''),
-                unitCount: typeof s.unit_count === 'number' ? s.unit_count : (s.rolls?.length ?? 0),
-              })),
-            };
-          } else {
-            out[stat] = {
-              mode: 'flat',
-              rolls: (data.rolls || []).map((value: number) => ({
-                value,
-                target: stat,
-                isHit: value <= stat,
-              })),
-            };
-          }
-        }
-        return out;
-      };
-
       const backendUnitToCombatUnit = (bu: BackendCombatUnit): CombatUnit => ({
         id: bu.instance_id,
         unitType: bu.unit_id,
@@ -3187,8 +3088,11 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
 
       const round: CombatRound = {
         roundNumber: p.round_number,
-        attackerRolls: toAttackerRolls(p.attacker_dice as Record<string, AttackerDicePayload>),
-        defenderRolls: toDefenderRolls(p.defender_dice),
+        attackerRolls: groupedPayloadToAttackerRolls(
+          p.attacker_dice as Record<string, GroupedAttackerDicePayload>,
+          p.attacker_dice_siegework_split,
+        ),
+        defenderRolls: groupedPayloadToDefenderRolls(p.defender_dice),
         attackerHits: p.attacker_hits ?? 0,
         defenderHits: p.defender_hits ?? 0,
         attackerCasualties: Array.isArray(p.attacker_casualties) ? p.attacker_casualties : [],

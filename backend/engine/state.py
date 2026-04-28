@@ -301,6 +301,17 @@ class TerritoryState:
         )
 
 
+def _combat_dice_log_jsonable(m: object) -> object:
+    """Recursively JSON-safe dicts (str keys) for persisting event-shaped dice in combat_log."""
+    if m is None:
+        return None
+    if isinstance(m, dict):
+        return {str(k): _combat_dice_log_jsonable(v) for k, v in m.items()}
+    if isinstance(m, (list, tuple)):
+        return [_combat_dice_log_jsonable(x) for x in m]
+    return m
+
+
 @dataclass
 class CombatRoundResult:
     """Result of a single combat round (for combat log)."""
@@ -316,6 +327,10 @@ class CombatRoundResult:
     is_archer_prefire: bool = False  # True when this entry is defender archer prefire before round 1
     is_stealth_prefire: bool = False  # True when this entry is attacker stealth prefire before round 1
     is_siegeworks_round: bool = False  # True when this entry is the dedicated siegeworks round (only siegework units rolled)
+    # Optional: same shape as combat_round_resolved (grouped by stat) for shelf-accurate dice when reading combat_log only.
+    attacker_dice: dict[str, Any] | None = None
+    defender_dice: dict[str, Any] | None = None
+    attacker_dice_siegework_split: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -335,6 +350,12 @@ class CombatRoundResult:
             out["is_stealth_prefire"] = True
         if self.is_siegeworks_round:
             out["is_siegeworks_round"] = True
+        if self.attacker_dice:
+            out["attacker_dice"] = self.attacker_dice
+        if self.defender_dice:
+            out["defender_dice"] = self.defender_dice
+        if self.attacker_dice_siegework_split:
+            out["attacker_dice_siegework_split"] = self.attacker_dice_siegework_split
         return out
 
     @classmethod
@@ -350,6 +371,8 @@ class CombatRoundResult:
             return list(v) if isinstance(v, list) else d
         def _bool(v: Any, d: bool) -> bool:
             return bool(v) if v is not None else d
+        def _opt_dice(v: Any) -> dict[str, Any] | None:
+            return v if isinstance(v, dict) and v else None
         return cls(
             round_number=_int(data.get("round_number"), 0),
             attacker_rolls=_list(data.get("attacker_rolls"), []),
@@ -363,6 +386,9 @@ class CombatRoundResult:
             is_archer_prefire=_bool(data.get("is_archer_prefire"), False),
             is_stealth_prefire=_bool(data.get("is_stealth_prefire"), False),
             is_siegeworks_round=_bool(data.get("is_siegeworks_round"), False),
+            attacker_dice=_opt_dice(data.get("attacker_dice")),
+            defender_dice=_opt_dice(data.get("defender_dice")),
+            attacker_dice_siegework_split=_opt_dice(data.get("attacker_dice_siegework_split")),
         )
 
 

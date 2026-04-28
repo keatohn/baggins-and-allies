@@ -8,7 +8,7 @@ but we're moving existing units, not buying/placing.
 import math
 from collections import defaultdict
 
-from backend.engine.actions import move_units, end_phase
+from backend.engine.actions import Action, move_units, end_phase
 from backend.engine.movement import _is_sea_zone
 from backend.engine.queries import (
     get_movable_units,
@@ -17,6 +17,7 @@ from backend.engine.queries import (
     _is_naval_unit,
     filter_unit_instances_that_can_reach,
 )
+from backend.engine.movement import is_friendly_territory_for_landing
 
 from backend.ai.context import AIContext
 from backend.ai.geography import (
@@ -353,11 +354,54 @@ def _n_land_movers(
     return n
 
 
-def decide_non_combat_move(ctx: AIContext):
+def _try_move_aerial_out_of_unfriendly_landing(
+    ctx: AIContext,
+) -> Action | None:
+    """
+    Aerials that failed to conquer must leave enemy/neutral land before end_phase; prefer one move that lands on an allied tile.
+    """
+    stuck = (ctx.available_actions or {}).get("aerial_units_must_move") or []
+    if not stuck:
+        return None
+    state = ctx.state
+    faction_id = ctx.faction_id
+    ud = ctx.unit_defs
+    td = ctx.territory_defs
+    fd = ctx.faction_defs
+    for entry in sorted(stuck, key=lambda e: (str(e.get("territory_id", "")), str(e.get("instance_id", "")))):
+        iid = entry.get("instance_id")
+        if not iid or not entry.get("territory_id"):
+            continue
+        from_tid = str(entry["territory_id"])
+        targets, _ = get_unit_move_targets(state, iid, ud, td, fd)
+        if not targets:
+            continue
+        for to_tid in sorted(targets.keys()):
+            t = state.territories.get(to_tid)
+            if not t:
+                continue
+            if is_friendly_territory_for_landing(
+                t, faction_id, fd, ud, state=state, territory_id=to_tid,
+            ):
+                ids = filter_unit_instances_that_can_reach(
+                    state, to_tid, [iid], ud, td, fd
+                )
+                if ids:
+                    return move_units(faction_id, from_tid, to_tid, [iid])
+    return None
+
+
+def decide_non_combat_move(ctx: AIContext) -> Action | None:
     """
     One move that best sets up for next turn: reinforce (defense) or forward position (attack).
     Score = DEFEND_VS_ATTACK_WEIGHT * reinforce_value(to) + (1 - DEFEND_VS_ATTACK_WEIGHT) * attack_setup_value(to).
+    Returns None when the engine cannot end the phase yet (e.g. aerials must still move) and we have no scored move.
     """
+    # Must clear aerials stuck in non-allied land before the engine allows end_phase.
+    out = _try_move_aerial_out_of_unfriendly_landing(ctx)
+    if out is not None:
+        return out
+
     state = ctx.state
     faction_id = ctx.faction_id
     ud = ctx.unit_defs
@@ -574,16 +618,17 @@ def decide_non_combat_move(ctx: AIContext):
             candidates.append(((from_tid, to_tid, list(unit_ids)), score))
 
     best_move = pick_from_score_band(candidates) if candidates else None
+    can_end = (ctx.available_actions or {}).get("can_end_phase", True)
 
     if not best_move:
-        return end_phase(faction_id)
+        return end_phase(faction_id) if can_end else None
     from_tid, to_tid, unit_ids = best_move
     # Only include unit instances that can reach to_tid (per remaining_movement)
     unit_ids = filter_unit_instances_that_can_reach(
         state, to_tid, unit_ids, ud, td, fd
     )
     if not unit_ids:
-        return end_phase(faction_id)
+        return end_phase(faction_id) if can_end else None
     # Sea -> land (offload): only land units may move; naval units cannot go on land (backend rule)
     from_def = td.get(from_tid)
     to_def = td.get(to_tid)
@@ -595,5 +640,5 @@ def decide_non_combat_move(ctx: AIContext):
             if u.instance_id in ids_set and not _is_naval_unit(ud.get(u.unit_id))
         ]
         if not unit_ids:
-            return end_phase(faction_id)
+            return end_phase(faction_id) if can_end else None
     return move_units(faction_id, from_tid, to_tid, unit_ids)

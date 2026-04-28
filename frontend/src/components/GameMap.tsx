@@ -966,6 +966,8 @@ function GameMap({
     isNaval?: boolean;
     instanceIds?: string[];
     passengerCount?: number;
+    /** Drag started from a single boat card in the naval tray (confirm max = 1 ship, not all ships in zone). */
+    fromNavalTray?: boolean;
   } | null>(null);
   const [bulkDragOverlay, setBulkDragOverlay] = useState<{ stacks: BulkDragOverlayStack[] } | null>(null);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
@@ -2362,7 +2364,7 @@ function GameMap({
       setValidDropTargets(new Set(withRoom));
       return;
     }
-    const { unitId, territoryId, count, unitDef, factionColor, instanceIds, passengerCount } = data as {
+    const { unitId, territoryId, count, unitDef, factionColor, instanceIds, passengerCount, fromNavalTray } = data as {
       unitId: string;
       territoryId: string;
       count: number;
@@ -2370,8 +2372,19 @@ function GameMap({
       factionColor?: string;
       instanceIds?: string[];
       passengerCount?: number;
+      fromNavalTray?: boolean;
     };
-    setActiveUnit({ unitId, territoryId, count, unitDef, factionColor, isNaval: navalUnitIds.has(unitId), instanceIds, passengerCount: passengerCount ?? 0 });
+    setActiveUnit({
+      unitId,
+      territoryId,
+      count,
+      unitDef,
+      factionColor,
+      isNaval: navalUnitIds.has(unitId),
+      instanceIds,
+      passengerCount: passengerCount ?? 0,
+      ...(fromNavalTray ? { fromNavalTray: true } : {}),
+    });
     const isSeaFrom = territoryData[territoryId]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(territoryId);
     const navalDrag =
       navalUnitIds.has(unitId) && isSeaFrom
@@ -2976,13 +2989,25 @@ function GameMap({
             boatOptions = boats.map(boat => [boat.instance_id, ...instanceIdsToUse]);
           }
         }
-        // Confirm UI: count ships, not passengers. Multi-boat map drag: +/- = number of ships. Single ship raid/offload: 1.
-        if (navalBoatStacks && navalBoatStacks.length > 1) {
-          moveCount = navalBoatStacks.length;
-          moveMaxCount = navalBoatStacks.length;
-        } else if (isOffloadOrSeaRaid && unitForDrop.isNaval && instanceIdsToUse && instanceIdsToUse.length > 0) {
-          moveCount = 1;
-          moveMaxCount = 1;
+        // Confirm UI: count ships, not passengers (instanceIds include each boat + its passengers).
+        if (unitForDrop.isNaval && instanceIdsToUse && territoryUnitsFull?.[unitForDrop.territoryId]) {
+          const fullU = territoryUnitsFull[unitForDrop.territoryId];
+          const boatIdSet = new Set(
+            fullU.filter((u) => navalUnitIds.has(u.unit_id)).map((b) => b.instance_id),
+          );
+          const nShipsInMove = instanceIdsToUse.filter((id) => boatIdSet.has(id)).length;
+          if (nShipsInMove >= 1) {
+            if (navalBoatStacks && navalBoatStacks.length > 1) {
+              moveCount = navalBoatStacks.length;
+              moveMaxCount = navalBoatStacks.length;
+            } else if (isOffloadOrSeaRaid) {
+              moveCount = 1;
+              moveMaxCount = 1;
+            } else {
+              moveCount = nShipsInMove;
+              moveMaxCount = Math.min(nShipsInMove, availableCount);
+            }
+          }
         }
         const fromId = typeof unitForDrop.territoryId === 'string' ? unitForDrop.territoryId : String((unitForDrop.territoryId as { id?: string; territoryId?: string })?.territoryId ?? (unitForDrop.territoryId as { id?: string })?.id ?? unitForDrop.territoryId);
         const toStrStored = (typeof storeToTerritory === 'string' ? storeToTerritory : String((storeToTerritory as { id?: string; territoryId?: string })?.territoryId ?? (storeToTerritory as { id?: string })?.id ?? storeToTerritory)).trim();

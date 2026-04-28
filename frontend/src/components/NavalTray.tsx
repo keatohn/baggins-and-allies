@@ -348,6 +348,8 @@ function DraggableBoatCard({
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `naval-tray-${seaZoneId}-${boat.boatInstanceId}`,
     data: {
+      type: 'naval-tray-boat' as const,
+      fromNavalTray: true,
       unitId: boat.unitId,
       territoryId: seaZoneId,
       count: 1,

@@ -5,7 +5,18 @@ Returns (new_state, events) where events describe what happened.
 """
 
 from copy import deepcopy
-from backend.engine.state import GameState, UnitStack, TerritoryState, Unit, ActiveCombat, CombatRoundResult, PendingMove, PendingMobilization, PendingCampPlacement
+from backend.engine.state import (
+    GameState,
+    UnitStack,
+    TerritoryState,
+    Unit,
+    ActiveCombat,
+    CombatRoundResult,
+    PendingMove,
+    PendingMobilization,
+    PendingCampPlacement,
+    _combat_dice_log_jsonable,
+)
 from backend.engine.actions import Action
 from backend.engine.definitions import UnitDefinition, TerritoryDefinition, FactionDefinition, CampDefinition, PortDefinition, is_transportable
 from backend.engine.combat import (
@@ -2773,6 +2784,9 @@ def _handle_initiate_combat(
             for pid in passenger_att_bomb_sw:
                 unit_type = pid.split("_")[1] if "_" in pid else "unknown"
                 events.append(unit_destroyed(pid, unit_type, attacker_faction, territory_id, "combat"))
+        _ad_sw = _combat_dice_log_jsonable(siege_att_dice_grouped) if siege_att_dice_grouped else None
+        _dd_sw = _combat_dice_log_jsonable(siege_def_dice_grouped) if siege_def_dice_grouped else None
+        _sp_sw = _combat_dice_log_jsonable(siege_att_dice_split_sw) if siege_att_dice_split_sw else None
         siege_log_entry = CombatRoundResult(
             round_number=0,
             attacker_rolls=dice_rolls.get("attacker", []),
@@ -2784,6 +2798,9 @@ def _handle_initiate_combat(
             attackers_remaining=len(attacker_units),
             defenders_remaining=len(round_result_sw.surviving_defender_ids),
             is_siegeworks_round=True,
+            attacker_dice=_ad_sw if isinstance(_ad_sw, dict) else None,
+            defender_dice=_dd_sw if isinstance(_dd_sw, dict) else None,
+            attacker_dice_siegework_split=_sp_sw if isinstance(_sp_sw, dict) else None,
         )
         combat_log_prefix = [siege_log_entry]
 
@@ -3095,6 +3112,8 @@ def _handle_initiate_combat(
         round_result.defender_casualties, round_result.defender_wounded, defender_id_to_type_health
     )
 
+    _ad1 = _combat_dice_log_jsonable(attacker_dice_grouped) if attacker_dice_grouped else None
+    _dd1 = _combat_dice_log_jsonable(defender_dice_grouped) if defender_dice_grouped else None
     combat_log_entry = CombatRoundResult(
         round_number=1,
         attacker_rolls=dice_rolls.get("attacker", []),
@@ -3105,6 +3124,8 @@ def _handle_initiate_combat(
         defender_casualties=round_result.defender_casualties,
         attackers_remaining=len(round_result.surviving_attacker_ids),
         defenders_remaining=len(round_result.surviving_defender_ids),
+        attacker_dice=_ad1 if isinstance(_ad1, dict) else None,
+        defender_dice=_dd1 if isinstance(_dd1, dict) else None,
     )
 
     events.append(combat_round_resolved(
@@ -3544,6 +3565,9 @@ def _handle_continue_combat(
             for pid in passenger_att_bomb:
                 unit_type = pid.split("_")[1] if "_" in pid else "unknown"
                 events.append(unit_destroyed(pid, unit_type, combat.attacker_faction, combat.territory_id, "combat"))
+        _ad_sc = _combat_dice_log_jsonable(siege_att_dice_grouped) if siege_att_dice_grouped else None
+        _dd_sc = _combat_dice_log_jsonable(siege_def_dice_grouped) if siege_def_dice_grouped else None
+        _sp_sc = _combat_dice_log_jsonable(siege_att_dice_split_continue) if siege_att_dice_split_continue else None
         siege_log_entry = CombatRoundResult(
             round_number=0,
             attacker_rolls=dice_rolls.get("attacker", []),
@@ -3555,6 +3579,9 @@ def _handle_continue_combat(
             attackers_remaining=len(attacker_units),
             defenders_remaining=len(round_result.surviving_defender_ids),
             is_siegeworks_round=True,
+            attacker_dice=_ad_sc if isinstance(_ad_sc, dict) else None,
+            defender_dice=_dd_sc if isinstance(_dd_sc, dict) else None,
+            attacker_dice_siegework_split=_sp_sc if isinstance(_sp_sc, dict) else None,
         )
         combat.combat_log.append(siege_log_entry)
         combat.cumulative_hits_received_by_attacker += round_result.defender_hits
@@ -3761,6 +3788,8 @@ def _handle_continue_combat(
 
     # Create combat log entry
     new_round_number = combat.round_number + 1
+    _adn = _combat_dice_log_jsonable(attacker_dice_grouped) if attacker_dice_grouped else None
+    _ddn = _combat_dice_log_jsonable(defender_dice_grouped) if defender_dice_grouped else None
     combat_log_entry = CombatRoundResult(
         round_number=new_round_number,
         attacker_rolls=dice_rolls.get("attacker", []),
@@ -3771,6 +3800,8 @@ def _handle_continue_combat(
         defender_casualties=round_result.defender_casualties,
         attackers_remaining=len(round_result.surviving_attacker_ids),
         defenders_remaining=len(round_result.surviving_defender_ids),
+        attacker_dice=_adn if isinstance(_adn, dict) else None,
+        defender_dice=_ddn if isinstance(_ddn, dict) else None,
     )
 
     # Emit round resolved event with full payload for UI (dice, hits, casualties, units at start)

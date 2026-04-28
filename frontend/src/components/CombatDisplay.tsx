@@ -147,6 +147,88 @@ export type AttackerDiceAtStat =
       flex: { rolls: DiceRoll[] };
     };
 
+/** Grouped backend dice (combat_round_resolved / combat_log) → shelf roll structures. */
+export type GroupedAttackerDicePayload = {
+  rolls?: number[];
+  segments?: Array<{
+    rolls: number[];
+    hits?: number;
+    on_ladder?: boolean;
+    unit_type?: string;
+    unit_count?: number;
+  }>;
+};
+
+export function groupedPayloadToDefenderRolls(
+  diceByStat: Record<string, { rolls: number[]; hits: number }>,
+): Record<number, DiceRoll[]> {
+  const out: Record<number, DiceRoll[]> = {};
+  for (const [statStr, data] of Object.entries(diceByStat || {})) {
+    const stat = Number(statStr);
+    out[stat] = (data.rolls || []).map((value: number) => ({
+      value,
+      target: stat,
+      isHit: value <= stat,
+    }));
+  }
+  return out;
+}
+
+/** @param siegeworkSplit — attacker_dice_siegework_split for dedicated siegework round */
+export function groupedPayloadToAttackerRolls(
+  attackerDice: Record<string, GroupedAttackerDicePayload>,
+  siegeworkSplit?: Record<string, { ram?: { rolls?: number[]; hits?: number }; flex?: { rolls?: number[]; hits?: number } }> | null,
+): Record<number, AttackerDiceAtStat> {
+  if (siegeworkSplit && Object.keys(siegeworkSplit).length > 0) {
+    const out: Record<number, AttackerDiceAtStat> = {};
+    for (const [statStr, buckets] of Object.entries(siegeworkSplit)) {
+      const stat = Number(statStr);
+      const mapRolls = (raw: number[] | undefined) =>
+        (raw ?? []).map((value: number) => ({
+          value,
+          target: stat,
+          isHit: value <= stat,
+        }));
+      out[stat] = {
+        mode: 'siegework_ram_flex',
+        ram: { rolls: mapRolls(buckets.ram?.rolls) },
+        flex: { rolls: mapRolls(buckets.flex?.rolls) },
+      };
+    }
+    return out;
+  }
+  const out: Record<number, AttackerDiceAtStat> = {};
+  for (const [statStr, data] of Object.entries(attackerDice || {})) {
+    const stat = Number(statStr);
+    const segs = data.segments;
+    if (Array.isArray(segs) && segs.length > 0) {
+      out[stat] = {
+        mode: 'ladder',
+        segments: segs.map(s => ({
+          rolls: (s.rolls || []).map((value: number) => ({
+            value,
+            target: stat,
+            isHit: value <= stat,
+          })),
+          onLadder: !!s.on_ladder,
+          unitType: String(s.unit_type || ''),
+          unitCount: typeof s.unit_count === 'number' ? s.unit_count : (s.rolls?.length ?? 0),
+        })),
+      };
+    } else {
+      out[stat] = {
+        mode: 'flat',
+        rolls: (data.rolls || []).map((value: number) => ({
+          value,
+          target: stat,
+          isHit: value <= stat,
+        })),
+      };
+    }
+  }
+  return out;
+}
+
 function isAttackerLadderDice(d: AttackerDiceAtStat | undefined): d is Extract<AttackerDiceAtStat, { mode: 'ladder' }> {
   return !!d && typeof d === 'object' && 'mode' in d && d.mode === 'ladder';
 }
@@ -1588,6 +1670,18 @@ function CombatDisplay({
       const arr = rolls.map((value, i) => ({ value, target: 10, isHit: i < hitCount }));
       return arr.length ? { 1: arr } : {};
     };
+    const lastEx = last as {
+      attacker_dice?: Record<string, GroupedAttackerDicePayload>;
+      defender_dice?: Record<string, { rolls: number[]; hits: number }>;
+      attacker_dice_siegework_split?: Record<string, { ram?: { rolls?: number[]; hits?: number }; flex?: { rolls?: number[]; hits?: number } }>;
+    };
+    const hasGroupedDice =
+      lastEx.attacker_dice
+      && lastEx.defender_dice
+      && typeof lastEx.attacker_dice === 'object'
+      && typeof lastEx.defender_dice === 'object'
+      && Object.keys(lastEx.attacker_dice).length > 0
+      && Object.keys(lastEx.defender_dice).length > 0;
     let prevA: string[] = [];
     let prevD: string[] = [];
     for (let i = 0; i < combatLog.length - 1; i++) {
@@ -1599,8 +1693,15 @@ function CombatDisplay({
     const dAtStart = defender.units.filter(u => !prevD.includes(u.id));
     const round: CombatRound = {
       roundNumber: rn,
-      attackerRolls: toAttackerFlat(aRolls, aHits),
-      defenderRolls: toDefenderSpectator(dRolls, dHits),
+      attackerRolls: hasGroupedDice
+        ? groupedPayloadToAttackerRolls(
+            lastEx.attacker_dice ?? {},
+            lastEx.attacker_dice_siegework_split,
+          )
+        : toAttackerFlat(aRolls, aHits),
+      defenderRolls: hasGroupedDice
+        ? groupedPayloadToDefenderRolls(lastEx.defender_dice ?? {})
+        : toDefenderSpectator(dRolls, dHits),
       attackerHits: aHits,
       defenderHits: dHits,
       attackerCasualties: last.attacker_casualties ?? [],
