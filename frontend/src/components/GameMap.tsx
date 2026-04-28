@@ -329,11 +329,11 @@ function filterLandUnitSeaLoadDestinations(
   validTargets: Set<string>,
   unitId: string,
   territoryData: Record<string, { terrain?: string; adjacent?: string[] } | undefined>,
-  territoryUnitsFull: Record<string, { instance_id: string; unit_id: string; loaded_onto?: string | null }[]>,
+  _territoryUnitsFull: Record<string, { instance_id: string; unit_id: string; loaded_onto?: string | null }[]>,
   unitDefs: Record<string, { tags?: string[]; archetype?: string }>,
   navalUnitIds: Set<string>,
-  currentFaction: string,
-  pendingMoves: PendingMove[] | undefined,
+  _currentFaction: string,
+  _pendingMoves: PendingMove[] | undefined,
   phase: string,
 ): void {
   if (navalUnitIds.has(unitId)) return;
@@ -361,25 +361,9 @@ function filterLandUnitSeaLoadDestinations(
       if (c !== tid) validTargets.delete(c);
       continue;
     }
-    const full =
-      territoryUnitsFull[tid] ??
-      territoryUnitsFull[canonicalSeaZoneId(tid)] ??
-      [];
-    const cap = getLandToSeaLoadCapacityRemaining(
-      tid,
-      full,
-      unitDefs as Record<string, { faction?: string; transport_capacity?: number }>,
-      navalUnitIds,
-      currentFaction,
-      pendingMoves,
-      phase,
-      territoryData,
-    );
-    if (cap <= 0) {
-      validTargets.delete(tid);
-      const c = canonicalSeaZoneId(tid);
-      if (c !== tid) validTargets.delete(c);
-    }
+    // Embark capacity for highlights comes from moveable_units (server uses state after same-phase
+    // pending moves). Raw territoryUnitsFull still shows ships at origin until phase end — do not strip
+    // sea hexes here based on client-only capacity.
   }
 }
 
@@ -532,8 +516,8 @@ interface GameMapProps {
   /** Defender boats in a mobilization naval standoff (must fight or sail away). */
   forcedNavalCombatInstanceIds?: string[];
   /**
-   * Sea zone ids (raw + canonical) where clicking the boat stack should open the naval tray even with no passengers
-   * aboard yet — e.g. pending land→sea loads into a hex with multiple boats (after user closed the tray with X).
+   * Sea zone ids (raw + canonical) where pending land→sea loads need the tray (multiple boats, allocation).
+   * Stack tap still opens the tray when there are passengers aboard to distinguish boats.
    */
   seaZoneIdsEligibleForNavalTrayStackClick?: Set<string>;
   /** When set, show naval tray (boats + passengers) for the selected sea zone during movement phases. */
@@ -1758,12 +1742,56 @@ function GameMap({
       );
     });
 
+    const fullForNaval =
+      territoryUnitsFull?.[fromTerritory] ??
+      territoryUnitsFull?.[fromKeyForMatch] ??
+      [];
+    let destSourceRows = matches;
+    if (navalUnitIds?.has(unitId) && navalDrag?.instanceIds?.length && fullForNaval.length > 0) {
+      const boatIdsFromDrag = navalDrag.instanceIds.filter((iid) => {
+        const u = fullForNaval.find((x) => x.instance_id === iid);
+        return u && navalUnitIds.has(u.unit_id);
+      });
+      if (boatIdsFromDrag.length > 0) {
+        const rows = boatIdsFromDrag.map((bid) => matches.find((m) => m.unit.instance_id === bid));
+        if (rows.some((r) => !r)) {
+          destSourceRows = [];
+        } else {
+          destSourceRows = rows as typeof matches;
+        }
+      }
+    }
+
     const validTargets = new Set<string>();
-    if (matches.length > 0) {
-      for (const m of matches) {
-        const dests = m.destinations || [];
-        for (const d of dests) {
-          addDestinationWithSeaZoneAlias(validTargets, d);
+    if (destSourceRows.length > 0) {
+      if (navalUnitIds?.has(unitId) && destSourceRows.length > 1) {
+        let inter: Set<string> | null = null;
+        for (const m of destSourceRows) {
+          const s = new Set<string>();
+          for (const dest of m.destinations || []) {
+            addDestinationWithSeaZoneAlias(s, dest);
+          }
+          if (inter === null) {
+            inter = s;
+          } else {
+            const next = new Set<string>();
+            for (const destId of inter) {
+              if (s.has(destId)) next.add(destId);
+            }
+            inter = next;
+          }
+        }
+        if (inter) {
+          for (const dest of inter) {
+            addDestinationWithSeaZoneAlias(validTargets, dest);
+          }
+        }
+      } else {
+        for (const m of destSourceRows) {
+          const dests = m.destinations || [];
+          for (const d of dests) {
+            addDestinationWithSeaZoneAlias(validTargets, d);
+          }
         }
       }
       filterLandUnitSeaLoadDestinations(
@@ -2160,9 +2188,16 @@ function GameMap({
         if (isSea && full?.length && navalUnitIds.size) {
           const boatCount = full.filter((u) => navalUnitIds.has(u.unit_id)).length;
           if (boatCount > 1) {
-            onSeaZoneStackClick(tid);
-            setTapMobilizationAll(false);
-            return;
+            const totalPax = full.filter((u) => u.loaded_onto).length;
+            const trayCanon = canonicalSeaZoneId(tid);
+            const eligiblePending =
+              seaZoneIdsEligibleForNavalTrayStackClick.has(tid) ||
+              seaZoneIdsEligibleForNavalTrayStackClick.has(trayCanon);
+            if (totalPax > 0 || eligiblePending) {
+              onSeaZoneStackClick(tid);
+              setTapMobilizationAll(false);
+              return;
+            }
           }
         }
       }
@@ -2219,6 +2254,7 @@ function GameMap({
     computeBulkAllMoveData,
     canAct,
     onSeaZoneStackClick,
+    seaZoneIdsEligibleForNavalTrayStackClick,
   ]);
 
   const handleTapMobilizeAllFromTray = useCallback(() => {
@@ -2908,13 +2944,16 @@ function GameMap({
             gameState.phase,
             territoryData,
           );
-          if (seaCap <= 0) {
+          const backendReachLand =
+            availableLandInstanceIds !== null && availableLandInstanceIds.length > 0;
+          if (seaCap <= 0 && !backendReachLand) {
             setActiveUnit(null);
             setActiveDragId(null);
             setValidDropTargets(new Set());
             return;
           }
-          moveMaxCount = Math.min(moveMaxCount, seaCap);
+          const effectiveSeaCap = backendReachLand ? Math.max(seaCap, availableLandInstanceIds!.length) : seaCap;
+          moveMaxCount = Math.min(moveMaxCount, effectiveSeaCap);
           if (instanceIdsToUse && instanceIdsToUse.length > moveMaxCount) {
             instanceIdsToUse = instanceIdsToUse.slice(0, moveMaxCount);
           }
@@ -4448,7 +4487,9 @@ function GameMap({
                           const eligiblePending =
                             seaZoneIdsEligibleForNavalTrayStackClick.has(territoryId) ||
                             seaZoneIdsEligibleForNavalTrayStackClick.has(canonicalSeaZoneId(territoryId));
-                          const showTrayDblClick = totalBoats > 1;
+                          /** Tray only when boats differ (passengers) or pending loads need allocation — not bare multi-ship stacks. */
+                          const showTrayDblClick =
+                            totalBoats > 1 && (totalPassengers > 0 || eligiblePending);
 
                           const boatCountByType = new Map<string, number>();
                           for (const u of navalUnits) {

@@ -2569,11 +2569,12 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
             actions["camp_cost"] = getattr(state, "camp_cost", 0)
             actions["stronghold_repair_cost"] = getattr(state, "stronghold_repair_cost", 0)
         elif phase in ("combat_move", "non_combat_move"):
+            slot_check_state = get_state_after_pending_moves(state, phase, ud, td, fd)
             movable = get_movable_units(state, faction, ud)
             actions["moveable_units"] = []
             for unit_info in movable:
                 targets, charge_routes = get_unit_move_targets(
-                    state, unit_info["instance_id"], ud, td, fd
+                    state, unit_info["instance_id"], ud, td, fd, slot_check_state
                 )
                 actions["moveable_units"].append({
                     "territory": unit_info["territory_id"],

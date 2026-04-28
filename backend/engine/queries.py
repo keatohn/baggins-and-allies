@@ -1678,19 +1678,32 @@ def get_unit_move_targets(
     unit_defs: dict[str, UnitDefinition],
     territory_defs: dict[str, TerritoryDefinition],
     faction_defs: dict[str, FactionDefinition],
+    slot_check_state: GameState | None = None,
 ) -> tuple[dict[str, int], dict[str, list[list[str]]]]:
     """
     Get all territories a specific unit can move to.
     Returns (targets_dict, charge_routes).
     - targets_dict: territory_id -> movement_cost
     - charge_routes: for cavalry in combat_move, territory_id -> list of charge_through paths (empty enemy IDs)
+
+    slot_check_state: optional snapshot for land→sea embark capacity (same-phase pending applied).
+    Pass once per available-actions build to avoid redundant deepcopy per unit.
     """
     for territory_id, territory in state.territories.items():
         for unit in territory.units:
             if unit.instance_id == unit_instance_id:
                 return get_reachable_territories_for_unit(
-                    unit, territory_id, state, unit_defs,
-                    territory_defs, faction_defs, state.phase
+                    unit,
+                    territory_id,
+                    state,
+                    unit_defs,
+                    territory_defs,
+                    faction_defs,
+                    state.phase,
+                    None,
+                    None,
+                    False,
+                    slot_check_state,
                 )
 
     return {}, {}  # Unit not found

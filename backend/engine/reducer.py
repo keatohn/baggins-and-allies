@@ -1212,6 +1212,47 @@ def _handle_move_units(
             )
             if not vr.valid:
                 raise ValueError(vr.error or "Invalid sail for sea raid/offload")
+        # Embark (API always sends move_type=load for land→sea). Pathfinding can mark some land units as
+        # "reaching" the sea hex and others not, splitting drivers/passengers and incorrectly falling through
+        # to sea-transport naval_capacity (Too many passengers for transport capacity). Treat explicit load
+        # as all-passenger capacity checks against boats in the destination sea zone.
+        elif (
+            move_type_payload == "load"
+            and not from_sea
+            and dest_is_sea
+            and not sea_offload_ok
+        ):
+            for u in units_to_move:
+                ud = unit_defs.get(u.unit_id)
+                if not is_land_unit(ud):
+                    raise ValueError(
+                        f"Unit {u.instance_id} cannot be carried (only land units can load into sea)"
+                    )
+                if not is_transportable(ud):
+                    raise ValueError(
+                        f"Unit {u.instance_id} cannot be transported (no transportable tag)"
+                    )
+            to_territory = state.territories.get(to_id)
+            if to_territory:
+                load_onto_decl = (action.payload.get("load_onto_boat_instance_id") or "").strip() or None
+                if load_onto_decl:
+                    boat_slots = remaining_load_slots_on_boat(
+                        state, to_id, load_onto_decl, faction_id, unit_defs, territory_defs, state.phase
+                    )
+                    if len(units_to_move) > boat_slots:
+                        raise ValueError(
+                            f"Boat {load_onto_decl} has only {boat_slots} passenger slot(s) left in {to_id} "
+                            f"(onboard + pending loads), cannot load {len(units_to_move)}"
+                        )
+                else:
+                    zone_slots = remaining_sea_load_passenger_slots(
+                        state, to_id, faction_id, unit_defs, territory_defs, state.phase
+                    )
+                    if len(units_to_move) > zone_slots:
+                        raise ValueError(
+                            f"Not enough transport capacity in {to_id}: {len(units_to_move)} passengers but only "
+                            f"{zone_slots} slot(s) left (including pending loads this phase)"
+                        )
         # Load: land -> sea, stack is all land; boats already in destination sea zone provide capacity
         elif not from_sea and dest_is_sea and not drivers and passengers:
             for u in passengers:

@@ -1021,6 +1021,7 @@ def get_reachable_territories_for_unit(
     acting_faction_id: str | None = None,
     exclude_instance_ids_from_ford_pending: set[str] | None = None,
     same_move_includes_ford_crosser: bool = False,
+    slot_check_state: GameState | None = None,
 ) -> tuple[dict[str, int], dict[str, list[list[str]]]]:
     """
     Calculate all territories reachable by a specific unit instance from a starting territory.
@@ -1031,6 +1032,10 @@ def get_reachable_territories_for_unit(
 
     acting_faction_id: if set, treat this faction as the moving player (friend/enemy/neutral
     edges). Defaults to state.current_faction. Used for AI threat checks without mutating state.
+
+    slot_check_state: optional board snapshot for land→sea embark capacity (remaining passenger slots).
+    When set (e.g. state after same-phase pending moves), load highlights match declare sail then load.
+    If None during combat_move/non_combat_move, computed lazily via get_state_after_pending_moves.
 
     exclude_instance_ids_from_ford_pending: pending moves containing these instance IDs do not
     count toward ford escort usage (so the current move can replace a pending declaration).
@@ -1243,6 +1248,17 @@ def get_reachable_territories_for_unit(
                         if via_path not in charge_routes[adjacent_id]:
                             charge_routes[adjacent_id].append(via_path)
 
+    # Land→sea embark: passenger slots must reflect boats after same-phase pending moves (sail then load).
+    embark_slot_state: GameState | None = None
+    if phase in ("combat_move", "non_combat_move"):
+        embark_slot_state = slot_check_state
+        if embark_slot_state is None:
+            from backend.engine.reducer import get_state_after_pending_moves
+
+            embark_slot_state = get_state_after_pending_moves(
+                state, phase, unit_defs, territory_defs, faction_defs
+            )
+
     # Filter destinations based on phase and unit type
     filtered_reachable = {}
     for territory_id, dist in reachable.items():
@@ -1314,8 +1330,9 @@ def get_reachable_territories_for_unit(
                 if (
                     is_land_unit(unit_def)
                     and is_transportable(unit_def)
+                    and embark_slot_state is not None
                     and remaining_sea_load_passenger_slots(
-                        state, territory_id, cf, unit_defs, territory_defs, phase
+                        embark_slot_state, territory_id, cf, unit_defs, territory_defs, phase
                     )
                     > 0
                 ):
@@ -1377,8 +1394,9 @@ def get_reachable_territories_for_unit(
                 if (
                     is_land_unit(unit_def)
                     and is_transportable(unit_def)
+                    and embark_slot_state is not None
                     and remaining_sea_load_passenger_slots(
-                        state, territory_id, cf, unit_defs, territory_defs, phase
+                        embark_slot_state, territory_id, cf, unit_defs, territory_defs, phase
                     )
                     > 0
                 ):

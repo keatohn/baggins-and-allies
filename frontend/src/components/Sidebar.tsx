@@ -671,7 +671,7 @@ function Sidebar({
                           !isLoad &&
                           ((!fromSea && !toSea) ||
                             (fromSea && !toSea) ||
-                            (!fromSea && toSea) ||
+                            (!fromSea && toSea && isAerialUnit) ||
                             combatNavalAttack);
                         const isNavalMove = isLoad || isOffload || isSail;
                         const buttonLabel = isLoad ? 'Load' : isOffload ? 'Offload' : isSail ? 'Sail' : isSeaRaid ? 'Sea Raid' : isAttack ? 'Attack' : 'Move';
