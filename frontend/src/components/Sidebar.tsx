@@ -534,9 +534,32 @@ function Sidebar({
             {bulkMoveConfirm && !pendingOffloadSeaChoice && (
               <div className="move-confirm">
                 {(() => {
-                  const isAttack = gameState.phase === 'combat_move';
-                  const buttonLabel = isAttack ? 'Attack' : 'Move';
-                  const confirmBtnClass = isAttack ? 'confirm-move-btn attack-btn' : 'confirm-move-btn';
+                  const fromTerrain = territoryData[bulkMoveConfirm.fromTerritory]?.terrain;
+                  const toTerrain = territoryData[bulkMoveConfirm.toTerritory]?.terrain;
+                  const fromSea =
+                    fromTerrain === 'sea' || /^sea_zone_?\d+$/i.test(bulkMoveConfirm.fromTerritory);
+                  const toSea = toTerrain === 'sea' || /^sea_zone_?\d+$/i.test(bulkMoveConfirm.toTerritory);
+                  const allMovingAerial =
+                    bulkMoveConfirm.stacks.length > 0 &&
+                    bulkMoveConfirm.stacks.every((s) => unitIsAerial(s.unitId, unitDefs));
+                  const isLoad = !fromSea && toSea && !allMovingAerial;
+                  const isOffload =
+                    fromSea && !toSea && gameState.phase === 'non_combat_move' && !allMovingAerial;
+                  const isSail = fromSea && toSea;
+                  const isAttack =
+                    gameState.phase === 'combat_move' &&
+                    !isLoad &&
+                    ((!fromSea && !toSea) ||
+                      (fromSea && !toSea) ||
+                      (!fromSea && toSea && allMovingAerial) ||
+                      (fromSea && toSea));
+                  const isNavalMove = isLoad || isOffload || isSail;
+                  const buttonLabel = isLoad ? 'Load' : isOffload ? 'Offload' : isSail ? 'Sail' : isAttack ? 'Attack' : 'Move';
+                  const confirmBtnClass = isAttack
+                    ? 'confirm-move-btn attack-btn'
+                    : isNavalMove
+                      ? 'confirm-move-btn naval-move-btn'
+                      : 'confirm-move-btn';
                   return (
                     <>
                       <p className="move-details">

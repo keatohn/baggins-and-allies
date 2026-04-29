@@ -2066,6 +2066,45 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     }));
   }, [pendingMoveConfirm?.unitId, pendingLoadPassengerInstanceIds, unitDefs]);
 
+  /** Same math as the effect below, but synchronous so NavalTray gets allocation on first paint (DndContext + passenger drag). */
+  const resolvedNavalTrayLoadAllocation = useMemo((): Record<string, string[]> | undefined => {
+    const pm = pendingMoveConfirm;
+    if (pm?.loadAllocation && Object.keys(pm.loadAllocation).length > 0) {
+      return pm.loadAllocation;
+    }
+    if (!pm?.boatOptions || pm.boatOptions.length < 2 || pendingLoadPassengerInstanceIds.length === 0) {
+      return undefined;
+    }
+    if (!backendState?.territories || !definitions?.units) return undefined;
+    const toSea = typeof pm.toTerritory === 'string' ? pm.toTerritory.trim() : '';
+    const toSeaCanon = canonicalSeaZoneId(toSea);
+    const full = (backendState.territories[toSea]?.units ??
+      backendState.territories[toSeaCanon]?.units) as
+      | { instance_id: string; unit_id: string; loaded_onto?: string | null }[]
+      | undefined;
+    if (!full?.length) return undefined;
+    return (
+      computeInitialLoadAllocation(
+        pm.boatOptions,
+        pendingLoadPassengerInstanceIds,
+        full,
+        definitions.units as Record<string, { transport_capacity?: number } | undefined>,
+        backendState.pending_moves ?? [],
+        gameState.phase,
+        toSea,
+        currentTerritoryData,
+      ) ?? undefined
+    );
+  }, [
+    pendingMoveConfirm,
+    pendingLoadPassengerInstanceIds,
+    backendState?.territories,
+    backendState?.pending_moves,
+    definitions?.units,
+    currentTerritoryData,
+    gameState.phase,
+  ]);
+
   // When tray opens for load with 2+ boats, init loadAllocation (sorted boats, pending loads consume slots).
   useEffect(() => {
     const pm = pendingMoveConfirm;
@@ -4087,7 +4126,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               })()}
               onChooseBoatForLoad={handleChooseBoat}
               pendingLoadPassengers={pendingLoadPassengers}
-              loadAllocation={pendingMoveConfirm?.loadAllocation}
+              loadAllocation={resolvedNavalTrayLoadAllocation}
               onLoadAllocationChange={handleLoadAllocationChange}
             />
             {showForfeitToast && (

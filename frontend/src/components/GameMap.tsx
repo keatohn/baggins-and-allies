@@ -122,58 +122,6 @@ function committedInstanceIdsFromHex(
   return out;
 }
 
-type FullUnitRow = {
-  instance_id: string;
-  unit_id: string;
-  loaded_onto?: string | null;
-  remaining_movement?: number;
-};
-
-/**
- * Minimum remaining_movement among movable units that bulk "All" would include (friendly stacks,
- * not committed to pending, excluding passengers — they move with their boat). If any included
- * unit has 0, bulk-all is invalid.
- */
-function minRemainingMovementForBulkAll(
-  territoryId: string,
-  territoryUnits: Record<string, { unit_id: string; count: number }[]>,
-  territoryUnitsFull: Record<string, FullUnitRow[]>,
-  currentFaction: string,
-  factionData: Record<string, { alliance?: string }>,
-  unitDefs: Record<string, { faction?: string }>,
-  pendingMoves: PendingMove[] | undefined,
-  phase: string,
-): number | null {
-  const stacks = territoryUnits[territoryId] || [];
-  const full = territoryUnitsFull[territoryId] ?? territoryUnitsFull[canonicalSeaZoneId(territoryId)] ?? [];
-  const fromCanon = canonicalSeaZoneId(territoryId);
-  const committed = committedInstanceIdsFromHex(pendingMoves, territoryId, fromCanon, phase);
-
-  const friendlyStacks = stacks.filter((s) => {
-    const parts = s.unit_id.split('_');
-    const factionFromId = parts.find((p) => factionData[p]);
-    const defFaction = unitDefs[s.unit_id]?.faction;
-    const uf = factionFromId ?? defFaction ?? parts[0];
-    return uf === currentFaction;
-  });
-  if (friendlyStacks.length <= 1) return null;
-
-  let globalMin: number | null = null;
-  for (const s of friendlyStacks) {
-    const instances = full.filter(
-      (u) =>
-        u.unit_id === s.unit_id &&
-        !committed.has(u.instance_id) &&
-        !u.loaded_onto,
-    );
-    for (const u of instances) {
-      const rm = typeof u.remaining_movement === 'number' ? u.remaining_movement : 0;
-      if (globalMin === null || rm < globalMin) globalMin = rm;
-    }
-  }
-  return globalMin;
-}
-
 function isSeaTerrainId(
   tid: string,
   territoryData: Record<string, { terrain?: string } | undefined>,
@@ -2067,17 +2015,25 @@ function GameMap({
       const sortedFriendly = [...friendlyStacks].sort((a, b) =>
         compareUnitStacksByMapOrder(a, b, unitDefs, factionData),
       );
-      const crosserStacks = sortedFriendly.filter((s) => isFordCrosser(unitDefs[s.unit_id]));
-      const escortStacks = sortedFriendly.filter((s) => usesFordEscortBudget(unitDefs[s.unit_id]));
-      const neutralStacks = sortedFriendly.filter(
+      const movableFriendly = sortedFriendly
+        .map((s) => ({ stack: s, targets: getValidTargets(fromTerritory, s.unit_id) }))
+        .filter((row) => row.targets.size > 0);
+      const movableStacks = movableFriendly.map((row) => row.stack);
+      const targetsByUnitId = new Map<string, Set<string>>(
+        movableFriendly.map((row) => [row.stack.unit_id, row.targets]),
+      );
+
+      const crosserStacks = movableStacks.filter((s) => isFordCrosser(unitDefs[s.unit_id]));
+      const escortStacks = movableStacks.filter((s) => usesFordEscortBudget(unitDefs[s.unit_id]));
+      const neutralStacks = movableStacks.filter(
         (s) => !isFordCrosser(unitDefs[s.unit_id]) && !usesFordEscortBudget(unitDefs[s.unit_id]),
       );
       let bulkTargets: Set<string> | null = null;
       if (crosserStacks.length > 0 && escortStacks.length > 0) {
-        const intersectStacks = (stacks: typeof sortedFriendly): Set<string> => {
+        const intersectStacks = (stacks: typeof movableStacks): Set<string> => {
           let acc: Set<string> | null = null;
           for (const s of stacks) {
-            const t = getValidTargets(fromTerritory, s.unit_id);
+            const t = targetsByUnitId.get(s.unit_id) ?? new Set<string>();
             if (acc === null) acc = new Set<string>(t);
             else acc = new Set([...acc].filter((id: string) => t.has(id)));
           }
@@ -2133,8 +2089,8 @@ function GameMap({
           bulkTargets.add(d);
         }
       } else {
-        for (const s of sortedFriendly) {
-          const t = getValidTargets(fromTerritory, s.unit_id);
+        for (const s of movableStacks) {
+          const t = targetsByUnitId.get(s.unit_id) ?? new Set<string>();
           if (bulkTargets === null) {
             bulkTargets = new Set<string>(t);
           } else {
@@ -2146,7 +2102,7 @@ function GameMap({
           }
         }
       }
-      const stacks: BulkDragOverlayStack[] = sortedFriendly.map((s) => {
+      const stacks: BulkDragOverlayStack[] = movableStacks.map((s) => {
         const parts = s.unit_id.split('_');
         const factionFromId = parts.find((p) => factionData[p]);
         const colorFromId = factionFromId ? factionData[factionFromId].color : null;
@@ -4697,32 +4653,19 @@ function GameMap({
                         const sortedUnits = [...units].sort((a, b) =>
                           compareUnitStacksByMapOrder(a, b, unitDefs, factionData),
                         );
-
-                        const bulkMinRm = minRemainingMovementForBulkAll(
-                          territoryId,
-                          territoryUnits,
-                          territoryUnitsFull,
-                          gameState.current_faction,
-                          factionData,
-                          unitDefs,
-                          pendingMoves,
-                          gameState.phase,
-                        );
-                        /** Bulk "All" only when every stack is the current turn faction (not allies you can't command). */
-                        const allStacksAreCurrentTurnFaction = units.every((s) => {
-                          const parts = s.unit_id.split('_');
+                        const hasAnyMovableCurrentFactionStack = sortedUnits.some(({ unit_id }) => {
+                          const parts = unit_id.split('_');
                           const factionFromId = parts.find((p) => factionData[p]);
-                          const defFaction = unitDefs[s.unit_id]?.faction;
-                          const uf = factionFromId ?? defFaction ?? parts[0];
-                          return uf === gameState.current_faction;
+                          const defFaction = unitDefs[unit_id]?.faction;
+                          const unitFaction = factionFromId ?? defFaction ?? parts[0];
+                          if (unitFaction !== gameState.current_faction) return false;
+                          return getValidTargets(territoryId, unit_id).size > 0;
                         });
                         const canShowAllDrag =
                           canAct &&
                           isMovementPhase &&
-                          allStacksAreCurrentTurnFaction &&
                           stackCount > 1 &&
-                          bulkMinRm != null &&
-                          bulkMinRm > 0;
+                          hasAnyMovableCurrentFactionStack;
                         return (
                           <div
                             key={territoryId}

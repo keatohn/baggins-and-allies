@@ -396,9 +396,13 @@ function DraggableBoatCard({
     };
   }, [coarsePointer, onBoatTapSelectForMove, listeners, rawListeners, tapPayload]);
 
-  const style: CSSProperties = {
+  const cardStyle: CSSProperties = {
     transform: CSS.Translate.toString(transform),
     opacity: isDragging ? 0.5 : 1,
+    ...(coarsePointer && onBoatTapSelectForMove ? { touchAction: 'none' as const } : {}),
+  };
+
+  const dragHandleStyle: CSSProperties = {
     cursor: isDragging ? 'grabbing' : 'grab',
     ...(coarsePointer && onBoatTapSelectForMove ? { touchAction: 'none' as const } : {}),
   };
@@ -411,21 +415,26 @@ function DraggableBoatCard({
     <div
       ref={setNodeRef}
       className={cardClass}
-      style={{ borderColor: factionColor, ...style }}
+      style={{ borderColor: factionColor, ...cardStyle }}
     >
-      <div className="naval-tray-boat-card-inner" {...mergedListeners} {...attributes}>
-        <div className="naval-tray-passengers">
-          {boat.passengers.map((p, i) => (
-            <img
-              key={`${boat.boatInstanceId}-${p.unitId}-${i}`}
-              src={p.icon}
-              alt={p.name}
-              className="naval-tray-passenger-icon"
-              title={p.name}
-              draggable={false}
-            />
-          ))}
-        </div>
+      <div className="naval-tray-passengers">
+        {boat.passengers.map((p, i) => (
+          <img
+            key={`${boat.boatInstanceId}-${p.unitId}-${i}`}
+            src={p.icon}
+            alt={p.name}
+            className="naval-tray-passenger-icon"
+            title={p.name}
+            draggable={false}
+          />
+        ))}
+      </div>
+      <div
+        className="naval-tray-boat-drag-handle"
+        style={dragHandleStyle}
+        {...mergedListeners}
+        {...attributes}
+      >
         <img
           src={boat.icon}
           alt={boat.name}
@@ -470,8 +479,10 @@ function NavalTray({
   const coarsePointer = useCoarsePointer();
 
   const isAllocationMode =
-    Boolean(loadAllocation && Object.keys(loadAllocation).length > 0 && pendingLoadPassengers.length > 0) &&
-    Boolean(onLoadAllocationChange);
+    Boolean(onLoadAllocationChange) &&
+    pendingLoadPassengers.length > 0 &&
+    boats.length >= 2 &&
+    Boolean(loadAllocation && Object.keys(loadAllocation).length > 0);
 
   const [allocationTapPassengerId, setAllocationTapPassengerId] = useState<string | null>(null);
 
