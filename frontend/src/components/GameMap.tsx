@@ -1994,6 +1994,41 @@ function GameMap({
         }
       }
     }
+
+    // Combat-move naval (no passengers / offload drag): sea highlights must match moveable_units rows only.
+    // Defensive strip so merged ford/extra paths cannot leak sea IDs the API did not list for this unit.
+    if (
+      gameState.phase === 'combat_move' &&
+      navalUnitIds?.has(unitId) &&
+      navalDragSeaNoPassengers(
+        fromTerritory,
+        unitId,
+        navalDrag,
+        gameState.phase,
+        territoryData,
+        territoryUnitsFull,
+        pendingMoves,
+        navalUnitIds,
+      )
+    ) {
+      const isSeaTerritoryId = (tid: string) =>
+        territoryData[tid]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid);
+      const allowedSeaFromApi = new Set<string>();
+      for (const m of matches) {
+        for (const d of m.destinations ?? []) {
+          addDestinationWithSeaZoneAlias(allowedSeaFromApi, d);
+        }
+      }
+      for (const tid of [...validTargets]) {
+        if (!isSeaTerritoryId(tid)) continue;
+        const c = canonicalSeaZoneId(tid);
+        if (!allowedSeaFromApi.has(tid) && !allowedSeaFromApi.has(c)) {
+          validTargets.delete(tid);
+          if (c !== tid) validTargets.delete(c);
+        }
+      }
+    }
+
     return validTargets;
   }, [
     availableMoveTargets,

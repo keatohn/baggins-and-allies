@@ -1272,3 +1272,63 @@ def test_contested_land_includes_sea_zone_when_attacker_has_passengers_in_stagin
     assert land_entries[0].get("sea_zone_id") == "sea_zone_11"
 
 
+def test_combat_move_naval_reachability_excludes_pure_sea_lane_hex(wotr_defs):
+    """
+    Combat-move naval sails must lead toward combat (enemy sea, etc.), forced-standoff escape,
+    or the empty-sea sail/load/raid pattern (requires adjacent *land* to destination sea).
+
+    sea_zone_8 borders only other seas — empty_sea_zone_valid_for_combat_move_sail_then_load_raid
+    cannot apply — so it must not appear as a combat_move destination (maps UI highlights).
+
+    Non-combat move still allows routine sailing through such hexes.
+    """
+    from backend.engine.movement import get_reachable_territories_for_unit
+    from backend.engine.queries import get_unit_move_targets
+
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    sea_11 = state.territories["sea_zone_11"]
+    sea_8 = state.territories["sea_zone_8"]
+    sea_11.units.clear()
+    sea_8.units.clear()
+    ship = _make_unit(state, "harad", "black_ship", unit_defs)
+    sea_11.units.append(ship)
+    state.current_faction = "harad"
+
+    state.phase = "combat_move"
+    targets_cm, _ = get_reachable_territories_for_unit(
+        ship,
+        "sea_zone_11",
+        state,
+        unit_defs,
+        territory_defs,
+        faction_defs,
+        "combat_move",
+    )
+    assert "sea_zone_8" not in targets_cm, (
+        "pure sea lane hex must not be a combat_move sail destination without attack hook"
+    )
+
+    t_api, _ = get_unit_move_targets(
+        state, ship.instance_id, unit_defs, territory_defs, faction_defs, None,
+    )
+    assert "sea_zone_8" not in t_api
+
+    state.phase = "non_combat_move"
+    targets_ncm, _ = get_reachable_territories_for_unit(
+        ship,
+        "sea_zone_11",
+        state,
+        unit_defs,
+        territory_defs,
+        faction_defs,
+        "non_combat_move",
+    )
+    assert "sea_zone_8" in targets_ncm, "non-combat should still allow sailing to adjacent empty seas"
+
+

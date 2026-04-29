@@ -2072,7 +2072,9 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     if (!pm?.boatOptions || pm.boatOptions.length < 2 || pm.loadAllocation != null) return;
     if (pendingLoadPassengerInstanceIds.length === 0) return;
     const toSea = typeof pm.toTerritory === 'string' ? pm.toTerritory.trim() : '';
-    const full = backendState?.territories?.[toSea]?.units as
+    const toSeaCanon = canonicalSeaZoneId(toSea);
+    const full = (backendState?.territories?.[toSea]?.units ??
+      backendState?.territories?.[toSeaCanon]?.units) as
       | { instance_id: string; unit_id: string; loaded_onto?: string | null }[]
       | undefined;
     if (!full?.length || !definitions?.units) return;
@@ -2153,9 +2155,10 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
 
   /** When pending load into a sea zone with multiple boats, open naval tray (choose boat when different makeups; view/rearrange when same). */
   useEffect(() => {
-    const to = typeof pendingMoveConfirm?.toTerritory === 'string' ? pendingMoveConfirm.toTerritory : '';
+    const to = typeof pendingMoveConfirm?.toTerritory === 'string' ? pendingMoveConfirm.toTerritory.trim() : '';
     if (!to || !pendingMoveConfirm) return;
-    const terrain = currentTerritoryData[to]?.terrain;
+    const toCanon = canonicalSeaZoneId(to);
+    const terrain = currentTerritoryData[to]?.terrain ?? currentTerritoryData[toCanon]?.terrain;
     const isSea = terrain === 'sea' || /^sea_zone_?\d+$/i.test(to);
     if (!isSea) return;
     const fromTerrain = currentTerritoryData[typeof pendingMoveConfirm.fromTerritory === 'string' ? pendingMoveConfirm.fromTerritory : '']?.terrain;
@@ -2166,8 +2169,13 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       ud?.archetype === 'aerial' || (Array.isArray(ud?.tags) && ud.tags.includes('aerial'));
     const isLoad = !fromSea && isSea && !isAerial;
     if (!isLoad) return;
-    const boatsInZone = (territoryUnitsFull[to] ?? []).filter((u) => navalUnitIds.has(u.unit_id));
-    if (boatsInZone.length >= 2) setSelectedSeaZoneForNavalTray(to);
+    const boatsInZone = (territoryUnitsFull[to] ?? territoryUnitsFull[toCanon] ?? []).filter((u) =>
+      navalUnitIds.has(u.unit_id),
+    );
+    if (boatsInZone.length >= 2) {
+      const traySeaId = territoryUnitsFull[to] ? to : toCanon;
+      setSelectedSeaZoneForNavalTray(traySeaId);
+    }
   }, [pendingMoveConfirm?.toTerritory, pendingMoveConfirm?.fromTerritory, pendingMoveConfirm?.unitId, pendingMoveConfirm, currentTerritoryData, territoryUnitsFull, navalUnitIds, unitDefs]);
 
   /** Drop camp on territory → set pending; user confirms or cancels in sidebar (like unit mobilization). */
