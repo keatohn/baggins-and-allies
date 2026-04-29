@@ -478,11 +478,36 @@ function NavalTray({
 }: NavalTrayProps) {
   const coarsePointer = useCoarsePointer();
 
+  const fallbackAllocation = useMemo((): Record<string, string[]> | null => {
+    if (!onLoadAllocationChange || pendingLoadPassengers.length === 0 || boats.length < 2) return null;
+    if (loadAllocation && Object.keys(loadAllocation).length > 0) return loadAllocation;
+
+    const byBoat: Record<string, string[]> = Object.fromEntries(
+      boats.map((b) => [b.boatInstanceId, []]),
+    );
+    const remaining = boats.map((b) => ({
+      boatId: b.boatInstanceId,
+      left: Math.max(0, (b.transportCapacity ?? 0) - b.passengers.filter((p) => !!p.instanceId).length),
+    }));
+
+    for (const p of pendingLoadPassengers) {
+      const target = remaining.find((r) => r.left > 0);
+      if (!target) break;
+      byBoat[target.boatId].push(p.instanceId);
+      target.left -= 1;
+    }
+    return byBoat;
+  }, [onLoadAllocationChange, pendingLoadPassengers, boats, loadAllocation]);
+
+  const effectiveLoadAllocation = loadAllocation && Object.keys(loadAllocation).length > 0
+    ? loadAllocation
+    : fallbackAllocation ?? undefined;
+
   const isAllocationMode =
     Boolean(onLoadAllocationChange) &&
     pendingLoadPassengers.length > 0 &&
     boats.length >= 2 &&
-    Boolean(loadAllocation && Object.keys(loadAllocation).length > 0);
+    Boolean(effectiveLoadAllocation && Object.keys(effectiveLoadAllocation).length > 0);
 
   const [allocationTapPassengerId, setAllocationTapPassengerId] = useState<string | null>(null);
 
@@ -494,16 +519,23 @@ function NavalTray({
     if (!coarsePointer) setAllocationTapPassengerId(null);
   }, [coarsePointer]);
 
+  useEffect(() => {
+    if (!onLoadAllocationChange) return;
+    if (!fallbackAllocation) return;
+    if (loadAllocation && Object.keys(loadAllocation).length > 0) return;
+    onLoadAllocationChange(fallbackAllocation);
+  }, [onLoadAllocationChange, fallbackAllocation, loadAllocation]);
+
   const reassignPassengerToBoat = useCallback(
     (instanceId: string, targetBoatId: string) => {
-      if (!loadAllocation || !onLoadAllocationChange) return;
-      const currentBoatId = Object.keys(loadAllocation).find((bid) =>
-        (loadAllocation[bid] ?? []).includes(instanceId),
+      if (!effectiveLoadAllocation || !onLoadAllocationChange) return;
+      const currentBoatId = Object.keys(effectiveLoadAllocation).find((bid) =>
+        (effectiveLoadAllocation[bid] ?? []).includes(instanceId),
       );
       if (currentBoatId === targetBoatId) return;
 
       const next: Record<string, string[]> = {};
-      for (const [bid, ids] of Object.entries(loadAllocation)) {
+      for (const [bid, ids] of Object.entries(effectiveLoadAllocation)) {
         if (bid === currentBoatId) {
           const filtered = (ids ?? []).filter((id) => id !== instanceId);
           if (filtered.length > 0) next[bid] = filtered;
@@ -522,13 +554,13 @@ function NavalTray({
       }
       onLoadAllocationChange(next);
     },
-    [loadAllocation, onLoadAllocationChange, boats],
+    [effectiveLoadAllocation, onLoadAllocationChange, boats],
   );
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       const { active, over } = event;
-      if (!over || !loadAllocation || !onLoadAllocationChange) return;
+      if (!over || !effectiveLoadAllocation || !onLoadAllocationChange) return;
       const activeId = active.id as string;
       if (!activeId.startsWith(TRAY_PASSENGER_PREFIX)) return;
       const instanceId = activeId.slice(TRAY_PASSENGER_PREFIX.length);
@@ -537,7 +569,7 @@ function NavalTray({
       const targetBoatId = overId.slice(TRAY_BOAT_PREFIX.length);
       reassignPassengerToBoat(instanceId, targetBoatId);
     },
-    [loadAllocation, onLoadAllocationChange, reassignPassengerToBoat],
+    [effectiveLoadAllocation, onLoadAllocationChange, reassignPassengerToBoat],
   );
 
   const handleAllocationDragStart = useCallback((_event: DragStartEvent) => {
@@ -569,7 +601,7 @@ function NavalTray({
         <div className="naval-tray-empty">No boats in this sea zone.</div>
       ) : isAllocationMode ? (
         boats.map((boat) => {
-          const allocatedIds = loadAllocation?.[boat.boatInstanceId] ?? [];
+          const allocatedIds = effectiveLoadAllocation?.[boat.boatInstanceId] ?? [];
           const allocatedPassengers = allocatedIds
             .map((id) => pendingLoadPassengers.find((p) => p.instanceId === id))
             .filter((p): p is PendingLoadPassenger => p != null);
