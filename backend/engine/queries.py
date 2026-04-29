@@ -922,6 +922,66 @@ def _validate_move(
         )
         return vr
 
+    # Embark: move_type=load, land→sea. Pathfinding may mark some land units as "reaching" the sea hex and
+    # others not, splitting drivers/passengers and incorrectly falling through to sea-transport naval_capacity
+    # (Too many passengers for transport capacity). Match reducer: treat the whole stack as loading passengers.
+    if (
+        move_type_payload == "load"
+        and origin_is_land
+        and dest_is_sea
+    ):
+        for u in units_in_stack:
+            ud = unit_defs.get(u.unit_id)
+            if not is_land_unit(ud):
+                return ValidationResult(
+                    False,
+                    f"Unit {u.instance_id} cannot be carried (only land units can load into sea)",
+                )
+            if not is_transportable(ud):
+                return ValidationResult(
+                    False,
+                    f"Unit {u.instance_id} cannot be transported (no transportable tag)",
+                )
+        dest_territory = state.territories.get(destination)
+        if not dest_territory:
+            return ValidationResult(False, f"Destination {destination} does not exist")
+        faction_id = action.faction
+        load_onto_boat_id = (action.payload.get("load_onto_boat_instance_id") or "").strip() or None
+        if load_onto_boat_id:
+            boat_unit = next((u for u in dest_territory.units if u.instance_id == load_onto_boat_id), None)
+            if not boat_unit:
+                return ValidationResult(False, f"Boat {load_onto_boat_id} not found in {destination}")
+            boat_ud = unit_defs.get(boat_unit.unit_id)
+            if not boat_ud or (
+                getattr(boat_ud, "archetype", "") != "naval" and "naval" not in getattr(boat_ud, "tags", [])
+            ):
+                return ValidationResult(False, f"Unit {load_onto_boat_id} is not a naval unit")
+            if get_unit_faction(boat_unit, unit_defs) != faction_id:
+                return ValidationResult(
+                    False,
+                    f"Boat {load_onto_boat_id} does not belong to faction {faction_id}",
+                )
+            slots = remaining_load_slots_on_boat(
+                state, destination, load_onto_boat_id, faction_id, unit_defs, territory_defs, state.phase
+            )
+            if len(units_in_stack) > slots:
+                return ValidationResult(
+                    False,
+                    f"Boat {load_onto_boat_id} has {slots} passenger slot(s) left (capacity minus onboard and pending loads), "
+                    f"cannot load {len(units_in_stack)}",
+                )
+        else:
+            slots_left = remaining_sea_load_passenger_slots(
+                state, destination, faction_id, unit_defs, territory_defs, state.phase
+            )
+            if len(units_in_stack) > slots_left:
+                return ValidationResult(
+                    False,
+                    f"Not enough transport capacity in {destination}: {len(units_in_stack)} passengers but only "
+                    f"{slots_left} slot(s) left (boats may be full or already reserved by pending loads this phase)",
+                )
+        return ValidationResult(True)
+
     # Load: land -> adjacent sea; stack can be all land units; boats already in sea zone provide capacity
     if origin_is_land and dest_is_sea and not drivers and passengers:
         for u in passengers:

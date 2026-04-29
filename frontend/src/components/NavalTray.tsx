@@ -1,15 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import {
-  DndContext,
-  useDraggable,
-  useDroppable,
-  PointerSensor,
-  useSensor,
-  useSensors,
-} from '@dnd-kit/core';
-import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
+import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent } from 'react';
+import { applyPassengerReassignToAllocation } from '../utils/navalTrayAllocation';
 import './NavalTray.css';
 
 export interface BoatPassenger {
@@ -529,52 +522,16 @@ function NavalTray({
   const reassignPassengerToBoat = useCallback(
     (instanceId: string, targetBoatId: string) => {
       if (!effectiveLoadAllocation || !onLoadAllocationChange) return;
-      const currentBoatId = Object.keys(effectiveLoadAllocation).find((bid) =>
-        (effectiveLoadAllocation[bid] ?? []).includes(instanceId),
+      const next = applyPassengerReassignToAllocation(
+        effectiveLoadAllocation,
+        boats,
+        instanceId,
+        targetBoatId,
       );
-      if (currentBoatId === targetBoatId) return;
-
-      const next: Record<string, string[]> = {};
-      for (const [bid, ids] of Object.entries(effectiveLoadAllocation)) {
-        if (bid === currentBoatId) {
-          const filtered = (ids ?? []).filter((id) => id !== instanceId);
-          if (filtered.length > 0) next[bid] = filtered;
-        } else if (bid === targetBoatId) {
-          next[bid] = [...(ids ?? []), instanceId];
-        } else {
-          if ((ids ?? []).length > 0) next[bid] = ids;
-        }
-      }
-      if (!next[targetBoatId]) next[targetBoatId] = [instanceId];
-      for (const boat of boats) {
-        const cap = boat.transportCapacity ?? 0;
-        const confirmed = boat.passengers.filter((p): p is BoatPassenger & { instanceId: string } => !!p.instanceId).length;
-        const alloc = (next[boat.boatInstanceId] ?? []).length;
-        if (confirmed + alloc > cap) return;
-      }
-      onLoadAllocationChange(next);
+      if (next) onLoadAllocationChange(next);
     },
     [effectiveLoadAllocation, onLoadAllocationChange, boats],
   );
-
-  const handleDragEnd = useCallback(
-    (event: DragEndEvent) => {
-      const { active, over } = event;
-      if (!over || !effectiveLoadAllocation || !onLoadAllocationChange) return;
-      const activeId = active.id as string;
-      if (!activeId.startsWith(TRAY_PASSENGER_PREFIX)) return;
-      const instanceId = activeId.slice(TRAY_PASSENGER_PREFIX.length);
-      const overId = over.id as string;
-      if (!overId.startsWith(TRAY_BOAT_PREFIX)) return;
-      const targetBoatId = overId.slice(TRAY_BOAT_PREFIX.length);
-      reassignPassengerToBoat(instanceId, targetBoatId);
-    },
-    [effectiveLoadAllocation, onLoadAllocationChange, reassignPassengerToBoat],
-  );
-
-  const handleAllocationDragStart = useCallback((_event: DragStartEvent) => {
-    setAllocationTapPassengerId(null);
-  }, []);
 
   const onPassengerTapToggle = useCallback((instanceId: string) => {
     setAllocationTapPassengerId((prev) => (prev === instanceId ? null : instanceId));
@@ -587,10 +544,6 @@ function NavalTray({
       setAllocationTapPassengerId(null);
     },
     [allocationTapPassengerId, reassignPassengerToBoat],
-  );
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: coarsePointer ? 10 : 8 } }),
   );
 
   if (!isOpen) return null;
@@ -666,13 +619,7 @@ function NavalTray({
           Tap a boat, then tap a destination on the map. Or drag the boat.
         </p>
       )}
-      {isAllocationMode ? (
-        <DndContext onDragStart={handleAllocationDragStart} onDragEnd={handleDragEnd} sensors={sensors}>
-          {boatList}
-        </DndContext>
-      ) : (
-        boatList
-      )}
+      {boatList}
     </div>
   );
 }

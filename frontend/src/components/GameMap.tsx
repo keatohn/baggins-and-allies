@@ -8,6 +8,7 @@ import DraggableUnit from './DraggableUnit';
 import DragOverlay, { type BulkDragOverlayStack } from './DragOverlay';
 import MobilizationTray from './MobilizationTray';
 import NavalTray, { type BoatInTray, type NavalTrayBoatTapMovePayload } from './NavalTray';
+import { applyPassengerReassignToAllocation } from '../utils/navalTrayAllocation';
 import { compareUnitStacksByMapOrder } from '../utils/unitStackSort';
 import './GameMap.css';
 import { sortSeaZoneIdsByNumericSuffix, seaZonesReachableBySailFrom } from '../seaZoneSort';
@@ -2321,6 +2322,11 @@ function GameMap({
     if (ae && typeof ae.clientX === 'number' && typeof ae.clientY === 'number') {
       lastMapDragPointerRef.current = { x: ae.clientX, y: ae.clientY };
     }
+    /** Tray passenger chips use the map's DndContext (nested DndContext broke drag). */
+    if ((data as { type?: string }).type === 'naval-tray-passenger') {
+      setActiveDragId(event.active.id as string);
+      return;
+    }
     setTapSelectedUnit(null); // Clear tap selection when starting a drag
     setTapBulkAllFromTerritory(null);
     setTapMobilizationAll(false);
@@ -2455,6 +2461,25 @@ function GameMap({
       setActiveUnit(null);
       setActiveDragId(null);
       setValidDropTargets(new Set());
+      return;
+    }
+
+    if (
+      dataType === 'naval-tray-passenger' &&
+      over &&
+      loadAllocation &&
+      onLoadAllocationChange &&
+      navalTray?.boats?.length
+    ) {
+      const activeId = String(active.id);
+      const overId = String(over.id);
+      if (activeId.startsWith('naval-tray-passenger-') && overId.startsWith('naval-tray-boat-')) {
+        const instanceId = activeId.slice('naval-tray-passenger-'.length);
+        const targetBoatId = overId.slice('naval-tray-boat-'.length);
+        const next = applyPassengerReassignToAllocation(loadAllocation, navalTray.boats, instanceId, targetBoatId);
+        if (next) onLoadAllocationChange(next);
+      }
+      setActiveDragId(null);
       return;
     }
 
@@ -3064,7 +3089,7 @@ function GameMap({
     setActiveUnit(null);
     setActiveDragId(null);
     setValidDropTargets(new Set());
-  }, [activeUnit, validDropTargets, territoryUnits, territoryUnitsFull, pendingMoves, availableMoveTargets, navalUnitIds, onSetPendingMove, _onDropDestination, onBulkMoveDrop, onMobilizationDrop, onMobilizationAllDrop, onCampDrop, gameState.phase, gameState.current_faction, factionData, unitDefs, territoryData, resolveTerritoryDropId, canAct]);
+  }, [activeUnit, validDropTargets, territoryUnits, territoryUnitsFull, pendingMoves, availableMoveTargets, navalUnitIds, onSetPendingMove, _onDropDestination, onBulkMoveDrop, onMobilizationDrop, onMobilizationAllDrop, onCampDrop, gameState.phase, gameState.current_faction, factionData, unitDefs, territoryData, resolveTerritoryDropId, canAct, loadAllocation, onLoadAllocationChange, navalTray]);
 
   const handleDragCancel = useCallback(() => {
     lastMapDragPointerRef.current = null;
