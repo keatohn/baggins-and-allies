@@ -1837,7 +1837,10 @@ def _apply_pending_moves(
             if ids_to_move and phase == "combat_move":
                 if not hasattr(state, "territory_sea_raid_from") or state.territory_sea_raid_from is None:
                     state.territory_sea_raid_from = {}
+                if not hasattr(state, "territory_sea_raid_faction") or state.territory_sea_raid_faction is None:
+                    state.territory_sea_raid_faction = {}
                 state.territory_sea_raid_from[to_id] = from_id
+                state.territory_sea_raid_faction[to_id] = faction_id
             elif phase == "combat_move" and not ids_to_move:
                 boat_ids_in_move = {
                     iid for iid in unit_instance_ids
@@ -4001,6 +4004,8 @@ def _handle_retreat(
     state.active_combat = None
     if getattr(state, "territory_sea_raid_from", None):
         state.territory_sea_raid_from.pop(combat.territory_id, None)
+    if getattr(state, "territory_sea_raid_faction", None):
+        state.territory_sea_raid_faction.pop(combat.territory_id, None)
 
     return state, events
 
@@ -4160,6 +4165,10 @@ def _purge_sea_raid_staging_after_lost_naval(
     if not lands:
         return events
     state.territory_sea_raid_from = {k: v for k, v in tsrf.items() if v != sea_territory_id}
+    tsfac = getattr(state, "territory_sea_raid_faction", None) or {}
+    for lid in lands:
+        tsfac.pop(lid, None)
+    state.territory_sea_raid_faction = tsfac
 
     for lid in lands:
         t = state.territories.get(lid)
@@ -4372,6 +4381,8 @@ def _resolve_combat_end(
             )
         else:
             state.territory_sea_raid_from.pop(territory_id, None)
+            if getattr(state, "territory_sea_raid_faction", None):
+                state.territory_sea_raid_faction.pop(territory_id, None)
 
     return state, events
 

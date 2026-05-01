@@ -2041,9 +2041,8 @@ def _faction_has_sea_raid_passengers_in_sea_zone(
     True if this faction has land (non-naval) units in the sea hex — the same units the sea-raid land
     roster pulls from the sea zone (see reducer._sea_raid_attacker_units_from_board). Boats alone do not count.
 
-    Used so we do not tag a land battle with sea_zone_id just because territory_sea_raid_from recorded an
-    offload from that sea (e.g. the enemy sea-raided onto this hex earlier); the current attacker must still
-    have passengers in that sea for a sea-raid-style initiate to be meaningful.
+    Legacy fallback when `territory_sea_raid_faction` has no entry for this land hex (older saves): require
+    passengers still aboard so we do not tag sea_zone_id from stale `territory_sea_raid_from` alone.
     """
     if not sea_zone:
         return False
@@ -2071,9 +2070,10 @@ def get_contested_territories(
     land territories use all units.
 
     Sea raid: after combat_move ends, passengers offload onto the land hex (same as combative offload).
-    Attackers are on that land territory; `sea_zone_id` on an entry (from `territory_sea_raid_from`) tells
-    initiate_combat which sea held the attacking fleet — only included when this faction still has land
-    (non-naval) units in that sea so we never mis-label a pure land assault after an unrelated offload.
+    Attackers are on that land territory; `sea_zone_id` comes from `territory_sea_raid_from` when the staging
+    faction matches (see `territory_sea_raid_faction`), so full offload still advertises the sea raid for
+    initiate_combat (Sea Raider bonus). Older saves without faction metadata fall back to requiring passengers
+    still in the staging sea.
     """
     attacker_alliance = faction_defs.get(faction_id, FactionDefinition(
         "", "", "", "", "")).alliance
@@ -2111,12 +2111,20 @@ def get_contested_territories(
                 "defender_unit_ids": [u.instance_id for u in defender_units],
             }
             sea_raid_from = getattr(state, "territory_sea_raid_from", None) or {}
+            sea_raid_fac = getattr(state, "territory_sea_raid_faction", None) or {}
             staged_sea = sea_raid_from.get(territory_id)
-            if staged_sea and _faction_has_sea_raid_passengers_in_sea_zone(
-                state.territories.get(staged_sea),
-                faction_id,
-                unit_defs,
-            ):
+            staged_fac = sea_raid_fac.get(territory_id)
+            include_sea_zone = False
+            if staged_sea:
+                if staged_fac is not None:
+                    include_sea_zone = staged_fac == faction_id
+                else:
+                    include_sea_zone = _faction_has_sea_raid_passengers_in_sea_zone(
+                        state.territories.get(staged_sea),
+                        faction_id,
+                        unit_defs,
+                    )
+            if include_sea_zone:
                 entry["sea_zone_id"] = staged_sea
             result.append(entry)
 

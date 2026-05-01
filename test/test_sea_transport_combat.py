@@ -1243,6 +1243,39 @@ def test_contested_land_omits_stale_sea_zone_after_enemy_sea_raid(wotr_defs):
     assert "sea_zone_id" not in land_entries[0], land_entries[0]
 
 
+def test_contested_land_includes_sea_zone_when_full_offload_if_staging_faction_matches(wotr_defs):
+    """
+    After full offload, no land passengers remain in the staging sea (boats only). combat_territories must still
+    include sea_zone_id for the faction that staged the offload so initiate_combat can pass sea_zone_id and
+    apply Sea Raider — otherwise the bonus silently disappears for the common case (all units ashore).
+    """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    har = state.territories["harondor"]
+    sea = state.territories["sea_zone_11"]
+    sea.units.clear()
+    har.units = []
+    har.owner = "gondor"
+    har.units.append(_make_unit(state, "gondor", "gondor_soldier", unit_defs))
+    corsair = _make_unit(state, "harad", "corsair_of_umbar", unit_defs)
+    har.units.append(corsair)
+    sea.units.append(_make_unit(state, "harad", "black_ship", unit_defs))
+    state.territory_sea_raid_from["harondor"] = "sea_zone_11"
+    state.territory_sea_raid_faction["harondor"] = "harad"
+    state.phase = "combat"
+    state.current_faction = "harad"
+
+    contested = get_contested_territories(state, "harad", faction_defs, unit_defs, territory_defs)
+    land_entries = [c for c in contested if c.get("territory_id") == "harondor"]
+    assert len(land_entries) == 1
+    assert land_entries[0].get("sea_zone_id") == "sea_zone_11"
+
+
 def test_contested_land_includes_sea_zone_when_attacker_has_passengers_in_staging_sea(wotr_defs):
     """When the attacker still has land units in the staging sea, sea_zone_id is advertised for sea-raid initiate."""
     unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
@@ -1330,5 +1363,101 @@ def test_combat_move_naval_reachability_excludes_pure_sea_lane_hex(wotr_defs):
         "non_combat_move",
     )
     assert "sea_zone_8" in targets_ncm, "non-combat should still allow sailing to adjacent empty seas"
+
+
+def test_contested_land_omits_sea_zone_when_staging_faction_mismatch_despite_passengers_in_sea(wotr_defs):
+    """
+    Staging faction metadata must win over 'has passengers in sea': otherwise another faction's stale tsrf plus
+    your units accidentally sailing into that sea could label your land battle as a sea raid (wrong sim / UI).
+    """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    har = state.territories["harondor"]
+    sea = state.territories["sea_zone_11"]
+    sea.units.clear()
+    har.units = []
+    har.owner = "gondor"
+    har.units.append(_make_unit(state, "gondor", "gondor_soldier", unit_defs))
+    har.units.append(_make_unit(state, "mordor", "morgul_orc", unit_defs))
+    har.units.append(_make_unit(state, "mordor", "nazgul", unit_defs))
+    ship = _make_unit(state, "mordor", "black_ship", unit_defs)
+    aboard = _make_unit(state, "mordor", "morgul_orc", unit_defs)
+    sea.units.extend([ship, aboard])
+    state.territory_sea_raid_from["harondor"] = "sea_zone_11"
+    state.territory_sea_raid_faction["harondor"] = "gondor"
+    state.phase = "combat"
+    state.current_faction = "mordor"
+
+    contested = get_contested_territories(state, "mordor", faction_defs, unit_defs, territory_defs)
+    land_entries = [c for c in contested if c.get("territory_id") == "harondor"]
+    assert len(land_entries) == 1
+    assert "sea_zone_id" not in land_entries[0], land_entries[0]
+
+
+def test_sea_raider_attack_delta_sea_raid_initiate_vs_land_only_after_full_offload(wotr_defs):
+    """
+    Sea Raider applies only when initiate_combat receives sea_zone_id (is_sea_raid). Full offload must still allow
+    that path. Same hex and dice: effective_attack with sea_zone_id must exceed land-only initiate by exactly +1
+    (the sea_raider bonus); if both matched, this test would pass while the bonus was broken everywhere.
+    """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+
+    def _contested_full_offload_state():
+        st = initialize_game_state(
+            faction_defs, territory_defs, unit_defs,
+            starting_setup=setup,
+            camp_defs=camp_defs,
+        )
+        har = st.territories["harondor"]
+        sea = st.territories["sea_zone_11"]
+        sea.units.clear()
+        har.units = []
+        har.owner = "gondor"
+        har.units.append(_make_unit(st, "gondor", "gondor_soldier", unit_defs))
+        har.units.append(_make_unit(st, "harad", "corsair_of_umbar", unit_defs))
+        sea.units.append(_make_unit(st, "harad", "black_ship", unit_defs))
+        st.territory_sea_raid_from["harondor"] = "sea_zone_11"
+        st.territory_sea_raid_faction["harondor"] = "harad"
+        st.phase = "combat"
+        st.current_faction = "harad"
+        return st
+
+    dice = {"attacker": [6], "defender": [6]}
+
+    s_raid = _contested_full_offload_state()
+    act_raid = initiate_combat(
+        "harad", "harondor", dice, sea_zone_id="sea_zone_11",
+    )
+    assert validate_action(s_raid, act_raid, unit_defs, territory_defs, faction_defs, camp_defs, port_defs).valid
+    _, ev_raid = apply_action(
+        s_raid, act_raid, unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    cr_raid = next(e for e in ev_raid if e.type == "combat_round_resolved")
+    eff_raid = next(
+        u["effective_attack"]
+        for u in cr_raid.payload["attacker_units_at_start"]
+        if u["unit_id"] == "corsair_of_umbar"
+    )
+
+    s_land = _contested_full_offload_state()
+    act_land = initiate_combat("harad", "harondor", dice, sea_zone_id=None)
+    assert validate_action(s_land, act_land, unit_defs, territory_defs, faction_defs, camp_defs, port_defs).valid
+    _, ev_land = apply_action(
+        s_land, act_land, unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    cr_land = next(e for e in ev_land if e.type == "combat_round_resolved")
+    eff_land = next(
+        u["effective_attack"]
+        for u in cr_land.payload["attacker_units_at_start"]
+        if u["unit_id"] == "corsair_of_umbar"
+    )
+
+    assert eff_raid - eff_land == 1, (eff_raid, eff_land)
 
 

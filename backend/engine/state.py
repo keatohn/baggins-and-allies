@@ -592,6 +592,8 @@ class GameState:
     territory_defender_casualty_order: dict[str, str] = field(default_factory=dict)
     # After applying offload in combat_move: land territory_id -> sea_zone_id (so combat_territories can include sea_zone_id for initiate).
     territory_sea_raid_from: dict[str, str] = field(default_factory=dict)
+    # Same keys as territory_sea_raid_from: faction that staged the combative offload (disambiguates stale tsrf after enemy raids).
+    territory_sea_raid_faction: dict[str, str] = field(default_factory=dict)
 
     def copy(self) -> "GameState":
         """Return a deep copy of this game state."""
@@ -644,6 +646,7 @@ class GameState:
             "avoided_forced_naval_combat_instance_ids": getattr(self, "avoided_forced_naval_combat_instance_ids", []),
             "territory_defender_casualty_order": getattr(self, "territory_defender_casualty_order", {}),
             "territory_sea_raid_from": getattr(self, "territory_sea_raid_from", {}),
+            "territory_sea_raid_faction": getattr(self, "territory_sea_raid_faction", {}),
             "starting_territory_owners": dict(getattr(self, "starting_territory_owners", {}) or {}),
         }
 
@@ -702,6 +705,9 @@ class GameState:
             avoided_forced_naval_combat_instance_ids=_ensure_str_list(data.get("avoided_forced_naval_combat_instance_ids")),
             territory_defender_casualty_order=dict(data.get("territory_defender_casualty_order") or {}) if isinstance(data.get("territory_defender_casualty_order"), dict) else {},
             territory_sea_raid_from=dict(data.get("territory_sea_raid_from") or {}) if isinstance(data.get("territory_sea_raid_from"), dict) else {},
+            territory_sea_raid_faction=dict(data.get("territory_sea_raid_faction") or {})
+            if isinstance(data.get("territory_sea_raid_faction"), dict)
+            else {},
             winner=data.get("winner"),
             map_asset=data.get("map_asset") if isinstance(data.get("map_asset"), str) else None,
             victory_criteria=_ensure_victory_criteria(
