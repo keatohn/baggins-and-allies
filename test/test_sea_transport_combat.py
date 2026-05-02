@@ -153,6 +153,42 @@ def test_naval_hex_continue_excludes_embarked_passengers_from_defender_dice(wotr
     )
 
 
+def test_naval_combat_ended_lists_embarked_attacker_casualties(wotr_defs):
+    """Sea-hex naval defeat: combat_ended attacker_casualty_ids must include embarked land units, not only ships."""
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    sea = state.territories["sea_zone_11"]
+    sea.units.clear()
+    har_ship = _make_unit(state, "harad", "black_ship", unit_defs)
+    har_land = _make_unit(state, "harad", "corsair_of_umbar", unit_defs)
+    har_land.loaded_onto = har_ship.instance_id
+    g_ship = _make_unit(state, "gondor", "gondor_ship", unit_defs)
+    sea.units.extend([har_ship, har_land, g_ship])
+
+    state.current_faction = "harad"
+    state.phase = "combat"
+
+    # Hits are roll <= firing side's attack (attacker) or defense (defender); mutual sink removes boat + passengers.
+    action = initiate_combat(
+        "harad",
+        "sea_zone_11",
+        dice_rolls={"attacker": [3], "defender": [3]},
+    )
+    state, events = apply_action(
+        state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    ended = [e for e in events if e.type == "combat_ended"]
+    assert len(ended) == 1
+    att_cas = ended[0].payload.get("attacker_casualty_ids") or []
+    assert har_ship.instance_id in att_cas
+    assert har_land.instance_id in att_cas
+
+
 def test_sea_raid_empty_land_conquer(state_with_sea_units):
     """Sea raid on empty land: land units move to territory, ships stay in sea."""
     state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs = state_with_sea_units
@@ -1138,8 +1174,87 @@ def test_validate_rejects_single_load_when_all_units_reach_but_zone_full(wotr_de
 def test_naval_loss_after_offload_clears_sea_raid_staging_and_passengers(wotr_defs):
     """
     Mandatory naval combat in the sea zone must not leave a follow-up land sea raid if all attackers
-    are eliminated: clear territory_sea_raid_from and remove stranded land attackers on the target hex.
+    are eliminated: clear territory_sea_raid_from and remove only sea-raid passengers on the target hex.
+    Walk-in land attackers on the same territory must survive (they were not on the losing fleet).
     """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    sea = state.territories["sea_zone_11"]
+    har = state.territories["harondor"]
+    sea.units.clear()
+    ship = _make_unit(state, "harad", "black_ship", unit_defs)
+    land = _make_unit(state, "harad", "corsair_of_umbar", unit_defs)
+    gship = _make_unit(state, "gondor", "gondor_ship", unit_defs)
+    sea.units.extend([ship, land, gship])
+    if har.owner != "gondor":
+        har.owner = "gondor"
+    har.units.append(_make_unit(state, "gondor", "gondor_soldier", unit_defs))
+    walk_in = _make_unit(state, "harad", "haradrim_warrior", unit_defs)
+    har.units.append(walk_in)
+
+    state.pending_moves = [
+        PendingMove(
+            from_territory="sea_zone_11",
+            to_territory="harondor",
+            unit_instance_ids=[ship.instance_id, land.instance_id],
+            phase="combat_move",
+            move_type="offload",
+        )
+    ]
+    state.current_faction = "harad"
+    state.phase = "combat_move"
+    state = get_state_after_pending_moves(
+        state, "combat_move", unit_defs, territory_defs, faction_defs
+    )
+    assert state.territory_sea_raid_from.get("harondor") == "sea_zone_11"
+    assert land.instance_id in (state.territory_sea_raid_passenger_instance_ids.get("harondor") or [])
+    assert walk_in.instance_id not in (state.territory_sea_raid_passenger_instance_ids.get("harondor") or [])
+    harad_on_land_before = [
+        u for u in state.territories["harondor"].units
+        if get_unit_faction(u, unit_defs) == "harad"
+    ]
+    assert len(harad_on_land_before) >= 2
+
+    state.phase = "combat"
+    state.current_faction = "harad"
+    state, _ = apply_action(
+        state,
+        initiate_combat(
+            "harad",
+            "sea_zone_11",
+            dice_rolls={"attacker": [10], "defender": [1]},
+        ),
+        unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    assert state.active_combat is None
+    assert state.territory_sea_raid_from.get("harondor") is None
+    harad_on_land_after = [
+        u for u in state.territories["harondor"].units
+        if get_unit_faction(u, unit_defs) == "harad"
+    ]
+    assert len(harad_on_land_after) == 1
+    assert harad_on_land_after[0].instance_id == walk_in.instance_id
+    assert all(u.unit_id != "corsair_of_umbar" for u in harad_on_land_after)
+
+    # Remaining battle is normal land combat (staging cleared — no sea_zone_id on contested entry).
+    contested = get_contested_territories(state, "harad", faction_defs, unit_defs, territory_defs)
+    har_entries = [c for c in contested if c["territory_id"] == "harondor"]
+    assert len(har_entries) == 1
+    assert "sea_zone_id" not in har_entries[0]
+    land_act = initiate_combat(
+        "harad", "harondor", {"attacker": [6], "defender": [6]}, sea_zone_id=None,
+    )
+    vr = validate_action(state, land_act, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert vr.valid, vr.error
+
+
+def test_naval_loss_passengers_only_no_harad_contested_land(wotr_defs):
+    """If every attacker on the land hex was a tracked sea-raid passenger, naval loss leaves nobody to fight."""
     unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
     setup = load_starting_setup(setup_id="wotr_exp_1.0")
     state = initialize_game_state(
@@ -1170,15 +1285,8 @@ def test_naval_loss_after_offload_clears_sea_raid_staging_and_passengers(wotr_de
     state.current_faction = "harad"
     state.phase = "combat_move"
     state = get_state_after_pending_moves(
-        state, "combat_move", unit_defs, territory_defs, faction_defs
+        state, "combat_move", unit_defs, territory_defs, faction_defs,
     )
-    assert state.territory_sea_raid_from.get("harondor") == "sea_zone_11"
-    harad_on_land_before = [
-        u for u in state.territories["harondor"].units
-        if get_unit_faction(u, unit_defs) == "harad"
-    ]
-    assert len(harad_on_land_before) >= 1
-
     state.phase = "combat"
     state.current_faction = "harad"
     state, _ = apply_action(
@@ -1190,13 +1298,8 @@ def test_naval_loss_after_offload_clears_sea_raid_staging_and_passengers(wotr_de
         ),
         unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
     )
-    assert state.active_combat is None
-    assert state.territory_sea_raid_from.get("harondor") is None
-    harad_on_land_after = [
-        u for u in state.territories["harondor"].units
-        if get_unit_faction(u, unit_defs) == "harad"
-    ]
-    assert len(harad_on_land_after) == 0
+    contested = get_contested_territories(state, "harad", faction_defs, unit_defs, territory_defs)
+    assert not any(c.get("territory_id") == "harondor" for c in contested)
 
 
 def test_retreat_and_retreat_options_rejected_during_sea_raid(wotr_defs):

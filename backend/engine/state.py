@@ -436,6 +436,9 @@ class ActiveCombat:
     ladder_equipment_count: int = 0
     # Attacker chose to detonate bomb(s) in the siegeworks round (initiate_combat); if False, bombs skip siege and survive
     fuse_bomb: bool = True
+    # Pure naval (sea hex): land passengers embarked on attacker boats at battle start (instance_id -> boat_id).
+    # Used so combat_ended attacker casualties include passengers lost when their ship sinks.
+    naval_embarked_attacker_loaded_onto: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -465,6 +468,8 @@ class ActiveCombat:
             out["ladder_equipment_count"] = self.ladder_equipment_count
         if not self.fuse_bomb:
             out["fuse_bomb"] = False
+        if self.naval_embarked_attacker_loaded_onto:
+            out["naval_embarked_attacker_loaded_onto"] = dict(self.naval_embarked_attacker_loaded_onto)
         return out
 
     @classmethod
@@ -515,6 +520,12 @@ class ActiveCombat:
         fuse_bomb = data.get("fuse_bomb", True)
         if not isinstance(fuse_bomb, bool):
             fuse_bomb = True
+        nav_emb_raw = data.get("naval_embarked_attacker_loaded_onto")
+        naval_embarked: dict[str, str] = {}
+        if isinstance(nav_emb_raw, dict):
+            for k, v in nav_emb_raw.items():
+                if isinstance(k, str) and isinstance(v, str):
+                    naval_embarked[k] = v
         return cls(
             attacker_faction=str(data.get("attacker_faction") or ""),
             territory_id=str(data.get("territory_id") or ""),
@@ -532,6 +543,7 @@ class ActiveCombat:
             ladder_infantry_instance_ids=ladder_infantry,
             ladder_equipment_count=max(0, ladder_eq),
             fuse_bomb=fuse_bomb,
+            naval_embarked_attacker_loaded_onto=naval_embarked,
         )
 
 

@@ -2510,6 +2510,14 @@ def _handle_initiate_combat(
     attacker_instance_ids = [u.instance_id for u in attacker_units]
     defender_instance_ids = [u.instance_id for u in defender_units]
 
+    naval_embarked_attacker_loaded_onto: dict[str, str] = {}
+    if not sea_zone_id:
+        tdef_emb = territory_defs.get(territory_id)
+        if tdef_emb and getattr(tdef_emb, "terrain_type", "").lower() == "sea":
+            naval_embarked_attacker_loaded_onto = _naval_embarked_attackers_by_boat(
+                territory, attacker_faction, attacker_instance_ids, unit_defs
+            )
+
     # Clear loaded_naval_must_attack_instance_ids for attacker boats (they are attacking)
     if getattr(state, "loaded_naval_must_attack_instance_ids", []):
         attacker_boat_ids = {
@@ -2657,6 +2665,7 @@ def _handle_initiate_combat(
                 sea_zone_id=sea_zone_id,
                 initial_attacker_instance_ids=attacker_instance_ids,
                 initial_defender_instance_ids=defender_instance_ids,
+                naval_embarked_attacker_loaded_onto=naval_embarked_attacker_loaded_onto,
             )
             events.extend(end_events)
             return state, events
@@ -2676,6 +2685,7 @@ def _handle_initiate_combat(
             cumulative_hits_received_by_attacker=0,
             cumulative_hits_received_by_defender=round_result.attacker_hits,
             fuse_bomb=fuse_bomb,
+            naval_embarked_attacker_loaded_onto=dict(naval_embarked_attacker_loaded_onto),
         )
         return state, events
 
@@ -2884,6 +2894,7 @@ def _handle_initiate_combat(
                 sea_zone_id=sea_zone_id,
                 initial_attacker_instance_ids=attacker_instance_ids,
                 initial_defender_instance_ids=defender_instance_ids,
+                naval_embarked_attacker_loaded_onto=naval_embarked_attacker_loaded_onto,
             )
             events.extend(end_events)
             return state, events
@@ -2907,6 +2918,7 @@ def _handle_initiate_combat(
                 sea_zone_id=sea_zone_id,
                 initial_attacker_instance_ids=attacker_instance_ids,
                 initial_defender_instance_ids=defender_instance_ids,
+                naval_embarked_attacker_loaded_onto=naval_embarked_attacker_loaded_onto,
             )
             events.extend(end_events)
             return state, events
@@ -2932,6 +2944,7 @@ def _handle_initiate_combat(
             ladder_infantry_instance_ids=ladder_ids_sw,
             ladder_equipment_count=ladder_count_sw,
             fuse_bomb=fuse_bomb,
+            naval_embarked_attacker_loaded_onto=dict(naval_embarked_attacker_loaded_onto),
         )
         return state, events
 
@@ -3053,6 +3066,7 @@ def _handle_initiate_combat(
                 sea_zone_id=sea_zone_id,
                 initial_attacker_instance_ids=[u.instance_id for u in attacker_units],
                 initial_defender_instance_ids=defender_instance_ids,
+                naval_embarked_attacker_loaded_onto=naval_embarked_attacker_loaded_onto,
             )
             events.extend(end_events)
             return state, events
@@ -3073,6 +3087,7 @@ def _handle_initiate_combat(
             cumulative_hits_received_by_attacker=round_result.defender_hits,
             cumulative_hits_received_by_defender=0,
             fuse_bomb=fuse_bomb,
+            naval_embarked_attacker_loaded_onto=dict(naval_embarked_attacker_loaded_onto),
         )
         return state, events
 
@@ -3246,6 +3261,7 @@ def _handle_initiate_combat(
             sea_zone_id=sea_zone_id,
             initial_attacker_instance_ids=attacker_instance_ids,
             initial_defender_instance_ids=defender_instance_ids,
+            naval_embarked_attacker_loaded_onto=naval_embarked_attacker_loaded_onto,
         )
         events.extend(end_events)
         return state, events
@@ -3266,6 +3282,7 @@ def _handle_initiate_combat(
         ladder_infantry_instance_ids=_initiate_ladder_infantry_ids,
         ladder_equipment_count=_initiate_ladder_equipment_count,
         fuse_bomb=fuse_bomb,
+        naval_embarked_attacker_loaded_onto=dict(naval_embarked_attacker_loaded_onto),
     )
     return state, events
 
@@ -3667,6 +3684,7 @@ def _handle_continue_combat(
                 sea_zone_id=sea_zone_id,
                 initial_attacker_instance_ids=combat.initial_attacker_instance_ids or None,
                 initial_defender_instance_ids=combat.initial_defender_instance_ids or None,
+                naval_embarked_attacker_loaded_onto=combat.naval_embarked_attacker_loaded_onto or None,
             )
             events.extend(end_events)
             state.active_combat = None
@@ -3692,6 +3710,7 @@ def _handle_continue_combat(
                 sea_zone_id=sea_zone_id,
                 initial_attacker_instance_ids=combat.initial_attacker_instance_ids or None,
                 initial_defender_instance_ids=combat.initial_defender_instance_ids or None,
+                naval_embarked_attacker_loaded_onto=combat.naval_embarked_attacker_loaded_onto or None,
             )
             events.extend(end_events)
             state.active_combat = None
@@ -3821,6 +3840,7 @@ def _handle_continue_combat(
                 sea_zone_id=sea_zone_id,
                 initial_attacker_instance_ids=combat.initial_attacker_instance_ids or None,
                 initial_defender_instance_ids=combat.initial_defender_instance_ids or None,
+                naval_embarked_attacker_loaded_onto=combat.naval_embarked_attacker_loaded_onto or None,
             )
             events.extend(end_events)
             state.active_combat = None
@@ -3937,6 +3957,7 @@ def _handle_continue_combat(
             sea_zone_id=sea_zone_id,
             initial_attacker_instance_ids=combat.initial_attacker_instance_ids or None,
             initial_defender_instance_ids=combat.initial_defender_instance_ids or None,
+            naval_embarked_attacker_loaded_onto=combat.naval_embarked_attacker_loaded_onto or None,
         )
         events.extend(end_events)
         state.active_combat = None
@@ -4057,6 +4078,28 @@ def _handle_set_territory_defender_casualty_order(
         raise ValueError(f"Only the owner of {territory_id} can set defender casualty order")
     state.territory_defender_casualty_order[territory_id] = casualty_order
     return state, []
+
+
+def _naval_embarked_attackers_by_boat(
+    sea_territory: TerritoryState,
+    attacker_faction: str,
+    attacker_boat_instance_ids: list[str],
+    unit_defs: dict[str, UnitDefinition],
+) -> dict[str, str]:
+    """Map passenger instance_id -> boat instance_id for attacker land units on listed attacker boats."""
+    boat_set = set(attacker_boat_instance_ids)
+    out: dict[str, str] = {}
+    for u in sea_territory.units:
+        if get_unit_faction(u, unit_defs) != attacker_faction:
+            continue
+        boat_id = getattr(u, "loaded_onto", None)
+        if not boat_id or boat_id not in boat_set:
+            continue
+        ud = unit_defs.get(u.unit_id)
+        if not is_land_unit(ud) or _is_naval_unit(ud):
+            continue
+        out[u.instance_id] = boat_id
+    return out
 
 
 def _remove_casualties(
@@ -4263,6 +4306,7 @@ def _resolve_combat_end(
     sea_zone_id: str | None = None,
     initial_attacker_instance_ids: list[str] | None = None,
     initial_defender_instance_ids: list[str] | None = None,
+    naval_embarked_attacker_loaded_onto: dict[str, str] | None = None,
 ) -> tuple[GameState, list[GameEvent]]:
     """
     Resolve the end of combat.
@@ -4276,9 +4320,16 @@ def _resolve_combat_end(
     territory = state.territories[territory_id]
     old_owner = territory.owner
     total_rounds = len(combat_log)
-    # Casualty ids for one-line battle summary
-    att_cas = list(set(initial_attacker_instance_ids or []) - set(round_result.surviving_attacker_ids))
-    def_cas = list(set(initial_defender_instance_ids or []) - set(round_result.surviving_defender_ids))
+    # Casualty ids for one-line battle summary (naval: include passengers lost when their boat sank)
+    att_cas_set = set(initial_attacker_instance_ids or []) - set(round_result.surviving_attacker_ids)
+    emb = naval_embarked_attacker_loaded_onto or {}
+    if emb:
+        surv_boats = set(round_result.surviving_attacker_ids)
+        for pid, bid in emb.items():
+            if bid not in surv_boats:
+                att_cas_set.add(pid)
+    att_cas = sorted(att_cas_set)
+    def_cas = sorted(set(initial_defender_instance_ids or []) - set(round_result.surviving_defender_ids))
     # Where attackers live: sea zone (before offload) or territory (after phase end / already offloaded)
     sea_zone = state.territories.get(sea_zone_id) if sea_zone_id else None
     surviving_attacker_ids_set = set(round_result.surviving_attacker_ids)
