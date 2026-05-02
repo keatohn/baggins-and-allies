@@ -931,6 +931,37 @@ export default function CombatSimulatorPanel({
     [attackerUnits, attackerCounts]
   );
 
+  /** Header strip: unit count, sum of cost.power, sum of base attack (matches per-row stats). */
+  const attackerSimHeaderTotals = useMemo(() => {
+    if (!definitions) return { units: 0, power: 0, attack: 0 };
+    let units = 0;
+    let power = 0;
+    let attack = 0;
+    for (const u of attackerUnits) {
+      const c = attackerCounts[u.id] ?? 0;
+      if (c <= 0) continue;
+      units += c;
+      power += c * getUnitPowerCost(definitions, u.id);
+      attack += c * getUnitStatFromDefs(definitions, u.id, 'attack');
+    }
+    return { units, power, attack };
+  }, [definitions, attackerUnits, attackerCounts]);
+
+  /** Defender column: merged stacks only (territory + added). */
+  const defenderSimHeaderTotals = useMemo(() => {
+    if (!definitions) return { units: 0, power: 0, defense: 0 };
+    let units = 0;
+    let power = 0;
+    let defense = 0;
+    for (const { unit_id, count } of defenderStacksMerged) {
+      if (count <= 0) continue;
+      units += count;
+      power += count * getUnitPowerCost(definitions, unit_id);
+      defense += count * getUnitStatFromDefs(definitions, unit_id, 'defense');
+    }
+    return { units, power, defense };
+  }, [definitions, defenderStacksMerged]);
+
   const handleClear = () => {
     setAttackerFaction('');
     setTerritoryId('');
@@ -1474,7 +1505,12 @@ export default function CombatSimulatorPanel({
           <div className="combat-sim-units-col">
             {attackerUnits.length > 0 && (
               <>
-                <label className="combat-sim-label combat-sim-units-header">Attacking Units</label>
+                <div className="combat-sim-units-header-row">
+                  <label className="combat-sim-label combat-sim-units-header">Attacking Units</label>
+                  <span className="combat-sim-units-header-totals" aria-label="Attacker unit totals">
+                    {attackerSimHeaderTotals.units}U  |  {attackerSimHeaderTotals.power}UP  |  {attackerSimHeaderTotals.attack}A
+                  </span>
+                </div>
                 <div className="combat-sim-units">
                   {attackerUnits.map((u) => {
                     const baseAttack = getUnitStat(u.id, 'attack');
@@ -1510,7 +1546,12 @@ export default function CombatSimulatorPanel({
           <div className="combat-sim-units-col">
             {territoryId && (
               <>
-                <label className="combat-sim-label combat-sim-units-header">Defending Units</label>
+                <div className="combat-sim-units-header-row">
+                  <label className="combat-sim-label combat-sim-units-header">Defending Units</label>
+                  <span className="combat-sim-units-header-totals" aria-label="Defender unit totals">
+                    {defenderSimHeaderTotals.units}U  |  {defenderSimHeaderTotals.power}UP  |  {defenderSimHeaderTotals.defense}D
+                  </span>
+                </div>
                 <div className="combat-sim-units">
                   {defenderStacksFiltered.length === 0 && addedDefenderStacks.length === 0 ? (
                     territoryId.startsWith(TERRAIN_PREFIX) ? null : (
@@ -1992,22 +2033,22 @@ export default function CombatSimulatorPanel({
                     </tr>
                     {(typeof result.attacker_siegework_hits_mean === 'number' ||
                       typeof result.defender_siegework_hits_mean === 'number') && (
-                      <tr>
-                        <td className="combat-sim-results-td-label" title="Dedicated siegeworks round (before round 1).">
-                          Siegework Hits
-                        </td>
-                        <td className="combat-sim-results-td">
-                          {typeof result.attacker_siegework_hits_mean === 'number'
-                            ? result.attacker_siegework_hits_mean.toFixed(1)
-                            : '—'}
-                        </td>
-                        <td className="combat-sim-results-td">
-                          {typeof result.defender_siegework_hits_mean === 'number'
-                            ? result.defender_siegework_hits_mean.toFixed(1)
-                            : '—'}
-                        </td>
-                      </tr>
-                    )}
+                        <tr>
+                          <td className="combat-sim-results-td-label" title="Dedicated siegeworks round (before round 1).">
+                            Siegework Hits
+                          </td>
+                          <td className="combat-sim-results-td">
+                            {typeof result.attacker_siegework_hits_mean === 'number'
+                              ? result.attacker_siegework_hits_mean.toFixed(1)
+                              : '—'}
+                          </td>
+                          <td className="combat-sim-results-td">
+                            {typeof result.defender_siegework_hits_mean === 'number'
+                              ? result.defender_siegework_hits_mean.toFixed(1)
+                              : '—'}
+                          </td>
+                        </tr>
+                      )}
                     <tr>
                       <td className="combat-sim-results-td-label">Prefire Hits</td>
                       <td className="combat-sim-results-td">{typeof result.attacker_prefire_hits_mean === 'number' ? result.attacker_prefire_hits_mean.toFixed(1) : '—'}</td>

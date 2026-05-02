@@ -544,6 +544,33 @@
   min-width: 0;
 }
 
+.combat-sim-units-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding-bottom: 0.35rem;
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--ink-faded);
+}
+
+.combat-sim-units-header-row .combat-sim-units-header {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.combat-sim-units-header-totals {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--ink-faded);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  /* Default HTML whitespace collapsing merges multiple spaces; keep intentional gaps around | */
+  white-space: pre;
+}
+
 .combat-sim-units-header {
   font-size: 0.95rem;
   font-weight: 600;
