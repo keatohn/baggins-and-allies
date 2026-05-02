@@ -603,6 +603,8 @@ class GameState:
     turn_order: list[str] = field(default_factory=list)
     # Boat instance IDs that received a load during combat_move and must attack (naval combat or sea raid) before phase end.
     loaded_naval_must_attack_instance_ids: list[str] = field(default_factory=list)
+    # Boats that used combat_move sea→sea into a non-hostile sea only under sail+load+raid rules; must sea raid, naval battle, or take passengers before phase end.
+    combat_move_naval_idle_sail_instance_ids: list[str] = field(default_factory=list)
     # Boats that mobilized into a sea zone that already had hostile enemy naval units (defenders must fight or leave).
     naval_mobilization_intruder_instance_ids: list[str] = field(default_factory=list)
     # Immutable snapshot: territory_id -> original owner faction at game creation (starting_setup territory_owners).
@@ -666,6 +668,9 @@ class GameState:
             "dynamic_camps": self.dynamic_camps,
             "turn_order": self.turn_order,
             "loaded_naval_must_attack_instance_ids": getattr(self, "loaded_naval_must_attack_instance_ids", []),
+            "combat_move_naval_idle_sail_instance_ids": getattr(
+                self, "combat_move_naval_idle_sail_instance_ids", []
+            ),
             "naval_mobilization_intruder_instance_ids": getattr(self, "naval_mobilization_intruder_instance_ids", []),
             "avoided_forced_naval_combat_instance_ids": getattr(self, "avoided_forced_naval_combat_instance_ids", []),
             "territory_defender_casualty_order": getattr(self, "territory_defender_casualty_order", {}),
@@ -743,6 +748,9 @@ class GameState:
                 PendingMobilization.from_dict(pm) for pm in (data.get("pending_mobilizations") or []) if isinstance(pm, dict)
             ],
             loaded_naval_must_attack_instance_ids=_ensure_str_list(data.get("loaded_naval_must_attack_instance_ids")),
+            combat_move_naval_idle_sail_instance_ids=_ensure_str_list(
+                data.get("combat_move_naval_idle_sail_instance_ids")
+            ),
             naval_mobilization_intruder_instance_ids=_ensure_str_list(data.get("naval_mobilization_intruder_instance_ids")),
             avoided_forced_naval_combat_instance_ids=_ensure_str_list(data.get("avoided_forced_naval_combat_instance_ids")),
             territory_defender_casualty_order=dict(data.get("territory_defender_casualty_order") or {}) if isinstance(data.get("territory_defender_casualty_order"), dict) else {},

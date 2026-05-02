@@ -25,15 +25,15 @@ def main():
     print("="*70)
 
     # Load definitions
-    unit_defs, territory_defs, faction_defs, camp_defs = load_static_definitions(setup_id="1.0")
+    unit_defs, territory_defs, faction_defs, camp_defs = load_static_definitions(setup_id="wotr_1.1")
 
-    # Initialize game (setup 1.0); use Rohan for power-cap test (Dunharrow has power=2)
+    # Initialize game (wotr_1.1); use Rohan for power-cap test (Dunharrow has power=2)
     state = initialize_game_state(
         faction_defs, territory_defs, camp_defs=camp_defs,
-        starting_setup=load_starting_setup(setup_id="1.0"),
+        starting_setup=load_starting_setup(setup_id="wotr_1.1"),
     )
     state.current_faction = "rohan"
-    # Rohan's territories with standing camps (edoras, dunharrow in 1.0; dunharrow produces 2 power)
+    # Rohan's territories with standing camps (edoras, dunharrow; dunharrow produces 2 power)
     state.mobilization_camps = ["edoras", "dunharrow"]
     print("\n[INITIAL STATE]")
     print_game_state(state, territory_defs)

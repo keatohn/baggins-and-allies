@@ -2617,6 +2617,10 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                                     boat_ids_declared_attack.add(iid)
                 effective_boat_ids = loaded_boat_ids - boat_ids_declared_attack
                 actions["loaded_naval_must_attack_instance_ids"] = list(effective_boat_ids)
+                idle_naval_sail_ids = list(
+                    getattr(state_after_combat_moves, "combat_move_naval_idle_sail_instance_ids", []) or []
+                )
+                actions["combat_move_naval_idle_sail_instance_ids"] = idle_naval_sail_ids
                 forced_naval_ids = get_forced_naval_combat_instance_ids(
                     state_after_combat_moves, faction, ud, td, fd
                 )
@@ -2631,7 +2635,10 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                         standoff_seas.add(tkey)
                 actions["forced_naval_standoff_sea_zone_ids"] = sorted(standoff_seas)
                 # Allow end phase once every boat that must attack has declared (pending load moves will apply on end_phase)
-                actions["can_end_phase"] = len(effective_boat_ids) == 0
+                # and no combat_move sail-only reposition into an eligible sea remains without sea raid / naval battle / load.
+                actions["can_end_phase"] = (
+                    len(effective_boat_ids) == 0 and len(idle_naval_sail_ids) == 0
+                )
             if phase == "non_combat_move":
                 # Apply pending moves first so aerial_units_must_move matches board state after declared
                 # moves (units still on-map until phase ends still appear stuck on raw state).

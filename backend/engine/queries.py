@@ -809,14 +809,21 @@ def _validate_move(
             )
             all_aerial = all(is_aerial_unit(unit_defs.get(u.unit_id)) for u in units_in_stack)
             if all_transportable_land:
-                dest_territory = state.territories.get(destination)
+                # Same-phase sail→load: pathfinding uses board after pending moves; capacity must too or the
+                # boat is still in its origin sea in `state` and slots at the embark hex read as zero.
+                from backend.engine.reducer import get_state_after_pending_moves
+
+                slot_state = get_state_after_pending_moves(
+                    state, state.phase, unit_defs, territory_defs, faction_defs
+                )
+                dest_territory = slot_state.territories.get(destination)
                 if not dest_territory:
                     return ValidationResult(False, f"Destination {destination} does not exist")
                 faction_id = action.faction
                 load_onto_boat_id = (action.payload.get("load_onto_boat_instance_id") or "").strip() or None
                 if load_onto_boat_id:
                     slots = remaining_load_slots_on_boat(
-                        state, destination, load_onto_boat_id, faction_id, unit_defs, territory_defs, state.phase
+                        slot_state, destination, load_onto_boat_id, faction_id, unit_defs, territory_defs, state.phase
                     )
                     if len(units_in_stack) > slots:
                         return ValidationResult(
@@ -826,7 +833,7 @@ def _validate_move(
                         )
                 else:
                     slots_left = remaining_sea_load_passenger_slots(
-                        state, destination, faction_id, unit_defs, territory_defs, state.phase
+                        slot_state, destination, faction_id, unit_defs, territory_defs, state.phase
                     )
                     if len(units_in_stack) > slots_left:
                         return ValidationResult(
@@ -942,7 +949,12 @@ def _validate_move(
                     False,
                     f"Unit {u.instance_id} cannot be transported (no transportable tag)",
                 )
-        dest_territory = state.territories.get(destination)
+        from backend.engine.reducer import get_state_after_pending_moves
+
+        slot_state = get_state_after_pending_moves(
+            state, state.phase, unit_defs, territory_defs, faction_defs
+        )
+        dest_territory = slot_state.territories.get(destination)
         if not dest_territory:
             return ValidationResult(False, f"Destination {destination} does not exist")
         faction_id = action.faction
@@ -962,7 +974,7 @@ def _validate_move(
                     f"Boat {load_onto_boat_id} does not belong to faction {faction_id}",
                 )
             slots = remaining_load_slots_on_boat(
-                state, destination, load_onto_boat_id, faction_id, unit_defs, territory_defs, state.phase
+                slot_state, destination, load_onto_boat_id, faction_id, unit_defs, territory_defs, state.phase
             )
             if len(units_in_stack) > slots:
                 return ValidationResult(
@@ -972,7 +984,7 @@ def _validate_move(
                 )
         else:
             slots_left = remaining_sea_load_passenger_slots(
-                state, destination, faction_id, unit_defs, territory_defs, state.phase
+                slot_state, destination, faction_id, unit_defs, territory_defs, state.phase
             )
             if len(units_in_stack) > slots_left:
                 return ValidationResult(
@@ -990,7 +1002,12 @@ def _validate_move(
                 return ValidationResult(False, f"Unit {u.instance_id} cannot be carried (only land units can be passengers)")
             if not is_transportable(ud):
                 return ValidationResult(False, f"Unit {u.instance_id} cannot be transported (no transportable tag)")
-        dest_territory = state.territories.get(destination)
+        from backend.engine.reducer import get_state_after_pending_moves
+
+        slot_state = get_state_after_pending_moves(
+            state, state.phase, unit_defs, territory_defs, faction_defs
+        )
+        dest_territory = slot_state.territories.get(destination)
         if not dest_territory:
             return ValidationResult(False, f"Destination {destination} does not exist")
         faction_id = action.faction
@@ -1005,7 +1022,7 @@ def _validate_move(
             if get_unit_faction(boat_unit, unit_defs) != faction_id:
                 return ValidationResult(False, f"Boat {load_onto_boat_id} does not belong to faction {faction_id}")
             slots = remaining_load_slots_on_boat(
-                state, destination, load_onto_boat_id, faction_id, unit_defs, territory_defs, state.phase
+                slot_state, destination, load_onto_boat_id, faction_id, unit_defs, territory_defs, state.phase
             )
             if len(passengers) > slots:
                 return ValidationResult(
@@ -1015,7 +1032,7 @@ def _validate_move(
                 )
         else:
             slots_left = remaining_sea_load_passenger_slots(
-                state, destination, faction_id, unit_defs, territory_defs, state.phase
+                slot_state, destination, faction_id, unit_defs, territory_defs, state.phase
             )
             if len(passengers) > slots_left:
                 return ValidationResult(
@@ -1569,6 +1586,19 @@ def _validate_end_phase(
     camp_defs: dict | None = None,
 ) -> ValidationResult:
     """Validate end_phase: combat phase cannot end while contested battles remain; mobilization: all camps placed or queued."""
+    if state.phase == "combat_move" and unit_defs and territory_defs and faction_defs:
+        from backend.engine.reducer import get_state_after_pending_moves
+
+        sim = get_state_after_pending_moves(
+            state, "combat_move", unit_defs, territory_defs, faction_defs
+        )
+        idle = getattr(sim, "combat_move_naval_idle_sail_instance_ids", []) or []
+        if idle:
+            return ValidationResult(
+                False,
+                "Combat move cannot end while a naval unit sailed into a sea zone for load/sea raid but did not follow "
+                f"through (sea raid, naval battle, or load). Unresolved boats: {idle!s}.",
+            )
     if state.phase == "combat":
         if state.active_combat is not None:
             return ValidationResult(

@@ -254,6 +254,8 @@ export interface AvailableActionsResponse {
   aerial_units_must_move?: { territory_id: string; unit_id: string; instance_id: string }[];
   /** Boat instance IDs that received a load this combat move and must attack before ending phase (per boat, not per sea zone). */
   loaded_naval_must_attack_instance_ids?: string[];
+  /** Boats that sailed in combat_move under sail+raid eligibility but must still sea raid, fight, or load. */
+  combat_move_naval_idle_sail_instance_ids?: string[];
   /** Defender boats sharing a sea with an enemy fleet that mobilized in: fight (combat phase) or sail away (avoid_forced_naval_combat). */
   forced_naval_combat_instance_ids?: string[];
   /** Sea zones where forced_naval_combat applies (for Actions panel). */

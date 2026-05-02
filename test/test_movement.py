@@ -24,8 +24,8 @@ def test_non_combat_reaches_territory_with_pending_capture_owner():
     until combat phase fully applies. Non-combat reachability must treat that hex as friendly so
     reinforcements can be plotted (same as validation / apply).
     """
-    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(setup_id="1.0")
-    starting = load_starting_setup(setup_id="1.0")
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(setup_id="wotr_1.1")
+    starting = load_starting_setup(setup_id="wotr_1.1")
     state = initialize_game_state(
         faction_defs, territory_defs, unit_defs,
         starting_setup=starting,
@@ -54,8 +54,8 @@ def test_non_combat_reaches_territory_with_pending_capture_owner():
 
 def test_non_combat_apply_accepts_pending_capture_owner():
     """Reducer apply must use effective_territory_owner for non-combat (same as validate_action / BFS)."""
-    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(setup_id="1.0")
-    starting = load_starting_setup(setup_id="1.0")
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(setup_id="wotr_1.1")
+    starting = load_starting_setup(setup_id="wotr_1.1")
     state = initialize_game_state(
         faction_defs, territory_defs, unit_defs,
         starting_setup=starting,
@@ -87,8 +87,8 @@ def test_land_combat_move():
     print("TEST: Land combat move (north_ithilien -> minas_morgul)")
     print("=" * 60)
 
-    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(setup_id="1.0")
-    starting = load_starting_setup(setup_id="1.0")
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(setup_id="wotr_1.1")
+    starting = load_starting_setup(setup_id="wotr_1.1")
     state = initialize_game_state(
         faction_defs, territory_defs, unit_defs,
         starting_setup=starting,
@@ -121,8 +121,8 @@ def test_non_combat_move():
     print("TEST: Non-combat move (minas_tirith -> pelennor)")
     print("=" * 60)
 
-    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(setup_id="1.0")
-    starting = load_starting_setup(setup_id="1.0")
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(setup_id="wotr_1.1")
+    starting = load_starting_setup(setup_id="wotr_1.1")
     state = initialize_game_state(
         faction_defs, territory_defs, unit_defs,
         starting_setup=starting,
@@ -153,8 +153,8 @@ def test_move_requires_destination():
     print("TEST: Move requires destination (validation)")
     print("=" * 60)
 
-    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(setup_id="1.0")
-    starting = load_starting_setup(setup_id="1.0")
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(setup_id="wotr_1.1")
+    starting = load_starting_setup(setup_id="wotr_1.1")
     state = initialize_game_state(
         faction_defs, territory_defs, unit_defs,
         starting_setup=starting,

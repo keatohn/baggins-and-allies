@@ -57,8 +57,10 @@ from backend.engine.movement import (
     pending_ford_crosser_lead_move_from_origin,
     remaining_ford_escort_slots,
     _is_sea_zone,
+    _is_naval_only,
     _sea_zone_has_hostile_enemy_boats,
     are_sea_zones_directly_adjacent,
+    empty_sea_zone_valid_for_combat_move_sail_then_load_raid,
     expand_sea_offload_instance_ids,
     remaining_load_slots_on_boat,
     remaining_sea_load_passenger_slots,
@@ -1091,6 +1093,11 @@ def _handle_move_units(
         raise ValueError(sea_offload_vr.error or "Invalid sea offload / sea raid move")
     sea_offload_ok = sea_offload_vr is not None and sea_offload_vr.valid
 
+    # Land→sea capacity after same-phase pending sails (matches pathfinding / validate_action).
+    state_for_embark_slots = get_state_after_pending_moves(
+        state, state.phase, unit_defs, territory_defs, faction_defs
+    )
+
     all_charge_routes: list[dict[str, list[list[str]]]] = []
     can_reach_list: list[bool] = []
     ford_pending_exclude = set(unit_instance_ids)
@@ -1132,12 +1139,12 @@ def _handle_move_units(
             )
             all_aerial = all(is_aerial_unit(unit_defs.get(u.unit_id)) for u in units_to_move)
             if all_transportable_land:
-                to_territory = state.territories.get(to_id)
+                to_territory = state_for_embark_slots.territories.get(to_id)
                 if to_territory:
                     load_onto_decl = (action.payload.get("load_onto_boat_instance_id") or "").strip() or None
                     if load_onto_decl:
                         boat_slots = remaining_load_slots_on_boat(
-                            state, to_id, load_onto_decl, faction_id, unit_defs, territory_defs, state.phase
+                            state_for_embark_slots, to_id, load_onto_decl, faction_id, unit_defs, territory_defs, state.phase
                         )
                         if len(units_to_move) > boat_slots:
                             raise ValueError(
@@ -1146,7 +1153,7 @@ def _handle_move_units(
                             )
                     else:
                         zone_slots = remaining_sea_load_passenger_slots(
-                            state, to_id, faction_id, unit_defs, territory_defs, state.phase
+                            state_for_embark_slots, to_id, faction_id, unit_defs, territory_defs, state.phase
                         )
                         if len(units_to_move) > zone_slots:
                             raise ValueError(
@@ -1248,12 +1255,12 @@ def _handle_move_units(
                     raise ValueError(
                         f"Unit {u.instance_id} cannot be transported (no transportable tag)"
                     )
-            to_territory = state.territories.get(to_id)
+            to_territory = state_for_embark_slots.territories.get(to_id)
             if to_territory:
                 load_onto_decl = (action.payload.get("load_onto_boat_instance_id") or "").strip() or None
                 if load_onto_decl:
                     boat_slots = remaining_load_slots_on_boat(
-                        state, to_id, load_onto_decl, faction_id, unit_defs, territory_defs, state.phase
+                        state_for_embark_slots, to_id, load_onto_decl, faction_id, unit_defs, territory_defs, state.phase
                     )
                     if len(units_to_move) > boat_slots:
                         raise ValueError(
@@ -1262,7 +1269,7 @@ def _handle_move_units(
                         )
                 else:
                     zone_slots = remaining_sea_load_passenger_slots(
-                        state, to_id, faction_id, unit_defs, territory_defs, state.phase
+                        state_for_embark_slots, to_id, faction_id, unit_defs, territory_defs, state.phase
                     )
                     if len(units_to_move) > zone_slots:
                         raise ValueError(
@@ -1277,12 +1284,12 @@ def _handle_move_units(
                     raise ValueError(f"Unit {u.instance_id} cannot be carried (only land units can be passengers)")
                 if not is_transportable(ud):
                     raise ValueError(f"Unit {u.instance_id} cannot be transported (no transportable tag)")
-            to_territory = state.territories.get(to_id)
+            to_territory = state_for_embark_slots.territories.get(to_id)
             if to_territory:
                 load_onto_decl = (action.payload.get("load_onto_boat_instance_id") or "").strip() or None
                 if load_onto_decl:
                     boat_slots = remaining_load_slots_on_boat(
-                        state, to_id, load_onto_decl, faction_id, unit_defs, territory_defs, state.phase
+                        state_for_embark_slots, to_id, load_onto_decl, faction_id, unit_defs, territory_defs, state.phase
                     )
                     if len(passengers) > boat_slots:
                         raise ValueError(
@@ -1291,7 +1298,7 @@ def _handle_move_units(
                         )
                 else:
                     zone_slots = remaining_sea_load_passenger_slots(
-                        state, to_id, faction_id, unit_defs, territory_defs, state.phase
+                        state_for_embark_slots, to_id, faction_id, unit_defs, territory_defs, state.phase
                     )
                     if len(passengers) > zone_slots:
                         raise ValueError(
@@ -1899,6 +1906,46 @@ def _apply_pending_moves(
                 state.current_faction or "",
                 getattr(pending_move, "load_onto_boat_instance_id", None) or None,
             )
+        # Combat move: sea→sea into a non-hostile sea only allowed for sail+load+raid — track empty sail so phase cannot end without follow-up.
+        idle_naval_sail_ids: list[str] = []
+        if (
+            phase == "combat_move"
+            and move_type == "sail"
+            and not getattr(pending_move, "avoid_forced_naval_combat", False)
+            and faction_id
+            and from_def_exp
+            and to_def_exp
+            and _is_sea_zone(from_def_exp)
+            and _is_sea_zone(to_def_exp)
+            and not _sea_zone_has_hostile_enemy_boats(
+                state, to_id, faction_id, unit_defs, faction_defs, territory_defs
+            )
+        ):
+            for iid in ids_to_move:
+                u = units_by_id.get(iid)
+                if not u:
+                    continue
+                bud = unit_defs.get(u.unit_id)
+                if not _is_naval_only(bud):
+                    continue
+                if any(
+                    getattr(p, "loaded_onto", None) == u.instance_id
+                    for p in from_territory.units
+                    if p.instance_id != u.instance_id
+                ):
+                    continue
+                if empty_sea_zone_valid_for_combat_move_sail_then_load_raid(
+                    state,
+                    to_id,
+                    from_id,
+                    faction_id,
+                    u,
+                    unit_defs,
+                    territory_defs,
+                    faction_defs,
+                    phase,
+                ):
+                    idle_naval_sail_ids.append(u.instance_id)
         # Move each unit and deduct movement cost
         for instance_id in ids_to_move:
             unit = units_by_id.get(instance_id)
@@ -1913,6 +1960,13 @@ def _apply_pending_moves(
                     unit_cost = cost_per_unit
                 unit.remaining_movement -= unit_cost
                 to_territory.units.append(unit)
+
+        if idle_naval_sail_ids:
+            if not hasattr(state, "combat_move_naval_idle_sail_instance_ids"):
+                state.combat_move_naval_idle_sail_instance_ids = []
+            for bid in idle_naval_sail_ids:
+                if bid not in state.combat_move_naval_idle_sail_instance_ids:
+                    state.combat_move_naval_idle_sail_instance_ids.append(bid)
 
         if (
             phase == "combat_move"
@@ -1991,9 +2045,17 @@ def _apply_pending_moves(
                 if any(getattr(p, "loaded_onto", None) == boat_id for p in to_territory.units):
                     if boat_id not in state.loaded_naval_must_attack_instance_ids:
                         state.loaded_naval_must_attack_instance_ids.append(boat_id)
+            if getattr(state, "combat_move_naval_idle_sail_instance_ids", None):
+                loaded_set = set(state.loaded_naval_must_attack_instance_ids or [])
+                state.combat_move_naval_idle_sail_instance_ids = [
+                    b
+                    for b in state.combat_move_naval_idle_sail_instance_ids
+                    if b not in loaded_set
+                ]
 
-        # If combat_move from sea to land (sea raid/offload) or sea to enemy sea (naval combat), boats in move have "attacked"
-        if phase == "combat_move" and from_id and getattr(state, "loaded_naval_must_attack_instance_ids", []):
+        # If combat_move from sea to land (sea raid/offload) or sea to enemy sea (naval combat), boats in move have "attacked".
+        # Do not require loaded_naval_must_attack — idle sail boats may sea raid without ever loading.
+        if phase == "combat_move" and from_id:
             from_def = territory_defs.get(from_id)
             to_def = territory_defs.get(to_id)
             if from_def and _is_sea_zone(from_def) and to_def:
@@ -2061,6 +2123,14 @@ def _apply_pending_moves(
     if phase == "combat_move" and boat_instance_ids_that_attacked and getattr(state, "loaded_naval_must_attack_instance_ids", []):
         state.loaded_naval_must_attack_instance_ids = [
             bid for bid in state.loaded_naval_must_attack_instance_ids if bid not in boat_instance_ids_that_attacked
+        ]
+    if phase == "combat_move" and boat_instance_ids_that_attacked and getattr(
+        state, "combat_move_naval_idle_sail_instance_ids", []
+    ):
+        state.combat_move_naval_idle_sail_instance_ids = [
+            bid
+            for bid in state.combat_move_naval_idle_sail_instance_ids
+            if bid not in boat_instance_ids_that_attacked
         ]
 
     return state, events
@@ -2518,14 +2588,18 @@ def _handle_initiate_combat(
                 territory, attacker_faction, attacker_instance_ids, unit_defs
             )
 
-    # Clear loaded_naval_must_attack_instance_ids for attacker boats (they are attacking)
+    # Clear naval combat_move obligations for attacker boats (they are attacking)
+    attacker_boat_ids = {
+        u.instance_id for u in attacker_units
+        if u.instance_id and _is_naval_unit(unit_defs.get(u.unit_id))
+    }
     if getattr(state, "loaded_naval_must_attack_instance_ids", []):
-        attacker_boat_ids = {
-            u.instance_id for u in attacker_units
-            if u.instance_id and _is_naval_unit(unit_defs.get(u.unit_id))
-        }
         state.loaded_naval_must_attack_instance_ids = [
             bid for bid in state.loaded_naval_must_attack_instance_ids if bid not in attacker_boat_ids
+        ]
+    if getattr(state, "combat_move_naval_idle_sail_instance_ids", []):
+        state.combat_move_naval_idle_sail_instance_ids = [
+            bid for bid in state.combat_move_naval_idle_sail_instance_ids if bid not in attacker_boat_ids
         ]
 
     if not sea_zone_id:
@@ -4530,6 +4604,12 @@ def _handle_end_phase(
                 "Every boat that received a load this phase must attack before ending combat move: "
                 f"{state.loaded_naval_must_attack_instance_ids!s}. Attack with those fleets (naval combat or sea raid) first."
             )
+        if getattr(state, "combat_move_naval_idle_sail_instance_ids", []):
+            raise ValueError(
+                "Combat move cannot end while a naval unit sailed into a sea zone only to enable loading and sea raids "
+                "but did not follow through: sea raid, naval battle, or load passengers this phase. "
+                f"Unresolved boats: {state.combat_move_naval_idle_sail_instance_ids!s}."
+            )
 
     # If ending non_combat_move phase: validate using state AFTER pending moves (same as API can_end_phase)
     if state.phase == "non_combat_move":
@@ -4664,6 +4744,7 @@ def _handle_end_phase(
     state.phase = phase_order[next_idx]
     if old_phase == "combat_move":
         state.loaded_naval_must_attack_instance_ids = []
+        state.combat_move_naval_idle_sail_instance_ids = []
         state.avoided_forced_naval_combat_instance_ids = []
 
     # When entering combat_move, ensure all current-faction units have full movement
@@ -4765,6 +4846,7 @@ def _handle_skip_turn(
     state.declared_battles = []
     state.pending_captures = {}
     state.loaded_naval_must_attack_instance_ids = []
+    state.combat_move_naval_idle_sail_instance_ids = []
     state.avoided_forced_naval_combat_instance_ids = []
     state.naval_mobilization_intruder_instance_ids = []
     return _handle_end_turn(state, territory_defs, faction_defs, camp_defs, unit_defs)

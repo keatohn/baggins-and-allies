@@ -15,13 +15,13 @@ from backend.engine.queries import get_mobilization_capacity, validate_action
 
 def test_mobilization_end_phase_forfeits_camp_when_no_valid_placement():
     unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(
-        setup_id="1.0"
+        setup_id="wotr_1.1"
     )
     state = initialize_game_state(
         faction_defs,
         territory_defs,
         camp_defs=camp_defs,
-        starting_setup=load_starting_setup(setup_id="1.0"),
+        starting_setup=load_starting_setup(setup_id="wotr_1.1"),
     )
     state.current_faction = "rohan"
     state.phase = "mobilization"
@@ -68,13 +68,13 @@ def test_mobilization_end_phase_forfeits_camp_when_no_valid_placement():
 
 def test_mobilize_rejected_when_capital_lost_even_with_purchased_units_in_pool():
     unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(
-        setup_id="1.0"
+        setup_id="wotr_1.1"
     )
     state = initialize_game_state(
         faction_defs,
         territory_defs,
         camp_defs=camp_defs,
-        starting_setup=load_starting_setup(setup_id="1.0"),
+        starting_setup=load_starting_setup(setup_id="wotr_1.1"),
     )
     state.current_faction = "rohan"
     state.phase = "mobilization"

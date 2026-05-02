@@ -462,6 +462,8 @@ interface GameMapProps {
   aerialUnitsMustMove?: { territory_id: string; unit_id: string; instance_id: string }[];
   /** Boat instance IDs that received a load this combat move and must attack before ending phase. Show caution on those boats. */
   loadedNavalMustAttackInstanceIds?: string[];
+  /** Boats that sailed in combat_move for load/raid eligibility but did not follow through — must resolve before ending phase. */
+  combatMoveNavalIdleSailInstanceIds?: string[];
   /** Defender boats in a mobilization naval standoff (must fight or sail away). */
   forcedNavalCombatInstanceIds?: string[];
   /**
@@ -844,6 +846,7 @@ function GameMap({
   availableMoveTargets,
   aerialUnitsMustMove = [],
   loadedNavalMustAttackInstanceIds = [],
+  combatMoveNavalIdleSailInstanceIds = [],
   forcedNavalCombatInstanceIds = [],
   seaZoneIdsEligibleForNavalTrayStackClick = EMPTY_ELIGIBLE_SEA_ZONES_FOR_TRAY,
 }: GameMapProps) {
@@ -858,10 +861,13 @@ function GameMap({
     () => new Set((aerialUnitsMustMove ?? []).map(u => `${u.territory_id}_${u.unit_id}`)),
     [aerialUnitsMustMove]
   );
-  const loadedNavalMustAttackInstanceIdSet = useMemo(
-    () => new Set(loadedNavalMustAttackInstanceIds),
-    [loadedNavalMustAttackInstanceIds]
-  );
+  const navalCombatMoveMustResolveInstanceIdSet = useMemo(() => {
+    const s = new Set<string>(loadedNavalMustAttackInstanceIds);
+    for (const id of combatMoveNavalIdleSailInstanceIds ?? []) {
+      s.add(id);
+    }
+    return s;
+  }, [loadedNavalMustAttackInstanceIds, combatMoveNavalIdleSailInstanceIds]);
   const forcedNavalCombatInstanceIdSet = useMemo(
     () => new Set(forcedNavalCombatInstanceIds),
     [forcedNavalCombatInstanceIds]
@@ -4606,14 +4612,14 @@ function GameMap({
                                             showAerialMustMove={aerialMustMoveKeySet.has(`${territoryId}_${unit_id}`)}
                                             showNavalMustAttack={
                                               gameState.phase === 'combat_move' &&
-                                              instanceIds.some((id) => loadedNavalMustAttackInstanceIdSet.has(id))
+                                              instanceIds.some((id) => navalCombatMoveMustResolveInstanceIdSet.has(id))
                                             }
                                             showForcedNavalStandoff={
                                               gameState.phase === 'combat_move' &&
                                               instanceIds.some(
                                                 (id) =>
                                                   forcedNavalCombatInstanceIdSet.has(id) &&
-                                                  !loadedNavalMustAttackInstanceIdSet.has(id)
+                                                  !navalCombatMoveMustResolveInstanceIdSet.has(id)
                                               )
                                             }
                                             isNaval
@@ -4726,14 +4732,14 @@ function GameMap({
                                 const showNavalMustAttackStacked =
                                   gameState.phase === 'combat_move' &&
                                   navalUnitIds.has(unit_id) &&
-                                  instanceIdsForUnit.some((id) => loadedNavalMustAttackInstanceIdSet.has(id));
+                                  instanceIdsForUnit.some((id) => navalCombatMoveMustResolveInstanceIdSet.has(id));
                                 const showForcedNavalStandoffStacked =
                                   gameState.phase === 'combat_move' &&
                                   navalUnitIds.has(unit_id) &&
                                   instanceIdsForUnit.some(
                                     (id) =>
                                       forcedNavalCombatInstanceIdSet.has(id) &&
-                                      !loadedNavalMustAttackInstanceIdSet.has(id)
+                                      !navalCombatMoveMustResolveInstanceIdSet.has(id)
                                   );
 
                                 return (
