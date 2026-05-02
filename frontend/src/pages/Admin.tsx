@@ -281,6 +281,9 @@ export default function Admin() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [hotfixBusy, setHotfixBusy] = useState(false);
+  const [hotfixMsg, setHotfixMsg] = useState<string | null>(null);
+  const [hotfixErr, setHotfixErr] = useState<string | null>(null);
 
   const useJson = jsonTab[activeTab] === true;
 
@@ -627,6 +630,41 @@ export default function Admin() {
 
       {saveError ? <div className="admin-page__error">{saveError}</div> : null}
       {saveOk ? <p className="admin-page__success">Saved. New games will use this data.</p> : null}
+
+      <section className="admin-page__hotfix-section" aria-labelledby="admin-hotfix-title">
+        <h2 id="admin-hotfix-title" className="admin-page__hotfix-title">
+          Temporary prod hotfix (remove after use)
+        </h2>
+        <p className="admin-form__micro">
+          Game <code>4f0c91c4-42fc-4b66-995e-16fd0e1b42cb</code>: move exactly two{' '}
+          <code>haradrim_archer</code> from <code>sea_zone_10</code> to <code>dol_amroth</code>. The server refuses
+          unless preconditions match. Only territory unit lists are adjusted; if an archer has{' '}
+          <code>loaded_onto</code>, it must reference a carrier still in <code>sea_zone_10</code>, and that key is
+          removed when placing them on land (required for a valid state).
+        </p>
+        {hotfixErr ? <div className="admin-page__error">{hotfixErr}</div> : null}
+        {hotfixMsg ? <p className="admin-page__success">{hotfixMsg}</p> : null}
+        <button
+          type="button"
+          className="admin-page__btn admin-page__btn--danger"
+          disabled={hotfixBusy}
+          onClick={async () => {
+            setHotfixErr(null);
+            setHotfixMsg(null);
+            setHotfixBusy(true);
+            try {
+              const r = await api.adminProdHotfixHaradrimDolAmroth();
+              setHotfixMsg(`Done. Moved: ${r.moved_instance_ids.join(', ')}`);
+            } catch (e) {
+              setHotfixErr(e instanceof Error ? e.message : 'Hotfix failed');
+            } finally {
+              setHotfixBusy(false);
+            }
+          }}
+        >
+          {hotfixBusy ? 'Applying…' : 'Apply Haradrim archer sea_zone_10 → dol_amroth hotfix'}
+        </button>
+      </section>
 
       <CreateSetupDialog open={createOpen} onClose={() => setCreateOpen(false)} setups={setups} onCreated={onCreatedSetup} />
       {deleteOpen && (

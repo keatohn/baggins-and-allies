@@ -450,12 +450,14 @@ def expand_sea_offload_instance_ids(
     faction_id: str,
 ) -> list[str]:
     """
-    Sea -> land: the client often sends only boat IDs (dragging the ship token). Append:
+    From a sea hex: the client often sends only boat IDs (dragging the ship token). Append:
     - embarked passengers (loaded_onto selected boats), and
     - same-phase pending loads into this sea (passengers still on land),
 
-    even when the request already lists embarked passengers (do not return early — pending loads
-    must still be merged or sea-offload validation fails).
+    Used for sea→land offload and sea→sea sail so pending-move apply matches declaration/validation.
+
+    Even when the request already lists embarked passengers, do not return early — pending loads
+    must still be merged or sea-offload validation fails.
     """
     ids = [str(x).strip() for x in unit_instance_ids if x and str(x).strip()]
     if not ids:

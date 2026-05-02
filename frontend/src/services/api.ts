@@ -780,6 +780,12 @@ export const api = {
     fetchJson<{ ok: boolean; id: string }>(`/admin/setups/${encodeURIComponent(setupId)}`, {
       method: 'DELETE',
     }),
+  /** TEMPORARY prod one-off: moves 2 haradrim_archer sea_zone_10 → dol_amroth for fixed game id only. */
+  adminProdHotfixHaradrimDolAmroth: () =>
+    fetchJson<{ ok: boolean; game_id: string; moved_instance_ids: string[] }>(
+      '/admin/games/prod-hotfix-haradrim-dol-amroth',
+      { method: 'POST', body: '{}' },
+    ),
 
   // Games (create, list, join)
   getSetups: () =>

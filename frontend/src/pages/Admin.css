@@ -646,3 +646,18 @@
     padding: 0.5rem 1.1rem;
   }
 }
+
+.admin-page__hotfix-section {
+  margin-top: 2rem;
+  padding: 1rem 1.25rem;
+  border: 1px dashed var(--ink-faded);
+  border-radius: 8px;
+  background: rgba(120, 40, 40, 0.06);
+}
+
+.admin-page__hotfix-title {
+  font-family: 'Cinzel', serif;
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+  color: var(--ink);
+}

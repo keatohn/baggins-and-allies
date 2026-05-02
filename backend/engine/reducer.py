@@ -1595,16 +1595,27 @@ def _apply_pending_moves(
                 )
             continue  # Skip invalid moves (non-combat: defensive)
 
-        # Same expansion as move declaration: client/DB may store only boat IDs; without this,
-        # ids_to_move filters to land units → empty → pending move is consumed and passengers never offload.
+        # Same expansion as move declaration / validation: payloads may list only boat IDs. Without this,
+        # sea→land offload filters to land units → empty → pending move is consumed and passengers never offload;
+        # sea→sea sail moves only boats and leaves embarked passengers stranded in the origin sea.
+        # Use the moving stack's faction (first unit found on the origin hex), not only current_faction —
+        # otherwise empty/wrong current_faction skips expansion entirely or mismatches allied stacks.
         from_def_exp = territory_defs.get(from_id)
         to_def_exp = territory_defs.get(to_id)
+        expand_faction_id = ""
+        for iid in unit_instance_ids:
+            u0 = next((u for u in from_territory.units if u.instance_id == iid), None)
+            if u0:
+                expand_faction_id = get_unit_faction(u0, unit_defs) or ""
+                if expand_faction_id:
+                    break
+        if not expand_faction_id:
+            expand_faction_id = (getattr(state, "current_faction", None) or "").strip()
         if (
             from_def_exp
             and to_def_exp
             and _is_sea_zone(from_def_exp)
-            and not _is_sea_zone(to_def_exp)
-            and getattr(state, "current_faction", None)
+            and expand_faction_id
         ):
             unit_instance_ids = expand_sea_offload_instance_ids(
                 state,
@@ -1613,7 +1624,7 @@ def _apply_pending_moves(
                 unit_instance_ids,
                 unit_defs,
                 territory_defs,
-                state.current_faction,
+                expand_faction_id,
             )
 
         # Non-combat: never apply a move into enemy territory or ownable neutral (defensive guard)

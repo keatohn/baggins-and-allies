@@ -847,6 +847,166 @@ def test_pending_offload_apply_expands_boat_only_instance_ids(wotr_defs):
     assert after.territory_sea_raid_from.get("harondor") == "sea_zone_11"
 
 
+def test_pending_sail_apply_expands_boat_only_instance_ids(wotr_defs):
+    """
+    Same as offload: apply must re-expand boat-only instance IDs for sea→sea sail. Otherwise the ship
+    moves alone and passengers remain on the old sea hex (declaration expand can be missing on stale rows).
+    """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    sea_from = state.territories["sea_zone_11"]
+    sea_to = state.territories["sea_zone_10"]
+    sea_from.units.clear()
+    sea_to.units.clear()
+    ship = _make_unit(state, "harad", "black_ship", unit_defs)
+    land = _make_unit(state, "harad", "corsair_of_umbar", unit_defs)
+    land.loaded_onto = ship.instance_id
+    sea_from.units.extend([ship, land])
+
+    state.pending_moves = [
+        PendingMove(
+            from_territory="sea_zone_11",
+            to_territory="sea_zone_10",
+            unit_instance_ids=[ship.instance_id],
+            phase="combat_move",
+            move_type="sail",
+        )
+    ]
+    state.current_faction = "harad"
+    state.phase = "combat_move"
+
+    after = get_state_after_pending_moves(
+        state, "combat_move", unit_defs, territory_defs, faction_defs,
+    )
+    left_behind = [u for u in after.territories["sea_zone_11"].units if u.instance_id == land.instance_id]
+    assert len(left_behind) == 0, "passenger must sail with the boat"
+    on_dest = [u for u in after.territories["sea_zone_10"].units if u.instance_id == land.instance_id]
+    assert len(on_dest) == 1
+    ships_dest = [u for u in after.territories["sea_zone_10"].units if u.instance_id == ship.instance_id]
+    assert len(ships_dest) == 1
+
+
+def test_pending_load_then_sail_boat_only_moves_embarked_passengers(wotr_defs):
+    """
+    End-to-end same-phase chain: load lands onto a boat, then sail declaring only the boat.
+    Without sea→sea expand on apply, the corsair would remain in the origin sea while the hull sails away.
+    """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    har = state.territories["harondor"]
+    sea_from = state.territories["sea_zone_11"]
+    sea_to = state.territories["sea_zone_10"]
+    sea_from.units.clear()
+    sea_to.units.clear()
+    har.units = [u for u in har.units if get_unit_faction(u, unit_defs) != "harad"]
+    ship = _make_unit(state, "harad", "black_ship", unit_defs)
+    corsair = _make_unit(state, "harad", "corsair_of_umbar", unit_defs)
+    sea_from.units.append(ship)
+    har.units.append(corsair)
+
+    state.pending_moves = [
+        PendingMove(
+            from_territory="harondor",
+            to_territory="sea_zone_11",
+            unit_instance_ids=[corsair.instance_id],
+            phase="combat_move",
+            move_type="load",
+            load_onto_boat_instance_id=ship.instance_id,
+            primary_unit_id="corsair_of_umbar",
+        ),
+        PendingMove(
+            from_territory="sea_zone_11",
+            to_territory="sea_zone_10",
+            unit_instance_ids=[ship.instance_id],
+            phase="combat_move",
+            move_type="sail",
+        ),
+    ]
+    state.current_faction = "harad"
+    state.phase = "combat_move"
+
+    after = get_state_after_pending_moves(
+        state, "combat_move", unit_defs, territory_defs, faction_defs,
+    )
+    assert not any(u.instance_id == corsair.instance_id for u in after.territories["sea_zone_11"].units), (
+        "passenger must not be stranded in origin sea after sail"
+    )
+    dest_units = after.territories["sea_zone_10"].units
+    co = next((u for u in dest_units if u.instance_id == corsair.instance_id), None)
+    sh = next((u for u in dest_units if u.instance_id == ship.instance_id), None)
+    assert co is not None and sh is not None
+    assert getattr(co, "loaded_onto", None) == ship.instance_id
+
+
+def test_sea_raid_staging_and_attack_bonus_still_hold_after_transport_changes(wotr_defs):
+    """
+    Guard: territory_sea_raid_faction + contested sea_zone_id + initiate sea_zone_id must still grant +1
+    effective_attack vs land-only initiate (regresses if sail/expand edits touch offload staging or combat path).
+    """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+
+    def _full_offload_contested():
+        st = initialize_game_state(
+            faction_defs, territory_defs, unit_defs,
+            starting_setup=setup,
+            camp_defs=camp_defs,
+        )
+        har = st.territories["harondor"]
+        sea = st.territories["sea_zone_11"]
+        sea.units.clear()
+        har.units = []
+        har.owner = "gondor"
+        har.units.append(_make_unit(st, "gondor", "gondor_soldier", unit_defs))
+        har.units.append(_make_unit(st, "harad", "corsair_of_umbar", unit_defs))
+        sea.units.append(_make_unit(st, "harad", "black_ship", unit_defs))
+        st.territory_sea_raid_from["harondor"] = "sea_zone_11"
+        st.territory_sea_raid_faction["harondor"] = "harad"
+        st.phase = "combat"
+        st.current_faction = "harad"
+        return st
+
+    st0 = _full_offload_contested()
+    contested = get_contested_territories(st0, "harad", faction_defs, unit_defs, territory_defs)
+    har_entries = [c for c in contested if c.get("territory_id") == "harondor"]
+    assert len(har_entries) == 1 and har_entries[0].get("sea_zone_id") == "sea_zone_11"
+
+    dice = {"attacker": [6], "defender": [6]}
+    _, ev_raid = apply_action(
+        deepcopy(_full_offload_contested()),
+        initiate_combat("harad", "harondor", dice, sea_zone_id="sea_zone_11"),
+        unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    _, ev_land = apply_action(
+        deepcopy(_full_offload_contested()),
+        initiate_combat("harad", "harondor", dice, sea_zone_id=None),
+        unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    cr_raid = next(e for e in ev_raid if e.type == "combat_round_resolved")
+    cr_land = next(e for e in ev_land if e.type == "combat_round_resolved")
+    eff_raid = next(
+        u["effective_attack"]
+        for u in cr_raid.payload["attacker_units_at_start"]
+        if u["unit_id"] == "corsair_of_umbar"
+    )
+    eff_land = next(
+        u["effective_attack"]
+        for u in cr_land.payload["attacker_units_at_start"]
+        if u["unit_id"] == "corsair_of_umbar"
+    )
+    assert eff_raid - eff_land == 1
+
+
 def test_validate_initiate_sea_raid_when_land_units_only_on_land(wotr_defs):
     """
     After combative offload, attackers stand on the land hex; sea zone may only have the fleet.
