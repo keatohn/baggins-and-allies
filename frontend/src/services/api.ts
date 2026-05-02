@@ -780,6 +780,12 @@ export const api = {
     fetchJson<{ ok: boolean; id: string }>(`/admin/setups/${encodeURIComponent(setupId)}`, {
       method: 'DELETE',
     }),
+  /** TEMPORARY prod one-off: add 2 gondor_knight + 1 citadel_guard to anfalas (fixed game id; idempotent). */
+  adminProdHotfixAddGondorAnfalas: () =>
+    fetchJson<{ ok: boolean; game_id: string; mutated: boolean; instance_ids: string[] }>(
+      '/admin/games/prod-hotfix-add-gondor-anfalas',
+      { method: 'POST', body: '{}' },
+    ),
 
   // Games (create, list, join)
   getSetups: () =>

@@ -281,6 +281,9 @@ export default function Admin() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [anfalasHotfixBusy, setAnfalasHotfixBusy] = useState(false);
+  const [anfalasHotfixMsg, setAnfalasHotfixMsg] = useState<string | null>(null);
+  const [anfalasHotfixErr, setAnfalasHotfixErr] = useState<string | null>(null);
 
   const useJson = jsonTab[activeTab] === true;
 
@@ -627,6 +630,42 @@ export default function Admin() {
 
       {saveError ? <div className="admin-page__error">{saveError}</div> : null}
       {saveOk ? <p className="admin-page__success">Saved. New games will use this data.</p> : null}
+
+      <section className="admin-page__hotfix-section" aria-labelledby="admin-anfalas-hotfix-title">
+        <h2 id="admin-anfalas-hotfix-title" className="admin-page__hotfix-title">
+          Temporary prod hotfix (remove after use)
+        </h2>
+        <p className="admin-form__micro">
+          Game <code>4f0c91c4-42fc-4b66-995e-16fd0e1b42cb</code>: add 2× <code>gondor_knight</code> and 1×{' '}
+          <code>citadel_guard</code> to <code>anfalas</code> if not already present (idempotent).
+        </p>
+        {anfalasHotfixErr ? <div className="admin-page__error">{anfalasHotfixErr}</div> : null}
+        {anfalasHotfixMsg ? <p className="admin-page__success">{anfalasHotfixMsg}</p> : null}
+        <button
+          type="button"
+          className="admin-page__btn admin-page__btn--danger"
+          disabled={anfalasHotfixBusy}
+          onClick={async () => {
+            setAnfalasHotfixErr(null);
+            setAnfalasHotfixMsg(null);
+            setAnfalasHotfixBusy(true);
+            try {
+              const r = await api.adminProdHotfixAddGondorAnfalas();
+              setAnfalasHotfixMsg(
+                r.mutated
+                  ? `Added units: ${r.instance_ids.join(', ')}`
+                  : `Already applied (no change). IDs: ${r.instance_ids.join(', ')}`,
+              );
+            } catch (e) {
+              setAnfalasHotfixErr(e instanceof Error ? e.message : 'Hotfix failed');
+            } finally {
+              setAnfalasHotfixBusy(false);
+            }
+          }}
+        >
+          {anfalasHotfixBusy ? 'Applying…' : 'Add Gondor units to anfalas (prod hotfix)'}
+        </button>
+      </section>
 
       <CreateSetupDialog open={createOpen} onClose={() => setCreateOpen(false)} setups={setups} onCreated={onCreatedSetup} />
       {deleteOpen && (

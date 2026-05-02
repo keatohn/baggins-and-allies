@@ -107,6 +107,7 @@ from backend.setup_data import (
     try_scenario_display,
 )
 from backend.setup_validation import validate_setup_payload
+from backend.api.prod_hotfix_anfalas_units import PROD_HOTFIX_GAME_ID, hotfix_add_gondor_anfalas_json
 from dataclasses import asdict
 from backend.engine.queries import (
     validate_action,
@@ -1375,6 +1376,29 @@ def admin_delete_setup(
     except ValueError:
         raise HTTPException(status_code=404, detail="Setup not found")
     return {"ok": True, "id": setup_id}
+
+
+@app.post("/admin/games/prod-hotfix-add-gondor-anfalas")
+def admin_prod_hotfix_add_gondor_anfalas(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    TEMPORARY: For one saved game only, append 2 gondor_knight and 1 citadel_guard to anfalas
+    (stable instance_ids; idempotent). Only ``territories.anfalas.units`` is extended.
+    """
+    row = db.query(GameModel).filter(GameModel.id == PROD_HOTFIX_GAME_ID).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Game not found for hotfix id")
+    ud, *_ = get_game_definitions(PROD_HOTFIX_GAME_ID, db)
+    try:
+        new_json, mutated, ids = hotfix_add_gondor_anfalas_json(row.game_state, ud)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    row.game_state = new_json
+    db.commit()
+    games.pop(PROD_HOTFIX_GAME_ID, None)
+    return {"ok": True, "game_id": PROD_HOTFIX_GAME_ID, "mutated": mutated, "instance_ids": ids}
 
 
 @app.post("/games/create")
