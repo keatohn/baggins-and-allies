@@ -221,6 +221,22 @@ def _sea_raid_attacker_units_from_board(
     return [out[i] for i in sorted(out.keys())]
 
 
+def _merge_sea_raid_passenger_instance_ids(state: GameState, land_tid: str, passenger_iids: list[str]) -> None:
+    """Track units that reached land_tid by sea offload this combat_move (naval-loss purge only)."""
+    if not passenger_iids:
+        return
+    if not hasattr(state, "territory_sea_raid_passenger_instance_ids") or state.territory_sea_raid_passenger_instance_ids is None:
+        state.territory_sea_raid_passenger_instance_ids = {}
+    prev = list(state.territory_sea_raid_passenger_instance_ids.get(land_tid, []))
+    state.territory_sea_raid_passenger_instance_ids[land_tid] = list(dict.fromkeys(prev + list(passenger_iids)))
+
+
+def _pop_sea_raid_passenger_instance_ids(state: GameState, land_tid: str) -> None:
+    pm = getattr(state, "territory_sea_raid_passenger_instance_ids", None)
+    if pm and land_tid in pm:
+        pm.pop(land_tid, None)
+
+
 def _build_round_unit_display(
     unit: Unit,
     unit_def: UnitDefinition | None,
@@ -1852,6 +1868,7 @@ def _apply_pending_moves(
                     state.territory_sea_raid_faction = {}
                 state.territory_sea_raid_from[to_id] = from_id
                 state.territory_sea_raid_faction[to_id] = faction_id
+                _merge_sea_raid_passenger_instance_ids(state, to_id, list(ids_to_move))
             elif phase == "combat_move" and not ids_to_move:
                 boat_ids_in_move = {
                     iid for iid in unit_instance_ids
@@ -4017,6 +4034,7 @@ def _handle_retreat(
         state.territory_sea_raid_from.pop(combat.territory_id, None)
     if getattr(state, "territory_sea_raid_faction", None):
         state.territory_sea_raid_faction.pop(combat.territory_id, None)
+    _pop_sea_raid_passenger_instance_ids(state, combat.territory_id)
 
     return state, events
 
@@ -4167,8 +4185,8 @@ def _purge_sea_raid_staging_after_lost_naval(
 ) -> list[GameEvent]:
     """
     When naval combat in a sea zone ends with all attackers eliminated, clear every
-    territory_sea_raid_from entry that staged from that sea and remove stranded land
-    attackers (passengers) from those land hexes so the land raid cannot follow.
+    territory_sea_raid_from entry that staged from that sea and remove only sea-raid
+    passengers already on those land hexes (walk-in land attackers stay).
     """
     events: list[GameEvent] = []
     tsrf = getattr(state, "territory_sea_raid_from", None) or {}
@@ -4181,14 +4199,22 @@ def _purge_sea_raid_staging_after_lost_naval(
         tsfac.pop(lid, None)
     state.territory_sea_raid_faction = tsfac
 
+    passenger_map = dict(getattr(state, "territory_sea_raid_passenger_instance_ids", None) or {})
+
     for lid in lands:
         t = state.territories.get(lid)
         if not t:
+            passenger_map.pop(lid, None)
             continue
+        doomed = set(passenger_map.pop(lid, []) or [])
         kept: list[Unit] = []
         for u in t.units:
             ud = unit_defs.get(u.unit_id)
-            if get_unit_faction(u, unit_defs) == attacker_faction and not _is_naval_unit(ud):
+            if (
+                u.instance_id in doomed
+                and get_unit_faction(u, unit_defs) == attacker_faction
+                and not _is_naval_unit(ud)
+            ):
                 unit_type = u.instance_id.split("_")[1] if "_" in u.instance_id else "unknown"
                 events.append(
                     unit_destroyed(u.instance_id, unit_type, attacker_faction, lid, "sea_raid_naval_lost")
@@ -4196,6 +4222,8 @@ def _purge_sea_raid_staging_after_lost_naval(
                 continue
             kept.append(u)
         t.units = kept
+
+    state.territory_sea_raid_passenger_instance_ids = passenger_map
 
     return events
 
@@ -4394,6 +4422,7 @@ def _resolve_combat_end(
             state.territory_sea_raid_from.pop(territory_id, None)
             if getattr(state, "territory_sea_raid_faction", None):
                 state.territory_sea_raid_faction.pop(territory_id, None)
+            _pop_sea_raid_passenger_instance_ids(state, territory_id)
 
     return state, events
 
@@ -4703,10 +4732,7 @@ def _handle_end_turn(
 
     At end of turn:
     - Clears purchased units pool (unspent purchases are lost)
-    - Calculates and stores pending income based on currently owned territories
-
-    At start of next faction's turn:
-    - Applies any pending income they have stored from their previous turn
+    - Calculates income from currently owned territories (if capital held) and adds it to faction_resources
     """
     unit_defs = unit_defs or {}
     events: list[GameEvent] = []
@@ -4715,9 +4741,8 @@ def _handle_end_turn(
     # Clear purchased units for this faction (they must be mobilized before end of turn)
     state.faction_purchased_units[state.current_faction] = []
 
-    # Calculate and store pending income for the ending faction
-    # Only if they still own their capital - if capital captured, no income
-    income_calculated_event: GameEvent | None = None
+    # Income for the ending faction from territories they own now (requires capital)
+    state.faction_pending_income[old_faction] = {}
     if faction_owns_capital(state, old_faction, faction_defs):
         pending_income: dict[str, int] = {}
         contributing_territories: list[str] = []
@@ -4730,7 +4755,6 @@ def _handle_end_turn(
             if not territory_def:
                 continue
 
-            # Add production from this territory
             for resource_id, amount in territory_def.produces.items():
                 if resource_id not in pending_income:
                     pending_income[resource_id] = 0
@@ -4739,19 +4763,19 @@ def _handle_end_turn(
             if territory_def.produces:
                 contributing_territories.append(territory_id)
 
-        # Store the pending income for collection at their next turn start
-        state.faction_pending_income[old_faction] = pending_income
-
         if pending_income:
-            income_calculated_event = income_calculated(old_faction, pending_income, contributing_territories)
-    else:
-        # Capital captured - no income
-        state.faction_pending_income[old_faction] = {}
+            events.append(income_calculated(old_faction, pending_income, contributing_territories))
+            if old_faction not in state.faction_resources:
+                state.faction_resources[old_faction] = {}
+            new_totals: dict[str, int] = {}
+            for resource_id, amount in pending_income.items():
+                if resource_id not in state.faction_resources[old_faction]:
+                    state.faction_resources[old_faction][resource_id] = 0
+                state.faction_resources[old_faction][resource_id] += amount
+                new_totals[resource_id] = state.faction_resources[old_faction][resource_id]
+            events.append(income_collected(old_faction, pending_income, new_totals))
 
-    # Turn end first; income summary last for this faction's turn (after mobilization / end phase)
     events.append(turn_ended(state.turn_number, old_faction))
-    if income_calculated_event is not None:
-        events.append(income_calculated_event)
 
     # Determine next faction (use state.turn_order from setup if set, else alphabetical)
     faction_ids = state.turn_order if state.turn_order else sorted(faction_defs.keys())
@@ -4787,19 +4811,6 @@ def _handle_end_turn(
     skipped = 0
     while skipped < len(faction_ids):
         new_faction = state.current_faction
-        if new_faction in state.faction_pending_income:
-            faction_income = state.faction_pending_income[new_faction]
-            if faction_income:
-                if new_faction not in state.faction_resources:
-                    state.faction_resources[new_faction] = {}
-                new_totals = {}
-                for resource_id, amount in faction_income.items():
-                    if resource_id not in state.faction_resources[new_faction]:
-                        state.faction_resources[new_faction][resource_id] = 0
-                    state.faction_resources[new_faction][resource_id] += amount
-                    new_totals[resource_id] = state.faction_resources[new_faction][resource_id]
-                events.append(income_collected(new_faction, faction_income, new_totals))
-            state.faction_pending_income[new_faction] = {}
 
         # Skip this faction if they have no capital and no units anywhere (no purchase/mobilize, nothing to move/attack)
         if not faction_owns_capital(state, new_faction, faction_defs) and _faction_unit_count(state, new_faction, unit_defs) == 0:

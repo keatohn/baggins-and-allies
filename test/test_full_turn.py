@@ -18,7 +18,6 @@ from backend.engine.reducer import apply_action
 from backend.engine.utils import (
     initialize_game_state,
     print_game_state,
-    apply_resource_production,
     generate_combat_rolls_for_units,
     print_combat_log,
 )
@@ -247,12 +246,7 @@ def main():
     print(
         f"New turn: {state.turn_number}, Current faction: {state.current_faction}, Phase: {state.phase}")
 
-    # ===== APPLY PRODUCTION =====
-    print("\n[RESOURCE PRODUCTION]")
-    print("Applying resource production for next turn:")
-    state = apply_resource_production(state, territory_defs)
-    print(
-        f"Gondor resources after production: {state.faction_resources['gondor']}")
+    # Income is credited in-engine on end_turn (no separate apply_resource_production step)
 
     # Print final state
     print("\n" + "="*70)
@@ -273,7 +267,7 @@ def main():
     print("  ✓ Phase transitions (all 5 phases)")
     print("  ✓ Movement/health reset at non_combat_move end")
     print("  ✓ Turn transitions")
-    print("  ✓ Resource production")
+    print("  ✓ End-of-turn income")
     print("="*70)
 
 

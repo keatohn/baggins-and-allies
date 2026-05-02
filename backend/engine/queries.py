@@ -2439,7 +2439,7 @@ def get_faction_stats(
 ) -> dict[str, Any]:
     """
     Get per-faction and per-alliance stats for the UI (territories, strongholds, power, power_per_turn, units, unit_power).
-    power = current resource from faction_resources; power_per_turn = sum of produces across owned territories.
+    power = faction_resources (income is credited when a faction ends their turn); power_per_turn = sum of produces across owned territories.
     unit_power = sum of power cost for all active units for that faction.
     """
     unit_defs = unit_defs or {}

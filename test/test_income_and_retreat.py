@@ -1,7 +1,7 @@
 """
 Test income collection and retreat mechanics.
 Demonstrates:
-1. Income calculated at end of turn, collected at start of next turn
+1. Income calculated and added to resources at end of turn
 2. Multi-round combat with retreat option
 """
 
@@ -80,7 +80,8 @@ def main():
         print(f"  - {e.type}: {e.payload}")
 
     print(f"\nNow it's {state.current_faction}'s turn")
-    print(f"Gondor pending income stored: {state.faction_pending_income.get('gondor', {})}")
+    print(f"Gondor resources after end-of-turn income: {state.faction_resources.get('gondor', {})}")
+    print(f"Gondor pending (legacy field): {state.faction_pending_income.get('gondor', {})}")
 
     # Skip through Mordor's turn
     print("\n[SKIPPING MORDOR'S TURN]")
@@ -93,14 +94,14 @@ def main():
         state, end_turn("mordor"), unit_defs, territory_defs, faction_defs, camp_defs
     )
 
-    # Now it's Gondor's turn again - income should be collected!
-    print("\n[GONDOR'S TURN STARTS - INCOME COLLECTED]")
+    # Now it's Gondor's turn again — income was already credited when Gondor ended their previous turn
+    print("\n[GONDOR'S TURN STARTS]")
     print("Events emitted:")
     for e in events:
         if e.type in ["income_calculated", "income_collected", "turn_started"]:
             print(f"  - {e.type}: {e.payload}")
 
-    print(f"\nGondor resources after income collection: {state.faction_resources['gondor']}")
+    print(f"\nGondor resources: {state.faction_resources['gondor']}")
 
     # ===== PART 2: Retreat Test =====
     print("\n" + "=" * 70)

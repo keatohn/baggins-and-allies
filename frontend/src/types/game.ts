@@ -3,7 +3,7 @@
 export type FactionId = string;
 export type Alliance = string;
 
-// Note: collect_income happens automatically at end of turn
+// Note: territory income is credited to faction_resources when the faction ends their turn
 export type GamePhase =
   | 'purchase'
   | 'combat_move'

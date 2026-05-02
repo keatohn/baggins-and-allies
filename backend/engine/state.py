@@ -31,6 +31,17 @@ def _ensure_faction_territories_at_turn_start(value: Any) -> dict[str, list[str]
     }
 
 
+def _ensure_territory_sea_raid_passenger_instance_ids(value: Any) -> dict[str, list[str]]:
+    """Land territory_id -> passenger instance_ids from sea offload (JSON round-trip)."""
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(k).strip(): _ensure_str_list(v)
+        for k, v in value.items()
+        if str(k).strip()
+    }
+
+
 def _ensure_victory_criteria(value: Any) -> dict[str, Any]:
     """
     Parse victory_criteria from dict.
@@ -540,9 +551,8 @@ class GameState:
     unit_id_counters: dict[str, int] = field(default_factory=dict)
     # Currently active combat (None if no combat in progress)
     active_combat: ActiveCombat | None = None
-    # Pending income to be collected at start of faction's next turn
-    # Calculated at end of their turn based on owned territories
-    # faction_id -> {resource_id -> amount}
+    # Legacy: was queued until turn start; engine now credits income at end of turn. Loaded games merge any
+    # remaining pending into faction_resources in from_dict. Kept for serialization compatibility.
     faction_pending_income: dict[str, dict[str, int]] = field(default_factory=dict)
     # Pending territory captures (applied at end of combat phase)
     # territory_id -> new_owner_faction_id
@@ -594,6 +604,8 @@ class GameState:
     territory_sea_raid_from: dict[str, str] = field(default_factory=dict)
     # Same keys as territory_sea_raid_from: faction that staged the combative offload (disambiguates stale tsrf after enemy raids).
     territory_sea_raid_faction: dict[str, str] = field(default_factory=dict)
+    # Land territory_id -> instance_ids that offloaded from sea this combat_move (only these removed if naval battle lost in staging sea).
+    territory_sea_raid_passenger_instance_ids: dict[str, list[str]] = field(default_factory=dict)
 
     def copy(self) -> "GameState":
         """Return a deep copy of this game state."""
@@ -647,6 +659,7 @@ class GameState:
             "territory_defender_casualty_order": getattr(self, "territory_defender_casualty_order", {}),
             "territory_sea_raid_from": getattr(self, "territory_sea_raid_from", {}),
             "territory_sea_raid_faction": getattr(self, "territory_sea_raid_faction", {}),
+            "territory_sea_raid_passenger_instance_ids": getattr(self, "territory_sea_raid_passenger_instance_ids", {}),
             "starting_territory_owners": dict(getattr(self, "starting_territory_owners", {}) or {}),
         }
 
@@ -669,6 +682,23 @@ class GameState:
         fpi = data.get("faction_pending_income") or {}
         if not isinstance(fpi, dict):
             fpi = {}
+        # One-time migration from pre–end-of-turn collection saves
+        for fid, income in list(fpi.items()):
+            if not isinstance(income, dict):
+                continue
+            fk = str(fid)
+            if fk not in fr:
+                fr[fk] = {}
+            elif not isinstance(fr[fk], dict):
+                fr[fk] = {}
+            for rid, amt in income.items():
+                try:
+                    n = int(amt)
+                except (TypeError, ValueError):
+                    continue
+                rk = str(rid)
+                fr[fk][rk] = int(fr[fk].get(rk, 0) or 0) + n
+        fpi = {}
         pc = data.get("pending_captures") or {}
         if not isinstance(pc, dict):
             pc = {}
@@ -708,6 +738,9 @@ class GameState:
             territory_sea_raid_faction=dict(data.get("territory_sea_raid_faction") or {})
             if isinstance(data.get("territory_sea_raid_faction"), dict)
             else {},
+            territory_sea_raid_passenger_instance_ids=_ensure_territory_sea_raid_passenger_instance_ids(
+                data.get("territory_sea_raid_passenger_instance_ids")
+            ),
             winner=data.get("winner"),
             map_asset=data.get("map_asset") if isinstance(data.get("map_asset"), str) else None,
             victory_criteria=_ensure_victory_criteria(

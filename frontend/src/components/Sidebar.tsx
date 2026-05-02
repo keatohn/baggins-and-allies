@@ -157,7 +157,7 @@ interface SidebarProps {
 }
 
 // Phase-specific action configurations
-// Note: collect_income happens automatically at end of turn, not a visible UI phase
+// Note: territory income is credited at end of turn (not a visible UI phase)
 const PHASE_CONFIG: Record<GamePhase, { buttons: { id: string; label: string }[] }> = {
   purchase: {
     buttons: [{ id: 'btn-purchase', label: 'Purchase Units' }],

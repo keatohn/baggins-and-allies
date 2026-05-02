@@ -133,7 +133,7 @@ def income_collected(
     income: dict[str, int],
     new_totals: dict[str, int],
 ) -> GameEvent:
-    """Emitted at start of turn when pending income is added to resources."""
+    """Emitted at end of turn when territory income is added to faction_resources."""
     return GameEvent(INCOME_COLLECTED, {
         "faction": faction,
         "income": income,  # resource -> amount added
