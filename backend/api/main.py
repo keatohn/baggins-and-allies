@@ -107,7 +107,6 @@ from backend.setup_data import (
     try_scenario_display,
 )
 from backend.setup_validation import validate_setup_payload
-from backend.api.prod_hotfix_haradrim import PROD_HOTFIX_GAME_ID, hotfix_game_row_game_state_json
 from dataclasses import asdict
 from backend.engine.queries import (
     validate_action,
@@ -1376,27 +1375,6 @@ def admin_delete_setup(
     except ValueError:
         raise HTTPException(status_code=404, detail="Setup not found")
     return {"ok": True, "id": setup_id}
-
-
-@app.post("/admin/games/prod-hotfix-haradrim-dol-amroth")
-def admin_prod_hotfix_haradrim_dol_amroth(
-    _admin: Player = Depends(get_current_admin),
-    db: Session = Depends(get_db),
-):
-    """
-    TEMPORARY: For game ``4f0c91c4-42fc-4b66-995e-16fd0e1b42cb`` only, moves exactly two
-    haradrim_archer from sea_zone_10 to dol_amroth. No other state keys or unit fields are modified.
-    """
-    row = db.query(GameModel).filter(GameModel.id == PROD_HOTFIX_GAME_ID).first()
-    if not row:
-        raise HTTPException(status_code=404, detail="Game not found for hotfix id")
-    try:
-        new_json, moved = hotfix_game_row_game_state_json(row.game_state)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    row.game_state = new_json
-    db.commit()
-    return {"ok": True, "game_id": PROD_HOTFIX_GAME_ID, "moved_instance_ids": moved}
 
 
 @app.post("/games/create")
