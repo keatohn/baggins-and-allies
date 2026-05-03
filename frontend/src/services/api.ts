@@ -783,6 +783,27 @@ export const api = {
       method: 'DELETE',
     }),
 
+  /** Spawn units on the board for a live game (site admin only). */
+  adminSpawnUnits: (
+    gameId: string,
+    body: { territory_id: string; unit_id: string; count?: number },
+  ) =>
+    fetchJson<{
+      ok: boolean;
+      game_id: string;
+      territory_id: string;
+      unit_id: string;
+      count: number;
+      instance_ids: string[];
+    }>(`/admin/games/${encodeURIComponent(gameId)}/spawn-units`, {
+      method: 'POST',
+      body: JSON.stringify({
+        territory_id: body.territory_id,
+        unit_id: body.unit_id,
+        ...(body.count != null ? { count: body.count } : {}),
+      }),
+    }),
+
   // Games (create, list, join)
   getSetups: () =>
     fetchJson<{ setups: SetupInfo[] }>('/setups'),

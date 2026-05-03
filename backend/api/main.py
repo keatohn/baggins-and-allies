@@ -34,7 +34,7 @@ from .auth import (
     verify_password,
 )
 
-from backend.engine.state import GameState, PendingMove
+from backend.engine.state import GameState, PendingMove, UnitStack
 from backend.engine.actions import (
     Action,
     purchase_units,
@@ -130,6 +130,7 @@ from backend.engine.utils import (
     has_unit_special,
     backfill_liberation_metadata,
     is_aerial_unit,
+    unitstack_to_units,
 )
 
 # Siegework units only roll in the dedicated siegeworks round, not in standard combat.
@@ -1375,6 +1376,54 @@ def admin_delete_setup(
     except ValueError:
         raise HTTPException(status_code=404, detail="Setup not found")
     return {"ok": True, "id": setup_id}
+
+
+class AdminSpawnUnitsBody(BaseModel):
+    territory_id: str = Field(..., min_length=1)
+    unit_id: str = Field(..., min_length=1)
+    count: int = Field(1, ge=1, le=99)
+
+
+@app.post("/admin/games/{game_id}/spawn-units")
+def admin_spawn_units(
+    game_id: str,
+    body: AdminSpawnUnitsBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Spawn unit instances on the board for an active game (persists to DB).
+    Owner faction is taken from the unit definition (e.g. nazgul -> mordor).
+
+    Only two parts of state change: faction unit_id_counters (new instance ids) and the target
+    territory's units list. Phase, combat, pending moves, resources, and all other territories are untouched.
+    """
+    snapshot = get_game(game_id, db)
+    unit_defs, _td, _fd, _cd, _pd = get_game_definitions(game_id, db)
+    tid = body.territory_id.strip()
+    if tid not in snapshot.territories:
+        raise HTTPException(status_code=400, detail=f"Unknown territory: {tid}")
+    unit_def = unit_defs.get(body.unit_id.strip())
+    if not unit_def:
+        raise HTTPException(status_code=400, detail=f"Unknown unit_id: {body.unit_id}")
+    faction_id = getattr(unit_def, "faction", None)
+    if not faction_id:
+        raise HTTPException(status_code=400, detail=f"Unit {body.unit_id} has no faction in definitions")
+    state = snapshot.copy()
+    stack = UnitStack(unit_id=body.unit_id.strip(), count=body.count)
+    new_units = unitstack_to_units(stack, str(faction_id), state, unit_defs)
+    if not new_units:
+        raise HTTPException(status_code=400, detail="Could not create units (check unit_id and definitions)")
+    state.territories[tid].units.extend(new_units)
+    save_game(game_id, state, db)
+    return {
+        "ok": True,
+        "game_id": game_id,
+        "territory_id": tid,
+        "unit_id": body.unit_id.strip(),
+        "count": len(new_units),
+        "instance_ids": [u.instance_id for u in new_units],
+    }
 
 
 @app.post("/games/create")
@@ -3326,10 +3375,16 @@ def _generate_initiate_combat_payload(
                 if flat_idx < initial_len:
                     defender_rolls[flat_idx] = new_reroll_values[i]
             dice_rolls["defender"] = defender_rolls
+            rerolled_indices_by_stat = _terror_rerolled_indices_by_stat(
+                defenders, ud, defender_mods or None, initial_len, flat_indices,
+                exclude_archetypes=set(NORMAL_COMBAT_EXCLUDE_ARCHETYPES),
+            )
             terror_reroll_response = {
                 "applied": True,
                 "terror_final_defender_hits": terror_final_defender_hits,
                 "terror_reroll_count": total_reroll_dice,
+                "defender_dice_initial_grouped": {str(k): v for k, v in defender_dice_initial_grouped.items()},
+                "defender_rerolled_indices_by_stat": rerolled_indices_by_stat,
             }
 
     result: dict[str, Any] = {"dice_rolls": dice_rolls, "terror_applied": bool(terror_reroll_response)}
@@ -3337,6 +3392,10 @@ def _generate_initiate_combat_payload(
         result["terror_final_defender_hits"] = terror_reroll_response["terror_final_defender_hits"]
     if terror_reroll_response.get("terror_reroll_count") is not None:
         result["terror_reroll_count"] = terror_reroll_response["terror_reroll_count"]
+    if terror_reroll_response.get("defender_dice_initial_grouped") is not None:
+        result["defender_dice_initial_grouped"] = terror_reroll_response["defender_dice_initial_grouped"]
+    if terror_reroll_response.get("defender_rerolled_indices_by_stat") is not None:
+        result["defender_rerolled_indices_by_stat"] = terror_reroll_response["defender_rerolled_indices_by_stat"]
     return result
 
 
@@ -3383,6 +3442,7 @@ def do_initiate_combat(
         payload["dice_rolls"],
         terror_applied=payload.get("terror_applied", False),
         terror_final_defender_hits=payload.get("terror_final_defender_hits"),
+        terror_reroll_count=payload.get("terror_reroll_count"),
         sea_zone_id=request.sea_zone_id,
         fuse_bomb=request.fuse_bomb,
     )
@@ -3404,6 +3464,16 @@ def do_initiate_combat(
             "applied": True,
             "terror_final_defender_hits": payload["terror_final_defender_hits"],
             **({"terror_reroll_count": payload["terror_reroll_count"]} if payload.get("terror_reroll_count") is not None else {}),
+            **(
+                {"defender_dice_initial_grouped": payload["defender_dice_initial_grouped"]}
+                if payload.get("defender_dice_initial_grouped")
+                else {}
+            ),
+            **(
+                {"defender_rerolled_indices_by_stat": payload["defender_rerolled_indices_by_stat"]}
+                if payload.get("defender_rerolled_indices_by_stat")
+                else {}
+            ),
         }
     return response
 
