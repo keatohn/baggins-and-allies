@@ -3179,6 +3179,134 @@ def _terror_rerolled_indices_by_stat(
     return rerolled
 
 
+def _maybe_apply_round_one_terror_continue_combat(
+    state: GameState,
+    ud: dict,
+    td: dict,
+    fd: dict,
+    dice_rolls: dict[str, list[int]],
+) -> dict[str, Any]:
+    """
+    When continue_combat resolves the first normal exchange (round_number 0, not siegework/archer prefire),
+    apply Terror to defender dice in-place — same rules as HTTP do_continue_combat.
+
+    Returns terror_reroll_response for the client/action (empty dict when Terror does not apply).
+    """
+    if not state.active_combat:
+        return {}
+    attackers, defenders = _get_active_combat_units(state, td, ud, fd)
+    if not attackers or not defenders:
+        return {}
+    combat = state.active_combat
+    combat_log = getattr(combat, "combat_log", []) or []
+    tdef_c = td.get(combat.territory_id)
+    def_sh = bool(tdef_c and getattr(tdef_c, "is_stronghold", False))
+    land_terr = state.territories.get(combat.territory_id)
+    def_sh_hp = _combat_territory_stronghold_hp(land_terr, tdef_c)
+    fuse_cont = getattr(combat, "fuse_bomb", True)
+    if not isinstance(fuse_cont, bool):
+        fuse_cont = True
+    sw_att, sw_def = get_siegework_dice_counts(
+        attackers, defenders, ud, def_sh, defender_stronghold_hp=def_sh_hp,
+        fuse_bomb=fuse_cont,
+    )
+    siegeworks_pending = (
+        combat.round_number == 0
+        and not any(getattr(r, "is_siegeworks_round", False) for r in combat_log)
+        and (sw_att > 0 or sw_def > 0)
+    )
+    archer_prefire_pending = (
+        combat.round_number == 0
+        and not siegeworks_pending
+        and not any(getattr(r, "is_archer_prefire", False) for r in combat_log)
+        and not any(getattr(r, "is_stealth_prefire", False) for r in combat_log)
+        and any(has_unit_special(ud.get(u.unit_id), "archer") for u in defenders if ud.get(u.unit_id))
+    )
+    is_round_one = combat.round_number == 0 and not siegeworks_pending and not archer_prefire_pending
+    if not is_round_one:
+        return {}
+
+    territory_def = td.get(combat.territory_id)
+    _, terrain_def = compute_terrain_stat_modifiers(
+        territory_def, attackers, defenders, ud
+    )
+    _, anticav_def = compute_anti_cavalry_stat_modifiers(
+        attackers, defenders, ud
+    )
+    _, captain_def = compute_captain_stat_modifiers(
+        attackers, defenders, ud
+    )
+    defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
+    terror_count = sum(1 for u in attackers if combat_has_special(ud.get(u.unit_id), "terror"))
+    hope_count = sum(1 for u in defenders if combat_has_special(ud.get(u.unit_id), "hope"))
+    terror_cap = min(3, max(0, terror_count - hope_count))
+    flat_indices, total_reroll_dice = get_terror_reroll_targets(
+        attackers,
+        defenders,
+        ud,
+        dice_rolls,
+        defender_mods or None,
+        terror_cap=terror_cap,
+        exclude_archetypes_from_rolling=set(NORMAL_COMBAT_EXCLUDE_ARCHETYPES),
+    )
+    defender_hits_from_rolls = combat_count_hits(
+        defenders,
+        dice_rolls.get("defender", []),
+        ud,
+        is_attacker=False,
+        stat_modifiers=defender_mods or None,
+        exclude_archetypes=set(NORMAL_COMBAT_EXCLUDE_ARCHETYPES),
+    )
+    hit_flat_set = get_defender_hit_flat_indices(
+        defenders, dice_rolls["defender"], ud, defender_mods or None,
+        exclude_archetypes=set(NORMAL_COMBAT_EXCLUDE_ARCHETYPES),
+    )
+    flat_indices = [i for i in flat_indices if i in hit_flat_set][:defender_hits_from_rolls]
+    total_reroll_dice = len(flat_indices)
+    if not flat_indices or total_reroll_dice <= 0 or defender_hits_from_rolls <= 0:
+        return {}
+
+    defender_dice_initial_grouped = group_dice_by_stat(
+        defenders,
+        dice_rolls["defender"],
+        ud,
+        is_attacker=False,
+        stat_modifiers=defender_mods or None,
+        exclude_archetypes_from_rolling=set(NORMAL_COMBAT_EXCLUDE_ARCHETYPES),
+    )
+    new_reroll_values = roll_dice(total_reroll_dice)
+    defender_rolls = list(dice_rolls["defender"])
+    initial_len = len(defender_rolls)
+    eff_def_per_idx = get_eff_def_per_flat_index(
+        defenders, ud, defender_mods or None,
+        exclude_archetypes=set(NORMAL_COMBAT_EXCLUDE_ARCHETYPES),
+    )
+    hits_from_rerolls = sum(
+        1
+        for j in range(len(flat_indices))
+        if flat_indices[j] < len(eff_def_per_idx)
+        and new_reroll_values[j] <= eff_def_per_idx[flat_indices[j]]
+    )
+    terror_final_defender_hits = (
+        defender_hits_from_rolls - total_reroll_dice + hits_from_rerolls
+    )
+    for i, flat_idx in enumerate(flat_indices):
+        if flat_idx < initial_len:
+            defender_rolls[flat_idx] = new_reroll_values[i]
+    dice_rolls["defender"] = defender_rolls
+    rerolled_indices_by_stat = _terror_rerolled_indices_by_stat(
+        defenders, ud, defender_mods or None, initial_len, flat_indices,
+        exclude_archetypes=set(NORMAL_COMBAT_EXCLUDE_ARCHETYPES),
+    )
+    return {
+        "applied": True,
+        "defender_dice_initial_grouped": {str(k): v for k, v in defender_dice_initial_grouped.items()},
+        "defender_rerolled_indices_by_stat": rerolled_indices_by_stat,
+        "terror_final_defender_hits": terror_final_defender_hits,
+        "terror_reroll_count": total_reroll_dice,
+    }
+
+
 def _generate_initiate_combat_payload(
     state: GameState,
     territory_id: str,
@@ -3556,90 +3684,9 @@ def do_continue_combat(
             ),
         }
 
-    terror_reroll_response: dict[str, Any] = {}
-    is_round_one = combat.round_number == 0 and not siegeworks_pending and not archer_prefire_pending
-    if is_round_one:
-        territory_def = td.get(state.active_combat.territory_id)
-        terrain_att, terrain_def = compute_terrain_stat_modifiers(
-            territory_def, attackers, defenders, ud
-        )
-        anticav_att, anticav_def = compute_anti_cavalry_stat_modifiers(
-            attackers, defenders, ud
-        )
-        captain_att, captain_def = compute_captain_stat_modifiers(
-            attackers, defenders, ud
-        )
-        attacker_mods = merge_stat_modifiers(terrain_att, anticav_att, captain_att)
-        defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
-        # Terror cap: terror units - hope units (hope cancels 1 terror each), then cap at 3
-        terror_count = sum(1 for u in attackers if combat_has_special(ud.get(u.unit_id), "terror"))
-        hope_count = sum(1 for u in defenders if combat_has_special(ud.get(u.unit_id), "hope"))
-        terror_cap = min(3, max(0, terror_count - hope_count))
-        flat_indices, total_reroll_dice = get_terror_reroll_targets(
-            attackers,
-            defenders,
-            ud,
-            dice_rolls,
-            defender_mods or None,
-            terror_cap=terror_cap,
-            exclude_archetypes_from_rolling=set(NORMAL_COMBAT_EXCLUDE_ARCHETYPES),
-        )
-        defender_hits_from_rolls = combat_count_hits(
-            defenders,
-            dice_rolls.get("defender", []),
-            ud,
-            is_attacker=False,
-            stat_modifiers=defender_mods or None,
-            exclude_archetypes=set(NORMAL_COMBAT_EXCLUDE_ARCHETYPES),
-        )
-        # Only re-roll dice that are actually hits; never re-roll misses (would help defender)
-        hit_flat_set = get_defender_hit_flat_indices(
-            defenders, dice_rolls["defender"], ud, defender_mods or None,
-            exclude_archetypes=set(NORMAL_COMBAT_EXCLUDE_ARCHETYPES),
-        )
-        flat_indices = [i for i in flat_indices if i in hit_flat_set][:defender_hits_from_rolls]
-        total_reroll_dice = len(flat_indices)
-        if flat_indices and total_reroll_dice > 0 and defender_hits_from_rolls > 0:
-            defender_dice_initial_grouped = group_dice_by_stat(
-                defenders,
-                dice_rolls["defender"],
-                ud,
-                is_attacker=False,
-                stat_modifiers=defender_mods or None,
-                exclude_archetypes_from_rolling=set(NORMAL_COMBAT_EXCLUDE_ARCHETYPES),
-            )
-            new_reroll_values = roll_dice(total_reroll_dice)
-            defender_rolls = list(dice_rolls["defender"])
-            initial_len = len(defender_rolls)
-            # Final defender hits = (hits not re-rolled) + (hits from re-rolls). Re-rolled hits don't count.
-            eff_def_per_idx = get_eff_def_per_flat_index(
-                defenders, ud, defender_mods or None,
-                exclude_archetypes=set(NORMAL_COMBAT_EXCLUDE_ARCHETYPES),
-            )
-            hits_from_rerolls = sum(
-                1
-                for j in range(len(flat_indices))
-                if flat_indices[j] < len(eff_def_per_idx)
-                and new_reroll_values[j] <= eff_def_per_idx[flat_indices[j]]
-            )
-            terror_final_defender_hits = (
-                defender_hits_from_rolls - total_reroll_dice + hits_from_rerolls
-            )
-            for i, flat_idx in enumerate(flat_indices):
-                if flat_idx < initial_len:
-                    defender_rolls[flat_idx] = new_reroll_values[i]
-            dice_rolls["defender"] = defender_rolls
-            rerolled_indices_by_stat = _terror_rerolled_indices_by_stat(
-                defenders, ud, defender_mods or None, initial_len, flat_indices,
-                exclude_archetypes=set(NORMAL_COMBAT_EXCLUDE_ARCHETYPES),
-            )
-            terror_reroll_response = {
-                "applied": True,
-                "defender_dice_initial_grouped": {str(k): v for k, v in defender_dice_initial_grouped.items()},
-                "defender_rerolled_indices_by_stat": rerolled_indices_by_stat,
-                "terror_final_defender_hits": terror_final_defender_hits,
-                "terror_reroll_count": total_reroll_dice,
-            }
+    terror_reroll_response = _maybe_apply_round_one_terror_continue_combat(
+        state, ud, td, fd, dice_rolls,
+    )
 
     action = continue_combat(
         state.current_faction,
@@ -4067,6 +4114,8 @@ def do_ai_step(
                     pl["terror_applied"] = True
                 if payload.get("terror_final_defender_hits") is not None:
                     pl["terror_final_defender_hits"] = payload["terror_final_defender_hits"]
+                if payload.get("terror_reroll_count") is not None:
+                    pl["terror_reroll_count"] = payload["terror_reroll_count"]
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
 
@@ -4074,7 +4123,17 @@ def do_ai_step(
     if action.type == "continue_combat" and state.active_combat:
         dr = action.payload.get("dice_rolls") or {}
         if not dr.get("attacker") and not dr.get("defender"):
-            action.payload["dice_rolls"] = _generate_dice_rolls_for_active_combat(state, ud, td, fd)
+            dice_ai = _generate_dice_rolls_for_active_combat(state, ud, td, fd)
+            terror_rr_ai = _maybe_apply_round_one_terror_continue_combat(
+                state, ud, td, fd, dice_ai,
+            )
+            action.payload["dice_rolls"] = dice_ai
+            if terror_rr_ai:
+                action.payload["terror_applied"] = True
+                if terror_rr_ai.get("terror_final_defender_hits") is not None:
+                    action.payload["terror_final_defender_hits"] = terror_rr_ai["terror_final_defender_hits"]
+                if terror_rr_ai.get("terror_reroll_count") is not None:
+                    action.payload["terror_reroll_count"] = terror_rr_ai["terror_reroll_count"]
 
     validation = validate_action(state, action, ud, td, fd, cd, port_d)
     if not validation.valid:
