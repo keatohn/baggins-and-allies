@@ -42,11 +42,6 @@ const TAB_LABELS: Record<TabKey, string> = {
 
 const DELETE_SETUP_CONFIRM_PHRASE = 'DELETE SETUP';
 
-/** Defaults for current production hotfix (spawn on existing game). */
-const LIVE_HOTFIX_DEFAULT_GAME = '4f0c91c4-42fc-4b66-995e-16fd0e1b42cb';
-const LIVE_HOTFIX_DEFAULT_TERRITORY = 'dol_amroth';
-const LIVE_HOTFIX_DEFAULT_UNIT = 'nazgul';
-
 type DictEntityMap = Record<string, Record<string, unknown>>;
 
 const MASTER_BUNDLE_KEYS = [
@@ -286,13 +281,6 @@ export default function Admin() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [liveHotfixGameId, setLiveHotfixGameId] = useState(LIVE_HOTFIX_DEFAULT_GAME);
-  const [liveHotfixTerritoryId, setLiveHotfixTerritoryId] = useState(LIVE_HOTFIX_DEFAULT_TERRITORY);
-  const [liveHotfixUnitId, setLiveHotfixUnitId] = useState(LIVE_HOTFIX_DEFAULT_UNIT);
-  const [liveHotfixCount, setLiveHotfixCount] = useState(1);
-  const [liveHotfixBusy, setLiveHotfixBusy] = useState(false);
-  const [liveHotfixError, setLiveHotfixError] = useState<string | null>(null);
-  const [liveHotfixOk, setLiveHotfixOk] = useState<string | null>(null);
 
   const useJson = jsonTab[activeTab] === true;
 
@@ -398,34 +386,6 @@ export default function Admin() {
     setDeleteConfirmText('');
     setDeleteError(null);
     setDeleting(false);
-  };
-
-  const runLiveHotfixSpawn = async () => {
-    const gid = liveHotfixGameId.trim();
-    const tid = liveHotfixTerritoryId.trim();
-    const uid = liveHotfixUnitId.trim();
-    if (!gid || !tid || !uid) {
-      setLiveHotfixError('Game id, territory, and unit are required.');
-      return;
-    }
-    const n = Math.floor(Number(liveHotfixCount));
-    if (!Number.isFinite(n) || n < 1 || n > 99) {
-      setLiveHotfixError('Count must be between 1 and 99.');
-      return;
-    }
-    setLiveHotfixBusy(true);
-    setLiveHotfixError(null);
-    setLiveHotfixOk(null);
-    try {
-      const r = await api.adminSpawnUnits(gid, { territory_id: tid, unit_id: uid, count: n });
-      setLiveHotfixOk(
-        `Spawned ${r.count}× ${r.unit_id} in ${r.territory_id} (${r.instance_ids.join(', ')})`,
-      );
-    } catch (e) {
-      setLiveHotfixError(e instanceof Error ? e.message : 'Spawn failed');
-    } finally {
-      setLiveHotfixBusy(false);
-    }
   };
 
   const confirmDeleteSetup = async () => {
@@ -587,82 +547,6 @@ export default function Admin() {
         </label>
         {loadingBundle ? <span className="admin-page__loading-inline">Loading…</span> : null}
       </div>
-
-      <section className="admin-page__live-hotfix" aria-labelledby="admin-live-hotfix-title">
-        <h2 id="admin-live-hotfix-title" className="admin-page__live-hotfix-title">
-          Live game hotfix
-        </h2>
-        <p className="admin-form__micro">
-          Spawn units directly into a running game&apos;s territory (persists immediately). Faction comes from the unit
-          definition (e.g. nazgul → mordor).
-        </p>
-        <div className="admin-form__row">
-          <label className="admin-form__label" htmlFor="admin-hotfix-game">
-            Game id
-          </label>
-          <input
-            id="admin-hotfix-game"
-            className="admin-form__input"
-            autoComplete="off"
-            spellCheck={false}
-            value={liveHotfixGameId}
-            onChange={(e) => setLiveHotfixGameId(e.target.value)}
-          />
-        </div>
-        <div className="admin-form__row">
-          <label className="admin-form__label" htmlFor="admin-hotfix-territory">
-            Territory id
-          </label>
-          <input
-            id="admin-hotfix-territory"
-            className="admin-form__input"
-            autoComplete="off"
-            spellCheck={false}
-            value={liveHotfixTerritoryId}
-            onChange={(e) => setLiveHotfixTerritoryId(e.target.value)}
-          />
-        </div>
-        <div className="admin-form__row">
-          <label className="admin-form__label" htmlFor="admin-hotfix-unit">
-            Unit id
-          </label>
-          <input
-            id="admin-hotfix-unit"
-            className="admin-form__input"
-            autoComplete="off"
-            spellCheck={false}
-            value={liveHotfixUnitId}
-            onChange={(e) => setLiveHotfixUnitId(e.target.value)}
-          />
-        </div>
-        <div className="admin-form__row">
-          <label className="admin-form__label" htmlFor="admin-hotfix-count">
-            Count
-          </label>
-          <input
-            id="admin-hotfix-count"
-            type="number"
-            min={1}
-            max={99}
-            className="admin-form__input admin-form__input--narrow"
-            value={liveHotfixCount}
-            onChange={(e) => setLiveHotfixCount(Number(e.target.value))}
-          />
-        </div>
-        <div className="admin-page__live-hotfix-actions">
-          <button
-            type="button"
-            className="admin-page__btn admin-page__btn--primary"
-            data-admin-major-sfx
-            disabled={liveHotfixBusy}
-            onClick={runLiveHotfixSpawn}
-          >
-            {liveHotfixBusy ? 'Spawning…' : 'Spawn units'}
-          </button>
-        </div>
-        {liveHotfixError ? <div className="admin-page__error">{liveHotfixError}</div> : null}
-        {liveHotfixOk ? <p className="admin-page__success">{liveHotfixOk}</p> : null}
-      </section>
 
       {loadError ? (
         <div className="admin-page__error">

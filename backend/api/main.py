@@ -34,7 +34,7 @@ from .auth import (
     verify_password,
 )
 
-from backend.engine.state import GameState, PendingMove, UnitStack
+from backend.engine.state import GameState, PendingMove
 from backend.engine.actions import (
     Action,
     purchase_units,
@@ -130,7 +130,6 @@ from backend.engine.utils import (
     has_unit_special,
     backfill_liberation_metadata,
     is_aerial_unit,
-    unitstack_to_units,
 )
 
 # Siegework units only roll in the dedicated siegeworks round, not in standard combat.
@@ -1376,54 +1375,6 @@ def admin_delete_setup(
     except ValueError:
         raise HTTPException(status_code=404, detail="Setup not found")
     return {"ok": True, "id": setup_id}
-
-
-class AdminSpawnUnitsBody(BaseModel):
-    territory_id: str = Field(..., min_length=1)
-    unit_id: str = Field(..., min_length=1)
-    count: int = Field(1, ge=1, le=99)
-
-
-@app.post("/admin/games/{game_id}/spawn-units")
-def admin_spawn_units(
-    game_id: str,
-    body: AdminSpawnUnitsBody,
-    _admin: Player = Depends(get_current_admin),
-    db: Session = Depends(get_db),
-):
-    """
-    Spawn unit instances on the board for an active game (persists to DB).
-    Owner faction is taken from the unit definition (e.g. nazgul -> mordor).
-
-    Only two parts of state change: faction unit_id_counters (new instance ids) and the target
-    territory's units list. Phase, combat, pending moves, resources, and all other territories are untouched.
-    """
-    snapshot = get_game(game_id, db)
-    unit_defs, _td, _fd, _cd, _pd = get_game_definitions(game_id, db)
-    tid = body.territory_id.strip()
-    if tid not in snapshot.territories:
-        raise HTTPException(status_code=400, detail=f"Unknown territory: {tid}")
-    unit_def = unit_defs.get(body.unit_id.strip())
-    if not unit_def:
-        raise HTTPException(status_code=400, detail=f"Unknown unit_id: {body.unit_id}")
-    faction_id = getattr(unit_def, "faction", None)
-    if not faction_id:
-        raise HTTPException(status_code=400, detail=f"Unit {body.unit_id} has no faction in definitions")
-    state = snapshot.copy()
-    stack = UnitStack(unit_id=body.unit_id.strip(), count=body.count)
-    new_units = unitstack_to_units(stack, str(faction_id), state, unit_defs)
-    if not new_units:
-        raise HTTPException(status_code=400, detail="Could not create units (check unit_id and definitions)")
-    state.territories[tid].units.extend(new_units)
-    save_game(game_id, state, db)
-    return {
-        "ok": True,
-        "game_id": game_id,
-        "territory_id": tid,
-        "unit_id": body.unit_id.strip(),
-        "count": len(new_units),
-        "instance_ids": [u.instance_id for u in new_units],
-    }
 
 
 @app.post("/games/create")
