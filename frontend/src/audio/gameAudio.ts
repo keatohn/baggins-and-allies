@@ -104,6 +104,81 @@ function readVolume(): number {
   return readGameMusicVolume();
 }
 
+/** Admin per-file percents keyed by `turn/gondor.m4a` etc. Missing = 100. Multiplies profile volume. */
+let audioFileGainPct: Record<string, number> = {};
+
+function clamp01(n: number): number {
+  return Math.min(1, Math.max(0, n));
+}
+
+function normalizeAudioRel(rel: string): string {
+  return rel.replace(/\\/g, '/').replace(/^\/+/, '').replace(/^assets\/audio\//, '');
+}
+
+function gainForRelPath(rel: string): number {
+  const key = normalizeAudioRel(rel);
+  const raw = audioFileGainPct[key];
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return Math.min(2, Math.max(0, raw / 100));
+  }
+  return 1;
+}
+
+function fileGainFromUrl(src: string | undefined): number {
+  if (!src) return 1;
+  let pathname = src;
+  try {
+    pathname = new URL(src, typeof window !== 'undefined' ? window.location.href : 'http://local.invalid/').pathname;
+  } catch {
+    /* keep src */
+  }
+  const m = pathname.match(/\/assets\/audio\/((?:turn|menu|lobby|sfx)\/[^/]+)$/i);
+  if (!m) return 1;
+  try {
+    return gainForRelPath(decodeURIComponent(m[1]));
+  } catch {
+    return gainForRelPath(m[1]);
+  }
+}
+
+function withFileGain(userVolume: number, src: string | undefined): number {
+  return clamp01(userVolume * fileGainFromUrl(src));
+}
+
+function applyTurnLoopMasterVolume(): void {
+  if (!turnLoop || turnLoop.isCrossfading()) return;
+  const active = turnLoop.getActiveElement();
+  active.volume = withFileGain(readGameMusicVolume(), active.src);
+  turnLoop.getIdleElement().volume = 0;
+}
+
+function applyMenuLoopMasterVolume(): void {
+  if (!menuLoop || menuLoop.isCrossfading()) return;
+  const active = menuLoop.getActiveElement();
+  active.volume = withFileGain(readMenuMusicVolume() * MENU_AMBIENCE_GAIN, active.src);
+  menuLoop.getIdleElement().volume = 0;
+}
+
+/** Replace the admin per-file mix. Values are percents (100 = unchanged). */
+export function setAudioFileGains(gains: Record<string, number> | null | undefined): void {
+  const next: Record<string, number> = {};
+  if (gains && typeof gains === 'object') {
+    for (const [k, v] of Object.entries(gains)) {
+      if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+      next[normalizeAudioRel(k)] = Math.round(Math.min(200, Math.max(0, v)));
+    }
+  }
+  audioFileGainPct = next;
+  applyTurnLoopMasterVolume();
+  applyMenuLoopMasterVolume();
+}
+
+export function getProfileVolumeForAudioKind(kind: 'turn' | 'menu' | 'lobby' | 'sfx'): number {
+  if (kind === 'sfx') return readSfxVolume();
+  if (kind === 'menu' || kind === 'lobby') return readMenuMusicVolume() * MENU_AMBIENCE_GAIN;
+  return readGameMusicVolume();
+}
+
 function sanitizeFactionId(id: string): string {
   return id.replace(/[^a-zA-Z0-9_-]/g, '');
 }
@@ -149,7 +224,7 @@ function fadeGain(
   onDone?: () => void,
 ): void {
   if (durationMs <= 0) {
-    const m = readGameMusicVolume();
+    const m = withFileGain(readGameMusicVolume(), audio.src);
     audio.volume = m * Math.min(1, Math.max(0, toG));
     onDone?.();
     return;
@@ -157,7 +232,7 @@ function fadeGain(
   const t0 = performance.now();
   const step = () => {
     if (sessionId !== session.v) return;
-    const m = readGameMusicVolume();
+    const m = withFileGain(readGameMusicVolume(), audio.src);
     const u = Math.min(1, (performance.now() - t0) / durationMs);
     const ue = smoothStep01(u);
     const g = fromG + (toG - fromG) * ue;
@@ -179,7 +254,7 @@ function fadeGainMenu(
 ): void {
   const cap = MENU_AMBIENCE_GAIN;
   if (durationMs <= 0) {
-    const m = readMenuMusicVolume();
+    const m = withFileGain(readMenuMusicVolume(), audio.src);
     audio.volume = m * cap * Math.min(1, Math.max(0, toG));
     onDone?.();
     return;
@@ -187,7 +262,7 @@ function fadeGainMenu(
   const t0 = performance.now();
   const step = () => {
     if (sessionId !== session.v) return;
-    const m = readMenuMusicVolume();
+    const m = withFileGain(readMenuMusicVolume(), audio.src);
     const u = Math.min(1, (performance.now() - t0) / durationMs);
     const g = fromG + (toG - fromG) * u;
     audio.volume = m * cap * Math.min(1, Math.max(0, g));
@@ -465,6 +540,12 @@ export function getGameSfxVolume(): number {
   return readSfxVolume();
 }
 
+function fireOneShot(url: string): void {
+  const a = new Audio(url);
+  a.volume = withFileGain(readSfxVolume(), url);
+  void a.play().catch(() => {});
+}
+
 /**
  * Lightweight UI click tone for menu and in-game interactions.
  * Uses existing SFX volume + mute settings from local storage.
@@ -477,9 +558,7 @@ export function playUiClickSound(): void {
   const sfx = readSfxVolume();
   if (sfx <= 0.001) return;
   if (clickSfxUrl) {
-    const a = new Audio(clickSfxUrl);
-    a.volume = Math.min(1, Math.max(0, sfx));
-    void a.play().catch(() => {});
+    fireOneShot(clickSfxUrl);
     return;
   }
   if (clickSfxResolving) return;
@@ -491,9 +570,7 @@ export function playUiClickSound(): void {
   tryPlayFirstWorkingUrl(urls, (url) => {
     clickSfxResolving = false;
     clickSfxUrl = url;
-    const a = new Audio(url);
-    a.volume = Math.min(1, Math.max(0, readSfxVolume()));
-    void a.play().catch(() => {});
+    fireOneShot(url);
   }, () => {
     clickSfxResolving = false;
   });
@@ -529,9 +606,7 @@ export function playMovementSfx(kind: 'ground' | 'aerial' | 'naval'): void {
   const stem = stemForMovementCategory(kind);
   const cached = movementSfxUrlCache[stem];
   if (cached) {
-    const a = new Audio(cached);
-    a.volume = Math.min(1, Math.max(0, sfx));
-    void a.play().catch(() => {});
+    fireOneShot(cached);
     return;
   }
   if (movementSfxResolving[stem]) return;
@@ -542,9 +617,7 @@ export function playMovementSfx(kind: 'ground' | 'aerial' | 'naval'): void {
     (url) => {
       movementSfxResolving[stem] = false;
       movementSfxUrlCache[stem] = url;
-      const a = new Audio(url);
-      a.volume = Math.min(1, Math.max(0, readSfxVolume()));
-      void a.play().catch(() => {});
+      fireOneShot(url);
     },
     () => {
       movementSfxResolving[stem] = false;
@@ -562,9 +635,7 @@ export function playCombatDiceShelfRevealSound(): void {
   const sfx = readSfxVolume();
   if (sfx <= 0.001) return;
   if (drumSfxUrl) {
-    const a = new Audio(drumSfxUrl);
-    a.volume = Math.min(1, Math.max(0, sfx));
-    void a.play().catch(() => {});
+    fireOneShot(drumSfxUrl);
     return;
   }
   if (drumSfxResolving) return;
@@ -573,9 +644,7 @@ export function playCombatDiceShelfRevealSound(): void {
   tryPlayFirstWorkingUrl(urls, (url) => {
     drumSfxResolving = false;
     drumSfxUrl = url;
-    const a = new Audio(url);
-    a.volume = Math.min(1, Math.max(0, readSfxVolume()));
-    void a.play().catch(() => {});
+    fireOneShot(url);
   }, () => {
     drumSfxResolving = false;
   });
@@ -586,9 +655,7 @@ export function playArcherPrefireCommenceSound(): void {
   const sfx = readSfxVolume();
   if (sfx <= 0.001) return;
   if (arrowsSfxUrl) {
-    const a = new Audio(arrowsSfxUrl);
-    a.volume = Math.min(1, Math.max(0, sfx));
-    void a.play().catch(() => {});
+    fireOneShot(arrowsSfxUrl);
     return;
   }
   if (arrowsSfxResolving) return;
@@ -597,9 +664,7 @@ export function playArcherPrefireCommenceSound(): void {
   tryPlayFirstWorkingUrl(urls, (url) => {
     arrowsSfxResolving = false;
     arrowsSfxUrl = url;
-    const a = new Audio(url);
-    a.volume = Math.min(1, Math.max(0, readSfxVolume()));
-    void a.play().catch(() => {});
+    fireOneShot(url);
   }, () => {
     arrowsSfxResolving = false;
   });
@@ -618,7 +683,7 @@ export function playSiegeworksRoundCommenceSound(): void {
 
   const startPlayback = (url: string) => {
     stopSiegeworksRoundCommenceSound();
-    const maxVol = Math.min(1, Math.max(0, sfx));
+    const maxVol = withFileGain(sfx, url);
     const audio = new Audio(url);
     audio.volume = maxVol;
 
@@ -688,12 +753,7 @@ export function setGameMusicVolume(level: number): void {
     localStorage.setItem(STORAGE_GAME_MUSIC_VOLUME, String(v));
     localStorage.setItem(STORAGE_MUSIC_VOLUME, String(v));
   } catch {}
-  const m = readGameMusicVolume();
-
-  if (turnLoop && !turnLoop.isCrossfading()) {
-    turnLoop.getActiveElement().volume = m;
-    turnLoop.getIdleElement().volume = 0;
-  }
+  applyTurnLoopMasterVolume();
 }
 
 export function setMenuMusicVolume(level: number): void {
@@ -701,11 +761,7 @@ export function setMenuMusicVolume(level: number): void {
   try {
     localStorage.setItem(STORAGE_MENU_MUSIC_VOLUME, String(v));
   } catch {}
-  const m = readMenuMusicVolume();
-  if (menuLoop && !menuLoop.isCrossfading()) {
-    menuLoop.getActiveElement().volume = m * MENU_AMBIENCE_GAIN;
-    menuLoop.getIdleElement().volume = 0;
-  }
+  applyMenuLoopMasterVolume();
 }
 
 export function setGameSfxVolume(level: number): void {
@@ -830,7 +886,7 @@ export function stopTurnCue(): void {
   turnLoop = null;
   if (!prev) return;
   const active = prev.getActiveElement();
-  const m = readVolume();
+  const m = withFileGain(readGameMusicVolume(), active.src);
   const av = active.volume;
   const g = m > 0.001 ? av / m : 0;
   fadeGain(active, g, 0, Math.min(380, TURN_SWITCH_CROSSFADE_MS), turnSession, s, () => {
@@ -976,9 +1032,9 @@ export function resumeMenuAmbienceIfPaused(): void {
 export function resumeTurnMusicIfPaused(): void {
   if (!turnLoop) return;
   if (isGameAudioMuted()) return;
-  const m = readVolume();
-  if (m <= 0.001) return;
   const active = turnLoop.getActiveElement();
+  const m = withFileGain(readGameMusicVolume(), active.src);
+  if (m <= 0.001) return;
   if (!active.paused) return;
   const sid = turnLoop.sessionId;
   void active.play().then(() => {

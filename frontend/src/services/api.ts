@@ -2,7 +2,7 @@
  * API service for communicating with the Baggins & Allies game backend.
  */
 
-import { syncAudioFromAuthPlayer } from '../audio/gameAudio';
+import { syncAudioFromAuthPlayer, setAudioFileGains } from '../audio/gameAudio';
 
 /**
  * Empty string must count as unset — otherwise fetch uses same-origin URLs and static hosts return 405 on POST.
@@ -605,6 +605,8 @@ export interface AdminSetupBundle {
 
 export type AdminSetupSavePayload = Omit<AdminSetupBundle, 'id'>;
 
+export type AudioGainsMap = Record<string, number>;
+
 export interface PatchProfileBody {
   username?: string;
   audio?: {
@@ -758,6 +760,19 @@ export const api = {
 
   adminListSetups: () =>
     fetchJson<{ setups: AdminSetupListItem[] }>('/admin/setups'),
+  getAudioGains: async () => {
+    const r = await fetchJson<{ gains: AudioGainsMap }>('/audio/gains');
+    setAudioFileGains(r.gains);
+    return r;
+  },
+  adminPutAudio: async (body: { gains: AudioGainsMap }) => {
+    const r = await fetchJson<{ ok: boolean; gains: AudioGainsMap }>('/admin/audio', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+    setAudioFileGains(r.gains);
+    return r;
+  },
   adminGetSetup: (setupId: string) => fetchJson<AdminSetupBundle>(`/admin/setups/${encodeURIComponent(setupId)}`),
   adminPutSetup: (setupId: string, body: AdminSetupSavePayload) =>
     fetchJson<{ ok: boolean; id: string }>(`/admin/setups/${encodeURIComponent(setupId)}`, {

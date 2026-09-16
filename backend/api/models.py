@@ -50,3 +50,13 @@ class Setup(Base):
     ports_json = Column(Text, nullable=False)
     starting_setup_json = Column(Text, nullable=False)
     specials_json = Column(Text, nullable=False)
+
+
+class AppSetting(Base):
+    """Singleton JSON blobs (e.g. per-file audio gains)."""
+
+    __tablename__ = "app_settings"
+
+    key = Column(String(64), primary_key=True)
+    value_json = Column(Text, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

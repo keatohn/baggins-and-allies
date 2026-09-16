@@ -506,6 +506,39 @@
   color: var(--ink-faded);
 }
 
+.admin-audio-group {
+  margin-top: 0.85rem;
+}
+
+.admin-audio-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.25rem;
+}
+
+.admin-audio-table th,
+.admin-audio-table td {
+  text-align: left;
+  padding: 0.28rem 0.4rem 0.28rem 0;
+  vertical-align: middle;
+}
+
+.admin-audio-table th {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink-faded);
+}
+
+.admin-audio-file {
+  font-size: 0.86rem;
+}
+
+.admin-audio-pct {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
 .admin-form__input {
   width: 100%;
   max-width: 100%;

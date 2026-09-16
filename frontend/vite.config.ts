@@ -56,6 +56,24 @@ export default defineConfig({
       ext: '.m4a',
     }),
     publicFilenamesPlugin({
+      name: 'menu-music-m4a',
+      virtualId: 'virtual:menu-music-m4a',
+      relDir: 'public/assets/audio/menu',
+      ext: '.m4a',
+    }),
+    publicFilenamesPlugin({
+      name: 'lobby-music-m4a',
+      virtualId: 'virtual:lobby-music-m4a',
+      relDir: 'public/assets/audio/lobby',
+      ext: '.m4a',
+    }),
+    publicFilenamesPlugin({
+      name: 'sfx-m4a',
+      virtualId: 'virtual:sfx-m4a',
+      relDir: 'public/assets/audio/sfx',
+      ext: '.m4a',
+    }),
+    publicFilenamesPlugin({
       name: 'unit-icon-png',
       virtualId: 'virtual:unit-icon-png',
       relDir: 'public/assets/units',

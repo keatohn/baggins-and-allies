@@ -11,6 +11,7 @@ import GameList from './pages/GameList.tsx'
 import JoinGame from './pages/JoinGame.tsx'
 import Profile from './pages/Profile.tsx'
 import Admin from './pages/Admin.tsx'
+import api from './services/api'
 import {
   playUiClickSound,
   resumeMenuAmbienceIfPaused,
@@ -156,6 +157,8 @@ function MenuAmbienceController() {
 
   return null
 }
+
+void api.getAudioGains().catch(() => {})
 
 const rootEl = document.getElementById('root')
 if (!rootEl) {

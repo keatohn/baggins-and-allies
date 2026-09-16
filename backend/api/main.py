@@ -91,6 +91,7 @@ from backend.engine.definitions import (
     TerritoryDefinition,
     parse_prefire_penalty_from_manifest,
 )
+from backend.audio_gains import load_audio_gains, save_audio_gains
 from backend.setup_data import (
     create_setup_from_bundle,
     create_setup,
@@ -1253,6 +1254,27 @@ def update_profile(
 def get_setups(db: Session = Depends(get_db)):
     """List available game setups (id, display_name, map_asset). Use setup_id in POST /games/create."""
     return {"setups": try_list_setups_menu(db)}
+
+
+@app.get("/audio/gains")
+def get_audio_gains(db: Session = Depends(get_db)):
+    """Per-file volume percents (0–200). Missing keys default to 100. Multiplies player profile volumes."""
+    return {"gains": load_audio_gains(db)}
+
+
+class AdminAudioGainsBody(BaseModel):
+    gains: dict[str, float]
+
+
+@app.put("/admin/audio")
+def admin_put_audio(
+    body: AdminAudioGainsBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Replace the global per-file audio mix. Values are percents; 100 is omitted (default)."""
+    gains = save_audio_gains(db, body.gains)
+    return {"ok": True, "gains": gains}
 
 
 class AdminSetupPayload(BaseModel):

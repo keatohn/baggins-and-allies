@@ -13,6 +13,7 @@ import {
   TerritoriesPanel,
   UnitsPanel,
 } from './admin/SetupEditorPanels';
+import { AudioPanel } from './admin/AudioPanel';
 import { isValidSetupId } from './admin/setupId';
 import './Admin.css';
 
@@ -25,6 +26,7 @@ const TAB_KEYS = [
   'ports',
   'starting_setup',
   'specials',
+  'audio',
 ] as const;
 
 type TabKey = (typeof TAB_KEYS)[number];
@@ -38,6 +40,7 @@ const TAB_LABELS: Record<TabKey, string> = {
   ports: 'Ports',
   starting_setup: 'Starting setup',
   specials: 'Specials',
+  audio: 'Audio',
 };
 
 const DELETE_SETUP_CONFIRM_PHRASE = 'DELETE SETUP';
@@ -281,6 +284,7 @@ export default function Admin() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [audioGains, setAudioGains] = useState<Record<string, number>>({});
 
   const useJson = jsonTab[activeTab] === true;
 
@@ -315,6 +319,14 @@ export default function Admin() {
     refreshList();
   }, [player?.is_admin, refreshList]);
 
+  useEffect(() => {
+    if (!player?.is_admin) return;
+    api
+      .getAudioGains()
+      .then((r) => setAudioGains(r.gains ?? {}))
+      .catch(() => setAudioGains({}));
+  }, [player?.is_admin]);
+
   const loadBundle = useCallback((id: string) => {
     if (!id) return;
     setLoadingBundle(true);
@@ -342,9 +354,22 @@ export default function Admin() {
   }, [player?.is_admin, selectedId, loadBundle]);
 
   const handleSave = async () => {
-    if (!selectedId || !bundle) return;
     setSaveError(null);
     setSaveOk(false);
+    if (activeTab === 'audio') {
+      setSaving(true);
+      try {
+        const res = await api.adminPutAudio({ gains: audioGains });
+        setAudioGains(res.gains ?? {});
+        setSaveOk(true);
+      } catch (e) {
+        setSaveError(e instanceof Error ? e.message : 'Save failed');
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+    if (!selectedId || !bundle) return;
     const body = {
       manifest: { ...(bundle.manifest as Record<string, unknown>), id: selectedId },
       units: bundle.units as DictEntityMap,
@@ -409,7 +434,29 @@ export default function Admin() {
   };
 
   const renderTabBody = () => {
-    if (!bundle) return null;
+    if (activeTab === 'audio') {
+      if (useJson) {
+        return (
+          <JsonTabEditor
+            value={audioGains}
+            onChange={(p) => {
+              const obj = p && typeof p === 'object' && !Array.isArray(p) ? (p as Record<string, unknown>) : {};
+              const inner = obj.gains && typeof obj.gains === 'object' && !Array.isArray(obj.gains) ? obj.gains : obj;
+              const next: Record<string, number> = {};
+              for (const [k, v] of Object.entries(inner as Record<string, unknown>)) {
+                const n = typeof v === 'number' ? v : Number(v);
+                if (Number.isFinite(n)) next[k] = n;
+              }
+              setAudioGains(next);
+            }}
+          />
+        );
+      }
+      return <AudioPanel gains={audioGains} onGainsChange={setAudioGains} />;
+    }
+    if (!bundle) {
+      return <p className="admin-page__empty">Select a setup to edit.</p>;
+    }
     if (useJson) {
       const j = (v: unknown, fn: (p: unknown) => void) => <JsonTabEditor value={v} onChange={fn} />;
       switch (activeTab) {
@@ -429,6 +476,8 @@ export default function Admin() {
           return j(bundle.starting_setup, (p) => setBundle((b) => (b ? { ...b, starting_setup: p as typeof b.starting_setup } : null)));
         case 'specials':
           return j(bundle.specials, (p) => setBundle((b) => (b ? { ...b, specials: p as typeof b.specials } : null)));
+        case 'audio':
+          return null;
         default:
           return null;
       }
@@ -493,6 +542,8 @@ export default function Admin() {
             onChange={(sp) => setBundle((b) => (b ? { ...b, specials: sp as typeof b.specials } : null))}
           />
         );
+      case 'audio':
+        return null;
       default:
         return null;
     }
@@ -586,31 +637,29 @@ export default function Admin() {
         </p>
       ) : null}
 
-      {bundle ? (
-        <>
-          <div className="admin-page__tabs" role="tablist">
-            {TAB_KEYS.map((k) => (
-              <button
-                key={k}
-                type="button"
-                role="tab"
-                aria-selected={activeTab === k}
-                className={`admin-page__tab${activeTab === k ? ' admin-page__tab--active' : ''}`}
-                onClick={() => setActiveTab(k)}
-              >
-                {TAB_LABELS[k]}
-              </button>
-            ))}
-          </div>
-          <div className="admin-page__panel">{renderTabBody()}</div>
-        </>
-      ) : null}
+      <>
+        <div className="admin-page__tabs" role="tablist">
+          {TAB_KEYS.map((k) => (
+            <button
+              key={k}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === k}
+              className={`admin-page__tab${activeTab === k ? ' admin-page__tab--active' : ''}`}
+              onClick={() => setActiveTab(k)}
+            >
+              {TAB_LABELS[k]}
+            </button>
+          ))}
+        </div>
+        <div className="admin-page__panel">{renderTabBody()}</div>
+      </>
 
       <div className="admin-page__actions">
         <button
           type="button"
           className="admin-page__btn admin-page__btn--primary"
-          disabled={!bundle || saving}
+          disabled={(activeTab !== 'audio' && !bundle) || saving}
           onClick={handleSave}
         >
           {saving ? 'Saving…' : 'Save'}
@@ -626,7 +675,11 @@ export default function Admin() {
       </div>
 
       {saveError ? <div className="admin-page__error">{saveError}</div> : null}
-      {saveOk ? <p className="admin-page__success">Saved. New games will use this data.</p> : null}
+      {saveOk ? (
+        <p className="admin-page__success">
+          {activeTab === 'audio' ? 'Saved audio mix.' : 'Saved. New games will use this data.'}
+        </p>
+      ) : null}
 
       <CreateSetupDialog open={createOpen} onClose={() => setCreateOpen(false)} setups={setups} onCreated={onCreatedSetup} />
       {deleteOpen && (
