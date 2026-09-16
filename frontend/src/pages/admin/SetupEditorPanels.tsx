@@ -193,15 +193,29 @@ function iconStem(filename: string): string {
   return filename.replace(/\.png$/i, '');
 }
 
-function UnitIconField({ value, onApply }: { value: unknown; onApply: (icon: string | undefined) => void }) {
+function AssetPngField({
+  value,
+  files,
+  dir,
+  noneLabel,
+  ariaLabel,
+  onApply,
+}: {
+  value: unknown;
+  files: string[];
+  dir: string;
+  noneLabel: string;
+  ariaLabel: string;
+  onApply: (filename: string | undefined) => void;
+}) {
   const current = typeof value === 'string' ? value.trim() : '';
-  const options = current && !UNIT_ICON_PNG.includes(current) ? [current, ...UNIT_ICON_PNG] : UNIT_ICON_PNG;
+  const options = current && !files.includes(current) ? [current, ...files] : files;
   return (
     <div className="admin-icon-picker">
       {current ? (
         <img
           key={current}
-          src={`/assets/units/${current}`}
+          src={`/assets/${dir}/${current}`}
           alt=""
           className="admin-icon-picker__preview"
           onError={(e) => {
@@ -213,11 +227,11 @@ function UnitIconField({ value, onApply }: { value: unknown; onApply: (icon: str
       )}
       <select
         className="admin-form__input admin-icon-picker__select"
-        aria-label="Unit icon"
+        aria-label={ariaLabel}
         value={current}
         onChange={(e) => onApply(e.target.value || undefined)}
       >
-        <option value="">None (uses unit id)</option>
+        <option value="">{noneLabel}</option>
         {options.map((f) => (
           <option key={f} value={f}>
             {iconStem(f)}
@@ -225,6 +239,19 @@ function UnitIconField({ value, onApply }: { value: unknown; onApply: (icon: str
         ))}
       </select>
     </div>
+  );
+}
+
+function UnitIconField({ value, onApply }: { value: unknown; onApply: (icon: string | undefined) => void }) {
+  return (
+    <AssetPngField
+      value={value}
+      files={UNIT_ICON_PNG}
+      dir="units"
+      noneLabel="None (uses unit id)"
+      ariaLabel="Unit icon"
+      onApply={onApply}
+    />
   );
 }
 

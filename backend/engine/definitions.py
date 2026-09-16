@@ -293,12 +293,15 @@ def is_transportable(ud: "UnitDefinition | None") -> bool:
     return "transportable" in (getattr(ud, "tags", None) or [])
 
 
-def _parse_hero_id(data: dict) -> Optional[str]:
-    raw = data.get("hero_id")
+def _parse_optional_str(raw: Any) -> Optional[str]:
     if not isinstance(raw, str):
         return None
     s = raw.strip()
     return s or None
+
+
+def _parse_hero_id(data: dict) -> Optional[str]:
+    return _parse_optional_str(data.get("hero_id"))
 
 
 def _parse_home_territories(data: dict) -> dict:

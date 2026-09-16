@@ -925,7 +925,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         adjacent: territory.adjacent,
         aerial_adjacent: (territory as { aerial_adjacent?: string[] }).aerial_adjacent ?? [],
         ford_adjacent: (territory as { ford_adjacent?: string[] }).ford_adjacent ?? [],
-        ownable: (territory as { ownable?: boolean }).ownable !== false,
+        ownable: territory.ownable !== false,
       };
     }
     return defs;
