@@ -9,9 +9,9 @@ import { api, getAuthToken, setAuthToken } from '../services/api';
 import type { AuthPlayer } from '../services/api';
 import './Profile.css';
 
-const DEFAULT_MENU_MUSIC_PCT = 50;
-const DEFAULT_GAME_MUSIC_PCT = 25;
-const DEFAULT_SFX_PCT = 25;
+const DEFAULT_MENU_MUSIC_PCT = 0;
+const DEFAULT_GAME_MUSIC_PCT = 0;
+const DEFAULT_SFX_PCT = 0;
 
 export default function Profile() {
   const navigate = useNavigate();

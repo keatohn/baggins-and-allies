@@ -24,9 +24,10 @@ export const MENU_FADE_IN_MS = 780;
 
 const MENU_AMBIENCE_GAIN = 0.35;
 
-/** Default when no saved preference (game music + SFX only; menu ambience stays louder by default). */
-const DEFAULT_GAME_MUSIC_LEVEL = 0.25;
-const DEFAULT_SFX_LEVEL = 0.25;
+/** Used only when localStorage has no keys. Saved profile values always overwrite this. */
+const DEFAULT_GAME_MUSIC_LEVEL = 0;
+const DEFAULT_SFX_LEVEL = 0;
+const DEFAULT_MENU_MUSIC_LEVEL = 0;
 
 const turnSession = { v: 0 };
 const menuSession = { v: 0 };
@@ -41,6 +42,8 @@ const TURN_CUE_DEBOUNCE_MS = 900;
 let turnLoop: TurnPlaylistPair | null = null;
 let menuLoop: MenuLoopPair | null = null;
 let currentMenuAmbienceMode: 'menu' | 'lobby' | null = null;
+/** True only on logged-in menu routes (not login/register, not an active game). */
+let menuRouteAmbienceAllowed = false;
 let lastUiClickAt = 0;
 const UI_CLICK_DEBOUNCE_MS = 30;
 let lastMovementSfxAt = 0;
@@ -82,13 +85,13 @@ function readGameMusicVolume(): number {
 }
 
 function readMenuMusicVolume(): number {
-  if (typeof localStorage === 'undefined') return 0.5;
+  if (typeof localStorage === 'undefined') return DEFAULT_MENU_MUSIC_LEVEL;
   if (localStorage.getItem(STORAGE_MUTE) === '1') return 0;
   const menuRaw = localStorage.getItem(STORAGE_MENU_MUSIC_VOLUME);
   const fallbackRaw = menuRaw == null ? localStorage.getItem(STORAGE_MUSIC_VOLUME) : menuRaw;
   const legacyRaw = fallbackRaw == null ? localStorage.getItem(LEGACY_STORAGE_VOLUME) : null;
-  const raw = parseFloat(fallbackRaw ?? legacyRaw ?? '0.5');
-  if (!Number.isFinite(raw)) return 0.5;
+  const raw = parseFloat(fallbackRaw ?? legacyRaw ?? String(DEFAULT_MENU_MUSIC_LEVEL));
+  if (!Number.isFinite(raw)) return DEFAULT_MENU_MUSIC_LEVEL;
   return Math.min(1, Math.max(0, raw));
 }
 
@@ -171,12 +174,6 @@ export function setAudioFileGains(gains: Record<string, number> | null | undefin
   audioFileGainPct = next;
   applyTurnLoopMasterVolume();
   applyMenuLoopMasterVolume();
-}
-
-export function getProfileVolumeForAudioKind(kind: 'turn' | 'menu' | 'lobby' | 'sfx'): number {
-  if (kind === 'sfx') return readSfxVolume();
-  if (kind === 'menu' || kind === 'lobby') return readMenuMusicVolume() * MENU_AMBIENCE_GAIN;
-  return readGameMusicVolume();
 }
 
 function sanitizeFactionId(id: string): string {
@@ -762,6 +759,7 @@ export function setMenuMusicVolume(level: number): void {
     localStorage.setItem(STORAGE_MENU_MUSIC_VOLUME, String(v));
   } catch {}
   applyMenuLoopMasterVolume();
+  if (menuRouteAmbienceAllowed && v > 0.001 && !menuLoop) startMenuAmbience('menu');
 }
 
 export function setGameSfxVolume(level: number): void {
@@ -973,6 +971,10 @@ export function stopMenuAmbience(): void {
 }
 
 export function startMenuAmbience(mode: 'menu' | 'lobby' = 'menu'): void {
+  if (mode === 'menu' && !menuRouteAmbienceAllowed) {
+    if (currentMenuAmbienceMode === 'menu') stopMenuAmbience();
+    return;
+  }
   // Do not skip restart when autoplay was blocked: play() may have rejected while menuLoop
   // still exists, which would leave ambience silent until route change without this check.
   if (menuLoop && currentMenuAmbienceMode === mode) {
@@ -1007,12 +1009,23 @@ export function startMenuAmbience(mode: 'menu' | 'lobby' = 'menu'): void {
   });
 }
 
+/** Logged-in shell menu only. Lobby/turn audio is started from the game view. */
+export function setMenuRouteAmbienceAllowed(on: boolean): void {
+  menuRouteAmbienceAllowed = on;
+  if (!on) {
+    if (currentMenuAmbienceMode === 'menu') stopMenuAmbience();
+    return;
+  }
+  startMenuAmbience('menu');
+}
+
 /**
  * Call from a user gesture (e.g. pointerdown) when menu/lobby ambience should be audible.
  * Browsers often block programmatic play() until the user interacts with the page.
  */
 export function resumeMenuAmbienceIfPaused(): void {
   if (!menuLoop) return;
+  if (currentMenuAmbienceMode === 'menu' && !menuRouteAmbienceAllowed) return;
   if (isGameAudioMuted()) return;
   const vol = readMenuMusicVolume();
   if (vol <= 0.001) return;

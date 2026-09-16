@@ -11,13 +11,12 @@ import GameList from './pages/GameList.tsx'
 import JoinGame from './pages/JoinGame.tsx'
 import Profile from './pages/Profile.tsx'
 import Admin from './pages/Admin.tsx'
-import api from './services/api'
+import api, { AUTH_CHANGED_EVENT, getAuthToken } from './services/api'
 import {
   playUiClickSound,
   resumeMenuAmbienceIfPaused,
   resumeTurnMusicIfPaused,
-  startMenuAmbience,
-  stopMenuAmbience,
+  setMenuRouteAmbienceAllowed,
 } from './audio/gameAudio'
 import { useEffect } from 'react'
 
@@ -33,6 +32,17 @@ const CLICKABLE_SELECTOR = [
 
 function isActiveGameRoute(pathname: string): boolean {
   return pathname.startsWith('/game/') && pathname !== '/game/new'
+}
+
+function isLoggedInMenuRoute(pathname: string): boolean {
+  return (
+    pathname === '/' ||
+    pathname === '/games' ||
+    pathname === '/join' ||
+    pathname === '/profile' ||
+    pathname === '/admin' ||
+    pathname === '/game/new'
+  )
 }
 
 function isAdminMajorClick(target: Element): boolean {
@@ -65,13 +75,16 @@ if (typeof document !== 'undefined') {
   document.addEventListener(
     'pointerdown',
     (event) => {
-      resumeMenuAmbienceIfPaused()
-      resumeTurnMusicIfPaused()
+      if (getAuthToken()) {
+        resumeMenuAmbienceIfPaused()
+        resumeTurnMusicIfPaused()
+      }
 
       const target = event.target
       const pathname = window.location.pathname || ''
       if (!(target instanceof Element)) return
       if (!target.closest(CLICKABLE_SELECTOR)) return
+      if (!getAuthToken()) return
       if (pathname === '/admin' && !isAdminMajorClick(target)) return
       if (isActiveGameRoute(pathname) && !isMajorInGameClick(target)) return
       if (target.closest('[data-no-ui-click-sfx]')) return
@@ -140,19 +153,12 @@ function MenuAmbienceController() {
   const location = useLocation()
 
   useEffect(() => {
-    const path = location.pathname
-    const isMenuRoute =
-      path === '/' ||
-      path === '/login' ||
-      path === '/register' ||
-      path === '/games' ||
-      path === '/join' ||
-      path === '/profile' ||
-      path === '/admin' ||
-      path === '/game/new'
-
-    if (isMenuRoute) startMenuAmbience('menu')
-    else stopMenuAmbience()
+    const sync = () => {
+      setMenuRouteAmbienceAllowed(Boolean(getAuthToken()) && isLoggedInMenuRoute(location.pathname))
+    }
+    sync()
+    window.addEventListener(AUTH_CHANGED_EVENT, sync)
+    return () => window.removeEventListener(AUTH_CHANGED_EVENT, sync)
   }, [location.pathname])
 
   return null

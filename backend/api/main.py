@@ -1080,14 +1080,15 @@ def _player_prefs_dict(player: Player) -> dict[str, Any]:
         return {}
 
 
-# New players and empty/missing audio prefs: menu 50%, in-game music 25%, SFX 25%.
-_DEFAULT_MENU_MUSIC = 0.5
-_DEFAULT_GAME_MUSIC = 0.25
-_DEFAULT_SFX = 0.25
+# Missing / never-saved audio prefs: all sliders at 0 until the player opts in on Profile.
+# Stored audio objects (including older accounts that saved 50%/25%/25%) are returned as-is.
+_DEFAULT_MENU_MUSIC = 0.0
+_DEFAULT_GAME_MUSIC = 0.0
+_DEFAULT_SFX = 0.0
 
 
 def _default_player_audio_stored() -> dict[str, Any]:
-    """Canonical audio object persisted for new accounts (and same values used when audio prefs are empty)."""
+    """Canonical audio object for new accounts and for players who never saved prefs."""
     g = _DEFAULT_GAME_MUSIC
     return {
         "menu_music_volume": _DEFAULT_MENU_MUSIC,
@@ -1113,10 +1114,10 @@ def _player_audio_response(player: Player) -> dict[str, Any]:
     except (TypeError, ValueError):
         game_music = _DEFAULT_GAME_MUSIC
     try:
-        menu_music = float(audio.get("menu_music_volume", game_music))
+        menu_music = float(audio.get("menu_music_volume", _DEFAULT_MENU_MUSIC))
         menu_music = max(0.0, min(1.0, menu_music))
     except (TypeError, ValueError):
-        menu_music = game_music
+        menu_music = _DEFAULT_MENU_MUSIC
     try:
         sfx = float(audio.get("sfx_volume", _DEFAULT_SFX))
         sfx = max(0.0, min(1.0, sfx))

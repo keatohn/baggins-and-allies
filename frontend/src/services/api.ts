@@ -41,6 +41,7 @@ export function getResolvedApiBase(): string {
 }
 
 const AUTH_TOKEN_KEY = 'baggins_auth_token';
+export const AUTH_CHANGED_EVENT = 'baggins-auth-changed';
 
 export function getAuthToken(): string | null {
   return localStorage.getItem(AUTH_TOKEN_KEY);
@@ -49,6 +50,9 @@ export function getAuthToken(): string | null {
 export function setAuthToken(token: string | null): void {
   if (token) localStorage.setItem(AUTH_TOKEN_KEY, token);
   else localStorage.removeItem(AUTH_TOKEN_KEY);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+  }
 }
 
 // ===== Types =====

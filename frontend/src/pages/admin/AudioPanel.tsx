@@ -3,7 +3,7 @@ import TURN_MUSIC_M4A from 'virtual:turn-music-m4a';
 import MENU_MUSIC_M4A from 'virtual:menu-music-m4a';
 import LOBBY_MUSIC_M4A from 'virtual:lobby-music-m4a';
 import SFX_M4A from 'virtual:sfx-m4a';
-import { GAME_AUDIO_BASE, getProfileVolumeForAudioKind } from '../../audio/gameAudio';
+import { GAME_AUDIO_BASE, startMenuAmbience, stopMenuAmbience } from '../../audio/gameAudio';
 
 export type AudioKind = 'turn' | 'menu' | 'lobby' | 'sfx';
 
@@ -41,6 +41,7 @@ export function AudioPanel({
     return () => {
       previewRef.current?.pause();
       previewRef.current = null;
+      startMenuAmbience('menu');
     };
   }, []);
 
@@ -51,26 +52,28 @@ export function AudioPanel({
     onGainsChange(next);
   };
 
-  const stopPreview = () => {
+  const stopPreview = (resumeMenu = true) => {
     previewRef.current?.pause();
     previewRef.current = null;
     setPlayingRel(null);
+    if (resumeMenu) startMenuAmbience('menu');
   };
 
   const playPreview = (kind: AudioKind, file: string) => {
     const rel = relPath(kind, file);
     if (playingRel === rel) {
-      stopPreview();
+      stopPreview(true);
       return;
     }
-    stopPreview();
+    stopPreview(false);
+    stopMenuAmbience();
     const audio = new Audio(`${GAME_AUDIO_BASE}/${rel}`);
-    const user = getProfileVolumeForAudioKind(kind);
-    audio.volume = Math.min(1, Math.max(0, user * (pctFor(gains, rel) / 100)));
+    audio.volume = Math.min(1, Math.max(0, pctFor(gains, rel) / 100));
     audio.addEventListener('ended', () => {
       if (previewRef.current === audio) {
         previewRef.current = null;
         setPlayingRel(null);
+        startMenuAmbience('menu');
       }
     });
     previewRef.current = audio;
@@ -79,6 +82,7 @@ export function AudioPanel({
       if (previewRef.current === audio) {
         previewRef.current = null;
         setPlayingRel(null);
+        startMenuAmbience('menu');
       }
     });
   };
@@ -86,8 +90,9 @@ export function AudioPanel({
   return (
     <div className="admin-form">
       <p className="admin-form__micro">
-        Per-file mix is global (not per setup). Each percent multiplies the player&apos;s profile volume for that
-        category — it does not replace it. 100% is unchanged. 0–200%.
+        Per-file mix is global (not per setup). Each percent multiplies each player&apos;s profile volume in-game.
+        Play preview uses only this percent (not your profile sliders) so you can compare files, and it pauses menu
+        music until you stop. Default 100%. Range 0–200%.
       </p>
       {GROUPS.map((group) => (
         <section key={group.kind} className="admin-audio-group">
