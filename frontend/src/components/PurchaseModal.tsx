@@ -11,6 +11,10 @@ interface UnitPurchaseInfo {
   movement: number;
   health: number;
   dice: number;
+  /** Shared across versions of the same hero; cart and in-play cap apply to the family. */
+  heroId?: string;
+  /** Backend cap (resources and unique remaining slots). Unique already in play => 0. */
+  maxAffordable?: number;
   /** True if this unit is naval (mobilizes to sea zone). Used to show in Sea tab. */
   isNaval?: boolean;
   /** True if siegework archetype; shown in Siege tab (after Sea). Excludes naval. */
@@ -19,6 +23,15 @@ interface UnitPurchaseInfo {
   specialLabels?: string[];
   /** Home territory count for this unit type (adds to land mobilization display denominator when in cart). */
   homeTerritoryCount?: number;
+}
+
+function heroFamilyInCart(
+  units: UnitPurchaseInfo[],
+  quantities: Record<string, number>,
+  heroId: string | undefined,
+): number {
+  if (!heroId) return 0;
+  return units.reduce((n, u) => (u.heroId === heroId ? n + (quantities[u.id] || 0) : n), 0);
 }
 
 interface PurchaseModalProps {
@@ -64,7 +77,11 @@ function formatCost(cost: Record<string, number>): string {
     .join(' | ') || '0';
 }
 
-type PurchaseTab = 'land' | 'sea' | 'siege' | 'other';
+type PurchaseTab = 'land' | 'sea' | 'siege' | 'hero' | 'other';
+
+function isHeroPurchaseUnit(u: UnitPurchaseInfo): boolean {
+  return Boolean(u.heroId);
+}
 
 function unitPowerCost(cost: Record<string, number>): number {
   return Object.values(cost || {}).reduce((sum, v) => sum + (Number.isFinite(v) ? v : 0), 0);
@@ -153,23 +170,31 @@ function PurchaseModal({
   onClose,
 }: PurchaseModalProps) {
   const nonNavalUnits = useMemo(() => availableUnits.filter(u => !u.isNaval), [availableUnits]);
+  const allNavalUnits = useMemo(() => availableUnits.filter(u => u.isNaval), [availableUnits]);
   const landTabUnits = useMemo(
     () => availableUnits
-      .filter(u => !u.isNaval && !u.isSiegework)
+      .filter(u => !u.isNaval && !u.isSiegework && !isHeroPurchaseUnit(u))
       .slice()
       .sort(compareUnitsForPurchase),
     [availableUnits]
   );
   const siegeUnits = useMemo(
     () => availableUnits
-      .filter(u => !u.isNaval && u.isSiegework)
+      .filter(u => !u.isNaval && u.isSiegework && !isHeroPurchaseUnit(u))
       .slice()
       .sort(compareUnitsForPurchase),
     [availableUnits]
   );
-  const seaUnits = useMemo(
+  const seaTabUnits = useMemo(
     () => availableUnits
-      .filter(u => u.isNaval)
+      .filter(u => u.isNaval && !isHeroPurchaseUnit(u))
+      .slice()
+      .sort(compareUnitsForPurchase),
+    [availableUnits]
+  );
+  const heroTabUnits = useMemo(
+    () => availableUnits
+      .filter(isHeroPurchaseUnit)
       .slice()
       .sort(compareUnitsForPurchase),
     [availableUnits]
@@ -188,8 +213,8 @@ function PurchaseModal({
     [nonNavalUnits, quantities]
   );
   const seaInCart = useMemo(
-    () => seaUnits.reduce((s, u) => s + (quantities[u.id] || 0), 0),
-    [seaUnits, quantities]
+    () => allNavalUnits.reduce((s, u) => s + (quantities[u.id] || 0), 0),
+    [allNavalUnits, quantities]
   );
 
   // Display land denominator: camp capacity + home slots from unit types currently in cart (1 per home territory per type), capped by backend total
@@ -231,7 +256,9 @@ function PurchaseModal({
 
   useEffect(() => {
     if (activeTab === 'siege' && siegeUnits.length === 0) setActiveTab('land');
-  }, [activeTab, siegeUnits.length]);
+    if (activeTab === 'hero' && heroTabUnits.length === 0) setActiveTab('land');
+    if (activeTab === 'sea' && seaTabUnits.length === 0) setActiveTab('land');
+  }, [activeTab, siegeUnits.length, heroTabUnits.length, seaTabUnits.length]);
 
   // Total cost for units only
   const totalUnitCosts = useMemo(() => {
@@ -297,6 +324,10 @@ function PurchaseModal({
         if (!unit) return prev;
 
         if (delta > 0) {
+          if (unit.heroId) {
+            const familyAfter = heroFamilyInCart(availableUnits, prev, unit.heroId) - current + newQty;
+            if (familyAfter > 1 || (unit.maxAffordable ?? 1) <= 0) return prev;
+          }
           const tryState = { ...prev, [unitId]: newQty };
           const tryCosts = buildPurchaseCostTotals(
             tryState,
@@ -311,7 +342,7 @@ function PurchaseModal({
           if (mobilizationCapacity != null && totalInCart > mobilizationCapacity) return prev;
 
           if (unit.isNaval && mobilizationSeaCapacity != null) {
-            const newSeaInCart = seaUnits.reduce((s, u) => s + (tryState[u.id] || 0), 0);
+            const newSeaInCart = allNavalUnits.reduce((s, u) => s + (tryState[u.id] || 0), 0);
             if (newSeaInCart > mobilizationSeaCapacity) return prev;
           }
           if (!unit.isNaval && (mobilizationLandCapacity != null || mobilizationCampLandCapacity != null)) {
@@ -344,7 +375,7 @@ function PurchaseModal({
       mobilizationLandCapacity,
       mobilizationCampLandCapacity,
       nonNavalUnits,
-      seaUnits,
+      allNavalUnits,
     ],
   );
 
@@ -353,6 +384,60 @@ function PurchaseModal({
     mobilizationCapacity != null && totalUnits >= mobilizationCapacity;
   const canAffordOneMoreCamp = campCost > 0 && (remainingResources.power ?? 0) >= campCost;
   const atCampCap = maxCamps !== undefined && maxCamps > 0 && campQuantity >= maxCamps;
+
+  const plusDisabled = (unit: UnitPurchaseInfo, _qty: number, affordable: boolean) => {
+    if (!affordable || atMobilizationCap) return true;
+    if (unit.heroId && (heroFamilyInCart(availableUnits, quantities, unit.heroId) >= 1 || (unit.maxAffordable ?? 1) <= 0))
+      return true;
+    return false;
+  };
+
+  /** Gray sibling versions (and any version already in play) so you cannot pick two of the same hero. */
+  const heroRowBlocked = (unit: UnitPurchaseInfo, qty: number) => {
+    if (!unit.heroId) return false;
+    if (qty > 0) return false;
+    if ((unit.maxAffordable ?? 1) <= 0) return true;
+    return heroFamilyInCart(availableUnits, quantities, unit.heroId) >= 1;
+  };
+
+  const renderUnitList = (units: UnitPurchaseInfo[]) => (
+    <>
+      <div className="unit-list">
+        {units.map(unit => {
+          const qty = quantities[unit.id] || 0;
+          const affordable = canAfford(unit);
+          const blocked = heroRowBlocked(unit, qty);
+          return (
+            <div key={unit.id} className={`unit-row${blocked ? ' unit-row--blocked' : ''}`}>
+              <div className="unit-info">
+                <span
+                  className="unit-icon-wrap"
+                  style={factionColor ? { ['--faction-border' as string]: factionColor } : undefined}
+                >
+                  <img src={unit.icon} alt={unit.name} className="unit-icon" />
+                </span>
+                <div className="unit-details">
+                  <span className="unit-name">{unit.name}</span>
+                  <UnitStatBlock unit={unit} />
+                </div>
+              </div>
+              <div className="unit-cost">
+                <span className="cost-value">{formatCost(unit.cost)}</span>
+              </div>
+              <div className="quantity-controls">
+                <button type="button" onClick={() => handleQuantityChange(unit.id, -1)} disabled={qty === 0}>−</button>
+                <span className="quantity">{qty}</span>
+                <button type="button" onClick={() => handleQuantityChange(unit.id, 1)} disabled={plusDisabled(unit, qty, affordable)}>+</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="unit-stats-key">
+        A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points
+      </p>
+    </>
+  );
 
   const handleCampChange = (delta: number) => {
     setCampQuantity(prev => {
@@ -412,7 +497,7 @@ function PurchaseModal({
           >
             Land
           </button>
-          {hasPort && seaUnits.length > 0 && (
+          {hasPort && seaTabUnits.length > 0 && (
             <button
               type="button"
               className={`purchase-tab ${activeTab === 'sea' ? 'active' : ''}`}
@@ -428,6 +513,15 @@ function PurchaseModal({
               onClick={() => setActiveTab('siege')}
             >
               Siege
+            </button>
+          )}
+          {heroTabUnits.length > 0 && (
+            <button
+              type="button"
+              className={`purchase-tab ${activeTab === 'hero' ? 'active' : ''}`}
+              onClick={() => setActiveTab('hero')}
+            >
+              Hero
             </button>
           )}
           <button
@@ -452,11 +546,11 @@ function PurchaseModal({
           })}
         </div>
 
-        {(activeTab === 'land' || activeTab === 'sea' || activeTab === 'siege') && (mobilizationCapacity != null || mobilizationLandCapacity != null || mobilizationCampLandCapacity != null || mobilizationSeaCapacity != null) && (
+        {(activeTab === 'land' || activeTab === 'sea' || activeTab === 'siege' || activeTab === 'hero') && (mobilizationCapacity != null || mobilizationLandCapacity != null || mobilizationCampLandCapacity != null || mobilizationSeaCapacity != null) && (
           <p className="mobilization-capacity">
-            {(mobilizationLandCapacity != null || mobilizationCampLandCapacity != null) && (mobilizationSeaCapacity == null || seaUnits.length === 0) ? (
+            {(mobilizationLandCapacity != null || mobilizationCampLandCapacity != null) && (mobilizationSeaCapacity == null || allNavalUnits.length === 0) ? (
               <>Land: <strong>{landInCart}/{displayLandDenominator}</strong></>
-            ) : (mobilizationLandCapacity != null || mobilizationCampLandCapacity != null) && mobilizationSeaCapacity != null && seaUnits.length > 0 ? (
+            ) : (mobilizationLandCapacity != null || mobilizationCampLandCapacity != null) && mobilizationSeaCapacity != null && allNavalUnits.length > 0 ? (
               <>Land: <strong>{landInCart}/{displayLandDenominator}</strong> | Sea: <strong>{seaInCart}/{mobilizationSeaCapacity}</strong></>
             ) : (
               <>Mobilization Capacity: <strong>{totalUnits}/{mobilizationCapacity ?? 0}</strong></>
@@ -470,119 +564,13 @@ function PurchaseModal({
           </p>
         )}
 
-        {activeTab === 'land' && (
-          <>
-            <div className="unit-list">
-              {landTabUnits.map(unit => {
-                const qty = quantities[unit.id] || 0;
-                const affordable = canAfford(unit);
-                return (
-                    <div key={unit.id} className="unit-row">
-                    <div className="unit-info">
-                      <span
-                        className="unit-icon-wrap"
-                        style={factionColor ? { ['--faction-border' as string]: factionColor } : undefined}
-                      >
-                        <img src={unit.icon} alt={unit.name} className="unit-icon" />
-                      </span>
-                      <div className="unit-details">
-                        <span className="unit-name">{unit.name}</span>
-                        <UnitStatBlock unit={unit} />
-                      </div>
-                    </div>
-                    <div className="unit-cost">
-                      <span className="cost-value">{formatCost(unit.cost)}</span>
-                    </div>
-                    <div className="quantity-controls">
-                      <button type="button" onClick={() => handleQuantityChange(unit.id, -1)} disabled={qty === 0}>−</button>
-                      <span className="quantity">{qty}</span>
-                      <button type="button" onClick={() => handleQuantityChange(unit.id, 1)} disabled={!affordable || atMobilizationCap}>+</button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <p className="unit-stats-key">
-              A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points
-            </p>
-          </>
-        )}
+        {activeTab === 'land' && renderUnitList(landTabUnits)}
 
-        {activeTab === 'sea' && (
-          <>
-            <div className="unit-list">
-              {seaUnits.map(unit => {
-                const qty = quantities[unit.id] || 0;
-                const affordable = canAfford(unit);
-                return (
-                    <div key={unit.id} className="unit-row">
-                    <div className="unit-info">
-                      <span
-                        className="unit-icon-wrap"
-                        style={factionColor ? { ['--faction-border' as string]: factionColor } : undefined}
-                      >
-                        <img src={unit.icon} alt={unit.name} className="unit-icon" />
-                      </span>
-                      <div className="unit-details">
-                        <span className="unit-name">{unit.name}</span>
-                        <UnitStatBlock unit={unit} />
-                      </div>
-                    </div>
-                    <div className="unit-cost">
-                      <span className="cost-value">{formatCost(unit.cost)}</span>
-                    </div>
-                    <div className="quantity-controls">
-                      <button type="button" onClick={() => handleQuantityChange(unit.id, -1)} disabled={qty === 0}>−</button>
-                      <span className="quantity">{qty}</span>
-                      <button type="button" onClick={() => handleQuantityChange(unit.id, 1)} disabled={!affordable || atMobilizationCap}>+</button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <p className="unit-stats-key">
-              A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points
-            </p>
-          </>
-        )}
+        {activeTab === 'sea' && renderUnitList(seaTabUnits)}
 
-        {activeTab === 'siege' && (
-          <>
-            <div className="unit-list">
-              {siegeUnits.map(unit => {
-                const qty = quantities[unit.id] || 0;
-                const affordable = canAfford(unit);
-                return (
-                    <div key={unit.id} className="unit-row">
-                    <div className="unit-info">
-                      <span
-                        className="unit-icon-wrap"
-                        style={factionColor ? { ['--faction-border' as string]: factionColor } : undefined}
-                      >
-                        <img src={unit.icon} alt={unit.name} className="unit-icon" />
-                      </span>
-                      <div className="unit-details">
-                        <span className="unit-name">{unit.name}</span>
-                        <UnitStatBlock unit={unit} />
-                      </div>
-                    </div>
-                    <div className="unit-cost">
-                      <span className="cost-value">{formatCost(unit.cost)}</span>
-                    </div>
-                    <div className="quantity-controls">
-                      <button type="button" onClick={() => handleQuantityChange(unit.id, -1)} disabled={qty === 0}>−</button>
-                      <span className="quantity">{qty}</span>
-                      <button type="button" onClick={() => handleQuantityChange(unit.id, 1)} disabled={!affordable || atMobilizationCap}>+</button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <p className="unit-stats-key">
-              A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points
-            </p>
-          </>
-        )}
+        {activeTab === 'siege' && renderUnitList(siegeUnits)}
+
+        {activeTab === 'hero' && renderUnitList(heroTabUnits)}
 
         {activeTab === 'other' && (
           <div className="unit-list">

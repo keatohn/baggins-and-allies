@@ -1285,8 +1285,9 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   // Purchasable units for current faction (with land/naval/siege split for purchase modal tabs)
   const availableUnits = useMemo(() => {
     if (!availableActions?.purchasable_units) return [];
+    const heroesOn = backendState?.heroes_enabled !== false;
     return availableActions.purchasable_units.map(u => {
-      const def = definitions?.units?.[u.unit_id] as { specials?: string[] } | undefined;
+      const def = definitions?.units?.[u.unit_id] as { specials?: string[]; hero_id?: string | null } | undefined;
       const specialsDefs = definitions?.specials as Record<string, unknown> | undefined;
       // Only ids with an entry in setup specials.json (object defs). Drops naval/land/transportable/siegework etc.
       const specIds = (Array.isArray(def?.specials) ? def.specials : []).filter((sid) => {
@@ -1302,6 +1303,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       const ud = unitDefs[u.unit_id] as { home_territory_ids?: string[] } | undefined;
       const homeTerritoryCount = ud?.home_territory_ids?.length ?? 0;
       const isNaval = navalUnitIds.has(u.unit_id);
+      const heroIdRaw = u.hero_id ?? def?.hero_id;
+      const heroId = typeof heroIdRaw === 'string' && heroIdRaw.trim() ? heroIdRaw.trim() : undefined;
       return {
         id: u.unit_id,
         name: u.display_name || u.unit_id,
@@ -1312,13 +1315,15 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         movement: u.movement,
         health: u.health,
         dice: u.dice ?? 1,
+        heroId,
+        maxAffordable: u.max_affordable,
         isNaval,
         isSiegework: !isNaval && siegeworkUnitIds.has(u.unit_id),
         specialLabels,
         homeTerritoryCount,
       };
-    });
-  }, [availableActions, unitDefs, navalUnitIds, siegeworkUnitIds, definitions?.units, definitions?.specials]);
+    }).filter((u) => heroesOn || !u.heroId);
+  }, [availableActions, unitDefs, navalUnitIds, siegeworkUnitIds, definitions?.units, definitions?.specials, backendState?.heroes_enabled]);
 
   // Mobilizable purchases
   const mobilizablePurchases = useMemo(() => {
@@ -4011,6 +4016,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               gameId={GAME_ID}
               setupId={gameSetupId}
               territoryDefenderCasualtyOrder={backendState?.territory_defender_casualty_order ?? {}}
+              heroesEnabled={backendState?.heroes_enabled !== false}
               embedded
             />
           </div>

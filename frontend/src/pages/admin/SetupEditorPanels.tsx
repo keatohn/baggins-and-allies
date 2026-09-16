@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import TURN_MUSIC_M4A from 'virtual:turn-music-m4a';
+import UNIT_ICON_PNG from 'virtual:unit-icon-png';
 import type { AdminSetupBundle } from '../../services/api';
 
 function linesToList(s: string): string[] {
@@ -59,36 +61,170 @@ function MultilineIdList({ value, onApply }: { value: unknown; onApply: (ids: st
   );
 }
 
+function musicValueToList(value: unknown): string[] {
+  if (value == null) return [];
+  if (typeof value === 'string') {
+    const s = value.trim();
+    return s ? [s] : [];
+  }
+  if (Array.isArray(value)) {
+    return value.filter((x): x is string => typeof x === 'string' && Boolean(x.trim())).map((x) => x.trim());
+  }
+  return [];
+}
+
+function musicChipLabel(filename: string): string {
+  return filename.replace(/\.(m4a|mp3|ogg|wav)$/i, '');
+}
+
 function MusicField({ value, onApply }: { value: unknown; onApply: (m: string | string[] | undefined) => void }) {
-  const [t, setT] = useState('');
-  useEffect(() => {
-    if (value === undefined || value === null) setT('');
-    else if (typeof value === 'string') setT(value);
-    else setT(JSON.stringify(value, null, 2));
-  }, [typeof value === 'string' ? value : JSON.stringify(value)]);
+  const selected = musicValueToList(value);
+  const unselected = TURN_MUSIC_M4A.filter((f) => !selected.includes(f));
+
+  const commit = (next: string[]) => {
+    onApply(next.length > 0 ? next : undefined);
+  };
+
   return (
-    <textarea
-      className="admin-form__textarea admin-form__textarea--json"
-      spellCheck={false}
-      value={t}
-      onChange={(e) => setT(e.target.value)}
-      onBlur={() => {
-        const raw = t.trim();
-        if (!raw) {
-          onApply(undefined);
-          return;
-        }
-        if (raw.startsWith('[') || raw.startsWith('"')) {
-          try {
-            onApply(JSON.parse(raw) as string | string[]);
-            return;
-          } catch {
-            /* treat as plain filename */
-          }
-        }
-        onApply(raw);
-      }}
-    />
+    <div className="admin-music-picker">
+      {selected.length === 0 ? (
+        <span className="admin-music-picker__empty">None (uses faction id)</span>
+      ) : (
+        selected.map((filename, idx) => (
+          <span key={`${filename}-${idx}`} className="admin-music-chip">
+            <span className="admin-music-chip__name" title={filename}>
+              {musicChipLabel(filename)}
+            </span>
+            <span className="admin-music-chip__actions">
+              <button
+                type="button"
+                className="admin-music-chip__btn"
+                disabled={idx === 0}
+                aria-label={`Move ${filename} earlier`}
+                onClick={() => {
+                  if (idx === 0) return;
+                  const next = selected.slice();
+                  [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+                  commit(next);
+                }}
+              >
+                ‹
+              </button>
+              <button
+                type="button"
+                className="admin-music-chip__btn"
+                disabled={idx === selected.length - 1}
+                aria-label={`Move ${filename} later`}
+                onClick={() => {
+                  if (idx >= selected.length - 1) return;
+                  const next = selected.slice();
+                  [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
+                  commit(next);
+                }}
+              >
+                ›
+              </button>
+              <button
+                type="button"
+                className="admin-music-chip__btn admin-music-chip__btn--remove"
+                aria-label={`Remove ${filename}`}
+                onClick={() => commit(selected.filter((_, i) => i !== idx))}
+              >
+                ×
+              </button>
+            </span>
+          </span>
+        ))
+      )}
+      <select
+        className="admin-form__input admin-music-picker__add"
+        aria-label="Add turn music track"
+        value=""
+        disabled={unselected.length === 0}
+        onChange={(e) => {
+          const filename = e.target.value;
+          if (!filename || selected.includes(filename)) return;
+          commit([...selected, filename]);
+        }}
+      >
+        <option value="">{unselected.length === 0 ? 'All tracks added' : 'Add track…'}</option>
+        {unselected.map((f) => (
+          <option key={f} value={f}>
+            {musicChipLabel(f)}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function HeroIdField({
+  value,
+  knownHeroIds,
+  onApply,
+}: {
+  value: unknown;
+  knownHeroIds: string[];
+  onApply: (id: string | undefined) => void;
+}) {
+  const current = typeof value === 'string' ? value.trim() : '';
+  const options = [...knownHeroIds];
+  if (current && !options.includes(current)) options.unshift(current);
+  return (
+    <div className="admin-icon-picker">
+      <input
+        className="admin-form__input admin-icon-picker__select"
+        list="admin-hero-id-options"
+        placeholder="None (not a hero)"
+        value={current}
+        onChange={(e) => onApply(e.target.value.trim() || undefined)}
+        aria-label="Hero id"
+      />
+      <datalist id="admin-hero-id-options">
+        {options.map((id) => (
+          <option key={id} value={id} />
+        ))}
+      </datalist>
+    </div>
+  );
+}
+
+function iconStem(filename: string): string {
+  return filename.replace(/\.png$/i, '');
+}
+
+function UnitIconField({ value, onApply }: { value: unknown; onApply: (icon: string | undefined) => void }) {
+  const current = typeof value === 'string' ? value.trim() : '';
+  const options = current && !UNIT_ICON_PNG.includes(current) ? [current, ...UNIT_ICON_PNG] : UNIT_ICON_PNG;
+  return (
+    <div className="admin-icon-picker">
+      {current ? (
+        <img
+          key={current}
+          src={`/assets/units/${current}`}
+          alt=""
+          className="admin-icon-picker__preview"
+          onError={(e) => {
+            (e.target as HTMLImageElement).style.visibility = 'hidden';
+          }}
+        />
+      ) : (
+        <span className="admin-icon-picker__preview admin-icon-picker__preview--empty" aria-hidden />
+      )}
+      <select
+        className="admin-form__input admin-icon-picker__select"
+        aria-label="Unit icon"
+        value={current}
+        onChange={(e) => onApply(e.target.value || undefined)}
+      >
+        <option value="">None (uses unit id)</option>
+        {options.map((f) => (
+          <option key={f} value={f}>
+            {iconStem(f)}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 
@@ -339,6 +475,15 @@ export function UnitsPanel({
   units: Record<string, Record<string, unknown>>;
   onChange: (next: Record<string, Record<string, unknown>>) => void;
 }) {
+  const knownHeroIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const u of Object.values(units)) {
+      const hid = typeof u.hero_id === 'string' ? u.hero_id.trim() : '';
+      if (hid) ids.add(hid);
+    }
+    return [...ids].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [units]);
+
   return (
     <EntityDictPanel
       title="unit"
@@ -354,6 +499,14 @@ export function UnitsPanel({
           {fieldRow(
             'Faction',
             <input type="text" className="admin-form__input" value={String(u.faction ?? '')} onChange={(e) => patch({ faction: e.target.value })} />,
+          )}
+          {fieldRow(
+            'Hero id',
+            <HeroIdField
+              value={u.hero_id}
+              knownHeroIds={knownHeroIds}
+              onApply={(hero_id) => patch({ hero_id })}
+            />,
           )}
           {fieldRow(
             'Archetype',
@@ -417,12 +570,8 @@ export function UnitsPanel({
             <input type="checkbox" checked={u.purchasable !== false} onChange={(e) => patch({ purchasable: e.target.checked })} />,
           )}
           {fieldRow(
-            'Unique',
-            <input type="checkbox" checked={u.unique === true} onChange={(e) => patch({ unique: e.target.checked })} />,
-          )}
-          {fieldRow(
-            'Icon filename',
-            <input type="text" className="admin-form__input" value={String(u.icon ?? '')} onChange={(e) => patch({ icon: e.target.value || undefined })} />,
+            'Icon',
+            <UnitIconField value={u.icon} onApply={(icon) => patch({ icon })} />,
           )}
           {fieldRow(
             'Transport capacity',
@@ -537,6 +686,36 @@ export function TerritoriesPanel({
   );
 }
 
+function parseHexColor(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const s = value.trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(s)) return `#${s.slice(1).toLowerCase()}`;
+  return null;
+}
+
+function FactionColorField({ value, onApply }: { value: unknown; onApply: (c: string) => void }) {
+  const raw = typeof value === 'string' ? value : '';
+  const hex = parseHexColor(value);
+  return (
+    <div className="admin-color-picker">
+      <input
+        type="color"
+        className="admin-color-picker__swatch"
+        value={hex ?? '#888888'}
+        onChange={(e) => onApply(e.target.value.toLowerCase())}
+        aria-label="Faction color palette"
+      />
+      <input
+        type="text"
+        className="admin-form__input admin-color-picker__hex"
+        spellCheck={false}
+        value={raw}
+        onChange={(e) => onApply(e.target.value)}
+      />
+    </div>
+  );
+}
+
 export function FactionsPanel({
   factions,
   onChange,
@@ -566,14 +745,14 @@ export function FactionsPanel({
           )}
           {fieldRow(
             'Color',
-            <input type="text" className="admin-form__input" value={String(f.color ?? '')} onChange={(e) => patch({ color: e.target.value })} />,
+            <FactionColorField value={f.color} onApply={(color) => patch({ color })} />,
           )}
           {fieldRow(
             'Icon filename',
             <input type="text" className="admin-form__input" value={String(f.icon ?? '')} onChange={(e) => patch({ icon: e.target.value || undefined })} />,
           )}
           {fieldRow(
-            'Music (filename, JSON string, or JSON array)',
+            'Music',
             <MusicField value={f.music} onApply={(m) => patch({ music: m })} />,
           )}
         </div>

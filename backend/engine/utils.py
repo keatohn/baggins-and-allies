@@ -142,6 +142,22 @@ def has_unit_tag(unit_def: UnitDefinition | None, tag: str) -> bool:
     return tag in tags
 
 
+def unit_hero_id(unit_def: UnitDefinition | None) -> str | None:
+    """Hero family id, or None if this unit is not a hero."""
+    if unit_def is None:
+        return None
+    raw = getattr(unit_def, "hero_id", None)
+    if not isinstance(raw, str):
+        return None
+    s = raw.strip()
+    return s or None
+
+
+def is_hero_unit(unit_def: UnitDefinition | None) -> bool:
+    """True if the unit has a non-empty `hero_id`."""
+    return unit_hero_id(unit_def) is not None
+
+
 def faction_owns_capital(
     state: GameState,
     faction_id: str,
@@ -207,6 +223,7 @@ def initialize_game_state(
     camp_cost: int | None = None,
     stronghold_repair_cost: int | None = None,
     prefire_penalty: bool | None = None,
+    heroes_enabled: bool | None = None,
 ) -> GameState:
     """
     Create an initial game state with all factions and territories set up.
@@ -296,6 +313,7 @@ def initialize_game_state(
     camp_cost_val = camp_cost if camp_cost is not None else 0
     stronghold_repair_cost_val = stronghold_repair_cost if stronghold_repair_cost is not None else 0
     prefire_penalty_val = True if prefire_penalty is None else bool(prefire_penalty)
+    heroes_enabled_val = True if heroes_enabled is None else bool(heroes_enabled)
     starting_territory_owners: dict[str, str] = {
         tid: o for tid, o in (
             (tid, ts.original_owner)
@@ -319,6 +337,7 @@ def initialize_game_state(
         camp_cost=camp_cost_val,
         stronghold_repair_cost=stronghold_repair_cost_val,
         prefire_penalty=prefire_penalty_val,
+        heroes_enabled=heroes_enabled_val,
         faction_territories_at_turn_start=faction_territories_at_turn_start,
         turn_order=turn_order,
         starting_territory_owners=starting_territory_owners,
@@ -338,6 +357,8 @@ def initialize_game_state(
 
                 unit_def = unit_defs.get(unit_id)
                 if not unit_def:
+                    continue
+                if not heroes_enabled_val and is_hero_unit(unit_def):
                     continue
 
                 # Faction: territory owner, or unit definition (e.g. "neutral") for unowned territories (moria, withered_heath)

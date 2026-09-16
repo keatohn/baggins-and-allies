@@ -7,6 +7,7 @@ export default function CreateGame() {
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [isMultiplayer, setIsMultiplayer] = useState(false);
+  const [heroesEnabled, setHeroesEnabled] = useState(true);
   const [setups, setSetups] = useState<SetupInfo[]>([]);
   const [selectedSetupId, setSelectedSetupId] = useState<string | null>(null);
   const [loadingSetups, setLoadingSetups] = useState(true);
@@ -55,6 +56,7 @@ export default function CreateGame() {
         name.trim() || 'My game',
         isMultiplayer,
         selectedSetupId ?? undefined,
+        heroesEnabled,
       );
       const initialState = res.state != null
         ? { ...res.state, turn_order: res.turn_order ?? res.state.turn_order }
@@ -139,6 +141,25 @@ export default function CreateGame() {
               onClick={() => setIsMultiplayer(true)}
             >
               Multiplayer
+            </button>
+          </div>
+        </div>
+        <div className="create-game-form__field">
+          <span className="create-game-form__field-label">Heroes</span>
+          <div className="create-game-form__picker" role="group" aria-label="Heroes on or off">
+            <button
+              type="button"
+              className={`create-game-form__picker-option ${heroesEnabled ? 'create-game-form__picker-option--active' : ''}`}
+              onClick={() => setHeroesEnabled(true)}
+            >
+              On
+            </button>
+            <button
+              type="button"
+              className={`create-game-form__picker-option ${!heroesEnabled ? 'create-game-form__picker-option--active' : ''}`}
+              onClick={() => setHeroesEnabled(false)}
+            >
+              Off
             </button>
           </div>
         </div>

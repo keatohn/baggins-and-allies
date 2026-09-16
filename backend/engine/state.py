@@ -591,6 +591,8 @@ class GameState:
     stronghold_repair_cost: int = 0  # From setup manifest; 0 = not set / no repair
     # Stealth/archer prefire: when True (default), prefire rolls use -1 to hit stat; when False, no penalty.
     prefire_penalty: bool = True
+    # Hero units (`hero_id` on the unit def): when False, they cannot be purchased and are omitted from starting placement.
+    heroes_enabled: bool = True
     # Faction territories at start of their turn (set when turn starts). Used for camp placement options.
     faction_territories_at_turn_start: dict[str, list[str]] = field(default_factory=dict)
     # Purchased camps this turn: list of {territory_options: [tid, ...], placed_territory_id: None | str}
@@ -662,6 +664,7 @@ class GameState:
             "camp_cost": self.camp_cost,
             "stronghold_repair_cost": getattr(self, "stronghold_repair_cost", 0),
             "prefire_penalty": getattr(self, "prefire_penalty", True),
+            "heroes_enabled": getattr(self, "heroes_enabled", True),
             "faction_territories_at_turn_start": self.faction_territories_at_turn_start,
             "pending_camps": self.pending_camps,
             "pending_camp_placements": [p.to_dict() for p in self.pending_camp_placements],
@@ -769,6 +772,7 @@ class GameState:
             camp_cost=int(data["camp_cost"]) if data.get("camp_cost") is not None else 0,
             stronghold_repair_cost=int(data["stronghold_repair_cost"]) if data.get("stronghold_repair_cost") is not None else 0,
             prefire_penalty=parse_prefire_penalty_from_manifest(data.get("prefire_penalty")),
+            heroes_enabled=parse_prefire_penalty_from_manifest(data.get("heroes_enabled")),
             faction_territories_at_turn_start=_ensure_faction_territories_at_turn_start(
                 data.get("faction_territories_at_turn_start")
             ),

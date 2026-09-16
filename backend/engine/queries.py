@@ -46,6 +46,7 @@ from backend.engine.utils import (
     has_unit_special,
     is_aerial_unit,
     is_land_unit,
+    unit_hero_id,
 )
 
 
@@ -483,6 +484,83 @@ def validate_move_as_sea_offload_if_applicable(
     return ValidationResult(True)
 
 
+def count_unit_instances(state: GameState, unit_id: str) -> int:
+    """
+    Count instances of a unit type in the whole game: map (including cargo),
+    purchased-but-unplaced pools, and queued pending mobilizations.
+    """
+    n = 0
+    for terr in (state.territories or {}).values():
+        for u in getattr(terr, "units", None) or []:
+            if getattr(u, "unit_id", None) == unit_id:
+                n += 1
+    for stacks in (state.faction_purchased_units or {}).values():
+        for stack in stacks or []:
+            if getattr(stack, "unit_id", None) == unit_id:
+                n += int(getattr(stack, "count", 0) or 0)
+    for pm in getattr(state, "pending_mobilizations", None) or []:
+        for item in getattr(pm, "units", None) or []:
+            if isinstance(item, dict):
+                uid = item.get("unit_id")
+                c = item.get("count", 0)
+            else:
+                uid = getattr(item, "unit_id", None)
+                c = getattr(item, "count", 0)
+            if uid == unit_id:
+                n += int(c or 0)
+    return n
+
+
+def count_hero_family_instances(
+    state: GameState,
+    hero_id: str,
+    unit_defs: dict[str, UnitDefinition],
+) -> int:
+    """Count in-play instances of every unit type that shares this hero_id."""
+    hid = (hero_id or "").strip()
+    if not hid:
+        return 0
+    n = 0
+    for uid, udef in (unit_defs or {}).items():
+        if unit_hero_id(udef) == hid:
+            n += count_unit_instances(state, uid)
+    return n
+
+
+def unique_units_purchase_error(
+    state: GameState,
+    purchases: dict[str, int],
+    unit_defs: dict[str, UnitDefinition],
+) -> str | None:
+    """Return an error if this purchase would put more than one of a hero family in play, or heroes are off."""
+    heroes_on = bool(getattr(state, "heroes_enabled", True))
+    family_purchases: dict[str, int] = {}
+    family_names: dict[str, str] = {}
+    for unit_id, count in (purchases or {}).items():
+        if count <= 0:
+            continue
+        unit_def = unit_defs.get(unit_id)
+        hid = unit_hero_id(unit_def)
+        if not hid:
+            continue
+        name = getattr(unit_def, "display_name", None) or unit_id
+        if not heroes_on:
+            return f"Cannot purchase {name}: heroes are disabled in this game"
+        family_purchases[hid] = family_purchases.get(hid, 0) + count
+        family_names[hid] = name
+    for hid, count in family_purchases.items():
+        existing = count_hero_family_instances(state, hid, unit_defs)
+        if existing + count <= 1:
+            continue
+        name = family_names.get(hid) or hid
+        if existing <= 0:
+            return (
+                f"Cannot purchase more than one {name}: unique units are limited to one in play"
+            )
+        return f"Cannot purchase {name}: one is already in play"
+    return None
+
+
 def _validate_purchase(
     state: GameState,
     action: Action,
@@ -525,6 +603,10 @@ def _validate_purchase(
 
         for resource, amount in unit_def.cost.items():
             total_cost[resource] = total_cost.get(resource, 0) + (amount * count)
+
+    unique_err = unique_units_purchase_error(state, purchases, unit_defs)
+    if unique_err:
+        return ValidationResult(False, unique_err)
 
     # Check resources
     faction_resources = state.faction_resources.get(faction_id, {})
@@ -1828,7 +1910,9 @@ def get_purchasable_units(
 ) -> list[dict[str, Any]]:
     """
     Get all unit types the faction can purchase with current resources.
-    Returns list of {unit_id, display_name, cost, max_affordable}.
+    Returns list of {unit_id, display_name, cost, max_affordable, unique, hero_id, ...}.
+    Hero units (`hero_id`) cap max_affordable at remaining family slots (0 or 1) based on units
+    already on the map, in purchased pools, or queued for mobilization (all versions share the cap).
     """
     faction_resources = state.faction_resources.get(faction_id, {})
     result = []
@@ -1837,6 +1921,10 @@ def get_purchasable_units(
         if unit_def.faction != faction_id:
             continue
         if not unit_def.purchasable:
+            continue
+        hid = unit_hero_id(unit_def)
+        unique = hid is not None
+        if unique and not bool(getattr(state, "heroes_enabled", True)):
             continue
 
         # Calculate max affordable
@@ -1849,11 +1937,17 @@ def get_purchasable_units(
         if max_affordable == float('inf'):
             max_affordable = 0
 
+        if unique and hid:
+            existing = count_hero_family_instances(state, hid, unit_defs)
+            max_affordable = min(max_affordable, max(0, 1 - existing))
+
         result.append({
             "unit_id": unit_id,
             "display_name": unit_def.display_name,
             "cost": unit_def.cost,
             "max_affordable": int(max_affordable),
+            "unique": unique,
+            "hero_id": hid,
             "attack": unit_def.attack,
             "defense": unit_def.defense,
             "movement": unit_def.movement,

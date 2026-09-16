@@ -78,6 +78,7 @@ from backend.engine.queries import (
     _sea_zone_adjacent_to_owned_port,
     _port_power_for_sea_zone,
     get_mobilization_capacity,
+    unique_units_purchase_error,
     _home_territory_ids,
     _is_naval_unit,
     participates_in_sea_hex_naval_combat,
@@ -635,6 +636,10 @@ def _handle_purchase_units(
             if resource_id not in total_cost:
                 total_cost[resource_id] = 0
             total_cost[resource_id] += cost_amount * count
+
+    unique_err = unique_units_purchase_error(state, purchases, unit_defs)
+    if unique_err:
+        raise ValueError(unique_err)
 
     # Validate faction has resources
     faction_resources = state.faction_resources.get(faction_id, {})

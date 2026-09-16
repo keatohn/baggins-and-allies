@@ -317,6 +317,8 @@ class CreateGameRequest(BaseModel):
     map_asset: str | None = None
     """Faction IDs controlled by AI (single-player or fill slots). Omitted = no AI factions."""
     ai_factions: list[str] | None = None
+    """Hero-tagged units. Default True. When False they cannot be purchased and are omitted from starting placement."""
+    heroes_enabled: bool = True
 
 
 class JoinGameRequest(BaseModel):
@@ -1406,6 +1408,7 @@ def create_game(
         camp_cost=camp_cost,
         stronghold_repair_cost=stronghold_repair_cost,
         prefire_penalty=parse_prefire_penalty_from_manifest(setup.get("prefire_penalty")),
+        heroes_enabled=bool(request.heroes_enabled),
     )
     state.map_asset = setup["map_asset"]
     # Ensure turn_order is never empty for new games (ticker and faction order)
@@ -1439,6 +1442,7 @@ def create_game(
     )
     # Always persist resolved setup (including default) so list/meta can show scenario name.
     config_snapshot["setup_id"] = setup_id
+    config_snapshot["heroes_enabled"] = bool(getattr(state, "heroes_enabled", True))
     # ai_factions set on start from unclaimed factions (single-player) or not used (multiplayer)
     if request.ai_factions:
         config_snapshot["ai_factions"] = list(request.ai_factions)

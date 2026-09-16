@@ -205,6 +205,8 @@ class UnitDefinition:
     dice: int = 1  # Number of dice rolled in combat (most units roll 1)
     purchasable: bool = True
     unique: bool = False
+    # Non-empty: this unit is a hero; same id on multiple defs = versions of one hero (one in play).
+    hero_id: Optional[str] = None
     icon: Optional[str] = None  # Filename in frontend/assets/units/
 
     # Future hooks for features not in V1
@@ -291,6 +293,14 @@ def is_transportable(ud: "UnitDefinition | None") -> bool:
     return "transportable" in (getattr(ud, "tags", None) or [])
 
 
+def _parse_hero_id(data: dict) -> Optional[str]:
+    raw = data.get("hero_id")
+    if not isinstance(raw, str):
+        return None
+    s = raw.strip()
+    return s or None
+
+
 def _parse_home_territories(data: dict) -> dict:
     """Return home_territory_ids from unit data (list only; supports legacy home_territory_id single key)."""
     ids = data.get("home_territory_ids")
@@ -350,6 +360,7 @@ def load_static_definitions(
             dice=data.get("dice", 1),
             purchasable=data.get("purchasable", True),
             unique=data.get("unique", False),
+            hero_id=_parse_hero_id(data),
             icon=data.get("icon"),
             transport_capacity=data.get("transport_capacity", 0),
             downgrade_to=data.get("downgrade_to"),
@@ -452,6 +463,7 @@ def definitions_from_snapshot(snapshot: dict) -> tuple[
             dice=data.get("dice", 1),
             purchasable=data.get("purchasable", True),
             unique=data.get("unique", False),
+            hero_id=_parse_hero_id(data),
             icon=data.get("icon"),
             transport_capacity=data.get("transport_capacity", 0),
             downgrade_to=data.get("downgrade_to"),

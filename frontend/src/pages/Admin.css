@@ -364,6 +364,122 @@
   min-width: 0;
 }
 
+.admin-music-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.admin-music-picker__empty {
+  font-size: 0.82rem;
+  color: var(--ink-faded);
+}
+
+.admin-music-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  max-width: 100%;
+  padding: 0.12rem 0.2rem 0.12rem 0.45rem;
+  border: 1px solid var(--ink-faded);
+  border-radius: 5px;
+  background: #fffef8;
+  font-size: 0.82rem;
+  line-height: 1.2;
+  color: var(--ink);
+}
+
+.admin-music-chip__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-music-chip__actions {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.admin-music-chip__btn {
+  margin: 0;
+  padding: 0 0.18rem;
+  border: none;
+  background: transparent;
+  color: var(--ink-faded);
+  font-size: 0.85rem;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.admin-music-chip__btn:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.admin-music-chip__btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.admin-music-chip__btn--remove {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.admin-music-picker__add {
+  max-width: 16rem;
+}
+
+.admin-icon-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.admin-icon-picker__preview {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  object-fit: contain;
+  border: 1px solid var(--ink-faded);
+  border-radius: 4px;
+  background: #fffef8;
+}
+
+.admin-icon-picker__preview--empty {
+  display: inline-block;
+  box-sizing: border-box;
+}
+
+.admin-icon-picker__select {
+  max-width: 16rem;
+}
+
+.admin-color-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.admin-color-picker__swatch {
+  width: 2.4rem;
+  height: 2.15rem;
+  padding: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--ink-faded);
+  border-radius: 6px;
+  background: #fffef8;
+  cursor: pointer;
+}
+
+.admin-color-picker__hex {
+  max-width: 8rem;
+}
+
 .admin-form__inline {
   display: flex;
   flex-wrap: wrap;

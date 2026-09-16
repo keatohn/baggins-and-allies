@@ -199,6 +199,11 @@
   border-bottom: none;
 }
 
+.unit-row--blocked {
+  opacity: 0.42;
+  filter: grayscale(0.45);
+}
+
 .unit-info {
   display: flex;
   align-items: center;

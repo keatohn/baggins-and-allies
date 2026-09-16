@@ -26,6 +26,8 @@ interface CombatSimulatorPanelProps {
   setupId?: string | null;
   /** Per-territory defender casualty order from live game (`best_unit` | `best_defense`). Drives default defender sim pill when a real territory is selected (attacker order is never derived from territory). */
   territoryDefenderCasualtyOrder?: Record<string, string>;
+  /** When false, units with `hero_id` are omitted from attacker and defender pickers. Default true. */
+  heroesEnabled?: boolean;
   onClose?: () => void;
   embedded?: boolean;
 }
@@ -123,18 +125,117 @@ function getTerrainTypeFromTerritoryId(definitions: Definitions | null, territor
 
 const SIM_COUNT_INPUT_MAX = 999;
 
+function unitHeroId(definitions: Definitions | null, unitId: string): string | null {
+  if (!definitions?.units) return null;
+  const raw = (definitions.units[unitId] as { hero_id?: string | null } | undefined)?.hero_id;
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim();
+  return s || null;
+}
+
+function isHeroUnit(definitions: Definitions | null, unitId: string): boolean {
+  return unitHeroId(definitions, unitId) != null;
+}
+
+function simAllowsHeroUnit(
+  definitions: Definitions | null,
+  unitId: string,
+  heroesEnabled: boolean,
+): boolean {
+  return heroesEnabled || !isHeroUnit(definitions, unitId);
+}
+
+function simCountOfUnitId(
+  unitId: string,
+  attackerCounts: Record<string, number>,
+  defenderTerritoryCounts: Record<string, number>,
+  addedDefenderStacks: { unit_id: string; count: number }[],
+): number {
+  let n = (attackerCounts[unitId] ?? 0) + (defenderTerritoryCounts[unitId] ?? 0);
+  for (const row of addedDefenderStacks) {
+    if (row.unit_id === unitId) n += row.count;
+  }
+  return n;
+}
+
+function simCountOfHeroFamily(
+  definitions: Definitions | null,
+  unitId: string,
+  attackerCounts: Record<string, number>,
+  defenderTerritoryCounts: Record<string, number>,
+  addedDefenderStacks: { unit_id: string; count: number }[],
+): number {
+  const heroId = unitHeroId(definitions, unitId);
+  if (!heroId) return simCountOfUnitId(unitId, attackerCounts, defenderTerritoryCounts, addedDefenderStacks);
+  const ids = new Set<string>([unitId]);
+  if (definitions?.units) {
+    for (const uid of Object.keys(definitions.units)) {
+      if (unitHeroId(definitions, uid) === heroId) ids.add(uid);
+    }
+  }
+  for (const uid of Object.keys(attackerCounts)) ids.add(uid);
+  for (const uid of Object.keys(defenderTerritoryCounts)) ids.add(uid);
+  for (const row of addedDefenderStacks) ids.add(row.unit_id);
+  let n = 0;
+  for (const uid of ids) {
+    if (unitHeroId(definitions, uid) === heroId) {
+      n += simCountOfUnitId(uid, attackerCounts, defenderTerritoryCounts, addedDefenderStacks);
+    }
+  }
+  return n;
+}
+
+/** Combined attacker+defender cap for unique units; otherwise 999. `thisCount` is this row's current count. */
+function simMaxForUnit(
+  definitions: Definitions | null,
+  unitId: string,
+  thisCount: number,
+  attackerCounts: Record<string, number>,
+  defenderTerritoryCounts: Record<string, number>,
+  addedDefenderStacks: { unit_id: string; count: number }[],
+): number {
+  if (!isHeroUnit(definitions, unitId)) return SIM_COUNT_INPUT_MAX;
+  const others =
+    simCountOfHeroFamily(definitions, unitId, attackerCounts, defenderTerritoryCounts, addedDefenderStacks) -
+    thisCount;
+  return Math.max(0, 1 - others);
+}
+
+function clampUniqueStacks(
+  definitions: Definitions | null,
+  attacker: { unit_id: string; count: number }[],
+  defender: { unit_id: string; count: number }[],
+): { attacker: { unit_id: string; count: number }[]; defender: { unit_id: string; count: number }[] } {
+  const remaining: Record<string, number> = {};
+  const clamp = (stacks: { unit_id: string; count: number }[]) =>
+    stacks
+      .map((s) => {
+        const hid = unitHeroId(definitions, s.unit_id);
+        if (!hid) return s;
+        const left = remaining[hid] ?? 1;
+        const take = Math.min(s.count, left);
+        remaining[hid] = left - take;
+        return { ...s, count: take };
+      })
+      .filter((s) => s.count > 0);
+  return { attacker: clamp(attacker), defender: clamp(defender) };
+}
+
 /** Touch-friendly count control: − / number / + */
 function SimCountStepper({
   value,
   onChange,
   unitLabel,
+  max = SIM_COUNT_INPUT_MAX,
 }: {
   value: number;
   onChange: (n: number) => void;
   /** For aria-label, e.g. unit display name */
   unitLabel: string;
+  max?: number;
 }) {
-  const v = Math.max(0, Math.min(SIM_COUNT_INPUT_MAX, value));
+  const cap = Math.max(0, Math.min(SIM_COUNT_INPUT_MAX, max));
+  const v = Math.max(0, Math.min(cap, value));
   const aria = `Count for ${unitLabel}`;
   return (
     <div className="combat-sim-count-stepper">
@@ -150,7 +251,7 @@ function SimCountStepper({
       <input
         type="number"
         min={0}
-        max={SIM_COUNT_INPUT_MAX}
+        max={cap}
         inputMode="numeric"
         className="combat-sim-input combat-sim-input--stepper"
         value={v}
@@ -162,7 +263,7 @@ function SimCountStepper({
           }
           const n = parseInt(raw, 10);
           if (Number.isNaN(n)) return;
-          onChange(Math.max(0, Math.min(SIM_COUNT_INPUT_MAX, n)));
+          onChange(Math.max(0, Math.min(cap, n)));
         }}
         aria-label={aria}
       />
@@ -170,8 +271,8 @@ function SimCountStepper({
         type="button"
         className="combat-sim-count-btn combat-sim-count-btn--inc"
         aria-label={`${aria}: increase`}
-        disabled={v >= SIM_COUNT_INPUT_MAX}
-        onClick={() => onChange(Math.min(SIM_COUNT_INPUT_MAX, v + 1))}
+        disabled={v >= cap}
+        onClick={() => onChange(Math.min(cap, v + 1))}
       >
         +
       </button>
@@ -592,6 +693,7 @@ export default function CombatSimulatorPanel({
   gameId = null,
   setupId = null,
   territoryDefenderCasualtyOrder = {},
+  heroesEnabled = true,
   onClose,
   embedded,
 }: CombatSimulatorPanelProps) {
@@ -718,6 +820,7 @@ export default function CombatSimulatorPanel({
   const attackerUnits = useMemo(
     () =>
       attackerUnitsAll.filter((u) => {
+        if (!simAllowsHeroUnit(definitions, u.id, heroesEnabled)) return false;
         if (!unitAllowedForCombatType(definitions, u.id, isLandCombat)) return false;
         if (getUnitMovement(definitions, u.id) <= 0) return false;
         if (!isLandCombat) {
@@ -726,7 +829,7 @@ export default function CombatSimulatorPanel({
         }
         return true;
       }).slice().sort((a, b) => compareUnitIdsByBattleOrder(definitions, unitDefs, a.id, b.id)),
-    [attackerUnitsAll, definitions, isLandCombat, unitDefs]
+    [attackerUnitsAll, definitions, isLandCombat, unitDefs, heroesEnabled]
   );
 
   const attackingTerritoryOptions = useMemo(() => {
@@ -756,8 +859,13 @@ export default function CombatSimulatorPanel({
 
   const defenderStacks = territoryId ? (territoryUnits[territoryId] ?? []).filter((s) => s.count > 0) : [];
   const defenderStacksFiltered = useMemo(
-    () => defenderStacks.filter((s) => unitAllowedForCombatType(definitions, s.unit_id, isLandCombat)),
-    [defenderStacks, definitions, isLandCombat]
+    () =>
+      defenderStacks.filter(
+        (s) =>
+          unitAllowedForCombatType(definitions, s.unit_id, isLandCombat) &&
+          simAllowsHeroUnit(definitions, s.unit_id, heroesEnabled),
+      ),
+    [defenderStacks, definitions, isLandCombat, heroesEnabled]
   );
 
   const defenderStacksFilteredRef = useRef(defenderStacksFiltered);
@@ -826,6 +934,7 @@ export default function CombatSimulatorPanel({
         const raw = definitions?.units?.[s.unit_id];
         const f = (raw as { faction?: string } | undefined)?.faction ?? unitDefs[s.unit_id]?.faction;
         if (f !== attackerFaction) return;
+        if (!simAllowsHeroUnit(definitions, s.unit_id, heroesEnabled)) return;
         if (!unitAllowedForCombatType(definitions, s.unit_id, isLandCombat)) return;
         if (getUnitMovement(definitions, s.unit_id) <= 0) return;
         if (!isLandCombat && !isUnitPurchasableInDefs(raw)) return;
@@ -847,7 +956,7 @@ export default function CombatSimulatorPanel({
       const next = computeNext();
       return Object.keys(next).length > 0 ? next : prev;
     });
-  }, [attackerFaction, attackingTerritoryId, isLandCombat, definitions, unitDefs]);
+  }, [attackerFaction, attackingTerritoryId, isLandCombat, definitions, unitDefs, heroesEnabled]);
 
   const isTerrainSelection = territoryId.startsWith(TERRAIN_PREFIX);
   const defenderOrderForEffect =
@@ -1017,7 +1126,17 @@ export default function CombatSimulatorPanel({
   };
 
   const handleAttackerCount = (unitId: UnitId, value: number) => {
-    setAttackerCounts((prev) => ({ ...prev, [unitId]: Math.max(0, value) }));
+    setAttackerCounts((prev) => {
+      const max = simMaxForUnit(
+        definitions,
+        unitId,
+        prev[unitId] ?? 0,
+        prev,
+        defenderTerritoryCounts,
+        addedDefenderStacks,
+      );
+      return { ...prev, [unitId]: Math.max(0, Math.min(max, value)) };
+    });
   };
 
   const CHUNK_SIZE = 500;
@@ -1028,10 +1147,14 @@ export default function CombatSimulatorPanel({
       setError('Select a territory');
       return;
     }
-    const attStacks = attackerUnits
+    const rawAtt = attackerUnits
       .map((u) => ({ unit_id: u.id, count: attackerCounts[u.id] ?? 0 }))
       .filter((s) => s.count > 0);
-    const defStacks = defenderStacksMerged;
+    const { attacker: attStacks, defender: defStacks } = clampUniqueStacks(
+      definitions,
+      rawAtt,
+      defenderStacksMerged,
+    );
     if (attStacks.length === 0 || defStacks.length === 0) {
       setError('Add at least one attacker unit and ensure the territory has defenders (or add defending units).');
       return;
@@ -1341,6 +1464,7 @@ export default function CombatSimulatorPanel({
     for (const [uid, u] of Object.entries(definitions.units)) {
       const faction = (u as { faction?: string }).faction ?? 'neutral';
       if (!factionIds.includes(faction)) continue;
+      if (!simAllowsHeroUnit(definitions, uid, heroesEnabled)) continue;
       if (!isLandCombat && !isUnitPurchasableInDefs(u)) continue;
       if (!unitAllowedForDefenseInCombatType(definitions, uid, isLandCombat)) continue;
       const f = definitions.factions?.[faction] as { display_name?: string } | undefined;
@@ -1365,7 +1489,7 @@ export default function CombatSimulatorPanel({
       return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
     });
     return units;
-  }, [definitions, factionData, defenderLogoFaction, isLandCombat, territoryId, attackerFaction, unitDefs]);
+  }, [definitions, factionData, defenderLogoFaction, isLandCombat, territoryId, attackerFaction, unitDefs, heroesEnabled]);
 
   /** Exclude unit types already on the defender shelf (territory rows with count > 0, or added) so we only offer units not yet listed. */
   const addDefenderUnitOptionsFiltered = useMemo(() => {
@@ -1373,8 +1497,17 @@ export default function CombatSimulatorPanel({
     defenderStacksFiltered.forEach(({ unit_id, count: orig }) => {
       if ((defenderTerritoryCounts[unit_id] ?? orig) > 0) alreadyOnShelf.add(unit_id);
     });
-    return addDefenderUnitOptions.filter((u) => !alreadyOnShelf.has(u.id));
-  }, [addDefenderUnitOptions, defenderStacksFiltered, addedDefenderStacks, defenderTerritoryCounts]);
+    return addDefenderUnitOptions.filter((u) => {
+      if (alreadyOnShelf.has(u.id)) return false;
+      if (
+        isHeroUnit(definitions, u.id) &&
+        simCountOfHeroFamily(definitions, u.id, attackerCounts, defenderTerritoryCounts, addedDefenderStacks) >= 1
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [addDefenderUnitOptions, defenderStacksFiltered, addedDefenderStacks, defenderTerritoryCounts, attackerCounts, definitions]);
 
   function percentToColor(p: number): string {
     if (p <= 0) return 'hsl(0, 75%, 45%)';
@@ -1534,6 +1667,14 @@ export default function CombatSimulatorPanel({
                             value={attackerCounts[u.id] ?? 0}
                             onChange={(n) => handleAttackerCount(u.id, n)}
                             unitLabel={displayName}
+                            max={simMaxForUnit(
+                              definitions,
+                              u.id,
+                              attackerCounts[u.id] ?? 0,
+                              attackerCounts,
+                              defenderTerritoryCounts,
+                              addedDefenderStacks,
+                            )}
                           />
                         </div>
                       </div>
@@ -1593,9 +1734,27 @@ export default function CombatSimulatorPanel({
                                 <SimCountStepper
                                   value={count}
                                   onChange={(n) =>
-                                    setDefenderTerritoryCounts((prev) => ({ ...prev, [unit_id]: n }))
+                                    setDefenderTerritoryCounts((prev) => {
+                                      const max = simMaxForUnit(
+                                        definitions,
+                                        unit_id,
+                                        prev[unit_id] ?? count,
+                                        attackerCounts,
+                                        prev,
+                                        addedDefenderStacks,
+                                      );
+                                      return { ...prev, [unit_id]: Math.max(0, Math.min(max, n)) };
+                                    })
                                   }
                                   unitLabel={dName}
+                                  max={simMaxForUnit(
+                                    definitions,
+                                    unit_id,
+                                    count,
+                                    attackerCounts,
+                                    defenderTerritoryCounts,
+                                    addedDefenderStacks,
+                                  )}
                                 />
                                 <button
                                   type="button"
@@ -1648,10 +1807,29 @@ export default function CombatSimulatorPanel({
                                   value={count}
                                   onChange={(n) =>
                                     setAddedDefenderStacks((prev) =>
-                                      prev.map((s, i) => (i === idx ? { ...s, count: n } : s)),
+                                      prev.map((s, i) => {
+                                        if (i !== idx) return s;
+                                        const max = simMaxForUnit(
+                                          definitions,
+                                          unit_id,
+                                          s.count,
+                                          attackerCounts,
+                                          defenderTerritoryCounts,
+                                          prev,
+                                        );
+                                        return { ...s, count: Math.max(0, Math.min(max, n)) };
+                                      }),
                                     )
                                   }
                                   unitLabel={aName}
+                                  max={simMaxForUnit(
+                                    definitions,
+                                    unit_id,
+                                    count,
+                                    attackerCounts,
+                                    defenderTerritoryCounts,
+                                    addedDefenderStacks,
+                                  )}
                                 />
                                 <button
                                   type="button"

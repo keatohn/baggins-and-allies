@@ -23,9 +23,11 @@ from backend.engine.queries import (
     get_mobilization_capacity,
     get_mobilization_territories,
     count_open_home_mobilization_slots_for_unit,
+    count_unit_instances,
+    count_hero_family_instances,
 )
 from backend.engine.queries import _is_naval_unit, get_unit_faction
-from backend.engine.utils import faction_owns_capital, has_unit_special
+from backend.engine.utils import faction_owns_capital, has_unit_special, unit_hero_id
 from backend.engine.movement import get_reachable_territories_for_unit
 from backend.engine.state import Unit
 
@@ -289,6 +291,20 @@ def _is_siegework_unit(ud, unit_id: str) -> bool:
     """True if unit type is siegework archetype."""
     u_def = ud.get(unit_id) if ud else None
     return bool(u_def and getattr(u_def, "archetype", "") == "siegework")
+
+
+def _unique_at_cap(state, ud, unit_id: str, batch_counts: dict[str, int]) -> bool:
+    """True if this hero family is already in play or already picked in this purchase batch."""
+    u_def = ud.get(unit_id) if ud else None
+    hid = unit_hero_id(u_def)
+    if not hid:
+        return False
+    existing = count_hero_family_instances(state, hid, ud)
+    batch_family = 0
+    for uid, c in (batch_counts or {}).items():
+        if unit_hero_id((ud or {}).get(uid)) == hid:
+            batch_family += int(c or 0)
+    return existing + batch_family >= 1
 
 
 def _active_siegework_count(state, faction_id: str, ud) -> int:
@@ -717,6 +733,8 @@ def decide_purchase(ctx: AIContext):
                 continue
             if at_siegework_cap and _is_siegework_unit(ud, unit_id):
                 continue
+            if _unique_at_cap(state, ud, unit_id, batch_counts):
+                continue
             already = batch_counts.get(unit_id, 0)
             effective = score - PURCHASE_BATCH_DIVERSITY_PENALTY * already
             if best_unit_id is None or (effective, -cost_per) > (best_effective, -best_cost):
@@ -741,6 +759,8 @@ def decide_purchase(ctx: AIContext):
             if cost_per <= 0 or budget_left < cost_per:
                 continue
             if at_siegework_cap and _is_siegework_unit(ud, unit_id):
+                continue
+            if _unique_at_cap(state, ud, unit_id, purchases):
                 continue
             home_rem: int | None = None
             u_e = ud.get(unit_id)

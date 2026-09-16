@@ -139,6 +139,8 @@ export interface ApiGameState {
   territory_defender_casualty_order?: Record<string, string>;
   /** From setup manifest (purchase phase). */
   camp_cost?: number;
+  /** Unique/hero units (`hero_id` on the unit def). Missing defaults true (older games). */
+  heroes_enabled?: boolean;
   /** Power cost per stronghold HP repaired (from setup manifest). */
   stronghold_repair_cost?: number;
   /**
@@ -275,6 +277,8 @@ export interface ApiPurchasableUnit {
   display_name: string;
   cost: Record<string, number>;
   max_affordable: number;
+  unique?: boolean;
+  hero_id?: string | null;
   attack: number;
   defense: number;
   movement: number;
@@ -371,6 +375,8 @@ export interface ApiUnitDefinition {
   dice: number;
   purchasable: boolean;
   unique: boolean;
+  /** Same id on multiple unit defs = versions of one hero (one in play). Empty/omitted = not a hero. */
+  hero_id?: string | null;
   icon?: string;
   transport_capacity?: number;
   downgrade_to?: string | null;
@@ -786,12 +792,13 @@ export const api = {
   // Games (create, list, join)
   getSetups: () =>
     fetchJson<{ setups: SetupInfo[] }>('/setups'),
-  createGame: (name: string, isMultiplayer: boolean, setupId?: string) =>
+  createGame: (name: string, isMultiplayer: boolean, setupId?: string, heroesEnabled: boolean = true) =>
     fetchJson<{ game_id: string; game_code: string | null; name: string; state?: ApiGameState; turn_order?: string[] }>('/games/create', {
       method: 'POST',
       body: JSON.stringify({
         name,
         is_multiplayer: isMultiplayer,
+        heroes_enabled: heroesEnabled,
         ...(setupId != null && { setup_id: setupId }),
       }),
     }),

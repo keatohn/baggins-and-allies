@@ -127,6 +127,10 @@ def validate_setup_documents(
         dt = u.get("downgrade_to")
         if isinstance(dt, str) and dt.strip() and dt not in unit_ids:
             errors.append(f'unit "{uid}" downgrade_to "{dt}" is not a known unit id')
+        hid = u.get("hero_id")
+        if hid is not None and hid != "":
+            if not isinstance(hid, str) or not hid.strip():
+                errors.append(f'unit "{uid}" hero_id must be a non-empty string when set')
 
     spec_defs = _parse_specials_defs(specials)
     spec_keys = set(spec_defs.keys())
