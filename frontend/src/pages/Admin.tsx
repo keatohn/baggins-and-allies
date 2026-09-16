@@ -476,8 +476,6 @@ export default function Admin() {
           return j(bundle.starting_setup, (p) => setBundle((b) => (b ? { ...b, starting_setup: p as typeof b.starting_setup } : null)));
         case 'specials':
           return j(bundle.specials, (p) => setBundle((b) => (b ? { ...b, specials: p as typeof b.specials } : null)));
-        case 'audio':
-          return null;
         default:
           return null;
       }
@@ -542,8 +540,6 @@ export default function Admin() {
             onChange={(sp) => setBundle((b) => (b ? { ...b, specials: sp as typeof b.specials } : null))}
           />
         );
-      case 'audio':
-        return null;
       default:
         return null;
     }
