@@ -1,1 +1,1201 @@
-{}
+{
+  "black_numenorean_knight": {
+    "id": "black_numenorean_knight",
+    "display_name": "Black Numenorean Knight",
+    "faction": "harad",
+    "archetype": "cavalry",
+    "attack": 5,
+    "defense": 4,
+    "dice": 1,
+    "movement": 2,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 6
+    },
+    "tags": [
+      "land"
+    ],
+    "specials": [
+      "charging"
+    ],
+    "icon": "black_numenorean_knight.png"
+  },
+  "haradrim_archer": {
+    "id": "haradrim_archer",
+    "display_name": "Haradrim Archer",
+    "faction": "harad",
+    "archetype": "archer",
+    "attack": 1,
+    "defense": 2,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 3
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "archer"
+    ],
+    "icon": "haradrim_archer.png"
+  },
+  "corsair_of_umbar": {
+    "id": "corsair_of_umbar",
+    "display_name": "Corsair of Umbar",
+    "faction": "harad",
+    "archetype": "infantry",
+    "attack": 2,
+    "defense": 1,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 3
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "home",
+      "sea_raider"
+    ],
+    "icon": "corsair_of_umbar.png",
+    "home_territory_ids": [
+      "umbar"
+    ]
+  },
+  "black_ship": {
+    "id": "black_ship",
+    "display_name": "Black Ship",
+    "faction": "harad",
+    "archetype": "naval",
+    "attack": 3,
+    "defense": 3,
+    "dice": 1,
+    "movement": 2,
+    "health": 1,
+    "transport_capacity": 2,
+    "purchasable": true,
+    "cost": {
+      "power": 8
+    },
+    "tags": [
+      "naval"
+    ],
+    "specials": [],
+    "icon": "black_ship.png"
+  },
+  "war_mumakil": {
+    "id": "war_mumakil",
+    "display_name": "War Mûmakil",
+    "faction": "harad",
+    "archetype": "monster",
+    "attack": 6,
+    "defense": 4,
+    "dice": 2,
+    "movement": 1,
+    "health": 2,
+    "transport_capacity": 2,
+    "purchasable": true,
+    "cost": {
+      "power": 16
+    },
+    "tags": [
+      "land"
+    ],
+    "specials": [
+      "ford_crosser",
+      "ram"
+    ],
+    "icon": "war_mumakil.png"
+  },
+  "haradrim_warrior": {
+    "id": "haradrim_warrior",
+    "display_name": "Haradrim Warrior",
+    "faction": "harad",
+    "archetype": "infantry",
+    "attack": 3,
+    "defense": 2,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 4
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [],
+    "icon": "haradrim_warrior.png"
+  },
+  "khazad_warrior": {
+    "id": "khazad_warrior",
+    "display_name": "Khazad Warrior",
+    "faction": "khazad_dum",
+    "archetype": "infantry",
+    "attack": 2,
+    "defense": 3,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 4
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "mountain"
+    ],
+    "icon": "khazad_warrior.png"
+  },
+  "durin": {
+    "id": "durin",
+    "display_name": "Durin",
+    "faction": "khazad_dum",
+    "hero_id": "durin",
+    "archetype": "infantry",
+    "attack": 5,
+    "defense": 6,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 10
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "captain",
+      "fearless",
+      "mountain"
+    ],
+    "icon": "durin.png"
+  },
+  "khazad_ballista": {
+    "id": "khazad_ballista",
+    "display_name": "Khazad Ballista",
+    "faction": "khazad_dum",
+    "archetype": "siegework",
+    "attack": 4,
+    "defense": 3,
+    "dice": 2,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 8
+    },
+    "tags": [
+      "land"
+    ],
+    "specials": [
+      "mountain"
+    ],
+    "icon": "khazad_ballista.png"
+  },
+  "khazad_guard": {
+    "id": "khazad_guard",
+    "display_name": "Khazad Guard",
+    "faction": "khazad_dum",
+    "archetype": "infantry",
+    "attack": 2,
+    "defense": 5,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 5
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "anti_cavalry",
+      "mountain"
+    ],
+    "icon": "khazad_guard.png"
+  },
+  "khazad_archer": {
+    "id": "khazad_archer",
+    "display_name": "Khazad Archer",
+    "faction": "khazad_dum",
+    "archetype": "archer",
+    "attack": 2,
+    "defense": 3,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 4
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "archer",
+      "mountain"
+    ],
+    "icon": "dwarf_archer.png"
+  },
+  "orc_warrior": {
+    "id": "orc_warrior",
+    "display_name": "Orc Warrior",
+    "faction": "mordor",
+    "archetype": "infantry",
+    "attack": 2,
+    "defense": 1,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 2
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [],
+    "icon": "orc_warrior.png"
+  },
+  "orc_archer": {
+    "id": "orc_archer",
+    "display_name": "Orc Archer",
+    "faction": "mordor",
+    "archetype": "archer",
+    "attack": 1,
+    "defense": 2,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 3
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "archer"
+    ],
+    "icon": "orc_archer.png"
+  },
+  "warg_rider": {
+    "id": "warg_rider",
+    "display_name": "Warg Rider",
+    "faction": "mordor",
+    "archetype": "cavalry",
+    "attack": 5,
+    "defense": 3,
+    "dice": 1,
+    "movement": 2,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 6
+    },
+    "tags": [
+      "land"
+    ],
+    "specials": [
+      "charging"
+    ],
+    "icon": "mordor_warg_rider.png"
+  },
+  "armored_troll": {
+    "id": "armored_troll",
+    "display_name": "Armored Troll",
+    "faction": "mordor",
+    "archetype": "monster",
+    "attack": 6,
+    "defense": 5,
+    "dice": 1,
+    "movement": 1,
+    "health": 2,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 12
+    },
+    "tags": [
+      "land"
+    ],
+    "specials": [
+      "ram"
+    ],
+    "icon": "armored_troll.png"
+  },
+  "sauron": {
+    "id": "sauron",
+    "display_name": "Sauron",
+    "faction": "mordor",
+    "hero_id": "sauron",
+    "archetype": "infantry",
+    "attack": 7,
+    "defense": 6,
+    "dice": 1,
+    "movement": 1,
+    "health": 2,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 18
+    },
+    "tags": [
+      "land"
+    ],
+    "specials": [
+      "fearless",
+      "terror"
+    ],
+    "icon": "sauron.png"
+  },
+  "battering_ram": {
+    "id": "battering_ram",
+    "display_name": "Battering Ram",
+    "faction": "mordor",
+    "archetype": "siegework",
+    "attack": 5,
+    "defense": 0,
+    "dice": 4,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 7
+    },
+    "tags": [
+      "land"
+    ],
+    "specials": [
+      "ram"
+    ],
+    "icon": "battering_ram.png"
+  },
+  "catapult": {
+    "id": "catapult",
+    "display_name": "Catapult",
+    "faction": "mordor",
+    "archetype": "siegework",
+    "attack": 5,
+    "defense": 1,
+    "dice": 3,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 10
+    },
+    "tags": [
+      "land"
+    ],
+    "specials": [],
+    "icon": "catapult.png"
+  },
+  "ringwraith": {
+    "id": "ringwraith",
+    "display_name": "Ringwraith",
+    "faction": "mordor",
+    "archetype": "aerial",
+    "attack": 6,
+    "defense": 4,
+    "dice": 1,
+    "movement": 4,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 14
+    },
+    "tags": [
+      "land"
+    ],
+    "specials": [
+      "aerial",
+      "terror"
+    ],
+    "icon": "ringwraith_armored.png"
+  },
+  "witch_king": {
+    "id": "witch_king",
+    "display_name": "Witch-king",
+    "faction": "mordor",
+    "hero_id": "witch_king",
+    "archetype": "aerial",
+    "attack": 6,
+    "defense": 5,
+    "dice": 1,
+    "movement": 4,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 16
+    },
+    "tags": [
+      "land"
+    ],
+    "specials": [
+      "aerial",
+      "fearless",
+      "terror"
+    ],
+    "icon": "witch_king.png"
+  },
+  "noldor_warrior": {
+    "id": "noldor_warrior",
+    "display_name": "Noldor Warrior",
+    "faction": "noldor",
+    "archetype": "infantry",
+    "attack": 4,
+    "defense": 4,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 5
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [],
+    "icon": "rivendell_warrior.png"
+  },
+  "noldor_archer": {
+    "id": "noldor_archer",
+    "display_name": "Noldor Archer",
+    "faction": "noldor",
+    "archetype": "archer",
+    "attack": 3,
+    "defense": 3,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 5
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "archer"
+    ],
+    "icon": "galadhrim_archer.png"
+  },
+  "noldor_knight": {
+    "id": "noldor_knight",
+    "display_name": "Noldor Knight",
+    "faction": "noldor",
+    "archetype": "cavalry",
+    "attack": 5,
+    "defense": 5,
+    "dice": 1,
+    "movement": 2,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 7
+    },
+    "tags": [
+      "land"
+    ],
+    "specials": [
+      "charging"
+    ],
+    "icon": "rivendell_knight.png"
+  },
+  "lindon_ship": {
+    "id": "lindon_ship",
+    "display_name": "Lindon Ship",
+    "faction": "noldor",
+    "archetype": "naval",
+    "attack": 3,
+    "defense": 3,
+    "dice": 1,
+    "movement": 2,
+    "health": 1,
+    "transport_capacity": 2,
+    "purchasable": true,
+    "cost": {
+      "power": 8
+    },
+    "tags": [
+      "naval"
+    ],
+    "specials": [],
+    "icon": "lindon_ship.png"
+  },
+  "lindon_spearman": {
+    "id": "lindon_spearman",
+    "display_name": "Lindon Spearman",
+    "faction": "noldor",
+    "archetype": "infantry",
+    "attack": 3,
+    "defense": 4,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 5
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "anti_cavalry"
+    ],
+    "icon": "lindon_spearman.png"
+  },
+  "gil_galad": {
+    "id": "gil_galad",
+    "display_name": "Gil-galad",
+    "faction": "noldor",
+    "hero_id": "gil_galad",
+    "archetype": "infantry",
+    "attack": 6,
+    "defense": 6,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 12
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "captain",
+      "fearless",
+      "hope"
+    ],
+    "icon": "gil_galad.png"
+  },
+  "elrond": {
+    "id": "elrond",
+    "display_name": "Elrond",
+    "faction": "noldor",
+    "hero_id": "elrond",
+    "archetype": "infantry",
+    "attack": 5,
+    "defense": 5,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 9
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "fearless",
+      "hope"
+    ],
+    "icon": "elrond.png"
+  },
+  "numenor_archer": {
+    "id": "numenor_archer",
+    "display_name": "Numenor Archer",
+    "faction": "numenor",
+    "archetype": "archer",
+    "attack": 2,
+    "defense": 2,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 3
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "archer"
+    ],
+    "icon": "numenor_archer.png"
+  },
+  "numenor_soldier": {
+    "id": "numenor_soldier",
+    "display_name": "Numenor Soldier",
+    "faction": "numenor",
+    "archetype": "infantry",
+    "attack": 3,
+    "defense": 2,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 3
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [],
+    "icon": "numenor_soldier.png"
+  },
+  "numenor_knight": {
+    "id": "numenor_knight",
+    "display_name": "Numenor Knight",
+    "faction": "numenor",
+    "archetype": "cavalry",
+    "attack": 5,
+    "defense": 4,
+    "dice": 1,
+    "movement": 2,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 6
+    },
+    "tags": [
+      "land"
+    ],
+    "specials": [
+      "charging"
+    ],
+    "icon": "numenor_knight.png"
+  },
+  "numenor_ship": {
+    "id": "numenor_ship",
+    "display_name": "Numenor Ship",
+    "faction": "numenor",
+    "archetype": "naval",
+    "attack": 3,
+    "defense": 3,
+    "dice": 1,
+    "movement": 2,
+    "health": 1,
+    "transport_capacity": 2,
+    "purchasable": true,
+    "cost": {
+      "power": 8
+    },
+    "tags": [
+      "naval"
+    ],
+    "specials": [],
+    "icon": "numenor_ship.png"
+  },
+  "elendil": {
+    "id": "elendil",
+    "display_name": "Elendil",
+    "faction": "numenor",
+    "hero_id": "elendil",
+    "archetype": "infantry",
+    "attack": 6,
+    "defense": 5,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 11
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "captain",
+      "fearless",
+      "hope"
+    ],
+    "icon": "elendil.png"
+  },
+  "isildur": {
+    "id": "isildur",
+    "display_name": "Isildur",
+    "faction": "numenor",
+    "hero_id": "isildur",
+    "archetype": "infantry",
+    "attack": 5,
+    "defense": 5,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 9
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "fearless",
+      "hope"
+    ],
+    "icon": "isildur.png"
+  },
+  "numenor_captain": {
+    "id": "numenor_captain",
+    "display_name": "Numenor Captain",
+    "faction": "numenor",
+    "archetype": "infantry",
+    "attack": 4,
+    "defense": 4,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 6
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "captain",
+      "fearless"
+    ],
+    "icon": "numenor_captain.png"
+  },
+  "numenor_spearman": {
+    "id": "numenor_spearman",
+    "display_name": "Numenor Spearman",
+    "faction": "numenor",
+    "archetype": "infantry",
+    "attack": 2,
+    "defense": 4,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 4
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "anti_cavalry"
+    ],
+    "icon": "numenor_spearman.png"
+  },
+  "easterling_pikeman": {
+    "id": "easterling_pikeman",
+    "display_name": "Easterling Pikeman",
+    "faction": "rhun",
+    "archetype": "infantry",
+    "attack": 2,
+    "defense": 4,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 4
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "anti_cavalry"
+    ],
+    "icon": "easterling_pikeman.png"
+  },
+  "easterling_archer": {
+    "id": "easterling_archer",
+    "display_name": "Easterling Archer",
+    "faction": "rhun",
+    "archetype": "archer",
+    "attack": 2,
+    "defense": 2,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 3
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "archer"
+    ],
+    "icon": "easterling_archer.png"
+  },
+  "easterling_warrior": {
+    "id": "easterling_warrior",
+    "display_name": "Easterling Warrior",
+    "faction": "rhun",
+    "archetype": "infantry",
+    "attack": 3,
+    "defense": 2,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 3
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [],
+    "icon": "easterling_warrior.png"
+  },
+  "easterling_captain": {
+    "id": "easterling_captain",
+    "display_name": "Easterling Captain",
+    "faction": "rhun",
+    "archetype": "infantry",
+    "attack": 4,
+    "defense": 4,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 6
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "captain"
+    ],
+    "icon": "easterling_captain.png"
+  },
+  "archer_chariot": {
+    "id": "archer_chariot",
+    "display_name": "Archer Chariot",
+    "faction": "rhun",
+    "archetype": "cavalry",
+    "attack": 3,
+    "defense": 2,
+    "dice": 2,
+    "movement": 2,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 8
+    },
+    "tags": [
+      "land"
+    ],
+    "specials": [
+      "archer",
+      "charging"
+    ],
+    "icon": "archer_chariot.png"
+  },
+  "silvan_archer": {
+    "id": "silvan_archer",
+    "display_name": "Silvan Archer",
+    "faction": "silvan",
+    "archetype": "archer",
+    "attack": 3,
+    "defense": 2,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 5
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "archer",
+      "forest",
+      "home",
+      "stealth"
+    ],
+    "icon": "mirkwood_elf.png",
+    "home_territory_ids": [
+      "north_greenwood"
+    ]
+  },
+  "silvan_warrior": {
+    "id": "silvan_warrior",
+    "display_name": "Silvan Warrior",
+    "faction": "silvan",
+    "archetype": "infantry",
+    "attack": 3,
+    "defense": 2,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 4
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "forest"
+    ],
+    "icon": "galadhrim_warrior.png"
+  },
+  "wood_elf_scout": {
+    "id": "wood_elf_scout",
+    "display_name": "Wood Elf Scout",
+    "faction": "silvan",
+    "archetype": "infantry",
+    "attack": 2,
+    "defense": 2,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 4
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "forest",
+      "stealth"
+    ],
+    "icon": "mirkwood_elf.png"
+  },
+  "oropher": {
+    "id": "oropher",
+    "display_name": "Oropher",
+    "faction": "silvan",
+    "hero_id": "oropher",
+    "archetype": "infantry",
+    "attack": 5,
+    "defense": 4,
+    "dice": 1,
+    "movement": 1,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 8
+    },
+    "tags": [
+      "land",
+      "transportable"
+    ],
+    "specials": [
+      "captain",
+      "fearless",
+      "forest"
+    ],
+    "icon": "oropher.png"
+  },
+  "greenwood_knight": {
+    "id": "greenwood_knight",
+    "display_name": "Greenwood Knight",
+    "faction": "silvan",
+    "archetype": "cavalry",
+    "attack": 4,
+    "defense": 4,
+    "dice": 1,
+    "movement": 2,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": true,
+    "cost": {
+      "power": 6
+    },
+    "tags": [
+      "land"
+    ],
+    "specials": [
+      "charging",
+      "forest"
+    ],
+    "icon": "mirkwood_cavalry.png"
+  },
+  "dragon": {
+    "id": "dragon",
+    "display_name": "Dragon",
+    "faction": "neutral",
+    "archetype": "monster",
+    "attack": 0,
+    "defense": 7,
+    "dice": 2,
+    "movement": 0,
+    "health": 3,
+    "transport_capacity": 0,
+    "purchasable": false,
+    "cost": {
+      "power": 0
+    },
+    "tags": [
+      "land"
+    ],
+    "specials": [
+      "fearless"
+    ],
+    "icon": "dragon.png"
+  },
+  "goblin": {
+    "id": "goblin",
+    "display_name": "Goblin",
+    "faction": "neutral",
+    "archetype": "infantry",
+    "attack": 0,
+    "defense": 1,
+    "dice": 1,
+    "movement": 0,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": false,
+    "cost": {
+      "power": 0
+    },
+    "tags": [
+      "land"
+    ],
+    "specials": [],
+    "icon": "goblin.png"
+  },
+  "spider": {
+    "id": "spider",
+    "display_name": "Spider",
+    "faction": "neutral",
+    "archetype": "monster",
+    "attack": 0,
+    "defense": 1,
+    "dice": 1,
+    "movement": 0,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": false,
+    "cost": {
+      "power": 0
+    },
+    "tags": [
+      "land"
+    ],
+    "specials": [],
+    "icon": "spider.png"
+  },
+  "cave_troll": {
+    "id": "cave_troll",
+    "display_name": "Cave Troll",
+    "faction": "neutral",
+    "archetype": "monster",
+    "attack": 0,
+    "defense": 4,
+    "dice": 1,
+    "movement": 0,
+    "health": 1,
+    "transport_capacity": 0,
+    "purchasable": false,
+    "cost": {
+      "power": 0
+    },
+    "tags": [
+      "land"
+    ],
+    "specials": [],
+    "icon": "cave_troll.png"
+  },
+  "ent": {
+    "id": "ent",
+    "display_name": "Ent",
+    "faction": "neutral",
+    "archetype": "monster",
+    "attack": 6,
+    "defense": 6,
+    "dice": 1,
+    "movement": 1,
+    "health": 2,
+    "transport_capacity": 0,
+    "purchasable": false,
+    "cost": {
+      "power": 0
+    },
+    "tags": [
+      "land"
+    ],
+    "specials": [
+      "fearless",
+      "forest",
+      "home",
+      "ram"
+    ],
+    "icon": "ent.png",
+    "home_territory_ids": [
+      "fangorn"
+    ]
+  }
+}
