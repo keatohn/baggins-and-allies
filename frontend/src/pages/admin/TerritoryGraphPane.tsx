@@ -315,10 +315,11 @@ export function TerritoryGraphPane({
                 const isFordN = !isSel && isFordNeighborTid(tid);
                 let cls = 'admin-graph__path';
                 if (isSel) cls += ' admin-graph__path--selected';
+                else if (isFordN && isAerialN) cls += ' admin-graph__path--neighbor-ford';
                 else if (isLandN && isAerialN) cls += ' admin-graph__path--neighbor-both';
                 else if (isLandN) cls += ' admin-graph__path--neighbor-land';
-                else if (isAerialN) cls += ' admin-graph__path--neighbor-aerial';
                 else if (isFordN) cls += ' admin-graph__path--neighbor-ford';
+                else if (isAerialN) cls += ' admin-graph__path--neighbor-aerial';
                 return (
                   <path
                     key={tid}
@@ -336,6 +337,15 @@ export function TerritoryGraphPane({
                 return renderEdge('land', a, b, pa, pb);
               })}
               {aerialEdges.map(({ a, b }) => {
+                if (
+                  fordEdges.some(
+                    (e) =>
+                      (sameTerritoryId(e.a, a) && sameTerritoryId(e.b, b)) ||
+                      (sameTerritoryId(e.a, b) && sameTerritoryId(e.b, a)),
+                  )
+                ) {
+                  return null;
+                }
                 const pa = lookupCentroid(centroids, a);
                 const pb = lookupCentroid(centroids, b);
                 if (!pa || !pb) return null;
@@ -356,13 +366,15 @@ export function TerritoryGraphPane({
                   className={
                     isSelectedTid(tid)
                       ? 'admin-graph__node admin-graph__node--selected'
-                      : isLandNeighborTid(tid)
-                        ? 'admin-graph__node admin-graph__node--land'
-                        : isAerialNeighborTid(tid)
-                          ? 'admin-graph__node admin-graph__node--aerial'
+                      : isFordNeighborTid(tid) && isAerialNeighborTid(tid)
+                        ? 'admin-graph__node admin-graph__node--ford'
+                        : isLandNeighborTid(tid)
+                          ? 'admin-graph__node admin-graph__node--land'
                           : isFordNeighborTid(tid)
                             ? 'admin-graph__node admin-graph__node--ford'
-                            : 'admin-graph__node'
+                            : isAerialNeighborTid(tid)
+                              ? 'admin-graph__node admin-graph__node--aerial'
+                              : 'admin-graph__node'
                   }
                   pointerEvents="none"
                 />
