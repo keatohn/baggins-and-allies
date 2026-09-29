@@ -384,6 +384,10 @@
   background: #2a5ea8;
 }
 
+.admin-graph__key-swatch--ford {
+  background: #d97706;
+}
+
 .admin-graph__header .admin-page__btn {
   grid-column: 2;
   grid-row: 1 / span 3;
@@ -448,6 +452,10 @@
   fill: rgba(42, 94, 168, 0.32);
 }
 
+.admin-graph__path--neighbor-ford {
+  fill: rgba(217, 119, 6, 0.34);
+}
+
 .admin-graph__path--neighbor-both {
   fill: rgba(40, 110, 110, 0.34);
 }
@@ -464,6 +472,10 @@
 
 .admin-graph__edge--aerial {
   stroke: #2a5ea8;
+}
+
+.admin-graph__edge--ford {
+  stroke: #d97706;
 }
 
 .admin-graph__edge--hot {
@@ -484,6 +496,10 @@
 
 .admin-graph__node--aerial {
   fill: #2a5ea8;
+}
+
+.admin-graph__node--ford {
+  fill: #d97706;
 }
 
 .admin-graph__status {

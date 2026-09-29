@@ -15,7 +15,7 @@ type Pt = { x: number; y: number };
 function neighborIdsForField(
   territories: Record<string, Record<string, unknown>>,
   selectedKey: string,
-  field: 'adjacent' | 'aerial_adjacent',
+  field: 'adjacent' | 'aerial_adjacent' | 'ford_adjacent',
 ): string[] {
   const names = new Set<string>();
   const t = territories[selectedKey];
@@ -126,9 +126,14 @@ export function TerritoryGraphPane({
     () => (selectedKey ? neighborIdsForField(territories, selectedKey, 'aerial_adjacent') : []),
     [selectedKey, territories],
   );
+  const fordNeighborIds = useMemo(
+    () => (selectedKey ? neighborIdsForField(territories, selectedKey, 'ford_adjacent') : []),
+    [selectedKey, territories],
+  );
 
   const isLandNeighborTid = (tid: string) => landNeighborIds.some((n) => sameTerritoryId(n, tid));
   const isAerialNeighborTid = (tid: string) => aerialNeighborIds.some((n) => sameTerritoryId(n, tid));
+  const isFordNeighborTid = (tid: string) => fordNeighborIds.some((n) => sameTerritoryId(n, tid));
   const isSelectedTid = (tid: string) => selected != null && sameTerritoryId(tid, selected);
 
   useEffect(() => {
@@ -148,6 +153,7 @@ export function TerritoryGraphPane({
 
   const landEdges = useMemo(() => adjacencyEdges(territories, 'adjacent'), [territories]);
   const aerialEdges = useMemo(() => adjacencyEdges(territories, 'aerial_adjacent'), [territories]);
+  const fordEdges = useMemo(() => adjacencyEdges(territories, 'ford_adjacent'), [territories]);
 
   const onWheel = (e: ReactWheelEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -210,14 +216,15 @@ export function TerritoryGraphPane({
   };
 
   const renderEdge = (
-    kind: 'land' | 'aerial',
+    kind: 'land' | 'aerial' | 'ford',
     a: string,
     b: string,
     pa: Pt,
     pb: Pt,
   ) => {
     const isHot = selected != null && (sameTerritoryId(a, selected) || sameTerritoryId(b, selected));
-    const pts = kind === 'aerial' ? offsetEdge(pa, pb, 7) : { a: pa, b: pb };
+    const pts =
+      kind === 'aerial' ? offsetEdge(pa, pb, 7) : kind === 'ford' ? offsetEdge(pa, pb, -7) : { a: pa, b: pb };
     return (
       <line
         key={`${kind}|${a}|${b}`}
@@ -256,6 +263,10 @@ export function TerritoryGraphPane({
             <li>
               <span className="admin-graph__key-swatch admin-graph__key-swatch--aerial" aria-hidden />
               Aerial adjacent
+            </li>
+            <li>
+              <span className="admin-graph__key-swatch admin-graph__key-swatch--ford" aria-hidden />
+              Ford adjacent
             </li>
           </ul>
           <button type="button" className="admin-page__btn" onClick={onClose}>
@@ -301,11 +312,13 @@ export function TerritoryGraphPane({
                 const isSel = isSelectedTid(tid);
                 const isLandN = !isSel && isLandNeighborTid(tid);
                 const isAerialN = !isSel && isAerialNeighborTid(tid);
+                const isFordN = !isSel && isFordNeighborTid(tid);
                 let cls = 'admin-graph__path';
                 if (isSel) cls += ' admin-graph__path--selected';
                 else if (isLandN && isAerialN) cls += ' admin-graph__path--neighbor-both';
                 else if (isLandN) cls += ' admin-graph__path--neighbor-land';
                 else if (isAerialN) cls += ' admin-graph__path--neighbor-aerial';
+                else if (isFordN) cls += ' admin-graph__path--neighbor-ford';
                 return (
                   <path
                     key={tid}
@@ -328,6 +341,12 @@ export function TerritoryGraphPane({
                 if (!pa || !pb) return null;
                 return renderEdge('aerial', a, b, pa, pb);
               })}
+              {fordEdges.map(({ a, b }) => {
+                const pa = lookupCentroid(centroids, a);
+                const pb = lookupCentroid(centroids, b);
+                if (!pa || !pb) return null;
+                return renderEdge('ford', a, b, pa, pb);
+              })}
               {Object.entries(centroids).map(([tid, c]) => (
                 <circle
                   key={`n-${tid}`}
@@ -341,7 +360,9 @@ export function TerritoryGraphPane({
                         ? 'admin-graph__node admin-graph__node--land'
                         : isAerialNeighborTid(tid)
                           ? 'admin-graph__node admin-graph__node--aerial'
-                          : 'admin-graph__node'
+                          : isFordNeighborTid(tid)
+                            ? 'admin-graph__node admin-graph__node--ford'
+                            : 'admin-graph__node'
                   }
                   pointerEvents="none"
                 />
@@ -355,7 +376,8 @@ export function TerritoryGraphPane({
             {selected}
             {landNeighborIds.length ? ` · adjacent: ${landNeighborIds.join(', ')}` : ''}
             {aerialNeighborIds.length ? ` · aerial: ${aerialNeighborIds.join(', ')}` : ''}
-            {!landNeighborIds.length && !aerialNeighborIds.length ? ' (no adjacent listed)' : ''}
+            {fordNeighborIds.length ? ` · ford: ${fordNeighborIds.join(', ')}` : ''}
+            {!landNeighborIds.length && !aerialNeighborIds.length && !fordNeighborIds.length ? ' (no adjacent listed)' : ''}
           </p>
         ) : (
           <p className="admin-graph__status">No territory selected</p>

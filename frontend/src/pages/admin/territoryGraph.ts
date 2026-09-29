@@ -267,7 +267,7 @@ export function lookupCentroid(
 
 export function adjacencyEdges(
   territories: Record<string, Record<string, unknown>>,
-  field: 'adjacent' | 'aerial_adjacent' = 'adjacent',
+  field: 'adjacent' | 'aerial_adjacent' | 'ford_adjacent' = 'adjacent',
 ): { a: string; b: string }[] {
   const seen = new Set<string>();
   const out: { a: string; b: string }[] = [];
