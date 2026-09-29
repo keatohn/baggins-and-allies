@@ -397,6 +397,8 @@ export interface ApiTerritoryDefinition {
   terrain_type: string;
   is_stronghold: boolean;
   ownable: boolean;
+  /** Filename in public/assets/territories. Omitted = no panel art. */
+  image?: string | null;
 }
 
 export interface ApiFactionDefinition {

@@ -24,3 +24,8 @@ declare module 'virtual:unit-icon-png' {
   const files: string[];
   export default files;
 }
+
+declare module 'virtual:territory-image-png' {
+  const files: string[];
+  export default files;
+}

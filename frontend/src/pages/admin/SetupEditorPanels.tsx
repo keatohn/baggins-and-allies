@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import TURN_MUSIC_M4A from 'virtual:turn-music-m4a';
 import UNIT_ICON_PNG from 'virtual:unit-icon-png';
+import TERRITORY_IMAGE_PNG from 'virtual:territory-image-png';
 import { TerritoryGraphPane } from './TerritoryGraphPane';
 import type { AdminSetupBundle } from '../../services/api';
 
@@ -286,6 +287,19 @@ function UnitIconField({ value, onApply }: { value: unknown; onApply: (icon: str
       dir="units"
       noneLabel="None (uses unit id)"
       ariaLabel="Unit icon"
+      onApply={onApply}
+    />
+  );
+}
+
+function TerritoryImageField({ value, onApply }: { value: unknown; onApply: (image: string | undefined) => void }) {
+  return (
+    <AssetPngField
+      value={value}
+      files={TERRITORY_IMAGE_PNG}
+      dir="territories"
+      noneLabel="None"
+      ariaLabel="Territory image"
       onApply={onApply}
     />
   );
@@ -688,6 +702,10 @@ export function TerritoriesPanel({
           {fieldRow(
             'Display name',
             <input type="text" className="admin-form__input" value={String(t.display_name ?? '')} onChange={(e) => patch({ display_name: e.target.value })} />,
+          )}
+          {fieldRow(
+            'Image',
+            <TerritoryImageField value={t.image} onApply={(image) => patch({ image })} />,
           )}
           {fieldRow(
             'Terrain type',

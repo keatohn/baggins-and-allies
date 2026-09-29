@@ -234,6 +234,8 @@ class TerritoryDefinition:
     aerial_adjacent: list[str] = field(default_factory=list)
     # River fords: land units with ford_crosser (or escort capacity) may use these edges
     ford_adjacent: list[str] = field(default_factory=list)
+    # Optional panel art under public/assets/territories/. Empty = no image.
+    image: Optional[str] = None
 
 
 @dataclass
@@ -388,6 +390,7 @@ def load_static_definitions(
             ownable=data.get("ownable", True),
             aerial_adjacent=data.get("aerial_adjacent", []),
             ford_adjacent=data.get("ford_adjacent", []),
+            image=_parse_optional_str(data.get("image")),
         )
 
     # Load factions
@@ -487,6 +490,7 @@ def definitions_from_snapshot(snapshot: dict) -> tuple[
             ownable=data.get("ownable", True),
             aerial_adjacent=data.get("aerial_adjacent", []),
             ford_adjacent=data.get("ford_adjacent", []),
+            image=_parse_optional_str(data.get("image")),
         )
 
     factions = {}

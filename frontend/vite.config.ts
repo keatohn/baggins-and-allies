@@ -79,6 +79,12 @@ export default defineConfig({
       relDir: 'public/assets/units',
       ext: '.png',
     }),
+    publicFilenamesPlugin({
+      name: 'territory-image-png',
+      virtualId: 'virtual:territory-image-png',
+      relDir: 'public/assets/territories',
+      ext: '.png',
+    }),
     react(),
     // GitHub Pages has no server rewrite for /login etc.; unknown paths get 404.html (same shell as index.html).
     {

@@ -917,8 +917,10 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       aerial_adjacent?: string[];
       ford_adjacent?: string[];
       ownable: boolean;
+      image?: string;
     }> = {};
     for (const [id, territory] of Object.entries(definitions.territories)) {
+      const image = typeof territory.image === 'string' ? territory.image.trim() : '';
       defs[id] = {
         name: territory.display_name,
         terrain: territory.terrain_type,
@@ -929,6 +931,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         aerial_adjacent: (territory as { aerial_adjacent?: string[] }).aerial_adjacent ?? [],
         ford_adjacent: (territory as { ford_adjacent?: string[] }).ford_adjacent ?? [],
         ownable: territory.ownable !== false,
+        ...(image ? { image } : {}),
       };
     }
     return defs;
@@ -975,6 +978,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       hasPort: boolean;
       isCapital: boolean;
       ownable?: boolean;
+      image?: string;
     }> = {};
 
     const pendingCaptures = pendingCapturesOverlayForPhase(

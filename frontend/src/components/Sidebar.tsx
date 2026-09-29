@@ -65,6 +65,8 @@ interface SidebarProps {
     ownable?: boolean;
     stronghold_base_health?: number;
     stronghold_current_health?: number;
+    /** Filename in assets/territories. Omitted = no panel art. */
+    image?: string;
   }>;
   territoryUnits: Record<string, { unit_id: string; count: number }[]>;
   /** When non-combat move and a territory is selected: stacks grouped by (unit_id, remaining_movement) for that territory */
@@ -1202,15 +1204,15 @@ function Sidebar({
 
       {/* Territory Panel */}
       <div className={`panel territory-panel${territory ? ' has-territory' : ''}`}>
-        {selectedTerritory && (
+        {territory?.image ? (
           <img
-            src={`/assets/territories/${selectedTerritory}.png`}
+            src={`/assets/territories/${territory.image}`}
             alt=""
             className="territory-panel-bg-image"
             aria-hidden
             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
           />
-        )}
+        ) : null}
         <h2
           className="territory-panel-header"
           style={
