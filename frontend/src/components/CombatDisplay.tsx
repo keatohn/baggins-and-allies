@@ -77,6 +77,8 @@ interface CombatUnit {
   terrainForest?: boolean;
   /** Unit is receiving captain +1 (not the captain himself). */
   hasCaptainBonus?: boolean;
+  /** Unit is receiving king +1 (not the king himself). */
+  hasKingBonus?: boolean;
   /** Unit is receiving anti-cavalry (pikes) +1. */
   hasAntiCavalry?: boolean;
   /** Attacker only: unit has Sea Raider and is in a sea raid (+1 attack). */
@@ -114,6 +116,7 @@ interface EliminatedStack {
   terrainMountain?: boolean;
   terrainForest?: boolean;
   hasCaptainBonus?: boolean;
+  hasKingBonus?: boolean;
   hasAntiCavalry?: boolean;
   hasSeaRaider?: boolean;
   hasArcher?: boolean;
@@ -486,6 +489,7 @@ type UnitRowGroup = {
   terrainMountain?: boolean;
   terrainForest?: boolean;
   hasCaptainBonus?: boolean;
+  hasKingBonus?: boolean;
   hasAntiCavalry?: boolean;
   hasSeaRaider?: boolean;
   hasArcher?: boolean;
@@ -519,6 +523,7 @@ function buildUnitRowGroupList(
     terrainMountain?: boolean;
     terrainForest?: boolean;
     hasCaptainBonus?: boolean;
+    hasKingBonus?: boolean;
     hasAntiCavalry?: boolean;
     hasSeaRaider?: boolean;
     hasArcher?: boolean;
@@ -543,6 +548,7 @@ function buildUnitRowGroupList(
       if (unit.terrainMountain) existing.terrainMountain = true;
       if (unit.terrainForest) existing.terrainForest = true;
       if (unit.hasCaptainBonus) existing.hasCaptainBonus = true;
+      if (unit.hasKingBonus) existing.hasKingBonus = true;
       if (unit.hasAntiCavalry) existing.hasAntiCavalry = true;
       if (unit.hasSeaRaider) existing.hasSeaRaider = true;
       if (unit.hasArcher) existing.hasArcher = true;
@@ -564,6 +570,7 @@ function buildUnitRowGroupList(
         terrainMountain: unit.terrainMountain,
         terrainForest: unit.terrainForest,
         hasCaptainBonus: unit.hasCaptainBonus,
+        hasKingBonus: unit.hasKingBonus,
         hasAntiCavalry: unit.hasAntiCavalry,
         hasSeaRaider: unit.hasSeaRaider,
         hasArcher: unit.hasArcher,
@@ -601,6 +608,7 @@ function buildUnitRowGroupList(
       terrainMountain: es.terrainMountain,
       terrainForest: es.terrainForest,
       hasCaptainBonus: es.hasCaptainBonus,
+      hasKingBonus: es.hasKingBonus,
       hasAntiCavalry: es.hasAntiCavalry,
       hasSeaRaider: es.hasSeaRaider,
       hasArcher: es.hasArcher,
@@ -697,6 +705,7 @@ function UnitRow({
     specialsDefs?.mountain?.name && `${code('mountain', 'M')}=${specialsDefs.mountain.name}`,
     specialsDefs?.forest?.name && `${code('forest', 'FR')}=${specialsDefs.forest.name}`,
     specialsDefs?.captain?.name && `${code('captain', 'C')}=${specialsDefs.captain.name}`,
+    specialsDefs?.king?.name && `${code('king', 'K')}=${specialsDefs.king.name}`,
     specialsDefs?.anti_cavalry?.name && `${code('anti_cavalry', 'AC')}=${specialsDefs.anti_cavalry.name}`,
     specialsDefs?.sea_raider?.name && `${code('sea_raider', 'SR')}=${specialsDefs.sea_raider.name}`,
     specialsDefs?.archer?.name && `${code('archer', 'AR')}=${specialsDefs.archer.name}`,
@@ -704,7 +713,7 @@ function UnitRow({
     specialsDefs?.bombikazi?.name && `${code('bombikazi', 'B')}=${specialsDefs.bombikazi.name}`,
     specialsDefs?.fearless?.name && `${code('fearless', 'FL')}=${specialsDefs.fearless.name}`,
     specialsDefs?.hope?.name && `${code('hope', 'HP')}=${specialsDefs.hope.name}`,
-  ].filter(Boolean).join(', ') || 'L=Ladder, R=Ram (siegeworks), T=Terror, M=Mountain, FR=Forest, C=Captain, AC=Anti-cavalry, SR=Sea Raider, AR=Archer, ST=Stealth, B=Bombikazi, FL=Fearless, HP=Hope';
+  ].filter(Boolean).join(', ') || 'L=Ladder, R=Ram (siegeworks), T=Terror, M=Mountain, FR=Forest, C=Captain, K=King, AC=Anti-cavalry, SR=Sea Raider, AR=Archer, ST=Stealth, B=Bombikazi, FL=Fearless, HP=Hope';
 
   const rowKey = hideStatLabel
     ? `${isAttacker ? 'attacker' : 'defender'}_siegework_noroll`
@@ -772,6 +781,7 @@ function UnitRow({
               if (u0?.terrainMountain) codes.push(code('mountain', 'M'));
               if (u0?.terrainForest) codes.push(code('forest', 'FR'));
               if (u0?.hasCaptainBonus) codes.push(code('captain', 'C'));
+              if (u0?.hasKingBonus) codes.push(code('king', 'K'));
               if (u0?.hasAntiCavalry) codes.push(code('anti_cavalry', 'AC'));
               if (u0?.hasSeaRaider) codes.push(code('sea_raider', 'SR'));
               if (seg.onLadder) codes.push(code('ladder', 'L'));
@@ -879,6 +889,7 @@ function UnitRow({
                     if (uu.terrainMountain) codes.push(code('mountain', 'M'));
                     if (uu.terrainForest) codes.push(code('forest', 'FR'));
                     if (uu.hasCaptainBonus) codes.push(code('captain', 'C'));
+                    if (uu.hasKingBonus) codes.push(code('king', 'K'));
                     if (uu.hasAntiCavalry) codes.push(code('anti_cavalry', 'AC'));
                     if (uu.hasSeaRaider) codes.push(code('sea_raider', 'SR'));
                     if (uu.hasRam) codes.push(code('ram', 'R'));
@@ -945,6 +956,7 @@ function UnitRow({
       if (group.terrainMountain) specialCodes.push(code('mountain', 'M'));
       if (group.terrainForest) specialCodes.push(code('forest', 'FR'));
       if (group.hasCaptainBonus) specialCodes.push(code('captain', 'C'));
+      if (group.hasKingBonus) specialCodes.push(code('king', 'K'));
       if (group.hasAntiCavalry) specialCodes.push(code('anti_cavalry', 'AC'));
       if (group.hasSeaRaider) specialCodes.push(code('sea_raider', 'SR'));
       if (group.hasArcher) specialCodes.push(code('archer', 'AR'));
@@ -1054,6 +1066,7 @@ function UnitRow({
           if (group.terrainMountain) specialCodes.push(code('mountain', 'M'));
           if (group.terrainForest) specialCodes.push(code('forest', 'FR'));
           if (group.hasCaptainBonus) specialCodes.push(code('captain', 'C'));
+          if (group.hasKingBonus) specialCodes.push(code('king', 'K'));
           if (group.hasAntiCavalry) specialCodes.push(code('anti_cavalry', 'AC'));
           if (group.hasSeaRaider) specialCodes.push(code('sea_raider', 'SR'));
           if (group.hasArcher) specialCodes.push(code('archer', 'AR'));
@@ -2166,6 +2179,7 @@ function CombatDisplay({
             terrainMountain: u.terrainMountain,
             terrainForest: u.terrainForest,
             hasCaptainBonus: u.hasCaptainBonus,
+            hasKingBonus: u.hasKingBonus,
             hasAntiCavalry: u.hasAntiCavalry,
             hasSeaRaider: u.hasSeaRaider,
             hasArcher: u.hasArcher,

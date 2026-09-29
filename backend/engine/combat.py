@@ -389,48 +389,59 @@ def compute_anti_cavalry_stat_modifiers(
     return attacker_mods, defender_mods
 
 
-def compute_captain_stat_modifiers(
+CAPTAIN_ALLY_CAP = 3
+KING_ALLY_CAP = 5
+
+
+def _leader_aura(unit_def: UnitDefinition | None, captain_max_allies: int) -> tuple[str, int] | None:
+    """
+    Captain boosts up to captain_max_allies allies; king boosts up to KING_ALLY_CAP.
+    A unit with both uses king (the wider aura) once.
+    """
+    if unit_def is None or captain_max_allies <= 0:
+        return None
+    if has_unit_special(unit_def, "king"):
+        return ("king", KING_ALLY_CAP)
+    if has_unit_special(unit_def, "captain"):
+        return ("captain", captain_max_allies)
+    return None
+
+
+def compute_leader_stat_modifiers(
     attacker_units: list[Unit],
     defender_units: list[Unit],
     unit_defs: dict[str, UnitDefinition],
     bonus: int = 1,
-    max_allies: int = 3,
-) -> tuple[dict[str, int], dict[str, int]]:
+    captain_max_allies: int = CAPTAIN_ALLY_CAP,
+) -> tuple[dict[str, int], dict[str, int], dict[str, str], dict[str, str]]:
     """
-    Captain: units with "captain" special (tags or specials list) grant up to max_allies
-    same-archetype allies +bonus. Attack for attackers, defense for defenders.
-    Each ally gets at most +1 (two captains cannot both boost the same 3 units; the second
-    captain boosts the next 3 unboosted same-archetype allies). Selection order: cost asc,
-    then relevant stat (attack/defense) asc, then specials count asc, then instance_id.
-    Returns (attacker_modifiers, defender_modifiers) as instance_id -> modifier.
+    Captain and king grant +bonus to allies of their own faction (attack for attackers,
+    defense for defenders). Captain covers up to 3 units of the same archetype. King
+    covers up to 5: same archetype first, then other archetypes with the same ordering
+    (cost asc, relevant stat asc, specials count asc, instance_id) until the cap is full.
+    Leaders are not boosted. Each ally gets the bonus from at most one leader; the next
+    leader (instance_id order) takes the next unboosted allies.
+
+    Returns (attacker_mods, defender_mods, attacker_sources, defender_sources).
+    Sources map instance_id -> "captain" | "king".
     """
-    if bonus == 0 or max_allies <= 0:
-        return {}, {}
+    if bonus == 0:
+        return {}, {}, {}, {}
 
-    def _has_captain(ud: UnitDefinition | None) -> bool:
-        return has_unit_special(ud, "captain")
-
-    def apply_for_side(units: list[Unit], stat_name: str) -> dict[str, int]:
+    def apply_for_side(units: list[Unit], stat_name: str) -> tuple[dict[str, int], dict[str, str]]:
         mods: dict[str, int] = {}
+        sources: dict[str, str] = {}
         boosted: set[str] = set()
-        captains = [u for u in units if _has_captain(unit_defs.get(u.unit_id))]
-        captains.sort(key=lambda u: u.instance_id or "")
-        for captain_unit in captains:
-            unit_def = unit_defs.get(captain_unit.unit_id)
-            if not unit_def:
+        leaders = [u for u in units if _leader_aura(unit_defs.get(u.unit_id), captain_max_allies)]
+        leaders.sort(key=lambda u: u.instance_id or "")
+        for leader_unit in leaders:
+            unit_def = unit_defs.get(leader_unit.unit_id)
+            aura = _leader_aura(unit_def, captain_max_allies)
+            if not unit_def or aura is None:
                 continue
+            source, ally_cap = aura
             archetype = getattr(unit_def, "archetype", "")
-            # Same-archetype allies (excluding captains), not already boosted
-            candidates = [
-                u for u in units
-                if u.instance_id != captain_unit.instance_id
-                and u.instance_id not in boosted
-                and not _has_captain(unit_defs.get(u.unit_id))
-            ]
-            # Same archetype only
-            candidates = [u for u in candidates if getattr(
-                unit_defs.get(u.unit_id), "archetype", "") == archetype]
-            # Sort: cost asc, stat asc, specials count asc, instance_id
+            leader_faction = getattr(unit_def, "faction", None) or ""
 
             def key(u: Unit) -> tuple:
                 ud = unit_defs.get(u.unit_id)
@@ -442,21 +453,55 @@ def compute_captain_stat_modifiers(
                 sp = getattr(ud, "specials", None) or []
                 tags = getattr(ud, "tags", None) or []
                 num_specials = len(sp) if isinstance(sp, list) else 0
-                num_specials += len([t for t in tags if t not in sp]
-                                    ) if isinstance(tags, list) else 0
+                num_specials += len([t for t in tags if t not in sp]) if isinstance(tags, list) else 0
                 return (cost, st, num_specials, u.instance_id or "")
-            candidates.sort(key=key)
-            count = 0
-            for ally in candidates:
-                if count >= max_allies:
-                    break
-                mods[ally.instance_id] = bonus
-                boosted.add(ally.instance_id)
-                count += 1
-        return mods
 
-    attacker_mods = apply_for_side(attacker_units, "attack")
-    defender_mods = apply_for_side(defender_units, "defense")
+            pool = []
+            for u in units:
+                if u.instance_id == leader_unit.instance_id or u.instance_id in boosted:
+                    continue
+                ud = unit_defs.get(u.unit_id)
+                if ud is None or _leader_aura(ud, captain_max_allies) is not None:
+                    continue
+                if (getattr(ud, "faction", None) or "") != leader_faction:
+                    continue
+                pool.append(u)
+            same_type = [u for u in pool if getattr(unit_defs.get(u.unit_id), "archetype", "") == archetype]
+            other_type = [u for u in pool if getattr(unit_defs.get(u.unit_id), "archetype", "") != archetype]
+            same_type.sort(key=key)
+            other_type.sort(key=key)
+            picks = same_type[:ally_cap]
+            if source == "king":
+                picks = picks + other_type[: ally_cap - len(picks)]
+            for ally in picks:
+                mods[ally.instance_id] = bonus
+                sources[ally.instance_id] = source
+                boosted.add(ally.instance_id)
+        return mods, sources
+
+    attacker_mods, attacker_sources = apply_for_side(attacker_units, "attack")
+    defender_mods, defender_sources = apply_for_side(defender_units, "defense")
+    return attacker_mods, defender_mods, attacker_sources, defender_sources
+
+
+def compute_captain_stat_modifiers(
+    attacker_units: list[Unit],
+    defender_units: list[Unit],
+    unit_defs: dict[str, UnitDefinition],
+    bonus: int = 1,
+    max_allies: int = CAPTAIN_ALLY_CAP,
+) -> tuple[dict[str, int], dict[str, int]]:
+    """
+    Stat bonuses from captain (up to max_allies) and king (up to 5).
+    Returns (attacker_modifiers, defender_modifiers) as instance_id -> modifier.
+    """
+    attacker_mods, defender_mods, _, _ = compute_leader_stat_modifiers(
+        attacker_units,
+        defender_units,
+        unit_defs,
+        bonus=bonus,
+        captain_max_allies=max_allies,
+    )
     return attacker_mods, defender_mods
 
 

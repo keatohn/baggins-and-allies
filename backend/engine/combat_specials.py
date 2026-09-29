@@ -13,7 +13,7 @@ from backend.engine.utils import has_unit_special
 from backend.engine.combat import (
     compute_terrain_stat_modifiers,
     compute_anti_cavalry_stat_modifiers,
-    compute_captain_stat_modifiers,
+    compute_leader_stat_modifiers,
     compute_sea_raider_stat_modifiers,
     merge_stat_modifiers,
     get_bombikazi_pairing,
@@ -44,7 +44,7 @@ def compute_battle_specials_and_modifiers(
     """
     Single source of truth: compute which specials apply to each unit and stat modifiers.
 
-    Uses same rules as real combat: terrain, anti-cavalry, captain, sea raider,
+    Uses same rules as real combat: terrain, anti-cavalry, captain, king, sea raider,
     terror/fearless/hope, stealth, bombikazi (paired), archer (defenders, when applicable).
 
     stealth: only when stealth_prefire_applicable (dedicated stealth prefire snapshot — not standard combat).
@@ -63,7 +63,7 @@ def compute_battle_specials_and_modifiers(
     anticav_att, anticav_def = compute_anti_cavalry_stat_modifiers(
         attacker_units, defender_units, unit_defs
     )
-    captain_att, captain_def = compute_captain_stat_modifiers(
+    captain_att, captain_def, captain_src_att, captain_src_def = compute_leader_stat_modifiers(
         attacker_units, defender_units, unit_defs
     )
     sea_raider_att, _ = compute_sea_raider_stat_modifiers(
@@ -87,7 +87,7 @@ def compute_battle_specials_and_modifiers(
 
     def build_specials(
         units: list[Unit],
-        captain_mods: dict[str, int],
+        leader_sources: dict[str, str],
         anticav_mods: dict[str, int],
         terrain_mods: dict[str, int],
         is_attacker: bool,
@@ -103,7 +103,8 @@ def compute_battle_specials_and_modifiers(
                 "terror": is_attacker and has_unit_special(unit_def, "terror"),
                 "terrainMountain": bool(terrain_mods.get(u.instance_id) and is_mountain),
                 "terrainForest": bool(terrain_mods.get(u.instance_id) and is_forest),
-                "captain": bool(captain_mods.get(u.instance_id, 0) > 0),
+                "captain": leader_sources.get(u.instance_id) == "captain",
+                "king": leader_sources.get(u.instance_id) == "king",
                 "antiCavalry": bool(anticav_mods.get(u.instance_id, 0) > 0),
                 "seaRaider": bool(sea_raider_mods.get(u.instance_id, 0) > 0),
                 "archer": (not is_attacker) and has_unit_special(unit_def, "archer") and archer_prefire_applicable,
@@ -121,10 +122,10 @@ def compute_battle_specials_and_modifiers(
         return out
 
     specials_attacker = build_specials(
-        attacker_units, captain_att, anticav_att, terrain_att, True, sea_raider_att
+        attacker_units, captain_src_att, anticav_att, terrain_att, True, sea_raider_att
     )
     specials_defender = build_specials(
-        defender_units, captain_def, anticav_def, terrain_def, False
+        defender_units, captain_src_def, anticav_def, terrain_def, False
     )
 
     return BattleSpecialsResult(
@@ -141,6 +142,7 @@ _ENGINE_SPECIAL_TO_PAYLOAD: tuple[tuple[str, str], ...] = (
     ("terrainMountain", "terrain_mountain"),
     ("terrainForest", "terrain_forest"),
     ("captain", "captain_bonus"),
+    ("king", "king_bonus"),
     ("antiCavalry", "anti_cavalry"),
     ("seaRaider", "sea_raider"),
     ("archer", "archer"),

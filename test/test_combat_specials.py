@@ -2,8 +2,12 @@
 from dataclasses import replace
 
 import pytest
-from backend.engine.combat import get_siegework_dice_counts, siegework_dice_round_applies
-from backend.engine.definitions import load_static_definitions
+from backend.engine.combat import (
+    compute_leader_stat_modifiers,
+    get_siegework_dice_counts,
+    siegework_dice_round_applies,
+)
+from backend.engine.definitions import UnitDefinition, load_static_definitions
 from backend.engine.state import Unit
 from backend.engine.combat_specials import (
     compute_battle_specials_and_modifiers,
@@ -346,3 +350,103 @@ def test_attacker_catapult_defender_ram_still_has_attacker_siegework_dice(defs):
     )
     assert att_d == unit_defs["catapult"].dice
     assert def_d == 0
+
+
+def _infantry(unit_id: str, specials: list[str] | None = None) -> UnitDefinition:
+    return UnitDefinition(
+        id=unit_id,
+        display_name=unit_id,
+        faction="gondor",
+        archetype="infantry",
+        tags=["land", "transportable"],
+        attack=2,
+        defense=2,
+        movement=1,
+        health=1,
+        cost={"power": 3},
+        specials=list(specials or []),
+    )
+
+
+def _units(prefix: str, unit_id: str, count: int) -> list[Unit]:
+    return [
+        Unit(
+            instance_id=f"{prefix}_{i}_{unit_id}",
+            unit_id=unit_id,
+            remaining_movement=1,
+            remaining_health=1,
+            base_movement=1,
+            base_health=1,
+        )
+        for i in range(count)
+    ]
+
+
+def test_king_and_captain_boost_own_faction_only():
+    """Captain stays same-type. King fills same type first, then other types, own faction only."""
+    ally = replace(_infantry("ally_soldier"), faction="rohan")
+    cheap_archer = replace(_infantry("cheap_archer"), archetype="archer", attack=1, cost={"power": 2})
+    mid_knight = replace(_infantry("mid_knight"), archetype="cavalry", attack=4, cost={"power": 4})
+    weak_siege = replace(_infantry("weak_siege"), archetype="siegework", attack=1, cost={"power": 2})
+    pricey = replace(_infantry("pricey"), archetype="monster", attack=6, cost={"power": 8})
+    defs = {
+        "king": _infantry("king", ["king"]),
+        "captain": _infantry("captain", ["captain"]),
+        "soldier": _infantry("soldier"),
+        "ally_soldier": ally,
+        "cheap_archer": cheap_archer,
+        "mid_knight": mid_knight,
+        "weak_siege": weak_siege,
+        "pricey": pricey,
+    }
+    king = _units("att", "king", 1)
+    soldiers = _units("sol", "soldier", 8)
+    allies = _units("ally", "ally_soldier", 3)
+    att_mods, _, att_sources, _ = compute_leader_stat_modifiers(king + soldiers + allies, [], defs)
+    assert len(att_mods) == 5
+    assert set(att_sources.values()) == {"king"}
+    assert all(v == 1 for v in att_mods.values())
+    assert all(iid.startswith("sol_") for iid in att_mods)
+    assert not any(iid.startswith("ally_") for iid in att_mods)
+
+    captain = _units("cap", "captain", 1)
+    cap_mods, _, _, _ = compute_leader_stat_modifiers(captain + soldiers + allies, [], defs)
+    assert len(cap_mods) == 3
+    assert all(iid.startswith("sol_") for iid in cap_mods)
+
+    both_mods, _, both_sources, _ = compute_leader_stat_modifiers(
+        king + captain + soldiers, [], defs
+    )
+    assert len(both_mods) == 8
+    assert all(v == 1 for v in both_mods.values())
+    assert sum(1 for s in both_sources.values() if s == "king") == 5
+    assert sum(1 for s in both_sources.values() if s == "captain") == 3
+
+    others = (
+        _units("arc", "cheap_archer", 1)
+        + _units("knt", "mid_knight", 1)
+        + _units("sw", "weak_siege", 1)
+        + _units("mon", "pricey", 1)
+    )
+    spill_mods, _, spill_sources, _ = compute_leader_stat_modifiers(
+        king + soldiers[:2] + others + allies, [], defs
+    )
+    assert set(spill_sources) == {
+        soldiers[0].instance_id,
+        soldiers[1].instance_id,
+        "sw_0_weak_siege",
+        "arc_0_cheap_archer",
+        "knt_0_mid_knight",
+    }
+    assert "mon_0_pricey" not in spill_mods
+    assert all(v == 1 for v in spill_mods.values())
+
+    cap_other, _, _, _ = compute_leader_stat_modifiers(captain + others, [], defs)
+    assert cap_other == {}
+
+    result = compute_battle_specials_and_modifiers(
+        king + soldiers[:6], [], None, defs
+    )
+    flags = specials_flags_for_round_payload(soldiers[0].instance_id, True, result)
+    assert flags["king_bonus"] is True
+    assert flags["captain_bonus"] is False

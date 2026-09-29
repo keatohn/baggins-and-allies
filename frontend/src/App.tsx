@@ -497,6 +497,7 @@ type CombatUnit = {
   terrainMountain?: boolean;
   terrainForest?: boolean;
   hasCaptainBonus?: boolean;
+  hasKingBonus?: boolean;
   hasAntiCavalry?: boolean;
   hasSeaRaider?: boolean;
   /** Defender: archer special badge (prefire round only); from backend `archer`. */
@@ -530,6 +531,7 @@ type BackendCombatUnit = {
   terrain_mountain?: boolean;
   terrain_forest?: boolean;
   captain_bonus?: boolean;
+  king_bonus?: boolean;
   anti_cavalry?: boolean;
   sea_raider?: boolean;
   /** Defender archer special (AR badge); only true during archer prefire snapshot. */
@@ -549,6 +551,7 @@ type CombatSpecialsInstance = {
   terrainMountain?: boolean;
   terrainForest?: boolean;
   captain?: boolean;
+  king?: boolean;
   antiCavalry?: boolean;
   seaRaider?: boolean;
   archer?: boolean;
@@ -3123,6 +3126,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         ...(bu.terrain_mountain && { terrainMountain: true }),
         ...(bu.terrain_forest && { terrainForest: true }),
         ...(bu.captain_bonus && { hasCaptainBonus: true }),
+        ...(bu.king_bonus && { hasKingBonus: true }),
         ...(bu.anti_cavalry && { hasAntiCavalry: true }),
         ...(bu.sea_raider && { hasSeaRaider: true }),
         ...(bu.archer && { hasArcher: true }),
@@ -3551,6 +3555,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         ...(specials?.terrainMountain && { terrainMountain: true }),
         ...(specials?.terrainForest && { terrainForest: true }),
         ...(specials?.captain && { hasCaptainBonus: true }),
+        ...(specials?.king && { hasKingBonus: true }),
         ...(specials?.antiCavalry && { hasAntiCavalry: true }),
         ...(specials?.seaRaider && { hasSeaRaider: true }),
         ...(specials?.archer && { hasArcher: true }),

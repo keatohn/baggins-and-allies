@@ -231,7 +231,7 @@ def combat_round_resolved(
       instance_id, unit_id, display_name, attack, defense, effective_attack,
       effective_defense, health, remaining_health, remaining_movement, is_archer, faction
       (unit definition owning faction for UI borders; not territory owner),
-      terror, terrain_mountain, terrain_forest, captain_bonus, anti_cavalry, sea_raider,
+      terror, terrain_mountain, terrain_forest, captain_bonus, king_bonus, anti_cavalry, sea_raider,
       archer (defender, archer prefire round only), stealth (attacker stealth prefire round only),
       bombikazi, fearless, hope,
       ram (attacker units with ram special; only true on dedicated siegeworks round snapshots),

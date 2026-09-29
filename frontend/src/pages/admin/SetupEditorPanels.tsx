@@ -46,6 +46,41 @@ function JsonObjectField({ value, onApply }: { value: unknown; onApply: (o: unkn
   );
 }
 
+function parseCommaList(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
+function commaListText(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.filter((x): x is string => typeof x === 'string' && x.trim() !== '').join(', ');
+  }
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  return '';
+}
+
+/** Keeps the raw text while typing so a trailing comma or space is not stripped on each keystroke. */
+function CommaListField({ value, onApply }: { value: unknown; onApply: (ids: string[]) => void }) {
+  const committed = commaListText(value);
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <input
+      type="text"
+      className="admin-form__input"
+      spellCheck={false}
+      value={draft ?? committed}
+      onChange={(e) => {
+        const raw = e.target.value;
+        setDraft(raw);
+        onApply(parseCommaList(raw));
+      }}
+      onBlur={() => setDraft(null)}
+    />
+  );
+}
+
 function MultilineIdList({ value, onApply }: { value: unknown; onApply: (ids: string[]) => void }) {
   const [t, setT] = useState('');
   useEffect(() => {
@@ -542,19 +577,7 @@ export function UnitsPanel({
           )}
           {fieldRow(
             'Tags (comma-separated)',
-            <input
-              type="text"
-              className="admin-form__input"
-              value={Array.isArray(u.tags) ? (u.tags as string[]).join(', ') : ''}
-              onChange={(e) =>
-                patch({
-                  tags: e.target.value
-                    .split(',')
-                    .map((t) => t.trim())
-                    .filter(Boolean),
-                })
-              }
-            />,
+            <CommaListField key={`${id}:tags`} value={u.tags} onApply={(tags) => patch({ tags })} />,
           )}
           {fieldRow(
             'Attack',
@@ -611,39 +634,22 @@ export function UnitsPanel({
           )}
           {fieldRow(
             'Specials (comma-separated)',
-            <input
-              type="text"
-              className="admin-form__input"
-              value={Array.isArray(u.specials) ? (u.specials as string[]).join(', ') : ''}
-              onChange={(e) =>
-                patch({
-                  specials: e.target.value
-                    .split(',')
-                    .map((t) => t.trim())
-                    .filter(Boolean),
-                })
-              }
-            />,
+            <CommaListField key={`${id}:specials`} value={u.specials} onApply={(specials) => patch({ specials })} />,
           )}
           {fieldRow(
             'Home territory ids (comma-separated)',
-            <input
-              type="text"
-              className="admin-form__input"
+            <CommaListField
+              key={`${id}:home`}
               value={
                 Array.isArray(u.home_territory_ids)
-                  ? (u.home_territory_ids as string[]).join(', ')
+                  ? u.home_territory_ids
                   : typeof u.home_territory_id === 'string'
                     ? u.home_territory_id
-                    : ''
+                    : []
               }
-              onChange={(e) => {
-                const parts = e.target.value
-                  .split(',')
-                  .map((t) => t.trim())
-                  .filter(Boolean);
-                patch({ home_territory_ids: parts.length ? parts : undefined, home_territory_id: undefined });
-              }}
+              onApply={(ids) =>
+                patch({ home_territory_ids: ids.length ? ids : undefined, home_territory_id: undefined })
+              }
             />,
           )}
         </div>

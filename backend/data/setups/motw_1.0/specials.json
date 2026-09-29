@@ -11,6 +11,7 @@
         "forest",
         "home",
         "hope",
+        "king",
         "ladder",
         "ram",
         "sea_raider",
@@ -39,7 +40,7 @@
     "captain": {
         "name": "Captain",
         "display_code": "C",
-        "description": "Grant +1 attack/defense boost to up to 3 units of the same unit type (infantry, archer, cavalry, etc.)"
+        "description": "Grant +1 attack/defense boost to up to 3 units of the same faction and unit type (infantry, archer, cavalry, etc.)"
     },
     "charging": {
         "name": "Charging",
@@ -68,6 +69,11 @@
         "name": "Hope",
         "display_code": "HP",
         "description": "Cancels 1 terror"
+    },
+    "king": {
+        "name": "King",
+        "display_code": "K",
+        "description": "Grant +1 attack/defense boost to up to 5 units of the same faction. Same unit type first; leftover slots go to other unit types, lowest values first"
     },
     "ladder": {
         "name": "Ladder",
