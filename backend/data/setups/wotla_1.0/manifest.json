@@ -1,0 +1,30 @@
+{
+  "id": "wotla_1.0",
+  "display_name": "War of the Last Alliance",
+  "is_active": true,
+  "map_asset": "wotla_map_1.0",
+  "context": {
+    "year": "SA 3434",
+    "map": "Middle-earth",
+    "faction_count": 7,
+    "factions": [
+      "Númenor",
+      "Mordor",
+      "Noldor",
+      "Rhûn",
+      "Silvan",
+      "Harad",
+      "Khazad-dûm"
+    ]
+  },
+  "victory_criteria": {
+    "strongholds": {
+      "good": 10,
+      "evil": 8
+    }
+  },
+  "camp_cost": 10,
+  "stronghold_repair_cost": 2,
+  "prefire_penalty": false,
+  "menu_order": 4
+}

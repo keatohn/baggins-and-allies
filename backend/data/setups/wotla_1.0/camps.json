@@ -1,0 +1,66 @@
+{
+  "numenor_camp": {
+    "id": "numenor_camp",
+    "territory_id": "numenor"
+  },
+  "minas_anor_camp": {
+    "id": "minas_anor_camp",
+    "territory_id": "minas_anor"
+  },
+  "pelargir_camp": {
+    "id": "pelargir_camp",
+    "territory_id": "pelargir"
+  },
+  "annuminas_camp": {
+    "id": "annuminas_camp",
+    "territory_id": "annuminas"
+  },
+  "fornost_camp": {
+    "id": "fornost_camp",
+    "territory_id": "fornost"
+  },
+  "barad_dur_camp": {
+    "id": "barad_dur_camp",
+    "territory_id": "barad_dur"
+  },
+  "minas_ithil_camp": {
+    "id": "minas_ithil_camp",
+    "territory_id": "minas_ithil"
+  },
+  "the_black_gate_camp": {
+    "id": "the_black_gate_camp",
+    "territory_id": "the_black_gate"
+  },
+  "ost_in_edhil_camp": {
+    "id": "ost_in_edhil_camp",
+    "territory_id": "ost_in_edhil"
+  },
+  "rivendell_camp": {
+    "id": "rivendell_camp",
+    "territory_id": "rivendell"
+  },
+  "mithlond_camp": {
+    "id": "mithlond_camp",
+    "territory_id": "mithlond"
+  },
+  "west_rhun_camp": {
+    "id": "west_rhun_camp",
+    "territory_id": "west_rhun"
+  },
+  "lothlorien_camp": {
+    "id": "lothlorien_camp",
+    "territory_id": "lothlorien"
+  },
+  "amon_lanc_camp": {
+    "id": "amon_lanc_camp",
+    "territory_id": "amon_lanc"
+  },
+  "umbar_camp": {
+    "id": "umbar_camp",
+    "territory_id": "umbar"
+  },
+  "khazad_dum_camp": {
+    "id": "khazad_dum_camp",
+    "territory_id": "khazad_dum"
+  }
+}

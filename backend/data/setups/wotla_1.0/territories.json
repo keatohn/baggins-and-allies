@@ -1,0 +1,1895 @@
+{
+  "west_harnen": {
+    "id": "west_harnen",
+    "display_name": "West Harnen",
+    "terrain_type": "wasteland",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "east_harnen",
+      "far_harad",
+      "haradwaith",
+      "sea_zone_18",
+      "sea_zone_19",
+      "south_ithilien",
+      "umbar"
+    ],
+    "aerial_adjacent": [
+      "lebennin",
+      "nurn"
+    ],
+    "ford_adjacent": []
+  },
+  "east_harnen": {
+    "id": "east_harnen",
+    "display_name": "East Harnen",
+    "terrain_type": "wasteland",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "haradwaith",
+      "near_harad",
+      "south_ithilien",
+      "west_harnen"
+    ],
+    "aerial_adjacent": [
+      "nurn"
+    ],
+    "ford_adjacent": []
+  },
+  "pelargir": {
+    "id": "pelargir",
+    "display_name": "Pelargir",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": true,
+    "ownable": true,
+    "adjacent": [
+      "lebennin",
+      "lossarnach",
+      "sea_zone_18"
+    ],
+    "aerial_adjacent": [
+      "south_ithilien"
+    ],
+    "ford_adjacent": []
+  },
+  "south_ithilien": {
+    "id": "south_ithilien",
+    "display_name": "South Ithilien",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "east_harnen",
+      "gorgoroth",
+      "minas_ithil",
+      "north_ithilien",
+      "osgiliath",
+      "sea_zone_18",
+      "west_harnen"
+    ],
+    "aerial_adjacent": [
+      "pelargir"
+    ],
+    "ford_adjacent": []
+  },
+  "andrast": {
+    "id": "andrast",
+    "display_name": "Andrast",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "anfalas",
+      "druwaith_iaur",
+      "sea_zone_15",
+      "sea_zone_16"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "pelennor": {
+    "id": "pelennor",
+    "display_name": "Pelennor",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "anorien",
+      "lossarnach",
+      "minas_anor",
+      "osgiliath",
+      "sea_zone_18"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "morgai": {
+    "id": "morgai",
+    "display_name": "Morgai",
+    "terrain_type": "wasteland",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "gorgoroth",
+      "minas_ithil",
+      "udun"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "south_calenardhon": {
+    "id": "south_calenardhon",
+    "display_name": "South Calenardhon",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "anorien",
+      "calenardhon",
+      "east_calenardhon",
+      "entwash",
+      "erech_lamedon",
+      "west_calenardhon"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "druwaith_iaur": {
+    "id": "druwaith_iaur",
+    "display_name": "Drúwaith Iaur",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "andrast",
+      "anfalas",
+      "fords_of_isen",
+      "sea_zone_8",
+      "west_calenardhon"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "north_ithilien": {
+    "id": "north_ithilien",
+    "display_name": "North Ithilien",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "dagorlad",
+      "minas_ithil",
+      "osgiliath",
+      "south_ithilien",
+      "udun"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "entwash": {
+    "id": "entwash",
+    "display_name": "Entwash",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "anorien",
+      "east_calenardhon",
+      "south_calenardhon"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "udun": {
+    "id": "udun",
+    "display_name": "Udûn",
+    "terrain_type": "wasteland",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "dagorlad",
+      "gorgoroth",
+      "morgai",
+      "north_ithilien",
+      "rhun_hills",
+      "the_black_gate"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "dagorlad": {
+    "id": "dagorlad",
+    "display_name": "Dagorlad",
+    "terrain_type": "wasteland",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "emyn_muil",
+      "north_ithilien",
+      "rhovanion",
+      "rhun_hills",
+      "the_black_gate",
+      "udun"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "emyn_muil": {
+    "id": "emyn_muil",
+    "display_name": "Emyn Muil",
+    "terrain_type": "wasteland",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "dagorlad",
+      "rhovanion"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "glanduin": {
+    "id": "glanduin",
+    "display_name": "Glanduin",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "fangorn",
+      "field_of_celebrant",
+      "khazad_dum",
+      "lothlorien",
+      "north_enedwaith",
+      "south_eregion"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "south_greenwood": {
+    "id": "south_greenwood",
+    "display_name": "South Greenwood",
+    "terrain_type": "forest",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "amon_lanc",
+      "anduin_valley",
+      "celduin_valley",
+      "north_greenwood",
+      "rhovanion"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "harlindon": {
+    "id": "harlindon",
+    "display_name": "Harlindon",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "lond_daer",
+      "minhiriath",
+      "mithlond",
+      "sea_zone_3",
+      "tower_hills"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "gladden_fields": {
+    "id": "gladden_fields",
+    "display_name": "Gladden Fields",
+    "terrain_type": "forest",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "hithlaeglir",
+      "lothlorien",
+      "north_eregion"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "celduin_valley": {
+    "id": "celduin_valley",
+    "display_name": "Celduin Valley",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "iron_hills",
+      "north_greenwood",
+      "rhovanion",
+      "south_greenwood",
+      "west_rhun"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "tower_hills": {
+    "id": "tower_hills",
+    "display_name": "Tower Hills",
+    "terrain_type": "mountains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "evendim_hills",
+      "harlindon",
+      "lune_valley",
+      "minhiriath",
+      "mithlond",
+      "west_eriador"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "khazad_dum": {
+    "id": "khazad_dum",
+    "display_name": "Khazad-dûm",
+    "terrain_type": "mountains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": true,
+    "ownable": true,
+    "adjacent": [
+      "glanduin",
+      "lothlorien",
+      "north_eregion",
+      "south_eregion"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "mithlond": {
+    "id": "mithlond",
+    "display_name": "Mithlond",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": true,
+    "ownable": true,
+    "adjacent": [
+      "forlindon",
+      "harlindon",
+      "lune_valley",
+      "sea_zone_3",
+      "tower_hills"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "ettenmoors": {
+    "id": "ettenmoors",
+    "display_name": "Ettenmoors",
+    "terrain_type": "mountains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "amon_sul",
+      "arnor",
+      "east_eriador",
+      "gundabad",
+      "hithlaeglir",
+      "north_eregion",
+      "rivendell"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "evendim_hills": {
+    "id": "evendim_hills",
+    "display_name": "Evendim Hills",
+    "terrain_type": "mountains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "annuminas",
+      "arnor",
+      "lune_valley",
+      "tower_hills",
+      "west_eriador"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "north_greenwood": {
+    "id": "north_greenwood",
+    "display_name": "North Greenwood",
+    "terrain_type": "forest",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "anduin_valley",
+      "celduin_valley",
+      "iron_hills",
+      "south_greenwood",
+      "withered_heath"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "iron_hills": {
+    "id": "iron_hills",
+    "display_name": "Iron Hills",
+    "terrain_type": "mountains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "celduin_valley",
+      "north_greenwood",
+      "west_rhun",
+      "withered_heath"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "lune_valley": {
+    "id": "lune_valley",
+    "display_name": "Lune Valley",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "evendim_hills",
+      "forlindon",
+      "mithlond",
+      "tower_hills"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "forlindon": {
+    "id": "forlindon",
+    "display_name": "Forlindon",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "lune_valley",
+      "mithlond",
+      "sea_zone_2",
+      "sea_zone_3"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "withered_heath": {
+    "id": "withered_heath",
+    "display_name": "Withered Heath",
+    "terrain_type": "mountains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "iron_hills",
+      "north_greenwood"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "the_black_gate": {
+    "id": "the_black_gate",
+    "display_name": "The Black Gate",
+    "terrain_type": "wasteland",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": true,
+    "ownable": true,
+    "adjacent": [
+      "dagorlad",
+      "udun"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "amon_lanc": {
+    "id": "amon_lanc",
+    "display_name": "Amon Lanc",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": true,
+    "ownable": true,
+    "adjacent": [
+      "anduin_valley",
+      "rhovanion",
+      "south_greenwood"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "minas_ithil": {
+    "id": "minas_ithil",
+    "display_name": "Minas Ithil",
+    "terrain_type": "wasteland",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": true,
+    "ownable": true,
+    "adjacent": [
+      "gorgoroth",
+      "morgai",
+      "north_ithilien",
+      "south_ithilien"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "khand": {
+    "id": "khand",
+    "display_name": "Khand",
+    "terrain_type": "wasteland",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "near_harad",
+      "nurn"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "near_harad": {
+    "id": "near_harad",
+    "display_name": "Near Harad",
+    "terrain_type": "wasteland",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "east_harnen",
+      "haradwaith",
+      "khand",
+      "nurn"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "haradwaith": {
+    "id": "haradwaith",
+    "display_name": "Haradwaith",
+    "terrain_type": "wasteland",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "east_harnen",
+      "far_harad",
+      "near_harad",
+      "west_harnen"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "far_harad": {
+    "id": "far_harad",
+    "display_name": "Far Harad",
+    "terrain_type": "wasteland",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "haradwaith",
+      "umbar",
+      "west_harnen"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "umbar": {
+    "id": "umbar",
+    "display_name": "Umbar",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "far_harad",
+      "sea_zone_20",
+      "west_harnen"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "osgiliath": {
+    "id": "osgiliath",
+    "display_name": "Osgiliath",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": true,
+    "ownable": true,
+    "adjacent": [
+      "north_ithilien",
+      "pelennor",
+      "south_ithilien"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "isengard": {
+    "id": "isengard",
+    "display_name": "Isengard",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": true,
+    "ownable": true,
+    "adjacent": [
+      "north_enedwaith",
+      "west_calenardhon"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "anorien": {
+    "id": "anorien",
+    "display_name": "Anorien",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "entwash",
+      "lossarnach",
+      "minas_anor",
+      "pelennor",
+      "south_calenardhon"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "lossarnach": {
+    "id": "lossarnach",
+    "display_name": "Lossarnach",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "anorien",
+      "lebennin",
+      "minas_anor",
+      "pelargir",
+      "pelennor",
+      "sea_zone_18"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "lebennin": {
+    "id": "lebennin",
+    "display_name": "Lebennin",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "belfalas",
+      "erech_lamedon",
+      "lossarnach",
+      "pelargir",
+      "sea_zone_18"
+    ],
+    "aerial_adjacent": [
+      "west_harnen"
+    ],
+    "ford_adjacent": []
+  },
+  "belfalas": {
+    "id": "belfalas",
+    "display_name": "Belfalas",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "anfalas",
+      "erech_lamedon",
+      "lebennin",
+      "sea_zone_17",
+      "sea_zone_18"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "anfalas": {
+    "id": "anfalas",
+    "display_name": "Anfalas",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "andrast",
+      "belfalas",
+      "druwaith_iaur",
+      "erech_lamedon",
+      "sea_zone_16",
+      "sea_zone_17"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "west_calenardhon": {
+    "id": "west_calenardhon",
+    "display_name": "West Calenardhon",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "calenardhon",
+      "druwaith_iaur",
+      "erech_lamedon",
+      "fangorn",
+      "fords_of_isen",
+      "isengard",
+      "north_enedwaith",
+      "south_calenardhon",
+      "south_enedwaith"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "fangorn": {
+    "id": "fangorn",
+    "display_name": "Fangorn",
+    "terrain_type": "forest",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "calenardhon",
+      "field_of_celebrant",
+      "glanduin",
+      "north_enedwaith",
+      "west_calenardhon"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "calenardhon": {
+    "id": "calenardhon",
+    "display_name": "Calenardhon",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "east_calenardhon",
+      "fangorn",
+      "field_of_celebrant",
+      "south_calenardhon",
+      "west_calenardhon"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "east_calenardhon": {
+    "id": "east_calenardhon",
+    "display_name": "East Calenardhon",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "calenardhon",
+      "entwash",
+      "field_of_celebrant",
+      "south_calenardhon"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "field_of_celebrant": {
+    "id": "field_of_celebrant",
+    "display_name": "Field of Celebrant",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "calenardhon",
+      "east_calenardhon",
+      "fangorn",
+      "glanduin",
+      "lothlorien"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "rhovanion": {
+    "id": "rhovanion",
+    "display_name": "Rhovanion",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "amon_lanc",
+      "anduin_valley",
+      "celduin_valley",
+      "dagorlad",
+      "emyn_muil",
+      "south_greenwood"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "anduin_valley": {
+    "id": "anduin_valley",
+    "display_name": "Anduin Valley",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "amon_lanc",
+      "north_greenwood",
+      "rhovanion",
+      "south_greenwood"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "lond_daer": {
+    "id": "lond_daer",
+    "display_name": "Lond Daer",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "harlindon",
+      "minhiriath",
+      "sea_zone_7",
+      "south_enedwaith"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "minhiriath": {
+    "id": "minhiriath",
+    "display_name": "Minhiriath",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "harlindon",
+      "lond_daer",
+      "north_enedwaith",
+      "ost_in_edhil",
+      "south_enedwaith",
+      "tower_hills",
+      "west_eriador"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "east_eriador": {
+    "id": "east_eriador",
+    "display_name": "East Eriador",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "amon_sul",
+      "ettenmoors",
+      "fornost",
+      "ost_in_edhil",
+      "south_eregion",
+      "west_eriador"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "arnor": {
+    "id": "arnor",
+    "display_name": "Arnor",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "amon_sul",
+      "annuminas",
+      "ettenmoors",
+      "evendim_hills",
+      "fornost"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "west_eriador": {
+    "id": "west_eriador",
+    "display_name": "West Eriador",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "annuminas",
+      "east_eriador",
+      "evendim_hills",
+      "fornost",
+      "minhiriath",
+      "ost_in_edhil",
+      "tower_hills"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "fornost": {
+    "id": "fornost",
+    "display_name": "Fornost",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": true,
+    "ownable": true,
+    "adjacent": [
+      "amon_sul",
+      "annuminas",
+      "arnor",
+      "east_eriador",
+      "west_eriador"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "amon_sul": {
+    "id": "amon_sul",
+    "display_name": "Amon Sûl",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "arnor",
+      "east_eriador",
+      "ettenmoors",
+      "fornost"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_2": {
+    "id": "sea_zone_2",
+    "display_name": "Sea Zone 2",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "forlindon",
+      "sea_zone_1",
+      "sea_zone_3",
+      "tol_fuin"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_3": {
+    "id": "sea_zone_3",
+    "display_name": "Sea Zone 3",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "forlindon",
+      "harlindon",
+      "mithlond",
+      "sea_zone_2",
+      "sea_zone_4",
+      "sea_zone_6",
+      "sea_zone_7"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_7": {
+    "id": "sea_zone_7",
+    "display_name": "Sea Zone 7",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "lond_daer",
+      "sea_zone_3",
+      "sea_zone_6",
+      "sea_zone_8",
+      "sea_zone_9",
+      "south_enedwaith"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_8": {
+    "id": "sea_zone_8",
+    "display_name": "Sea Zone 8",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "druwaith_iaur",
+      "fords_of_isen",
+      "sea_zone_10",
+      "sea_zone_15",
+      "sea_zone_7",
+      "sea_zone_9"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_15": {
+    "id": "sea_zone_15",
+    "display_name": "Sea Zone 15",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "andrast",
+      "sea_zone_10",
+      "sea_zone_14",
+      "sea_zone_16",
+      "sea_zone_8"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_16": {
+    "id": "sea_zone_16",
+    "display_name": "Sea Zone 16",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "andrast",
+      "anfalas",
+      "sea_zone_14",
+      "sea_zone_15",
+      "sea_zone_17",
+      "sea_zone_19"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_17": {
+    "id": "sea_zone_17",
+    "display_name": "Sea Zone 17",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "anfalas",
+      "belfalas",
+      "sea_zone_16",
+      "sea_zone_18",
+      "sea_zone_19"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_18": {
+    "id": "sea_zone_18",
+    "display_name": "Sea Zone 18",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "belfalas",
+      "lebennin",
+      "lossarnach",
+      "pelargir",
+      "pelennor",
+      "sea_zone_17",
+      "sea_zone_19",
+      "south_ithilien",
+      "tolfalas",
+      "west_harnen"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_20": {
+    "id": "sea_zone_20",
+    "display_name": "Sea Zone 20",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "sea_zone_19",
+      "sea_zone_21",
+      "sea_zone_22",
+      "umbar"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "lothlorien": {
+    "id": "lothlorien",
+    "display_name": "Lothlorien",
+    "terrain_type": "forest",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "field_of_celebrant",
+      "gladden_fields",
+      "glanduin",
+      "khazad_dum",
+      "north_eregion"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "west_rhun": {
+    "id": "west_rhun",
+    "display_name": "West Rhûn",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "celduin_valley",
+      "iron_hills",
+      "rhun_hills"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "rhun_hills": {
+    "id": "rhun_hills",
+    "display_name": "Rhûn Hills",
+    "terrain_type": "mountains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "dagorlad",
+      "nurn",
+      "udun",
+      "west_rhun"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "south_eregion": {
+    "id": "south_eregion",
+    "display_name": "South Eregion",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "east_eriador",
+      "glanduin",
+      "khazad_dum",
+      "north_enedwaith",
+      "north_eregion",
+      "ost_in_edhil"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "north_eregion": {
+    "id": "north_eregion",
+    "display_name": "North Eregion",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "ettenmoors",
+      "gladden_fields",
+      "khazad_dum",
+      "lothlorien",
+      "rivendell",
+      "south_eregion"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_6": {
+    "id": "sea_zone_6",
+    "display_name": "Sea Zone 6",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "sea_zone_3",
+      "sea_zone_4",
+      "sea_zone_5",
+      "sea_zone_7",
+      "sea_zone_9"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_9": {
+    "id": "sea_zone_9",
+    "display_name": "Sea Zone 9",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "sea_zone_10",
+      "sea_zone_11",
+      "sea_zone_5",
+      "sea_zone_6",
+      "sea_zone_7",
+      "sea_zone_8"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_21": {
+    "id": "sea_zone_21",
+    "display_name": "Sea Zone 21",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "sea_zone_13",
+      "sea_zone_14",
+      "sea_zone_19",
+      "sea_zone_20",
+      "sea_zone_22"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_19": {
+    "id": "sea_zone_19",
+    "display_name": "Sea Zone 19",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "sea_zone_14",
+      "sea_zone_16",
+      "sea_zone_17",
+      "sea_zone_18",
+      "sea_zone_20",
+      "sea_zone_21",
+      "tolfalas",
+      "west_harnen"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "nurn": {
+    "id": "nurn",
+    "display_name": "Nurn",
+    "terrain_type": "wasteland",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "barad_dur",
+      "gorgoroth",
+      "khand",
+      "mount_doom",
+      "near_harad",
+      "rhun_hills"
+    ],
+    "aerial_adjacent": [
+      "east_harnen",
+      "west_harnen"
+    ],
+    "ford_adjacent": []
+  },
+  "erech_lamedon": {
+    "id": "erech_lamedon",
+    "display_name": "Erech-Lamedon",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "anfalas",
+      "belfalas",
+      "lebennin",
+      "south_calenardhon",
+      "west_calenardhon"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "south_enedwaith": {
+    "id": "south_enedwaith",
+    "display_name": "South Enedwaith",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "fords_of_isen",
+      "lond_daer",
+      "minhiriath",
+      "north_enedwaith",
+      "sea_zone_7",
+      "west_calenardhon"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "north_enedwaith": {
+    "id": "north_enedwaith",
+    "display_name": "North Enedwaith",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "fangorn",
+      "glanduin",
+      "isengard",
+      "minhiriath",
+      "ost_in_edhil",
+      "south_enedwaith",
+      "south_eregion",
+      "west_calenardhon"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "fords_of_isen": {
+    "id": "fords_of_isen",
+    "display_name": "Fords of Isen",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "druwaith_iaur",
+      "sea_zone_8",
+      "south_enedwaith",
+      "west_calenardhon"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "mount_doom": {
+    "id": "mount_doom",
+    "display_name": "Mount Doom",
+    "terrain_type": "wasteland",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "barad_dur",
+      "gorgoroth",
+      "nurn"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "gorgoroth": {
+    "id": "gorgoroth",
+    "display_name": "Gorgoroth",
+    "terrain_type": "wasteland",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "barad_dur",
+      "minas_ithil",
+      "morgai",
+      "mount_doom",
+      "nurn",
+      "south_ithilien",
+      "udun"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "hithlaeglir": {
+    "id": "hithlaeglir",
+    "display_name": "Hithlaeglir",
+    "terrain_type": "mountains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "ettenmoors",
+      "gladden_fields",
+      "gundabad",
+      "rivendell"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "gundabad": {
+    "id": "gundabad",
+    "display_name": "Gundabad",
+    "terrain_type": "mountains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "ettenmoors",
+      "hithlaeglir"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "numenor": {
+    "id": "numenor",
+    "display_name": "Númenor",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": true,
+    "ownable": true,
+    "adjacent": [
+      "sea_zone_23"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "rivendell": {
+    "id": "rivendell",
+    "display_name": "Rivendell",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": true,
+    "ownable": true,
+    "adjacent": [
+      "ettenmoors",
+      "hithlaeglir",
+      "north_eregion"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "ost_in_edhil": {
+    "id": "ost_in_edhil",
+    "display_name": "Ost-In-Edhil",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": true,
+    "ownable": true,
+    "adjacent": [
+      "east_eriador",
+      "minhiriath",
+      "north_enedwaith",
+      "south_eregion",
+      "west_eriador"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "annuminas": {
+    "id": "annuminas",
+    "display_name": "Annuminas",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": true,
+    "ownable": true,
+    "adjacent": [
+      "arnor",
+      "evendim_hills",
+      "fornost",
+      "west_eriador"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "minas_anor": {
+    "id": "minas_anor",
+    "display_name": "Minas Anor",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": true,
+    "ownable": true,
+    "adjacent": [
+      "anorien",
+      "lossarnach",
+      "pelennor"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_23": {
+    "id": "sea_zone_23",
+    "display_name": "Sea Zone 23",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "numenor",
+      "sea_zone_12",
+      "sea_zone_13",
+      "sea_zone_22"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_22": {
+    "id": "sea_zone_22",
+    "display_name": "Sea Zone 22",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "sea_zone_13",
+      "sea_zone_20",
+      "sea_zone_21",
+      "sea_zone_23"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_13": {
+    "id": "sea_zone_13",
+    "display_name": "Sea Zone 13",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "sea_zone_10",
+      "sea_zone_12",
+      "sea_zone_14",
+      "sea_zone_21",
+      "sea_zone_22",
+      "sea_zone_23"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_4": {
+    "id": "sea_zone_4",
+    "display_name": "Sea Zone 4",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "sea_zone_1",
+      "sea_zone_3",
+      "sea_zone_5",
+      "sea_zone_6"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_5": {
+    "id": "sea_zone_5",
+    "display_name": "Sea Zone 5",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "sea_zone_11",
+      "sea_zone_4",
+      "sea_zone_6",
+      "sea_zone_9"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_14": {
+    "id": "sea_zone_14",
+    "display_name": "Sea Zone 14",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "sea_zone_10",
+      "sea_zone_13",
+      "sea_zone_15",
+      "sea_zone_16",
+      "sea_zone_19",
+      "sea_zone_21"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "tolfalas": {
+    "id": "tolfalas",
+    "display_name": "Tolfalas",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "sea_zone_18",
+      "sea_zone_19"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "tol_fuin": {
+    "id": "tol_fuin",
+    "display_name": "Tol Fuin",
+    "terrain_type": "plains",
+    "produces": {
+      "power": 1
+    },
+    "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "sea_zone_1",
+      "sea_zone_2"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_1": {
+    "id": "sea_zone_1",
+    "display_name": "Sea Zone 1",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "sea_zone_2",
+      "sea_zone_4",
+      "tol_fuin"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_12": {
+    "id": "sea_zone_12",
+    "display_name": "Sea Zone 12",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "sea_zone_11",
+      "sea_zone_13",
+      "sea_zone_23"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_11": {
+    "id": "sea_zone_11",
+    "display_name": "Sea Zone 11",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "sea_zone_10",
+      "sea_zone_12",
+      "sea_zone_5",
+      "sea_zone_9"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "sea_zone_10": {
+    "id": "sea_zone_10",
+    "display_name": "Sea Zone 10",
+    "terrain_type": "sea",
+    "produces": {},
+    "is_stronghold": false,
+    "ownable": false,
+    "adjacent": [
+      "sea_zone_11",
+      "sea_zone_13",
+      "sea_zone_14",
+      "sea_zone_15",
+      "sea_zone_8",
+      "sea_zone_9"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "barad_dur": {
+    "id": "barad_dur",
+    "display_name": "Barad-dûr",
+    "terrain_type": "fortress",
+    "produces": {
+      "power": 12
+    },
+    "is_stronghold": true,
+    "stronghold_base_health": 2,
+    "ownable": true,
+    "adjacent": [
+      "gorgoroth",
+      "mount_doom",
+      "nurn"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  }
+}

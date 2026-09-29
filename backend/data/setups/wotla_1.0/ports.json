@@ -1,0 +1,22 @@
+{
+  "numenor_port": {
+    "id": "numenor_port",
+    "territory_id": "numenor"
+  },
+  "mithlond_port": {
+    "id": "mithlond_port",
+    "territory_id": "mithlond"
+  },
+  "pelargir_port": {
+    "id": "pelargir_port",
+    "territory_id": "pelargir"
+  },
+  "umbar_port": {
+    "id": "umbar_port",
+    "territory_id": "umbar"
+  },
+  "lond_daer_port": {
+    "id": "lond_daer_port",
+    "territory_id": "lond_daer"
+  }
+}
