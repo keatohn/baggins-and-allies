@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import TURN_MUSIC_M4A from 'virtual:turn-music-m4a';
 import UNIT_ICON_PNG from 'virtual:unit-icon-png';
+import { TerritoryGraphPane } from './TerritoryGraphPane';
 import type { AdminSetupBundle } from '../../services/api';
 
 function linesToList(s: string): string[] {
@@ -653,19 +654,31 @@ export function UnitsPanel({
 
 export function TerritoriesPanel({
   territories,
+  mapAsset,
   onChange,
 }: {
   territories: Record<string, Record<string, unknown>>;
+  mapAsset?: string;
   onChange: (next: Record<string, Record<string, unknown>>) => void;
 }) {
+  const [graphOpen, setGraphOpen] = useState(false);
   return (
-    <EntityDictPanel
-      title="territory"
-      data={territories}
-      onChange={onChange}
-      renderEditor={(id, t, patch) => (
-        <div className="admin-form">
-          {fieldRow('Territory id', <input type="text" className="admin-form__input admin-form__input--readonly" readOnly disabled value={id} />)}
+    <>
+      {graphOpen ? (
+        <TerritoryGraphPane mapAsset={mapAsset} territories={territories} onClose={() => setGraphOpen(false)} />
+      ) : null}
+      <EntityDictPanel
+        title="territory"
+        data={territories}
+        onChange={onChange}
+        renderEditor={(id, t, patch) => (
+          <div className="admin-form">
+            <div className="admin-form__graph-row">
+              <button type="button" className="admin-page__btn" onClick={() => setGraphOpen(true)}>
+                View as Graph
+              </button>
+            </div>
+            {fieldRow('Territory id', <input type="text" className="admin-form__input admin-form__input--readonly" readOnly disabled value={id} />)}
           {fieldRow(
             'Display name',
             <input type="text" className="admin-form__input" value={String(t.display_name ?? '')} onChange={(e) => patch({ display_name: e.target.value })} />,
@@ -707,9 +720,10 @@ export function TerritoriesPanel({
             'Ownable',
             <input type="checkbox" checked={t.ownable !== false} onChange={(e) => patch({ ownable: e.target.checked })} />,
           )}
-        </div>
-      )}
-    />
+          </div>
+        )}
+      />
+    </>
   );
 }
 

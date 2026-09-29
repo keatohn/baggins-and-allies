@@ -312,9 +312,188 @@
   box-sizing: border-box;
 }
 
-.admin-modal--wide {
-  width: min(100%, 42rem);
-  max-height: min(92vh, 44rem);
+.admin-form__graph-row {
+  margin: 0 0 0.85rem;
+}
+
+.admin-modal--graph {
+  width: min(100%, 96vw);
+  max-width: 1400px;
+  max-height: min(94vh, 920px);
+  height: min(94vh, 920px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 1rem 1.1rem 0.85rem;
+}
+
+.admin-graph__header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto auto;
+  gap: 0.25rem 0.75rem;
+  align-items: start;
+  flex: 0 0 auto;
+  margin-bottom: 0.5rem;
+}
+
+.admin-graph__header .admin-modal__title {
+  margin: 0;
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.admin-graph__header .admin-form__micro {
+  margin: 0;
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.admin-graph__key {
+  grid-column: 1;
+  grid-row: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem 1.25rem;
+  margin: 0.15rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.88rem;
+  color: var(--ink);
+}
+
+.admin-graph__key li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.admin-graph__key-swatch {
+  display: inline-block;
+  width: 1.15rem;
+  height: 0.38rem;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.admin-graph__key-swatch--land {
+  background: #2f7a3a;
+}
+
+.admin-graph__key-swatch--aerial {
+  background: #2a5ea8;
+}
+
+.admin-graph__header .admin-page__btn {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  align-self: start;
+}
+
+.admin-graph__viewport {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--parchment);
+  border: 1px solid var(--ink-faded);
+  border-radius: 8px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.admin-graph__viewport:active {
+  cursor: grabbing;
+}
+
+.admin-graph__world {
+  position: relative;
+  transform-origin: 0 0;
+}
+
+.admin-graph__landscape {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+  user-select: none;
+}
+
+.admin-graph__svg {
+  position: relative;
+  display: block;
+  z-index: 1;
+}
+
+.admin-graph__path {
+  fill: transparent;
+  stroke: var(--ink);
+  stroke-width: 4;
+  cursor: pointer;
+  pointer-events: fill;
+}
+
+.admin-graph__path--selected {
+  fill: rgba(61, 41, 20, 0.28);
+  stroke: var(--ink);
+  stroke-width: 7;
+}
+
+.admin-graph__path--neighbor-land {
+  fill: rgba(47, 122, 58, 0.32);
+}
+
+.admin-graph__path--neighbor-aerial {
+  fill: rgba(42, 94, 168, 0.32);
+}
+
+.admin-graph__path--neighbor-both {
+  fill: rgba(40, 110, 110, 0.34);
+}
+
+.admin-graph__edge {
+  fill: none;
+  stroke-linecap: round;
+  stroke-width: 4.5;
+}
+
+.admin-graph__edge--land {
+  stroke: #2f7a3a;
+}
+
+.admin-graph__edge--aerial {
+  stroke: #2a5ea8;
+}
+
+.admin-graph__edge--hot {
+  stroke-width: 7;
+}
+
+.admin-graph__node {
+  fill: var(--ink);
+}
+
+.admin-graph__node--selected {
+  fill: var(--ink);
+}
+
+.admin-graph__node--land {
+  fill: #2f7a3a;
+}
+
+.admin-graph__node--aerial {
+  fill: #2a5ea8;
+}
+
+.admin-graph__status {
+  flex: 0 0 auto;
+  margin: 0.55rem 0 0;
+  font-size: 0.82rem;
+  color: var(--ink-faded);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .admin-modal__title {

@@ -502,6 +502,7 @@ export default function Admin() {
         return (
           <TerritoriesPanel
             territories={(bundle.territories as DictEntityMap) ?? {}}
+            mapAsset={typeof bundle.manifest?.map_asset === 'string' ? bundle.manifest.map_asset : undefined}
             onChange={(next) => setBundle((b) => (b ? { ...b, territories: next as typeof b.territories } : null))}
           />
         );

@@ -1,3 +1,5 @@
+import MENU_MUSIC_M4A from 'virtual:menu-music-m4a';
+
 const STORAGE_MUTE = 'gameAudioMuted';
 const STORAGE_MUSIC_VOLUME = 'gameAudioMusicVolume';
 const STORAGE_MENU_MUSIC_VOLUME = 'gameAudioMenuMusicVolume';
@@ -417,13 +419,25 @@ class MenuLoopPair {
   private readonly onEnded: () => void;
 
   readonly sessionId: number;
+  readonly stems: readonly string[];
+  private playingStemIndex: number;
+  private readonly audioBase: string;
   readonly a: HTMLAudioElement;
   readonly b: HTMLAudioElement;
 
-  constructor(urlA: string, urlB: string, sessionId: number) {
+  constructor(
+    stems: readonly string[],
+    initialStemIndex: number,
+    firstUrl: string,
+    sessionId: number,
+    audioBase: string,
+  ) {
+    this.stems = stems;
+    this.playingStemIndex = initialStemIndex;
     this.sessionId = sessionId;
-    this.a = new Audio(urlA);
-    this.b = new Audio(urlB);
+    this.audioBase = audioBase;
+    this.a = new Audio(firstUrl);
+    this.b = new Audio();
     this.a.preload = 'auto';
     this.b.preload = 'auto';
 
@@ -432,11 +446,12 @@ class MenuLoopPair {
 
     const startHandoff = () => {
       if (sessionId !== menuSession.v || this.handoff) return;
-      this.handoff = true;
-      const active = this.activeIsA ? this.a : this.b;
+      const nextStemIndex = (this.playingStemIndex + 1) % this.stems.length;
       const incoming = this.activeIsA ? this.b : this.a;
+      if (!incoming.src) return;
+      this.handoff = true;
+      const outgoing = this.activeIsA ? this.a : this.b;
       incoming.currentTime = 0;
-      const outgoing = active;
       void incoming.play().then(() => {
         if (sessionId !== menuSession.v) return;
         fadeGainMenu(outgoing, 1, 0, MENU_LOOP_CROSSFADE_MS, menuSession, sessionId, () => {
@@ -445,7 +460,10 @@ class MenuLoopPair {
         });
         fadeGainMenu(incoming, 0, 1, MENU_LOOP_CROSSFADE_MS, menuSession, sessionId, () => {
           this.activeIsA = !this.activeIsA;
+          this.playingStemIndex = nextStemIndex;
           this.handoff = false;
+          const idle = this.getIdleElement();
+          this.preloadStemForIndex(idle, (this.playingStemIndex + 1) % this.stems.length, sessionId);
         });
       }).catch(() => {
         this.handoff = false;
@@ -479,6 +497,39 @@ class MenuLoopPair {
     this.b.addEventListener('timeupdate', this.onTimeUpdate);
     this.a.addEventListener('ended', this.onEnded);
     this.b.addEventListener('ended', this.onEnded);
+
+    queueMicrotask(() => {
+      if (sessionId !== menuSession.v) return;
+      this.preloadStemForIndex(this.b, (initialStemIndex + 1) % this.stems.length, sessionId);
+    });
+  }
+
+  private preloadStemForIndex(el: HTMLAudioElement, stemIndex: number, sid: number): void {
+    const stem = this.stems[stemIndex];
+    tryPlayFirstWorkingUrl(
+      MENU_AUDIO_EXTS.map((ext) => `${this.audioBase}/${stem}${ext}`),
+      (url) => {
+        if (sid !== menuSession.v) return;
+        try {
+          el.pause();
+          el.currentTime = 0;
+          el.src = url;
+          el.load();
+        } catch {}
+      },
+      () => {
+        if (sid !== menuSession.v) return;
+        const active = this.activeIsA ? this.a : this.b;
+        if (active.src && el !== active) {
+          try {
+            el.pause();
+            el.currentTime = 0;
+            el.src = active.src;
+            el.load();
+          } catch {}
+        }
+      },
+    );
   }
 
   isCrossfading(): boolean {
@@ -835,44 +886,15 @@ function tryPlayFirstWorkingUrl(
   tryNext();
 }
 
-function tryPlayFirstWorkingMenuTrack(track: 'menu' | 'lobby', onReady: (urlA: string, urlB: string) => void): void {
-  const base = track === 'lobby' ? 'fellowship' : 'shire';
-  const folder = track === 'lobby' ? LOBBY_AUDIO_BASE : MENU_AUDIO_BASE;
-  let i = 0;
-  const tryNext = () => {
-    if (i >= MENU_AUDIO_EXTS.length) return;
-    const ext = MENU_AUDIO_EXTS[i++];
-    const urlA = `${folder}/${base}${ext}`;
-    const urlB = `${folder}/${base}${ext}`;
-    const probeA = new Audio();
-    const onErrA = () => {
-      probeA.removeEventListener('canplay', onOkA);
-      tryNext();
-    };
-    const onOkA = () => {
-      probeA.removeEventListener('error', onErrA);
-      const probeB = new Audio();
-      const onErrB = () => {
-        probeB.removeEventListener('canplay', onOkB);
-        tryNext();
-      };
-      const onOkB = () => {
-        probeB.removeEventListener('error', onErrB);
-        onReady(urlA, urlB);
-      };
-      probeB.addEventListener('error', onErrB, { once: true });
-      probeB.addEventListener('canplay', onOkB, { once: true });
-      probeB.preload = 'auto';
-      probeB.src = urlB;
-      probeB.load();
-    };
-    probeA.addEventListener('error', onErrA, { once: true });
-    probeA.addEventListener('canplay', onOkA, { once: true });
-    probeA.preload = 'auto';
-    probeA.src = urlA;
-    probeA.load();
-  };
-  tryNext();
+function menuAmbiencePlaylist(mode: 'menu' | 'lobby'): { stems: string[]; audioBase: string } {
+  if (mode === 'lobby') {
+    return { stems: ['fellowship'], audioBase: LOBBY_AUDIO_BASE };
+  }
+  const stems = MENU_MUSIC_M4A.map((f) => stemFromMusicFilename(f)).filter((s): s is string => Boolean(s));
+  if (stems.length === 0) return { stems: ['shire'], audioBase: MENU_AUDIO_BASE };
+  const shireIdx = stems.findIndex((s) => s.toLowerCase() === 'shire');
+  const ordered = shireIdx > 0 ? [...stems.slice(shireIdx), ...stems.slice(0, shireIdx)] : stems;
+  return { stems: ordered, audioBase: MENU_AUDIO_BASE };
 }
 
 export function stopTurnCue(): void {
@@ -991,22 +1013,32 @@ export function startMenuAmbience(mode: 'menu' | 'lobby' = 'menu'): void {
 
   menuSession.v++;
   const sessionId = menuSession.v;
+  const { stems, audioBase } = menuAmbiencePlaylist(mode);
+  if (stems.length === 0) return;
 
-  tryPlayFirstWorkingMenuTrack(mode, (urlA, urlB) => {
-    if (sessionId !== menuSession.v) return;
-    const pair = new MenuLoopPair(urlA, urlB, sessionId);
-    menuLoop = pair;
-    currentMenuAmbienceMode = mode;
-    void pair
-      .startFirstPlay()
-      .then(() => {
-        if (sessionId !== menuSession.v || menuLoop !== pair) return;
-        fadeGainMenu(pair.a, 0, 1, MENU_FADE_IN_MS, menuSession, sessionId);
-      })
-      .catch(() => {
-        /* Autoplay policy: play() may reject until user gesture; resumeMenuAmbienceIfPaused retries. */
-      });
-  });
+  const tryStart = (stemIdx: number) => {
+    if (stemIdx >= stems.length) return;
+    tryPlayFirstWorkingUrl(
+      MENU_AUDIO_EXTS.map((ext) => `${audioBase}/${stems[stemIdx]}${ext}`),
+      (url) => {
+        if (sessionId !== menuSession.v) return;
+        const pair = new MenuLoopPair(stems, stemIdx, url, sessionId, audioBase);
+        menuLoop = pair;
+        currentMenuAmbienceMode = mode;
+        void pair
+          .startFirstPlay()
+          .then(() => {
+            if (sessionId !== menuSession.v || menuLoop !== pair) return;
+            fadeGainMenu(pair.a, 0, 1, MENU_FADE_IN_MS, menuSession, sessionId);
+          })
+          .catch(() => {
+            /* Autoplay policy: play() may reject until user gesture; resumeMenuAmbienceIfPaused retries. */
+          });
+      },
+      () => tryStart(stemIdx + 1),
+    );
+  };
+  tryStart(0);
 }
 
 /** Logged-in shell menu only. Lobby/turn audio is started from the game view. */
