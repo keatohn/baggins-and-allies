@@ -12,6 +12,7 @@ from backend.ai.combat import decide_combat, decide_initiate_combat
 from backend.ai.mobilization import decide_mobilization
 from backend.ai.combat_move import decide_combat_move
 from backend.ai.non_combat_move import decide_non_combat_move
+from backend.engine.special_rules import territory_defs_with_current_power
 
 
 def decide(ctx: AIContext) -> Action | None:
@@ -25,6 +26,7 @@ def decide(ctx: AIContext) -> Action | None:
     if ctx.state.winner:
         return None
 
+    ctx.territory_defs = territory_defs_with_current_power(ctx.territory_defs, ctx.state)
     ctx.strategic = build_strategic_turn_context(ctx)
 
     phase = ctx.phase

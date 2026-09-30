@@ -10,6 +10,7 @@ from copy import deepcopy
 from typing import Any
 
 from backend.engine.definitions import parse_prefire_penalty_from_manifest
+from backend.engine.special_rules import parse_special_rules
 
 
 def _ensure_str_list(value: Any) -> list[str]:
@@ -593,6 +594,8 @@ class GameState:
     prefire_penalty: bool = True
     # Hero units (`hero_id` on the unit def): when False, they cannot be purchased and are omitted from starting placement.
     heroes_enabled: bool = True
+    # Snapshot of manifest special_rules (fading territory, etc.). Empty on older games.
+    special_rules: list[dict[str, Any]] = field(default_factory=list)
     # Faction territories at start of their turn (set when turn starts). Used for camp placement options.
     faction_territories_at_turn_start: dict[str, list[str]] = field(default_factory=dict)
     # Purchased camps this turn: list of {territory_options: [tid, ...], placed_territory_id: None | str}
@@ -665,6 +668,7 @@ class GameState:
             "stronghold_repair_cost": getattr(self, "stronghold_repair_cost", 0),
             "prefire_penalty": getattr(self, "prefire_penalty", True),
             "heroes_enabled": getattr(self, "heroes_enabled", True),
+            "special_rules": list(getattr(self, "special_rules", None) or []),
             "faction_territories_at_turn_start": self.faction_territories_at_turn_start,
             "pending_camps": self.pending_camps,
             "pending_camp_placements": [p.to_dict() for p in self.pending_camp_placements],
@@ -773,6 +777,7 @@ class GameState:
             stronghold_repair_cost=int(data["stronghold_repair_cost"]) if data.get("stronghold_repair_cost") is not None else 0,
             prefire_penalty=parse_prefire_penalty_from_manifest(data.get("prefire_penalty")),
             heroes_enabled=parse_prefire_penalty_from_manifest(data.get("heroes_enabled")),
+            special_rules=parse_special_rules(data.get("special_rules")),
             faction_territories_at_turn_start=_ensure_faction_territories_at_turn_start(
                 data.get("faction_territories_at_turn_start")
             ),

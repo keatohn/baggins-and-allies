@@ -148,6 +148,11 @@ export interface ApiGameState {
   /** Power cost per stronghold HP repaired (from setup manifest). */
   stronghold_repair_cost?: number;
   /**
+   * Current power production for territories under a fading_territory special rule.
+   * Territories omitted here still use the printed definition value.
+   */
+  territory_power?: Record<string, number>;
+  /**
    * Territory captures queued until combat phase ends (owner on each territory may still be stale).
    * Client should treat these hexes as owned by the capturer for highlights / move fallback BFS.
    */
@@ -662,6 +667,10 @@ export interface GameMeta {
   host_forfeited?: boolean;
   /** True if the authenticated user is the current host (only present when request is authenticated). */
   is_host?: boolean;
+  /** Optional match-start note from the setup manifest. Shown once, when the match leaves the lobby. */
+  starting_message?: string;
+  /** True when this player has already closed the starting message. */
+  starting_message_dismissed?: boolean;
 }
 
 /** GET /games/:id/forfeit-options — factions you control and valid assignees for each. */
@@ -859,6 +868,10 @@ export const api = {
     }),
   startGame: (gameId: string) =>
     fetchJson<{ message: string; status: string }>(`/games/${gameId}/start`, {
+      method: 'POST',
+    }),
+  dismissStartingMessage: (gameId: string) =>
+    fetchJson<{ ok: boolean }>(`/games/${gameId}/dismiss-starting-message`, {
       method: 'POST',
     }),
   /** Per-faction reassignment when leaving (each value: "computer" or another player id). */

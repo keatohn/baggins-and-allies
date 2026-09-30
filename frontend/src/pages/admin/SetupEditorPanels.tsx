@@ -317,13 +317,160 @@ function TerritoryImageField({ value, onApply }: { value: unknown; onApply: (ima
   );
 }
 
+type FadingTerritoryRow = { territory_id: string; fade_per_turn: number; floor: number };
+
+function fadingRowsFromManifest(manifest: Record<string, unknown>): FadingTerritoryRow[] {
+  const rules = manifest.special_rules;
+  if (!Array.isArray(rules)) return [];
+  const rows: FadingTerritoryRow[] = [];
+  for (const rule of rules) {
+    if (!rule || typeof rule !== 'object' || (rule as { type?: string }).type !== 'fading_territory') continue;
+    const territories = (rule as { territories?: unknown }).territories;
+    if (!Array.isArray(territories)) continue;
+    for (const row of territories) {
+      if (!row || typeof row !== 'object') continue;
+      const rec = row as Record<string, unknown>;
+      const fade = Number(rec.fade_per_turn);
+      const floor = Number(rec.floor);
+      rows.push({
+        territory_id: typeof rec.territory_id === 'string' ? rec.territory_id : '',
+        fade_per_turn: Number.isFinite(fade) ? Math.max(0, Math.trunc(fade)) : 0,
+        floor: Number.isFinite(floor) ? Math.max(0, Math.trunc(floor)) : 0,
+      });
+    }
+  }
+  return rows;
+}
+
+function manifestWithFadingRows(
+  manifest: Record<string, unknown>,
+  rows: FadingTerritoryRow[],
+): Record<string, unknown> {
+  const rules = Array.isArray(manifest.special_rules) ? manifest.special_rules : [];
+  const others = rules.filter(
+    (rule) => !rule || typeof rule !== 'object' || (rule as { type?: string }).type !== 'fading_territory',
+  );
+  const nextRules = rows.length
+    ? [...others, { type: 'fading_territory', territories: rows }]
+    : others;
+  const next = { ...manifest };
+  if (nextRules.length) next.special_rules = nextRules;
+  else delete next.special_rules;
+  return next;
+}
+
+function FadingTerritoryFields({
+  manifest,
+  territoryIds,
+  onManifestChange,
+}: {
+  manifest: Record<string, unknown>;
+  territoryIds: string[];
+  onManifestChange: (next: Record<string, unknown>) => void;
+}) {
+  const rows = fadingRowsFromManifest(manifest);
+  const used = new Set(rows.map((r) => r.territory_id).filter(Boolean));
+
+  const write = (nextRows: FadingTerritoryRow[]) => {
+    onManifestChange(manifestWithFadingRows(manifest, nextRows));
+  };
+
+  return (
+    <>
+      {rows.length > 0 && (
+        <div className="admin-form__rule-list">
+          {rows.map((row, index) => {
+            const options = territoryIds.filter((id) => id === row.territory_id || !used.has(id));
+            return (
+              <div key={`${row.territory_id || 'new'}-${index}`} className="admin-form__rule-row">
+                <select
+                  className="admin-form__input"
+                  aria-label="Fading territory"
+                  value={row.territory_id}
+                  onChange={(e) => {
+                    const next = rows.slice();
+                    next[index] = { ...row, territory_id: e.target.value };
+                    write(next);
+                  }}
+                >
+                  <option value="">Territory</option>
+                  {options.map((id) => (
+                    <option key={id} value={id}>
+                      {id}
+                    </option>
+                  ))}
+                </select>
+                <label className="admin-form__inline-label">
+                  Fade / turn
+                  <input
+                    type="number"
+                    min={0}
+                    className="admin-form__input admin-form__input--narrow"
+                    aria-label="Fade per turn"
+                    value={String(row.fade_per_turn)}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      const next = rows.slice();
+                      next[index] = { ...row, fade_per_turn: Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0 };
+                      write(next);
+                    }}
+                  />
+                </label>
+                <label className="admin-form__inline-label">
+                  Floor
+                  <input
+                    type="number"
+                    min={0}
+                    className="admin-form__input admin-form__input--narrow"
+                    aria-label="Power floor"
+                    value={String(row.floor)}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      const next = rows.slice();
+                      next[index] = { ...row, floor: Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0 };
+                      write(next);
+                    }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="admin-page__btn"
+                  onClick={() => write(rows.filter((_, i) => i !== index))}
+                >
+                  Remove
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <button
+        type="button"
+        className="admin-page__btn"
+        disabled={territoryIds.length === 0 || used.size >= territoryIds.length}
+        onClick={() => {
+          const territory_id = territoryIds.find((id) => !used.has(id)) ?? '';
+          write([...rows, { territory_id, fade_per_turn: 1, floor: 0 }]);
+        }}
+      >
+        Add fading territory
+      </button>
+      <p className="admin-form__micro">
+        Each new turn, that territory produces this much less power until it reaches the floor. Turn 1 still uses the printed power.
+      </p>
+    </>
+  );
+}
+
 export function ManifestPanel({
   setupId,
   manifest,
+  territoryIds,
   onManifestChange,
 }: {
   setupId: string;
   manifest: Record<string, unknown>;
+  territoryIds: string[];
   onManifestChange: (next: Record<string, unknown>) => void;
 }) {
   const [ctxDraft, setCtxDraft] = useState('');
@@ -465,6 +612,38 @@ export function ManifestPanel({
           type="checkbox"
           checked={manifest.prefire_penalty !== false}
           onChange={(e) => onManifestChange({ ...manifest, prefire_penalty: e.target.checked })}
+        />,
+      )}
+      {fieldRow(
+        'Starting message',
+        <>
+          <textarea
+            className="admin-form__textarea"
+            rows={4}
+            placeholder="Optional. Shown once in the middle of the map when the match starts."
+            value={typeof manifest.starting_message === 'string' ? manifest.starting_message : ''}
+            onChange={(e) => {
+              const value = e.target.value;
+              if (!value) {
+                const next = { ...manifest };
+                delete next.starting_message;
+                onManifestChange(next);
+                return;
+              }
+              onManifestChange({ ...manifest, starting_message: value });
+            }}
+          />
+          <p className="admin-form__micro">
+            Each player sees this when the lobby becomes a match, and only then. Closing it hides it for that player.
+          </p>
+        </>,
+      )}
+      {fieldRow(
+        'Fading territories',
+        <FadingTerritoryFields
+          manifest={manifest}
+          territoryIds={territoryIds}
+          onManifestChange={onManifestChange}
         />,
       )}
       {fieldRow(

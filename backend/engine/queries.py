@@ -17,6 +17,7 @@ from backend.engine.definitions import (
     is_transportable,
 )
 from backend.engine.utils import effective_territory_owner, faction_owns_capital
+from backend.engine.special_rules import territory_current_power
 from backend.engine.movement import (
     _is_sea_zone,
     _sea_zone_has_hostile_enemy_boats,
@@ -122,7 +123,7 @@ def _port_power_for_sea_zone(
             continue
         adj_def = territory_defs.get(adj_id)
         if adj_def:
-            total += adj_def.produces.get("power", 0)
+            total += territory_current_power(state, adj_id, adj_def)
     return total
 
 
@@ -1323,7 +1324,7 @@ def _validate_mobilize(
                     )
         if dest_territory.owner != faction_id:
             return ValidationResult(False, f"{destination} is not owned by {faction_id}")
-        power_production = dest_def.produces.get("power", 0)
+        power_production = territory_current_power(state, destination, dest_def)
         this_count = sum(item.get("count", 0) for item in units_to_mobilize)
         owned_at_turn_start = getattr(state, "faction_territories_at_turn_start", {}).get(faction_id, []) or []
         camp_hex_owned_at_turn_start = destination in owned_at_turn_start
@@ -1436,7 +1437,7 @@ def _validate_mobilize(
                 if not _territory_has_port(adj_id, port_defs):
                     continue
                 port_power = territory_defs.get(adj_id)
-                port_power_val = port_power.produces.get("power", 0) if port_power else 0
+                port_power_val = territory_current_power(state, adj_id, port_power) if port_power else 0
                 total_for_port = _total_pending_mobilization_to_port(state, adj_id, territory_defs, port_defs)
                 if total_for_port + this_action_count > port_power_val:
                     return ValidationResult(
@@ -1543,7 +1544,7 @@ def _validate_purchase_camp(
         if _territory_has_standing_camp(state, tid, camp_defs):
             continue
         tdef = territory_defs.get(tid)
-        if tdef and (tdef.produces.get("power", 0) or 0) > 0:
+        if tdef and territory_current_power(state, tid, tdef) > 0:
             options.append(tid)
     if not options:
         return ValidationResult(False, "No valid territory to place a camp (need owned territory with power production)")
@@ -1633,7 +1634,7 @@ def valid_camp_placement_territory_ids(
         if not terr or terr.owner != faction_id:
             continue
         tdef = territory_defs.get(tid)
-        if not tdef or (tdef.produces.get("power", 0) or 0) <= 0:
+        if not tdef or territory_current_power(state, tid, tdef) <= 0:
             continue
         if _territory_has_standing_camp(state, tid, camp_defs):
             continue
@@ -1745,7 +1746,7 @@ def _validate_place_camp(
             f"You must own {territory_id} to place a camp there",
         )
     tdef = territory_defs.get(territory_id)
-    if not tdef or (tdef.produces.get("power", 0) or 0) <= 0:
+    if not tdef or territory_current_power(state, territory_id, tdef) <= 0:
         return ValidationResult(
             False,
             f"Territory {territory_id} cannot host a mobilization camp (needs power production)",
@@ -2047,7 +2048,7 @@ def get_mobilization_capacity(
         territory_def = territory_defs.get(territory_id)
         if not territory_def:
             continue
-        power = territory_def.produces.get("power", 0)
+        power = territory_current_power(state, territory_id, territory_def)
         if _territory_has_standing_camp(state, territory_id, camp_defs):
             seen.add(territory_id)
             home_at_camp: dict[str, int] = {}
@@ -2579,8 +2580,8 @@ def get_faction_stats(
             tdef = territory_defs.get(tid)
             if tdef and getattr(tdef, "is_stronghold", False):
                 strongholds_count += 1
-            if tdef and hasattr(tdef, "produces") and isinstance(tdef.produces, dict):
-                power_per_turn += tdef.produces.get("power", 0)
+            if tdef:
+                power_per_turn += territory_current_power(state, tid, tdef)
         power = state.faction_resources.get(faction_id, {}).get("power", 0)
         factions[faction_id] = {
             "territories": territories_count,

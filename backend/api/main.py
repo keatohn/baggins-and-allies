@@ -91,6 +91,11 @@ from backend.engine.definitions import (
     TerritoryDefinition,
     parse_prefire_penalty_from_manifest,
 )
+from backend.engine.special_rules import (
+    fading_territory_index,
+    parse_starting_message,
+    territory_current_power,
+)
 from backend.audio_gains import load_audio_gains, load_menu_music, save_audio_settings
 from backend.setup_data import (
     create_setup_from_bundle,
@@ -1047,6 +1052,12 @@ def state_for_response(state: GameState, game_id: str | None = None, db: Session
         else:
             ud, td, fd = unit_defs, territory_defs, faction_defs
         out["faction_stats"] = get_faction_stats(state, td, fd, ud)
+        fading = fading_territory_index(getattr(state, "special_rules", None))
+        if fading:
+            out["territory_power"] = {
+                tid: territory_current_power(state, tid, td.get(tid))
+                for tid in fading
+            }
         if state.active_combat and game_id and db is not None:
             combat_stat_modifiers, combat_specials, combat_attacker_effective_attack_override = _get_combat_modifiers_and_specials(state, ud, td, fd)
             out["combat_stat_modifiers"] = combat_stat_modifiers
@@ -1433,6 +1444,7 @@ def create_game(
         stronghold_repair_cost=stronghold_repair_cost,
         prefire_penalty=parse_prefire_penalty_from_manifest(setup.get("prefire_penalty")),
         heroes_enabled=bool(request.heroes_enabled),
+        special_rules=setup.get("special_rules"),
     )
     state.map_asset = setup["map_asset"]
     # Ensure turn_order is never empty for new games (ticker and faction order)
@@ -1467,6 +1479,9 @@ def create_game(
     # Always persist resolved setup (including default) so list/meta can show scenario name.
     config_snapshot["setup_id"] = setup_id
     config_snapshot["heroes_enabled"] = bool(getattr(state, "heroes_enabled", True))
+    starting_message = parse_starting_message(setup.get("starting_message"))
+    if starting_message:
+        config_snapshot["starting_message"] = starting_message
     # ai_factions set on start from unclaimed factions (single-player) or not used (multiplayer)
     if request.ai_factions:
         config_snapshot["ai_factions"] = list(request.ai_factions)
@@ -2202,6 +2217,13 @@ def get_game_meta(
         "forfeit_reassignments": forfeit_reassignments,
         "host_forfeited": host_forfeited,
     }
+    starting_message = parse_starting_message(config.get("starting_message"))
+    if starting_message:
+        out["starting_message"] = starting_message
+        dismissed_raw = config.get("starting_message_dismissed_player_ids")
+        dismissed_ids = {str(x) for x in dismissed_raw} if isinstance(dismissed_raw, list) else set()
+        if player is not None:
+            out["starting_message_dismissed"] = str(player.id) in dismissed_ids
     if is_host is not None:
         out["is_host"] = is_host
     return out
@@ -2354,6 +2376,37 @@ def start_game(
     if game_id in game_defs:
         del game_defs[game_id]
     return {"message": "Game started", "status": "active"}
+
+
+@app.post("/games/{game_id}/dismiss-starting-message")
+def dismiss_starting_message(
+    game_id: str,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Remember that this player closed the match-start message. They will not see it again."""
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Game not found")
+    if row.status == "lobby":
+        raise HTTPException(status_code=400, detail="Match has not started")
+    if not _player_in_game(game_id, str(player.id), db):
+        raise HTTPException(status_code=403, detail="Not in this game")
+    config = json.loads(row.config) if isinstance(row.config, str) else {}
+    if not isinstance(config, dict):
+        config = {}
+    if not parse_starting_message(config.get("starting_message")):
+        return {"ok": True}
+    dismissed = config.get("starting_message_dismissed_player_ids")
+    if not isinstance(dismissed, list):
+        dismissed = []
+    player_id_str = str(player.id)
+    if player_id_str not in {str(x) for x in dismissed}:
+        dismissed.append(player_id_str)
+        config["starting_message_dismissed_player_ids"] = dismissed
+        row.config = json.dumps(config)
+        db.commit()
+    return {"ok": True}
 
 
 def _normalize_forfeit_assign_target(raw: str) -> str:

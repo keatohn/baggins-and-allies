@@ -70,6 +70,7 @@ from backend.engine.movement import (
     sea_land_adjacent_for_offload,
     get_forced_naval_combat_instance_ids,
 )
+from backend.engine.special_rules import territory_current_power
 from backend.engine.queries import (
     _get_retreat_adjacent_ids,
     _territory_is_friendly_for_retreat,
@@ -741,7 +742,7 @@ def _handle_purchase_camp(
         if _territory_has_standing_camp(state, tid, camp_defs):
             continue
         tdef = territory_defs.get(tid)
-        if tdef and (tdef.produces.get("power", 0) or 0) > 0:
+        if tdef and territory_current_power(state, tid, tdef) > 0:
             territory_options.append(tid)
 
     if not territory_options:
@@ -2255,7 +2256,8 @@ def _handle_mobilize_units(
                     continue
                 if not _territory_has_port(adj_id, port_defs):
                     continue
-                port_power_val = territory_defs.get(adj_id).produces.get("power", 0) if territory_defs.get(adj_id) else 0
+                adj_def = territory_defs.get(adj_id)
+                port_power_val = territory_current_power(state, adj_id, adj_def) if adj_def else 0
                 total_for_port = _total_pending_mobilization_to_port(state, adj_id, territory_defs, port_defs)
                 if total_for_port + total_mobilizing > port_power_val:
                     raise ValueError(
@@ -2281,7 +2283,7 @@ def _handle_mobilize_units(
                         f"Land units can only mobilize to a standing camp or a home territory for that unit type; "
                         f"{destination_id} is not valid for {uid}"
                     )
-        power_production = dest_def.produces.get("power", 0)
+        power_production = territory_current_power(state, destination_id, dest_def)
         total_mobilizing = sum(u.get("count", 0) for u in units_to_mobilize)
         owned_at_turn_start = getattr(state, "faction_territories_at_turn_start", {}).get(faction_id, []) or []
         camp_hex_owned_at_turn_start = destination_id in owned_at_turn_start
@@ -4893,12 +4895,22 @@ def _handle_end_turn(
             if not territory_def:
                 continue
 
+            contributed = False
             for resource_id, amount in territory_def.produces.items():
+                if resource_id == "power":
+                    amount = territory_current_power(state, territory_id, territory_def)
+                try:
+                    amount = int(amount or 0)
+                except (TypeError, ValueError):
+                    continue
+                if amount <= 0:
+                    continue
                 if resource_id not in pending_income:
                     pending_income[resource_id] = 0
                 pending_income[resource_id] += amount
+                contributed = True
 
-            if territory_def.produces:
+            if contributed:
                 contributing_territories.append(territory_id)
 
         if pending_income:

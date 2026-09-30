@@ -195,6 +195,8 @@ def load_setup(setup_id: str) -> dict:
             except (TypeError, ValueError, KeyError):
                 pass
             result["prefire_penalty"] = parse_prefire_penalty_from_manifest(m.get("prefire_penalty"))
+            from backend.engine.special_rules import attach_manifest_rules
+            attach_manifest_rules(result, m)
             return result
         except (json.JSONDecodeError, OSError):
             pass

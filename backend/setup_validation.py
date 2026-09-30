@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from backend.engine.special_rules import parse_nonneg_int
+
 
 def _as_obj(raw: str | dict[str, Any] | None, label: str) -> tuple[dict[str, Any] | None, str | None]:
     if raw is None:
@@ -227,6 +229,48 @@ def validate_setup_documents(
             int(mo)
         except (TypeError, ValueError):
             errors.append("manifest.menu_order must be an integer when set")
+
+    starting_message = manifest.get("starting_message")
+    if starting_message is not None and not isinstance(starting_message, str):
+        errors.append("manifest.starting_message must be a string when set")
+
+    special_rules = manifest.get("special_rules")
+    if special_rules is not None:
+        if not isinstance(special_rules, list):
+            errors.append("manifest.special_rules must be a list when set")
+        else:
+            seen_fading: set[str] = set()
+            for i, rule in enumerate(special_rules):
+                if not isinstance(rule, dict):
+                    errors.append(f"manifest.special_rules[{i}] must be an object")
+                    continue
+                typ = rule.get("type")
+                if not isinstance(typ, str) or not typ.strip():
+                    errors.append(f'manifest.special_rules[{i}].type must be a non-empty string')
+                    continue
+                if typ != "fading_territory":
+                    continue
+                rows = rule.get("territories")
+                if not isinstance(rows, list) or not rows:
+                    errors.append(
+                        f'manifest.special_rules[{i}].territories must be a non-empty list'
+                    )
+                    continue
+                for j, row in enumerate(rows):
+                    prefix = f"manifest.special_rules[{i}].territories[{j}]"
+                    if not isinstance(row, dict):
+                        errors.append(f"{prefix} must be an object")
+                        continue
+                    tid = row.get("territory_id")
+                    if not isinstance(tid, str) or tid not in territory_ids:
+                        errors.append(f'{prefix}.territory_id must be a known territory')
+                    elif tid in seen_fading:
+                        errors.append(f'{prefix} duplicates fading territory "{tid}"')
+                    else:
+                        seen_fading.add(tid)
+                    for key in ("fade_per_turn", "floor"):
+                        if parse_nonneg_int(row.get(key)) is None:
+                            errors.append(f"{prefix}.{key} must be an integer >= 0")
 
     return errors
 

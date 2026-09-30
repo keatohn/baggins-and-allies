@@ -742,6 +742,28 @@
   color: var(--ink-faded);
 }
 
+.admin-form__rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.admin-form__rule-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.admin-form__inline-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--ink-faded);
+}
+
 .admin-audio-group {
   margin-top: 0.85rem;
 }

@@ -507,6 +507,7 @@ export default function Admin() {
           <ManifestPanel
             setupId={selectedId}
             manifest={bundle.manifest as Record<string, unknown>}
+            territoryIds={Object.keys((bundle.territories as Record<string, unknown>) ?? {}).sort()}
             onManifestChange={(m) =>
               setBundle((b) => (b ? { ...b, manifest: { ...m, id: selectedId } as typeof b.manifest } : null))
             }

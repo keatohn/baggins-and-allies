@@ -14,6 +14,7 @@ from backend.engine.definitions import (
     load_starting_setup,
 )
 from backend.engine import DICE_SIDES
+from backend.engine.special_rules import effective_territory_power, parse_special_rules
 
 
 def get_unit_faction(unit: Unit, unit_defs: dict[str, UnitDefinition]) -> str | None:
@@ -224,6 +225,7 @@ def initialize_game_state(
     stronghold_repair_cost: int | None = None,
     prefire_penalty: bool | None = None,
     heroes_enabled: bool | None = None,
+    special_rules: list | None = None,
 ) -> GameState:
     """
     Create an initial game state with all factions and territories set up.
@@ -269,7 +271,9 @@ def initialize_game_state(
                 territories[capital].owner = faction_id
                 territories[capital].original_owner = faction_id  # Set original owner
 
-    # Calculate starting resources from owned territories
+    parsed_special_rules = parse_special_rules(special_rules)
+
+    # Calculate starting resources from owned territories (turn 1 production, before any fade)
     faction_resources: dict[str, dict[str, int]] = {
         faction_id: {} for faction_id in faction_defs.keys()
     }
@@ -285,6 +289,13 @@ def initialize_game_state(
         
         # Add this territory's production to the owner's starting resources
         for resource_id, amount in territory_def.produces.items():
+            if resource_id == "power":
+                try:
+                    amount = effective_territory_power(int(amount or 0), 1, parsed_special_rules, territory_id)
+                except (TypeError, ValueError):
+                    amount = 0
+            if not amount:
+                continue
             if resource_id not in faction_resources[owner]:
                 faction_resources[owner][resource_id] = 0
             faction_resources[owner][resource_id] += amount
@@ -338,6 +349,7 @@ def initialize_game_state(
         stronghold_repair_cost=stronghold_repair_cost_val,
         prefire_penalty=prefire_penalty_val,
         heroes_enabled=heroes_enabled_val,
+        special_rules=parsed_special_rules,
         faction_territories_at_turn_start=faction_territories_at_turn_start,
         turn_order=turn_order,
         starting_territory_owners=starting_territory_owners,

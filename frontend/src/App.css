@@ -74,6 +74,14 @@
   line-height: 1.4;
 }
 
+.map-wrap .forfeit-notification-toast.starting-message-toast p {
+  white-space: pre-wrap;
+}
+
+.map-wrap .forfeit-notification-toast.starting-message-toast--stacked {
+  top: calc(50% - 4.75rem);
+}
+
 .forfeit-notification-toast-close {
   flex-shrink: 0;
   width: 1.5rem;

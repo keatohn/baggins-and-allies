@@ -866,6 +866,44 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     setForfeitToastDismissed(false);
   }, [GAME_ID]);
 
+  /** Match-start note: appears when this client sees the lobby become an active match, then only until closed. */
+  const [startingMessageVisible, setStartingMessageVisible] = useState(false);
+  const startingMessageWatchRef = useRef<{ gameId: string; status: string } | null>(null);
+  useEffect(() => {
+    if (!GAME_ID) return;
+    const metaForGame = gameMeta?.id === GAME_ID ? gameMeta : null;
+    const status = metaForGame?.status ?? null;
+    const prev = startingMessageWatchRef.current;
+    const message = (metaForGame?.starting_message ?? '').trim();
+    const dismissed = metaForGame?.starting_message_dismissed === true;
+    const atMatchStart = (backendState?.turn_number ?? 1) === 1;
+    if (
+      prev &&
+      prev.gameId === GAME_ID &&
+      prev.status === 'lobby' &&
+      status === 'active' &&
+      message &&
+      !dismissed &&
+      atMatchStart
+    ) {
+      setStartingMessageVisible(true);
+    }
+    if (!metaForGame || dismissed) {
+      setStartingMessageVisible(false);
+    }
+    if (status) {
+      startingMessageWatchRef.current = { gameId: GAME_ID, status };
+    } else if (!prev || prev.gameId !== GAME_ID) {
+      startingMessageWatchRef.current = null;
+    }
+  }, [GAME_ID, gameMeta, backendState?.turn_number]);
+
+  const dismissStartingMessage = useCallback(() => {
+    setStartingMessageVisible(false);
+    if (!GAME_ID) return;
+    api.dismissStartingMessage(GAME_ID).catch(() => {});
+  }, [GAME_ID]);
+
   // Derived data from backend definitions (archetype/tags for aerial return-path rule in combat move)
   const unitDefs = useMemo(() => {
     if (!definitions) return {};
@@ -1008,9 +1046,11 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           )
           : territory.owner
       ) as FactionId | undefined;
+      const fadedPower = backendState.territory_power?.[id];
       result[id] = def
         ? {
           ...def,
+          produces: typeof fadedPower === 'number' ? fadedPower : def.produces,
           owner: resolvedOwner,
           ...(originalOwner ? { original_owner: originalOwner } : {}),
           hasCamp: territoryHasCamp(id),
@@ -1026,7 +1066,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           stronghold: false,
           stronghold_base_health: 0,
           stronghold_current_health: 0,
-          produces: 0,
+          produces: typeof fadedPower === 'number' ? fadedPower : 0,
           adjacent: [],
           aerial_adjacent: [],
           hasCamp: territoryHasCamp(id),
@@ -4153,6 +4193,15 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               loadAllocation={resolvedNavalTrayLoadAllocation}
               onLoadAllocationChange={handleLoadAllocationChange}
             />
+            {startingMessageVisible && gameMeta?.starting_message && (
+              <div
+                className={`forfeit-notification-toast starting-message-toast${showForfeitToast ? ' starting-message-toast--stacked' : ''}`}
+                role="status"
+              >
+                <p>{gameMeta.starting_message}</p>
+                <button type="button" className="forfeit-notification-toast-close" onClick={dismissStartingMessage} aria-label="Dismiss">×</button>
+              </div>
+            )}
             {showForfeitToast && (
               <div className="forfeit-notification-toast" role="status">
                 <p>

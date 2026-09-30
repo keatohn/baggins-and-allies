@@ -163,6 +163,8 @@ def load_setup_dict_from_db(db: Session, setup_id: str) -> dict[str, Any] | None
     except (TypeError, ValueError, KeyError):
         pass
     result["prefire_penalty"] = parse_prefire_penalty_from_manifest(m.get("prefire_penalty"))
+    from backend.engine.special_rules import attach_manifest_rules
+    attach_manifest_rules(result, m)
     return result
 
 
