@@ -869,9 +869,10 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   // Derived data from backend definitions (archetype/tags for aerial return-path rule in combat move)
   const unitDefs = useMemo(() => {
     if (!definitions) return {};
-    const defs: Record<string, { name: string; icon: string; faction?: string; archetype?: string; tags?: string[]; specials?: string[]; home_territory_ids?: string[]; cost?: number; transport_capacity?: number }> = {};
+    const defs: Record<string, { name: string; icon: string; faction?: string; archetype?: string; tags?: string[]; specials?: string[]; home_territory_ids?: string[]; cost?: number; transport_capacity?: number; hero_id?: string }> = {};
     for (const [id, unit] of Object.entries(definitions.units)) {
-      const u = unit as { display_name: string; icon?: string; faction?: string; archetype?: string; tags?: string[]; specials?: string[]; home_territory_ids?: string[]; cost?: number | { power?: number }; transport_capacity?: number };
+      const u = unit as { display_name: string; icon?: string; faction?: string; archetype?: string; tags?: string[]; specials?: string[]; home_territory_ids?: string[]; cost?: number | { power?: number }; transport_capacity?: number; hero_id?: string | null };
+      const heroId = typeof u.hero_id === 'string' ? u.hero_id.trim() : '';
       const cost = typeof u.cost === 'object' && u.cost?.power != null ? u.cost.power : (typeof u.cost === 'number' ? u.cost : 0);
       const homeIds = Array.isArray(u.home_territory_ids) ? u.home_territory_ids : [];
       defs[id] = {
@@ -884,6 +885,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         home_territory_ids: homeIds.length > 0 ? homeIds : undefined,
         cost,
         transport_capacity: u.transport_capacity,
+        ...(heroId ? { hero_id: heroId } : {}),
       };
     }
     return defs;

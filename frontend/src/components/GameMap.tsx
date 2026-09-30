@@ -404,7 +404,7 @@ interface GameMapProps {
   territoryUnits: Record<string, { unit_id: string; count: number; instances?: string[] }[]>;
   /** Full unit list per territory (for sea zones: boats + loaded_onto to show passenger count per boat). */
   territoryUnitsFull?: Record<string, { instance_id: string; unit_id: string; loaded_onto?: string | null }[]>;
-  unitDefs: Record<string, { name: string; icon: string; faction?: string; archetype?: string; tags?: string[]; home_territory_ids?: string[]; cost?: number; transport_capacity?: number }>;
+  unitDefs: Record<string, { name: string; icon: string; faction?: string; archetype?: string; tags?: string[]; home_territory_ids?: string[]; cost?: number; transport_capacity?: number; hero_id?: string }>;
   unitStats: Record<string, { movement: number }>;
   factionData: Record<string, { name: string; icon: string; color: string; alliance: string; capital?: string }>;
   onTerritorySelect: (territoryId: string | null) => void;
@@ -904,6 +904,7 @@ function GameMap({
     unitDef?: { name: string; icon: string };
     factionColor?: string;
     isNaval?: boolean;
+    isHero?: boolean;
     instanceIds?: string[];
     passengerCount?: number;
     /** Drag started from a single boat card in the naval tray (confirm max = 1 ship, not all ships in zone). */
@@ -2129,6 +2130,7 @@ function GameMap({
           },
           factionColor: colorFromId ?? colorFromDef ?? undefined,
           isNaval: navalUnitIds.has(s.unit_id),
+          isHero: Boolean(ud?.hero_id),
           passengerCount: 0,
         };
       });
@@ -2270,12 +2272,13 @@ function GameMap({
       unitDef: { name: p.name, icon: p.icon },
       factionColor: mobilizationTray.factionColor ?? undefined,
       isNaval: navalUnitIds.has(p.unitId),
+      isHero: Boolean(unitDefs[p.unitId]?.hero_id),
       passengerCount: 0,
     }));
     setBulkDragOverlay(stacks.length > 0 ? { stacks } : null);
     setTapSelectedUnit(null);
     setTapBulkAllFromTerritory(null);
-  }, [mobilizationTray, navalUnitIds]);
+  }, [mobilizationTray, navalUnitIds, unitDefs]);
 
   const handleNavalTrayBoatTapSelect = useCallback(
     (payload: NavalTrayBoatTapMovePayload) => {
@@ -2371,6 +2374,7 @@ function GameMap({
         unitDef: { name: p.name, icon: p.icon },
         factionColor: mobilizationTray?.factionColor ?? undefined,
         isNaval: navalUnitIds.has(p.unitId),
+        isHero: Boolean(unitDefs[p.unitId]?.hero_id),
         passengerCount: 0,
       }));
       setBulkDragOverlay(stacks.length > 0 ? { stacks } : null);
@@ -2421,6 +2425,7 @@ function GameMap({
       unitDef,
       factionColor,
       isNaval: navalUnitIds.has(unitId),
+      isHero: Boolean(unitDefs[unitId]?.hero_id),
       instanceIds,
       passengerCount: passengerCount ?? 0,
       ...(fromNavalTray ? { fromNavalTray: true } : {}),
@@ -2437,6 +2442,7 @@ function GameMap({
     validMobilizeTerritories,
     validMobilizeSeaZones,
     navalUnitIds,
+    unitDefs,
     remainingMobilizationCapacity,
     remainingHomeSlots,
     mobilizationTray?.pendingCamps,
@@ -4668,6 +4674,7 @@ function GameMap({
                                           showNavalMustAttack={false}
                                           showForcedNavalStandoff={false}
                                           isNaval={false}
+                                          isHero={Boolean(unitDefs[unit_id]?.hero_id)}
                                           instanceIds={instanceIdsForUnit}
                                         />
                                       </span>
@@ -4763,6 +4770,7 @@ function GameMap({
                                       showNavalMustAttack={showNavalMustAttackStacked}
                                       showForcedNavalStandoff={showForcedNavalStandoffStacked}
                                       isNaval={navalUnitIds.has(unit_id)}
+                                      isHero={Boolean(unitDefs[unit_id]?.hero_id)}
                                       instanceIds={instanceIdsForUnit.length > 0 ? instanceIdsForUnit : undefined}
                                     />
                                   </span>

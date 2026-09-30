@@ -32,8 +32,9 @@
   cursor: inherit !important;
 }
 
-/* Sea units 1.5× larger on map only (not in territory panel) */
-.unit-token.unit-token--naval {
+/* Sea units and heroes 1.5× larger on map only (not in territory panel) */
+.unit-token.unit-token--naval,
+.unit-token.unit-token--hero {
   width: clamp(52px, 15vmin, 63px);
   height: clamp(52px, 15vmin, 63px);
 }

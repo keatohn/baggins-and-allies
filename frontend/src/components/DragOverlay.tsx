@@ -10,6 +10,7 @@ export interface BulkDragOverlayStack {
   unitDef: { name: string; icon: string };
   factionColor?: string;
   isNaval: boolean;
+  isHero?: boolean;
   passengerCount: number;
 }
 
@@ -21,6 +22,7 @@ interface DragOverlayProps {
     unitDef?: { name: string; icon: string };
     factionColor?: string;
     isNaval?: boolean;
+    isHero?: boolean;
     passengerCount?: number;
   } | null;
   activeMobilizationItem?: {
@@ -81,7 +83,7 @@ function DragOverlay({
             return (
               <div
                 key={s.unitId}
-                className={`unit-token dragging-overlay${s.isNaval ? ' unit-token--naval' : ''}`}
+                className={`unit-token dragging-overlay${s.isNaval ? ' unit-token--naval' : ''}${s.isHero ? ' unit-token--hero' : ''}`}
                 style={style}
               >
                 <img src={s.unitDef.icon} alt={s.unitDef.name} draggable={false} />
@@ -109,7 +111,10 @@ function DragOverlay({
 
   return (
     <DndDragOverlay dropAnimation={null} style={{ pointerEvents: 'none' }}>
-      <div className={`unit-token dragging-overlay${activeUnit.isNaval ? ' unit-token--naval' : ''}`} style={style}>
+      <div
+        className={`unit-token dragging-overlay${activeUnit.isNaval ? ' unit-token--naval' : ''}${activeUnit.isHero ? ' unit-token--hero' : ''}`}
+        style={style}
+      >
         <img src={activeUnit.unitDef.icon} alt={activeUnit.unitDef.name} draggable={false} />
         <span className={`count ${activeUnit.count === 1 && passengerCount === 0 ? 'single' : ''}`}>
           {activeUnit.count}

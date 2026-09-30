@@ -20,6 +20,8 @@ interface DraggableUnitProps {
   showForcedNavalStandoff?: boolean;
   /** Naval unit: use larger token on map (1.5×) */
   isNaval?: boolean;
+  /** Hero unit (`hero_id`): same larger token as naval */
+  isHero?: boolean;
   /** Passenger count to show on boat token (sea transport). */
   passengerCount?: number;
   /** When set (e.g. boat + passengers), use these instance IDs for the move. */
@@ -39,6 +41,7 @@ function DraggableUnit({
   showNavalMustAttack = false,
   showForcedNavalStandoff = false,
   isNaval = false,
+  isHero = false,
   passengerCount = 0,
   instanceIds,
 }: DraggableUnitProps) {
@@ -78,7 +81,7 @@ function DraggableUnit({
   return (
     <div
       ref={setNodeRef}
-      className={`unit-token ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${disabled ? 'disabled' : ''} ${showAerialMustMove ? 'aerial-must-move' : ''} ${showNavalMustAttack || showForcedNavalStandoff ? 'naval-must-attack' : ''} ${isNaval ? 'unit-token--naval' : ''}`}
+      className={`unit-token ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${disabled ? 'disabled' : ''} ${showAerialMustMove ? 'aerial-must-move' : ''} ${showNavalMustAttack || showForcedNavalStandoff ? 'naval-must-attack' : ''} ${isNaval ? 'unit-token--naval' : ''} ${isHero ? 'unit-token--hero' : ''}`}
       style={style}
       title={title}
       {...listeners}
