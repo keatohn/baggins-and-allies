@@ -70,7 +70,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
-  margin-bottom: 0.65rem;
 }
 
 /* Tab buttons: same parchment feel as sub-page Menu, compact. */
@@ -94,6 +93,11 @@
   border-color: var(--gold-dark, #8b7355);
   background: rgba(139, 115, 85, 0.08);
   box-shadow: none;
+}
+
+.admin-page__tab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .admin-page__tab--active {
@@ -238,11 +242,48 @@
 }
 
 .admin-page__nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
   margin-bottom: 0.75rem;
 }
 
 .admin-page__nav .page-menu-btn {
   margin-bottom: 0;
+}
+
+.admin-page__nav .page-menu-btn.admin-page__audio-btn--active {
+  background: var(--ink);
+  color: var(--parchment);
+  border-color: var(--ink);
+}
+
+.admin-page__nav .page-menu-btn.admin-page__audio-btn--active:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--parchment);
+  border-color: var(--ink);
+}
+
+.admin-page__tabs-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 1rem;
+  row-gap: 0.65rem;
+  margin-bottom: 0.65rem;
+}
+
+.admin-page__tabs {
+  margin-bottom: 0;
+}
+
+.admin-page__tab-previews {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.3rem;
 }
 
 .admin-page__toolbar--wrap {

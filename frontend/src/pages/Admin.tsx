@@ -15,6 +15,8 @@ import {
 } from './admin/SetupEditorPanels';
 import { AudioPanel } from './admin/AudioPanel';
 import { isValidSetupId } from './admin/setupId';
+import { previewStatsFromBundle } from './admin/previewStats';
+import { GameStatsModal, UnitStatsModal } from '../components/StatsModals';
 import './Admin.css';
 
 const TAB_KEYS = [
@@ -26,7 +28,6 @@ const TAB_KEYS = [
   'ports',
   'starting_setup',
   'specials',
-  'audio',
 ] as const;
 
 type TabKey = (typeof TAB_KEYS)[number];
@@ -40,7 +41,6 @@ const TAB_LABELS: Record<TabKey, string> = {
   ports: 'Ports',
   starting_setup: 'Starting setup',
   specials: 'Specials',
-  audio: 'Audio',
 };
 
 const DELETE_SETUP_CONFIRM_PHRASE = 'DELETE SETUP';
@@ -286,7 +286,12 @@ export default function Admin() {
   const [deleting, setDeleting] = useState(false);
   const [audioGains, setAudioGains] = useState<Record<string, number>>({});
   const [menuMusic, setMenuMusic] = useState<string[]>([]);
+  const [audioOpen, setAudioOpen] = useState(false);
+  const [audioJsonMode, setAudioJsonMode] = useState(false);
+  const [unitStatsOpen, setUnitStatsOpen] = useState(false);
+  const [gameStatsOpen, setGameStatsOpen] = useState(false);
   const audioJson = useMemo(() => ({ gains: audioGains, menu_music: menuMusic }), [audioGains, menuMusic]);
+  const statsPreview = useMemo(() => previewStatsFromBundle(bundle), [bundle]);
 
   const useJson = jsonTab[activeTab] === true;
 
@@ -361,7 +366,7 @@ export default function Admin() {
   const handleSave = async () => {
     setSaveError(null);
     setSaveOk(false);
-    if (activeTab === 'audio') {
+    if (audioOpen) {
       setSaving(true);
       try {
         const res = await api.adminPutAudio({ gains: audioGains, menu_music: menuMusic });
@@ -440,8 +445,8 @@ export default function Admin() {
   };
 
   const renderTabBody = () => {
-    if (activeTab === 'audio') {
-      if (useJson) {
+    if (audioOpen) {
+      if (audioJsonMode) {
         return (
           <JsonTabEditor
             value={audioJson}
@@ -576,8 +581,31 @@ export default function Admin() {
         <Link to="/" className="page-menu-btn">
           Menu
         </Link>
+        <button
+          type="button"
+          className={`page-menu-btn${audioOpen ? ' admin-page__audio-btn--active' : ''}`}
+          onClick={() => {
+            setAudioOpen((open) => !open);
+            setSaveOk(false);
+            setSaveError(null);
+          }}
+        >
+          Audio
+        </button>
       </div>
 
+      {audioOpen ? (
+        <div className="admin-page__toolbar admin-page__toolbar--wrap">
+          <label className="admin-page__checkbox-label">
+            <input
+              type="checkbox"
+              checked={audioJsonMode}
+              onChange={() => setAudioJsonMode((v) => !v)}
+            />
+            Raw JSON
+          </label>
+        </div>
+      ) : (
       <div className="admin-page__toolbar admin-page__toolbar--wrap">
         <label className="admin-page__field">
           <span className="admin-page__field-label">Setup</span>
@@ -611,6 +639,7 @@ export default function Admin() {
         </label>
         {loadingBundle ? <span className="admin-page__loading-inline">Loading…</span> : null}
       </div>
+      )}
 
       {loadError ? (
         <div className="admin-page__error">
@@ -650,29 +679,57 @@ export default function Admin() {
         </p>
       ) : null}
 
+      {audioOpen ? (
+        <div className="admin-page__panel">{renderTabBody()}</div>
+      ) : (
       <>
-        <div className="admin-page__tabs" role="tablist">
-          {TAB_KEYS.map((k) => (
+        <div className="admin-page__tabs-row">
+          <div className="admin-page__tabs" role="tablist">
+            {TAB_KEYS.map((k) => (
+              <button
+                key={k}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === k}
+                className={`admin-page__tab${activeTab === k ? ' admin-page__tab--active' : ''}`}
+                onClick={() => {
+                  setActiveTab(k);
+                  setSaveOk(false);
+                  setSaveError(null);
+                }}
+              >
+                {TAB_LABELS[k]}
+              </button>
+            ))}
+          </div>
+          <div className="admin-page__tab-previews">
             <button
-              key={k}
               type="button"
-              role="tab"
-              aria-selected={activeTab === k}
-              className={`admin-page__tab${activeTab === k ? ' admin-page__tab--active' : ''}`}
-              onClick={() => setActiveTab(k)}
+              className="admin-page__tab"
+              disabled={!statsPreview}
+              onClick={() => setUnitStatsOpen(true)}
             >
-              {TAB_LABELS[k]}
+              Unit stats
             </button>
-          ))}
+            <button
+              type="button"
+              className="admin-page__tab"
+              disabled={!statsPreview}
+              onClick={() => setGameStatsOpen(true)}
+            >
+              Game stats
+            </button>
+          </div>
         </div>
         <div className="admin-page__panel">{renderTabBody()}</div>
       </>
+      )}
 
       <div className="admin-page__actions">
         <button
           type="button"
           className="admin-page__btn admin-page__btn--primary"
-          disabled={(activeTab !== 'audio' && !bundle) || saving}
+          disabled={(audioOpen ? false : !bundle) || saving}
           onClick={handleSave}
         >
           {saving ? 'Saving…' : 'Save'}
@@ -680,7 +737,7 @@ export default function Admin() {
         <button
           type="button"
           className="admin-page__btn admin-page__btn--danger"
-          disabled={!bundle || saving || deleting}
+          disabled={!bundle || saving || deleting || audioOpen}
           onClick={openDeleteDialog}
         >
           Delete setup
@@ -690,7 +747,7 @@ export default function Admin() {
       {saveError ? <div className="admin-page__error">{saveError}</div> : null}
       {saveOk ? (
         <p className="admin-page__success">
-          {activeTab === 'audio' ? 'Saved audio mix.' : 'Saved. New games will use this data.'}
+          {audioOpen ? 'Saved audio mix.' : 'Saved. New games will use this data.'}
         </p>
       ) : null}
 
@@ -739,6 +796,22 @@ export default function Admin() {
             </div>
           </div>
         </div>
+      )}
+      {unitStatsOpen && statsPreview && (
+        <UnitStatsModal
+          unitsByFaction={statsPreview.unitsByFaction}
+          factionData={statsPreview.factionData}
+          turnOrder={statsPreview.turnOrder}
+          onClose={() => setUnitStatsOpen(false)}
+        />
+      )}
+      {gameStatsOpen && statsPreview && (
+        <GameStatsModal
+          factionStats={statsPreview.factionStats}
+          factionData={statsPreview.factionData}
+          turnOrder={statsPreview.turnOrder}
+          onClose={() => setGameStatsOpen(false)}
+        />
       )}
     </div>
   );
