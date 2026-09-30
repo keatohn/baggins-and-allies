@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import TURN_MUSIC_M4A from 'virtual:turn-music-m4a';
+import LOBBY_MUSIC_M4A from 'virtual:lobby-music-m4a';
 import UNIT_ICON_PNG from 'virtual:unit-icon-png';
 import TERRITORY_IMAGE_PNG from 'virtual:territory-image-png';
 import { TerritoryGraphPane } from './TerritoryGraphPane';
@@ -114,9 +115,21 @@ function musicChipLabel(filename: string): string {
   return filename.replace(/\.(m4a|mp3|ogg|wav)$/i, '');
 }
 
-function MusicField({ value, onApply }: { value: unknown; onApply: (m: string | string[] | undefined) => void }) {
+function MusicField({
+  value,
+  files,
+  emptyLabel,
+  addAriaLabel,
+  onApply,
+}: {
+  value: unknown;
+  files: string[];
+  emptyLabel: string;
+  addAriaLabel: string;
+  onApply: (m: string | string[] | undefined) => void;
+}) {
   const selected = musicValueToList(value);
-  const unselected = TURN_MUSIC_M4A.filter((f) => !selected.includes(f));
+  const unselected = files.filter((f) => !selected.includes(f));
 
   const commit = (next: string[]) => {
     onApply(next.length > 0 ? next : undefined);
@@ -125,7 +138,7 @@ function MusicField({ value, onApply }: { value: unknown; onApply: (m: string | 
   return (
     <div className="admin-music-picker">
       {selected.length === 0 ? (
-        <span className="admin-music-picker__empty">None (uses faction id)</span>
+        <span className="admin-music-picker__empty">{emptyLabel}</span>
       ) : (
         selected.map((filename, idx) => (
           <span key={`${filename}-${idx}`} className="admin-music-chip">
@@ -175,7 +188,7 @@ function MusicField({ value, onApply }: { value: unknown; onApply: (m: string | 
       )}
       <select
         className="admin-form__input admin-music-picker__add"
-        aria-label="Add turn music track"
+        aria-label={addAriaLabel}
         value=""
         disabled={unselected.length === 0}
         onChange={(e) => {
@@ -373,6 +386,16 @@ export function ManifestPanel({
           placeholder="e.g. wotr_map_1.1"
           value={String(manifest.map_asset ?? '')}
           onChange={(e) => onManifestChange({ ...manifest, map_asset: e.target.value })}
+        />,
+      )}
+      {fieldRow(
+        'Lobby music',
+        <MusicField
+          value={manifest.lobby_music}
+          files={LOBBY_MUSIC_M4A}
+          emptyLabel="None"
+          addAriaLabel="Add lobby music track"
+          onApply={(m) => onManifestChange({ ...manifest, lobby_music: m ?? [] })}
         />,
       )}
       {fieldRow(
@@ -818,7 +841,13 @@ export function FactionsPanel({
           )}
           {fieldRow(
             'Music',
-            <MusicField value={f.music} onApply={(m) => patch({ music: m })} />,
+            <MusicField
+              value={f.music}
+              files={TURN_MUSIC_M4A}
+              emptyLabel="None (uses faction id)"
+              addAriaLabel="Add turn music track"
+              onApply={(m) => patch({ music: m })}
+            />,
           )}
         </div>
       )}

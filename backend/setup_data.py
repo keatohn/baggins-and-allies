@@ -23,6 +23,7 @@ from backend.engine.definitions import (
     load_specials as load_specials_from_files,
     load_static_definitions as load_static_definitions_from_files,
     list_setups as list_setups_from_files,
+    lobby_music_filenames,
     menu_order_sort_value,
     parse_prefire_penalty_from_manifest,
     scenario_display_from_setup_id as scenario_display_from_files,
@@ -267,10 +268,14 @@ def scenario_display_from_setup_id_db(db: Session, setup_id: str) -> dict[str, A
     except json.JSONDecodeError:
         return None
     ctx = m.get("context")
-    return {
+    out: dict[str, Any] = {
         "display_name": m.get("display_name", setup_id),
         "context": ctx if isinstance(ctx, dict) else None,
     }
+    lobby_music = lobby_music_filenames(m)
+    if lobby_music is not None:
+        out["lobby_music"] = lobby_music
+    return out
 
 
 def get_admin_setup_bundle(db: Session, setup_id: str) -> dict[str, Any] | None:
@@ -299,6 +304,7 @@ def empty_setup_payload(new_id: str) -> dict[str, Any]:
             "display_name": new_id,
             "is_active": False,
             "map_asset": "",
+            "lobby_music": ["fellowship.m4a"],
             "context": {},
         },
         "units": {},

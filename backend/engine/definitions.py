@@ -82,6 +82,19 @@ def read_setup_manifest(setup_id: str) -> dict[str, Any] | None:
         return None
 
 
+def lobby_music_filenames(manifest: dict[str, Any]) -> list[str] | None:
+    """Filenames under public/assets/audio/lobby. None when the manifest has no lobby_music key."""
+    if "lobby_music" not in manifest:
+        return None
+    raw = manifest.get("lobby_music")
+    if isinstance(raw, str):
+        s = raw.strip()
+        return [s] if s else []
+    if isinstance(raw, list):
+        return [x.strip() for x in raw if isinstance(x, str) and x.strip()]
+    return []
+
+
 def scenario_display_from_setup_id(setup_id: str) -> dict[str, Any] | None:
     """display_name + context from manifest for lobby/meta. Ignores is_active (inactive setups still show for existing games)."""
     m = read_setup_manifest(setup_id)
@@ -96,10 +109,14 @@ def scenario_display_from_setup_id(setup_id: str) -> dict[str, Any] | None:
     if not m:
         return None
     ctx = m.get("context")
-    return {
+    out: dict[str, Any] = {
         "display_name": m.get("display_name", setup_id),
         "context": ctx if isinstance(ctx, dict) else None,
     }
+    lobby_music = lobby_music_filenames(m)
+    if lobby_music is not None:
+        out["lobby_music"] = lobby_music
+    return out
 
 
 def list_setups() -> list[dict]:

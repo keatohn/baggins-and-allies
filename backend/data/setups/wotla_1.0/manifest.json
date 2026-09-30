@@ -26,5 +26,8 @@
   "camp_cost": 10,
   "stronghold_repair_cost": 2,
   "prefire_penalty": false,
+  "lobby_music": [
+    "fellowship.m4a"
+  ],
   "menu_order": 4
 }

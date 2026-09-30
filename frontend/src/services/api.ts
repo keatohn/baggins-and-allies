@@ -646,7 +646,12 @@ export interface GameMeta {
   /** Lobby: player_id -> username for display. */
   player_usernames?: Record<string, string>;
   /** Lobby: scenario chosen at create (display_name + context from manifest). */
-  scenario?: { display_name: string; context?: Record<string, unknown> } | null;
+  scenario?: {
+    display_name: string;
+    context?: Record<string, unknown>;
+    /** Filenames in assets/audio/lobby. Missing = fellowship. Empty = silence. */
+    lobby_music?: string[];
+  } | null;
   /** Faction IDs controlled by AI (single-player or fill slots). When current_faction is in this list, call POST /games/{id}/ai-step to advance. */
   ai_factions?: string[];
   /** Player IDs who forfeited; their turns are auto-skipped. Used for forfeit notification toast. */
@@ -688,7 +693,11 @@ export interface GameListItem {
   /** Lobby only: total factions (turn order length). */
   lobby_factions_total?: number | null;
   /** Setup display name from manifest when game config has setup_id (same shape as lobby meta). */
-  scenario?: { display_name: string; context?: Record<string, unknown> } | null;
+  scenario?: {
+    display_name: string;
+    context?: Record<string, unknown>;
+    lobby_music?: string[];
+  } | null;
 }
 
 /** Setup/scenario from GET /setups (manifest id, display_name, map_asset, optional context for UX). */

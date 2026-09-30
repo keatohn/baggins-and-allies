@@ -44,6 +44,7 @@ const TURN_CUE_DEBOUNCE_MS = 900;
 let turnLoop: TurnPlaylistPair | null = null;
 let menuLoop: MenuLoopPair | null = null;
 let currentMenuAmbienceMode: 'menu' | 'lobby' | null = null;
+let currentMenuPlaylistKey = '';
 /** True only on logged-in menu routes (not login/register, not an active game). */
 let menuRouteAmbienceAllowed = false;
 let lastUiClickAt = 0;
@@ -72,6 +73,7 @@ function teardownMenuPlayback(): void {
   const prev = menuLoop;
   menuLoop = null;
   currentMenuAmbienceMode = null;
+  currentMenuPlaylistKey = '';
   if (prev) prev.destroy();
 }
 
@@ -886,9 +888,22 @@ function tryPlayFirstWorkingUrl(
   tryNext();
 }
 
-function menuAmbiencePlaylist(mode: 'menu' | 'lobby'): { stems: string[]; audioBase: string } {
+function lobbyMusicStems(lobbyMusic: string | string[] | null | undefined): string[] {
+  if (lobbyMusic === undefined) return ['fellowship'];
+  const raw: string[] = Array.isArray(lobbyMusic)
+    ? lobbyMusic.filter((x): x is string => typeof x === 'string')
+    : lobbyMusic != null && String(lobbyMusic).trim()
+      ? [String(lobbyMusic)]
+      : [];
+  return raw.map((m) => stemFromMusicFilename(m)).filter((s): s is string => Boolean(s));
+}
+
+function menuAmbiencePlaylist(
+  mode: 'menu' | 'lobby',
+  lobbyMusic?: string | string[] | null,
+): { stems: string[]; audioBase: string } {
   if (mode === 'lobby') {
-    return { stems: ['fellowship'], audioBase: LOBBY_AUDIO_BASE };
+    return { stems: lobbyMusicStems(lobbyMusic), audioBase: LOBBY_AUDIO_BASE };
   }
   const stems = MENU_MUSIC_M4A.map((f) => stemFromMusicFilename(f)).filter((s): s is string => Boolean(s));
   if (stems.length === 0) return { stems: ['shire'], audioBase: MENU_AUDIO_BASE };
@@ -992,14 +1007,23 @@ export function stopMenuAmbience(): void {
   teardownMenuPlayback();
 }
 
-export function startMenuAmbience(mode: 'menu' | 'lobby' = 'menu'): void {
+export function startMenuAmbience(
+  mode: 'menu' | 'lobby' = 'menu',
+  lobbyMusic?: string | string[] | null,
+): void {
   if (mode === 'menu' && !menuRouteAmbienceAllowed) {
     if (currentMenuAmbienceMode === 'menu') stopMenuAmbience();
     return;
   }
+  const { stems, audioBase } = menuAmbiencePlaylist(mode, lobbyMusic);
+  const playlistKey = `${mode}:${stems.join('|')}`;
+  if (stems.length === 0) {
+    if (mode === 'lobby') stopMenuAmbience();
+    return;
+  }
   // Do not skip restart when autoplay was blocked: play() may have rejected while menuLoop
   // still exists, which would leave ambience silent until route change without this check.
-  if (menuLoop && currentMenuAmbienceMode === mode) {
+  if (menuLoop && currentMenuAmbienceMode === mode && currentMenuPlaylistKey === playlistKey) {
     try {
       if (!menuLoop.getActiveElement().paused) return;
     } catch {
@@ -1013,8 +1037,7 @@ export function startMenuAmbience(mode: 'menu' | 'lobby' = 'menu'): void {
 
   menuSession.v++;
   const sessionId = menuSession.v;
-  const { stems, audioBase } = menuAmbiencePlaylist(mode);
-  if (stems.length === 0) return;
+  currentMenuPlaylistKey = playlistKey;
 
   const tryStart = (stemIdx: number) => {
     if (stemIdx >= stems.length) return;

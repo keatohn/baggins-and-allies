@@ -3898,10 +3898,12 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   }, [GAME_ID, currentPlayerId]);
 
   const isLobby = gameMeta?.status === 'lobby';
+  const lobbyMusicKey =
+    gameMeta?.scenario?.lobby_music === undefined ? undefined : gameMeta.scenario.lobby_music.join('|');
   useEffect(() => {
-    if (isLobby) startMenuAmbience('lobby');
+    if (isLobby) startMenuAmbience('lobby', gameMeta?.scenario?.lobby_music);
     else stopMenuAmbience();
-  }, [isLobby]);
+  }, [isLobby, lobbyMusicKey, gameMeta?.scenario?.lobby_music]);
 
   // Loading/error states
   if (loading) {
