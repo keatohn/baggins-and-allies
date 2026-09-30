@@ -1,5 +1,3 @@
-import MENU_MUSIC_M4A from 'virtual:menu-music-m4a';
-
 const STORAGE_MUTE = 'gameAudioMuted';
 const STORAGE_MUSIC_VOLUME = 'gameAudioMusicVolume';
 const STORAGE_MENU_MUSIC_VOLUME = 'gameAudioMenuMusicVolume';
@@ -8,9 +6,7 @@ const STORAGE_SFX_VOLUME = 'gameAudioSfxVolume';
 const LEGACY_STORAGE_VOLUME = 'gameAudioVolume';
 
 export const GAME_AUDIO_BASE = '/assets/audio';
-const MENU_AUDIO_BASE = `${GAME_AUDIO_BASE}/menu`;
-const LOBBY_AUDIO_BASE = `${GAME_AUDIO_BASE}/lobby`;
-const TURN_AUDIO_BASE = `${GAME_AUDIO_BASE}/turn`;
+const MUSIC_AUDIO_BASE = `${GAME_AUDIO_BASE}/music`;
 const SFX_AUDIO_BASE = `${GAME_AUDIO_BASE}/sfx`;
 
 export const TURN_AUDIO_EXTS = ['.m4a', '.mp3', '.ogg'] as const;
@@ -111,15 +107,23 @@ function readVolume(): number {
   return readGameMusicVolume();
 }
 
-/** Admin per-file percents keyed by `turn/gondor.m4a` etc. Missing = 100. Multiplies profile volume. */
+/** Admin per-file percents keyed by `music/gondor.m4a` etc. Missing = 100. Multiplies profile volume. */
 let audioFileGainPct: Record<string, number> = {};
+
+const DEFAULT_MENU_MUSIC = ['shire.m4a', 'adventure.m4a'];
+/** Admin menu playlist (filenames in assets/audio/music). */
+let menuMusicFiles: string[] = DEFAULT_MENU_MUSIC;
 
 function clamp01(n: number): number {
   return Math.min(1, Math.max(0, n));
 }
 
 function normalizeAudioRel(rel: string): string {
-  return rel.replace(/\\/g, '/').replace(/^\/+/, '').replace(/^assets\/audio\//, '');
+  return rel
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/^assets\/audio\//, '')
+    .replace(/^(turn|menu|lobby)\//, 'music/');
 }
 
 function gainForRelPath(rel: string): number {
@@ -139,7 +143,7 @@ function fileGainFromUrl(src: string | undefined): number {
   } catch {
     /* keep src */
   }
-  const m = pathname.match(/\/assets\/audio\/((?:turn|menu|lobby|sfx)\/[^/]+)$/i);
+  const m = pathname.match(/\/assets\/audio\/((?:music|sfx)\/[^/]+)$/i);
   if (!m) return 1;
   try {
     return gainForRelPath(decodeURIComponent(m[1]));
@@ -180,11 +184,28 @@ export function setAudioFileGains(gains: Record<string, number> | null | undefin
   applyMenuLoopMasterVolume();
 }
 
+/** Replace the admin menu playlist; restarts menu ambience if it is playing a different list. */
+export function setMenuMusicFiles(files: string[] | null | undefined): void {
+  const next = Array.isArray(files) ? files.filter((f) => typeof f === 'string' && f.trim()) : DEFAULT_MENU_MUSIC;
+  if (next.join('|') === menuMusicFiles.join('|')) return;
+  menuMusicFiles = next;
+  if (currentMenuAmbienceMode === 'lobby') return;
+  if (currentMenuAmbienceMode === null) {
+    if (menuRouteAmbienceAllowed) startMenuAmbience('menu');
+    return;
+  }
+  const { stems } = menuAmbiencePlaylist('menu');
+  if (`menu:${stems.join('|')}` !== currentMenuPlaylistKey) {
+    stopMenuAmbience();
+    startMenuAmbience('menu');
+  }
+}
+
 function sanitizeFactionId(id: string): string {
   return id.replace(/[^a-zA-Z0-9_-]/g, '');
 }
 
-/** Single filename → stem under assets/audio/turn; no faction fallback. */
+/** Single filename → stem under assets/audio/music; no faction fallback. */
 function stemFromMusicFilename(music: string | null | undefined): string | null {
   if (!music || !String(music).trim()) return null;
   const base = String(music).trim().split(/[/\\]/).pop() ?? '';
@@ -360,7 +381,7 @@ class TurnPlaylistPair {
   private preloadStemForIndex(el: HTMLAudioElement, stemIndex: number, sid: number): void {
     const stem = this.stems[stemIndex];
     tryPlayFirstWorkingUrl(
-      TURN_AUDIO_EXTS.map((ext) => `${TURN_AUDIO_BASE}/${stem}${ext}`),
+      TURN_AUDIO_EXTS.map((ext) => `${MUSIC_AUDIO_BASE}/${stem}${ext}`),
       (url) => {
         if (sid !== turnSession.v) return;
         try {
@@ -903,13 +924,10 @@ function menuAmbiencePlaylist(
   lobbyMusic?: string | string[] | null,
 ): { stems: string[]; audioBase: string } {
   if (mode === 'lobby') {
-    return { stems: lobbyMusicStems(lobbyMusic), audioBase: LOBBY_AUDIO_BASE };
+    return { stems: lobbyMusicStems(lobbyMusic), audioBase: MUSIC_AUDIO_BASE };
   }
-  const stems = MENU_MUSIC_M4A.map((f) => stemFromMusicFilename(f)).filter((s): s is string => Boolean(s));
-  if (stems.length === 0) return { stems: ['shire'], audioBase: MENU_AUDIO_BASE };
-  const shireIdx = stems.findIndex((s) => s.toLowerCase() === 'shire');
-  const ordered = shireIdx > 0 ? [...stems.slice(shireIdx), ...stems.slice(0, shireIdx)] : stems;
-  return { stems: ordered, audioBase: MENU_AUDIO_BASE };
+  const stems = menuMusicFiles.map((f) => stemFromMusicFilename(f)).filter((s): s is string => Boolean(s));
+  return { stems, audioBase: MUSIC_AUDIO_BASE };
 }
 
 export function stopTurnCue(): void {
@@ -945,7 +963,7 @@ export function stopMenuAmbienceImmediate(): void {
 /**
  * Start crossfaded turn music for the current faction.
  * @param factionId Used for debouncing and fallback track when `setupMusicFile` is missing/invalid.
- * @param setupMusicFile Optional factions.json `music`: one filename or ordered list; stems must match assets/audio/turn. Multiple tracks cycle (with crossfade) until the turn changes.
+ * @param setupMusicFile Optional factions.json `music`: one filename or ordered list; stems must match assets/audio/music. Multiple tracks cycle (with crossfade) until the turn changes.
  */
 export function playFactionTurnCue(factionId: string, setupMusicFile?: string | string[] | null): void {
   const safe = sanitizeFactionId(factionId);
@@ -985,7 +1003,7 @@ export function playFactionTurnCue(factionId: string, setupMusicFile?: string | 
   const tryStart = (stemIdx: number) => {
     if (stemIdx >= stems.length) return;
     tryPlayFirstWorkingUrl(
-      TURN_AUDIO_EXTS.map((ext) => `${TURN_AUDIO_BASE}/${stems[stemIdx]}${ext}`),
+      TURN_AUDIO_EXTS.map((ext) => `${MUSIC_AUDIO_BASE}/${stems[stemIdx]}${ext}`),
       (url) => {
         if (sessionId !== turnSession.v) return;
 
@@ -1018,7 +1036,7 @@ export function startMenuAmbience(
   const { stems, audioBase } = menuAmbiencePlaylist(mode, lobbyMusic);
   const playlistKey = `${mode}:${stems.join('|')}`;
   if (stems.length === 0) {
-    if (mode === 'lobby') stopMenuAmbience();
+    stopMenuAmbience();
     return;
   }
   // Do not skip restart when autoplay was blocked: play() may have rejected while menuLoop

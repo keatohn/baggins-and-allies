@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import TURN_MUSIC_M4A from 'virtual:turn-music-m4a';
-import LOBBY_MUSIC_M4A from 'virtual:lobby-music-m4a';
+import MUSIC_M4A from 'virtual:music-m4a';
 import UNIT_ICON_PNG from 'virtual:unit-icon-png';
 import TERRITORY_IMAGE_PNG from 'virtual:territory-image-png';
 import { TerritoryGraphPane } from './TerritoryGraphPane';
@@ -115,7 +114,7 @@ function musicChipLabel(filename: string): string {
   return filename.replace(/\.(m4a|mp3|ogg|wav)$/i, '');
 }
 
-function MusicField({
+export function MusicField({
   value,
   files,
   emptyLabel,
@@ -392,7 +391,7 @@ export function ManifestPanel({
         'Lobby music',
         <MusicField
           value={manifest.lobby_music}
-          files={LOBBY_MUSIC_M4A}
+          files={MUSIC_M4A}
           emptyLabel="None"
           addAriaLabel="Add lobby music track"
           onApply={(m) => onManifestChange({ ...manifest, lobby_music: m ?? [] })}
@@ -843,7 +842,7 @@ export function FactionsPanel({
             'Music',
             <MusicField
               value={f.music}
-              files={TURN_MUSIC_M4A}
+              files={MUSIC_M4A}
               emptyLabel="None (uses faction id)"
               addAriaLabel="Add turn music track"
               onApply={(m) => patch({ music: m })}

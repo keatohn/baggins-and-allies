@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, getAuthToken, getResolvedApiBase, usesViteApiProxy } from '../services/api';
 import type { AdminSetupBundle, AdminSetupListItem, AuthPlayer } from '../services/api';
@@ -285,6 +285,8 @@ export default function Admin() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [audioGains, setAudioGains] = useState<Record<string, number>>({});
+  const [menuMusic, setMenuMusic] = useState<string[]>([]);
+  const audioJson = useMemo(() => ({ gains: audioGains, menu_music: menuMusic }), [audioGains, menuMusic]);
 
   const useJson = jsonTab[activeTab] === true;
 
@@ -323,7 +325,10 @@ export default function Admin() {
     if (!player?.is_admin) return;
     api
       .getAudioGains()
-      .then((r) => setAudioGains(r.gains ?? {}))
+      .then((r) => {
+        setAudioGains(r.gains ?? {});
+        setMenuMusic(r.menu_music ?? []);
+      })
       .catch(() => setAudioGains({}));
   }, [player?.is_admin]);
 
@@ -359,8 +364,9 @@ export default function Admin() {
     if (activeTab === 'audio') {
       setSaving(true);
       try {
-        const res = await api.adminPutAudio({ gains: audioGains });
+        const res = await api.adminPutAudio({ gains: audioGains, menu_music: menuMusic });
         setAudioGains(res.gains ?? {});
+        setMenuMusic(res.menu_music ?? []);
         setSaveOk(true);
       } catch (e) {
         setSaveError(e instanceof Error ? e.message : 'Save failed');
@@ -438,7 +444,7 @@ export default function Admin() {
       if (useJson) {
         return (
           <JsonTabEditor
-            value={audioGains}
+            value={audioJson}
             onChange={(p) => {
               const obj = p && typeof p === 'object' && !Array.isArray(p) ? (p as Record<string, unknown>) : {};
               const inner = obj.gains && typeof obj.gains === 'object' && !Array.isArray(obj.gains) ? obj.gains : obj;
@@ -448,11 +454,21 @@ export default function Admin() {
                 if (Number.isFinite(n)) next[k] = n;
               }
               setAudioGains(next);
+              if (Array.isArray(obj.menu_music)) {
+                setMenuMusic(obj.menu_music.filter((x): x is string => typeof x === 'string'));
+              }
             }}
           />
         );
       }
-      return <AudioPanel gains={audioGains} onGainsChange={setAudioGains} />;
+      return (
+        <AudioPanel
+          gains={audioGains}
+          onGainsChange={setAudioGains}
+          menuMusic={menuMusic}
+          onMenuMusicChange={setMenuMusic}
+        />
+      );
     }
     if (!bundle) {
       return <p className="admin-page__empty">Select a setup to edit.</p>;

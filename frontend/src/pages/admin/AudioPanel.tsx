@@ -1,16 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import TURN_MUSIC_M4A from 'virtual:turn-music-m4a';
-import MENU_MUSIC_M4A from 'virtual:menu-music-m4a';
-import LOBBY_MUSIC_M4A from 'virtual:lobby-music-m4a';
+import MUSIC_M4A from 'virtual:music-m4a';
 import SFX_M4A from 'virtual:sfx-m4a';
 import { GAME_AUDIO_BASE, startMenuAmbience, stopMenuAmbience } from '../../audio/gameAudio';
+import { MusicField } from './SetupEditorPanels';
 
-export type AudioKind = 'turn' | 'menu' | 'lobby' | 'sfx';
+export type AudioKind = 'music' | 'sfx';
 
 const GROUPS: { kind: AudioKind; label: string; files: string[] }[] = [
-  { kind: 'turn', label: 'Turn music', files: TURN_MUSIC_M4A },
-  { kind: 'menu', label: 'Menu', files: MENU_MUSIC_M4A },
-  { kind: 'lobby', label: 'Lobby', files: LOBBY_MUSIC_M4A },
+  { kind: 'music', label: 'Music', files: MUSIC_M4A },
   { kind: 'sfx', label: 'SFX', files: SFX_M4A },
 ];
 
@@ -30,9 +27,13 @@ function pctFor(gains: Record<string, number>, rel: string): number {
 export function AudioPanel({
   gains,
   onGainsChange,
+  menuMusic,
+  onMenuMusicChange,
 }: {
   gains: Record<string, number>;
   onGainsChange: (next: Record<string, number>) => void;
+  menuMusic: string[];
+  onMenuMusicChange: (next: string[]) => void;
 }) {
   const previewRef = useRef<HTMLAudioElement | null>(null);
   const [playingRel, setPlayingRel] = useState<string | null>(null);
@@ -89,6 +90,20 @@ export function AudioPanel({
 
   return (
     <div className="admin-form">
+      <section className="admin-audio-group">
+        <h3 className="admin-form__subtitle">Menu music</h3>
+        <MusicField
+          value={menuMusic}
+          files={MUSIC_M4A}
+          emptyLabel="None"
+          addAriaLabel="Add menu music track"
+          onApply={(m) => onMenuMusicChange(Array.isArray(m) ? m : m ? [m] : [])}
+        />
+        <p className="admin-form__micro">
+          Plays in order and loops on the logged-in menus. Lobby music is set per setup (Manifest tab); turn music per
+          faction (Factions tab).
+        </p>
+      </section>
       <p className="admin-form__micro">
         Per-file mix is global (not per setup). Each percent multiplies each player&apos;s profile volume in-game.
         Play preview uses only this percent (not your profile sliders) so you can compare files, and it pauses menu

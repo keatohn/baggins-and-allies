@@ -2,7 +2,7 @@
  * API service for communicating with the Baggins & Allies game backend.
  */
 
-import { syncAudioFromAuthPlayer, setAudioFileGains } from '../audio/gameAudio';
+import { syncAudioFromAuthPlayer, setAudioFileGains, setMenuMusicFiles } from '../audio/gameAudio';
 
 /**
  * Empty string must count as unset — otherwise fetch uses same-origin URLs and static hosts return 405 on POST.
@@ -408,7 +408,7 @@ export interface ApiFactionDefinition {
   color: string;
   capital: string;
   icon?: string;
-  /** Turn music in assets/audio/turn; stem(s) with .mp3/.ogg fallbacks. One file or ordered list (playlist cycles until turn changes). Omitted = use faction id. */
+  /** Turn music in assets/audio/music; stem(s) with .mp3/.ogg fallbacks. One file or ordered list (playlist cycles until turn changes). Omitted = use faction id. */
   music?: string | string[];
 }
 
@@ -649,7 +649,7 @@ export interface GameMeta {
   scenario?: {
     display_name: string;
     context?: Record<string, unknown>;
-    /** Filenames in assets/audio/lobby. Missing = fellowship. Empty = silence. */
+    /** Filenames in assets/audio/music. Missing = fellowship. Empty = silence. */
     lobby_music?: string[];
   } | null;
   /** Faction IDs controlled by AI (single-player or fill slots). When current_faction is in this list, call POST /games/{id}/ai-step to advance. */
@@ -776,16 +776,18 @@ export const api = {
   adminListSetups: () =>
     fetchJson<{ setups: AdminSetupListItem[] }>('/admin/setups'),
   getAudioGains: async () => {
-    const r = await fetchJson<{ gains: AudioGainsMap }>('/audio/gains');
+    const r = await fetchJson<{ gains: AudioGainsMap; menu_music?: string[] }>('/audio/gains');
     setAudioFileGains(r.gains);
+    setMenuMusicFiles(r.menu_music);
     return r;
   },
-  adminPutAudio: async (body: { gains: AudioGainsMap }) => {
-    const r = await fetchJson<{ ok: boolean; gains: AudioGainsMap }>('/admin/audio', {
+  adminPutAudio: async (body: { gains: AudioGainsMap; menu_music?: string[] }) => {
+    const r = await fetchJson<{ ok: boolean; gains: AudioGainsMap; menu_music?: string[] }>('/admin/audio', {
       method: 'PUT',
       body: JSON.stringify(body),
     });
     setAudioFileGains(r.gains);
+    setMenuMusicFiles(r.menu_music);
     return r;
   },
   adminGetSetup: (setupId: string) => fetchJson<AdminSetupBundle>(`/admin/setups/${encodeURIComponent(setupId)}`),

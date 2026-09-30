@@ -83,7 +83,7 @@ def read_setup_manifest(setup_id: str) -> dict[str, Any] | None:
 
 
 def lobby_music_filenames(manifest: dict[str, Any]) -> list[str] | None:
-    """Filenames under public/assets/audio/lobby. None when the manifest has no lobby_music key."""
+    """Filenames under public/assets/audio/music. None when the manifest has no lobby_music key."""
     if "lobby_music" not in manifest:
         return None
     raw = manifest.get("lobby_music")
@@ -280,7 +280,7 @@ def _faction_capital_from_json(raw: Any) -> str:
 
 
 def _coerce_faction_music(raw: Any) -> str | list[str] | None:
-    """Legacy single string or list of filenames for assets/audio/turn (playlist order for a turn)."""
+    """Legacy single string or list of filenames for assets/audio/music (playlist order for a turn)."""
     if raw is None:
         return None
     if isinstance(raw, str):
@@ -301,7 +301,7 @@ class FactionDefinition:
     capital: str  # territory_id
     color: str
     icon: Optional[str] = None  # Filename in frontend/assets/factions/
-    # Turn music: one filename or ordered list under public/assets/audio/turn/ (may differ from id).
+    # Turn music: one filename or ordered list under public/assets/audio/music/ (may differ from id).
     music: str | list[str] | None = None
 
 

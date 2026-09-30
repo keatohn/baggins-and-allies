@@ -50,21 +50,9 @@ export default defineConfig({
   appType: 'spa',
   plugins: [
     publicFilenamesPlugin({
-      name: 'turn-music-m4a',
-      virtualId: 'virtual:turn-music-m4a',
-      relDir: 'public/assets/audio/turn',
-      ext: '.m4a',
-    }),
-    publicFilenamesPlugin({
-      name: 'menu-music-m4a',
-      virtualId: 'virtual:menu-music-m4a',
-      relDir: 'public/assets/audio/menu',
-      ext: '.m4a',
-    }),
-    publicFilenamesPlugin({
-      name: 'lobby-music-m4a',
-      virtualId: 'virtual:lobby-music-m4a',
-      relDir: 'public/assets/audio/lobby',
+      name: 'music-m4a',
+      virtualId: 'virtual:music-m4a',
+      relDir: 'public/assets/audio/music',
       ext: '.m4a',
     }),
     publicFilenamesPlugin({

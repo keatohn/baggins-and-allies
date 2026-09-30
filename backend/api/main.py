@@ -91,7 +91,7 @@ from backend.engine.definitions import (
     TerritoryDefinition,
     parse_prefire_penalty_from_manifest,
 )
-from backend.audio_gains import load_audio_gains, save_audio_gains
+from backend.audio_gains import load_audio_gains, load_menu_music, save_audio_settings
 from backend.setup_data import (
     create_setup_from_bundle,
     create_setup,
@@ -1259,12 +1259,13 @@ def get_setups(db: Session = Depends(get_db)):
 
 @app.get("/audio/gains")
 def get_audio_gains(db: Session = Depends(get_db)):
-    """Per-file volume percents (0–200). Missing keys default to 100. Multiplies player profile volumes."""
-    return {"gains": load_audio_gains(db)}
+    """Per-file volume percents (0–200, missing = 100) and the ordered menu music playlist."""
+    return {"gains": load_audio_gains(db), "menu_music": load_menu_music(db)}
 
 
 class AdminAudioGainsBody(BaseModel):
     gains: dict[str, float]
+    menu_music: list[str] | None = None
 
 
 @app.put("/admin/audio")
@@ -1273,9 +1274,9 @@ def admin_put_audio(
     _admin: Player = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    """Replace the global per-file audio mix. Values are percents; 100 is omitted (default)."""
-    gains = save_audio_gains(db, body.gains)
-    return {"ok": True, "gains": gains}
+    """Replace the global per-file audio mix and (when sent) the menu music playlist."""
+    gains, menu_music = save_audio_settings(db, body.gains, body.menu_music)
+    return {"ok": True, "gains": gains, "menu_music": menu_music}
 
 
 class AdminSetupPayload(BaseModel):
