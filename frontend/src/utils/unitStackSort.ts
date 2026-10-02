@@ -1,6 +1,6 @@
 type StackLike = { unit_id: string; count: number };
 
-type UnitDefLike = { faction?: string; cost?: number } | undefined;
+type UnitDefLike = { faction?: string; cost?: number; hero_id?: string } | undefined;
 type FactionLike = { name?: string; color?: string } | undefined;
 
 /** Faction id for map/territory stack ordering. */
@@ -15,13 +15,21 @@ export function factionKeyForUnitType(
   return factionFromId ?? defFaction ?? parts[0] ?? '';
 }
 
-/** Shared stack sort: faction, then count (desc), then cost/power (desc), then unit_id. */
+function isHeroUnit(unit_id: string, unitDefs: Record<string, UnitDefLike>): boolean {
+  const heroId = unitDefs[unit_id]?.hero_id;
+  return typeof heroId === 'string' && heroId.trim() !== '';
+}
+
+/** Shared stack sort: heroes first, then faction, count (desc), cost/power (desc), unit_id. */
 export function compareUnitStacksByMapOrder(
   a: StackLike,
   b: StackLike,
   unitDefs: Record<string, UnitDefLike>,
   factionData: Record<string, FactionLike>,
 ): number {
+  const heroA = isHeroUnit(a.unit_id, unitDefs);
+  const heroB = isHeroUnit(b.unit_id, unitDefs);
+  if (heroA !== heroB) return heroA ? -1 : 1;
   const fa = factionKeyForUnitType(a.unit_id, unitDefs, factionData);
   const fb = factionKeyForUnitType(b.unit_id, unitDefs, factionData);
   if (fa !== fb) return fa.localeCompare(fb);
