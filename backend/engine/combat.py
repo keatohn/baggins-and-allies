@@ -1409,7 +1409,8 @@ def get_terror_reroll_targets(
     Round 1 only, before casualties: which defender dice (by flat index) must re-roll due to terror.
 
     Terror applies when an attacker has "terror" special. Each defender unit with "hope" cancels
-    one terror unit (before capping). Effective terror = max(0, terror_units - hope_units);
+    one terror unit (before capping). One defender with "light" cancels every attacker terror
+    unit. Effective terror = 0 if any defender has light, else max(0, terror_units - hope_units);
     then cap at terror_cap (default 3) DICE total. ONLY dice that rolled a HIT may be re-rolled.
     Units with "fearless" are immune to being selected for reroll.
 
@@ -1420,6 +1421,9 @@ def get_terror_reroll_targets(
     def_mods = stat_modifiers_defender or {}
     skip_arch = exclude_archetypes_from_rolling or set()
 
+    light_cancels_terror = any(
+        _has_special(unit_defs.get(u.unit_id), "light") for u in defender_units
+    )
     terror_count = sum(
         1 for u in attacker_units
         if _has_special(unit_defs.get(u.unit_id), "terror")
@@ -1428,7 +1432,7 @@ def get_terror_reroll_targets(
         1 for u in defender_units
         if _has_special(unit_defs.get(u.unit_id), "hope")
     )
-    effective_terror = max(0, terror_count - hope_count)
+    effective_terror = 0 if light_cancels_terror else max(0, terror_count - hope_count)
     effective_cap = min(terror_cap, effective_terror)
     if effective_cap <= 0:
         return [], 0

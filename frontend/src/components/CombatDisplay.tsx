@@ -93,6 +93,8 @@ interface CombatUnit {
   hasFearless?: boolean;
   /** Defender only: unit has Hope (cancels 1 terror), when attackers have terror. */
   hasHope?: boolean;
+  /** Unit has Light and the other side has terror, so that terror is fully cancelled. */
+  hasLight?: boolean;
   /** Attacker only: unit has ram special (from backend round snapshot / combat_specials). */
   hasRam?: boolean;
   /** Siegework archetype (from backend); used to shelf non-rolling engines in standard combat. */
@@ -124,6 +126,7 @@ interface EliminatedStack {
   hasBombikazi?: boolean;
   hasFearless?: boolean;
   hasHope?: boolean;
+  hasLight?: boolean;
   hasRam?: boolean;
 }
 
@@ -497,6 +500,7 @@ type UnitRowGroup = {
   hasBombikazi?: boolean;
   hasFearless?: boolean;
   hasHope?: boolean;
+  hasLight?: boolean;
   hasRam?: boolean;
   passengerCount?: number;
   isCumulativeEliminated?: boolean;
@@ -531,6 +535,7 @@ function buildUnitRowGroupList(
     hasBombikazi?: boolean;
     hasFearless?: boolean;
     hasHope?: boolean;
+    hasLight?: boolean;
     hasRam?: boolean;
     passengerCount?: number;
   }>();
@@ -556,6 +561,7 @@ function buildUnitRowGroupList(
       if (unit.hasBombikazi) existing.hasBombikazi = true;
       if (unit.hasFearless) existing.hasFearless = true;
       if (unit.hasHope) existing.hasHope = true;
+      if (unit.hasLight) existing.hasLight = true;
       existing.passengerCount = (existing.passengerCount ?? 0) + (unit.passengerCount ?? 0);
     } else {
       groupMap.set(unitGroupKey, {
@@ -578,6 +584,7 @@ function buildUnitRowGroupList(
         hasBombikazi: unit.hasBombikazi,
         hasFearless: unit.hasFearless,
         hasHope: unit.hasHope,
+        hasLight: unit.hasLight,
         hasRam: unit.hasRam,
         passengerCount: unit.passengerCount ?? 0,
       });
@@ -616,6 +623,7 @@ function buildUnitRowGroupList(
       hasBombikazi: es.hasBombikazi,
       hasFearless: es.hasFearless,
       hasHope: es.hasHope,
+      hasLight: es.hasLight,
       hasRam: es.hasRam,
       isCumulativeEliminated: true,
       groupKey: `elim-${es.unitType}-${idx}`,
@@ -713,7 +721,8 @@ function UnitRow({
     specialsDefs?.bombikazi?.name && `${code('bombikazi', 'B')}=${specialsDefs.bombikazi.name}`,
     specialsDefs?.fearless?.name && `${code('fearless', 'FL')}=${specialsDefs.fearless.name}`,
     specialsDefs?.hope?.name && `${code('hope', 'HP')}=${specialsDefs.hope.name}`,
-  ].filter(Boolean).join(', ') || 'L=Ladder, R=Ram (siegeworks), T=Terror, M=Mountain, FR=Forest, C=Captain, K=King, AC=Anti-cavalry, SR=Sea Raider, AR=Archer, ST=Stealth, B=Bombikazi, FL=Fearless, HP=Hope';
+    specialsDefs?.light?.name && `${code('light', 'LT')}=${specialsDefs.light.name}`,
+  ].filter(Boolean).join(', ') || 'L=Ladder, R=Ram (siegeworks), T=Terror, M=Mountain, FR=Forest, C=Captain, K=King, AC=Anti-cavalry, SR=Sea Raider, AR=Archer, ST=Stealth, B=Bombikazi, FL=Fearless, HP=Hope, LT=Light';
 
   const rowKey = hideStatLabel
     ? `${isAttacker ? 'attacker' : 'defender'}_siegework_noroll`
@@ -893,6 +902,7 @@ function UnitRow({
                     if (uu.hasAntiCavalry) codes.push(code('anti_cavalry', 'AC'));
                     if (uu.hasSeaRaider) codes.push(code('sea_raider', 'SR'));
                     if (uu.hasRam) codes.push(code('ram', 'R'));
+                    if (uu.hasLight) codes.push(code('light', 'LT'));
                     if (onLadder) codes.push(code('ladder', 'L'));
                     const eliminatedAllFull = total > 0 && ccFull === total;
                     /** No dice on this shelf yet: prior-round ghosts show red X, not a stale count. */
@@ -964,6 +974,7 @@ function UnitRow({
       if (group.hasBombikazi) specialCodes.push(code('bombikazi', 'B'));
       if (group.hasFearless) specialCodes.push(code('fearless', 'FL'));
       if (group.hasHope) specialCodes.push(code('hope', 'HP'));
+      if (group.hasLight) specialCodes.push(code('light', 'LT'));
       if (group.hasRam) specialCodes.push(code('ram', 'R'));
       const paxG = group.passengerCount ?? 0;
       return (
@@ -1074,6 +1085,7 @@ function UnitRow({
           if (group.hasBombikazi) specialCodes.push(code('bombikazi', 'B'));
           if (group.hasFearless) specialCodes.push(code('fearless', 'FL'));
           if (group.hasHope) specialCodes.push(code('hope', 'HP'));
+      if (group.hasLight) specialCodes.push(code('light', 'LT'));
           if (group.hasRam) specialCodes.push(code('ram', 'R'));
           const paxRow = group.passengerCount ?? 0;
           return (
@@ -2187,6 +2199,7 @@ function CombatDisplay({
             hasBombikazi: u.hasBombikazi,
             hasFearless: u.hasFearless,
             hasHope: u.hasHope,
+            hasLight: u.hasLight,
             hasRam: u.hasRam,
           });
         }

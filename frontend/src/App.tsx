@@ -506,6 +506,8 @@ type CombatUnit = {
   hasBombikazi?: boolean;
   hasFearless?: boolean;
   hasHope?: boolean;
+  /** Unit has Light and the other side has terror, so that terror is fully cancelled. */
+  hasLight?: boolean;
   /** Attacker: unit has ram special (from backend / definitions). */
   hasRam?: boolean;
   siegeworkArchetype?: boolean;
@@ -540,6 +542,7 @@ type BackendCombatUnit = {
   bombikazi?: boolean;
   fearless?: boolean;
   hope?: boolean;
+  light?: boolean;
   ram?: boolean;
   siegework_archetype?: boolean;
   passenger_count?: number;
@@ -559,6 +562,7 @@ type CombatSpecialsInstance = {
   bombikazi?: boolean;
   fearless?: boolean;
   hope?: boolean;
+  light?: boolean;
   ram?: boolean;
 };
 
@@ -3180,6 +3184,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         ...(bu.bombikazi && { hasBombikazi: true }),
         ...(bu.fearless && { hasFearless: true }),
         ...(bu.hope && { hasHope: true }),
+        ...(bu.light && { hasLight: true }),
         ...(bu.ram && { hasRam: true }),
         ...(bu.siegework_archetype && { siegeworkArchetype: true }),
         ...(typeof bu.passenger_count === 'number' && bu.passenger_count > 0
@@ -3609,6 +3614,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         ...(specials?.bombikazi && { hasBombikazi: true }),
         ...(specials?.fearless && { hasFearless: true }),
         ...(specials?.hope && { hasHope: true }),
+        ...(specials?.light && { hasLight: true }),
         ...(specials?.ram && { hasRam: true }),
         ...(archetype === 'siegework' && { siegeworkArchetype: true }),
       };

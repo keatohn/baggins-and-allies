@@ -45,7 +45,7 @@ def compute_battle_specials_and_modifiers(
     Single source of truth: compute which specials apply to each unit and stat modifiers.
 
     Uses same rules as real combat: terrain, anti-cavalry, captain, king, sea raider,
-    terror/fearless/hope, stealth, bombikazi (paired), archer (defenders, when applicable).
+    terror/fearless/hope/light, stealth, bombikazi (paired), archer (defenders, when applicable).
 
     stealth: only when stealth_prefire_applicable (dedicated stealth prefire snapshot — not standard combat).
 
@@ -78,6 +78,9 @@ def compute_battle_specials_and_modifiers(
 
     attackers_have_terror = any(
         has_unit_special(unit_defs.get(u.unit_id), "terror") for u in attacker_units if unit_defs.get(u.unit_id)
+    )
+    defenders_have_terror = any(
+        has_unit_special(unit_defs.get(u.unit_id), "terror") for u in defender_units if unit_defs.get(u.unit_id)
     )
     stealth_activated = (
         len(attacker_units) > 0
@@ -117,6 +120,9 @@ def compute_battle_specials_and_modifiers(
                 "bombikazi": is_attacker and u.instance_id in paired_bombikazi_ids,
                 "fearless": (not is_attacker) and has_unit_special(unit_def, "fearless") and attackers_have_terror,
                 "hope": (not is_attacker) and has_unit_special(unit_def, "hope") and attackers_have_terror,
+                "light": has_unit_special(unit_def, "light") and (
+                    attackers_have_terror if not is_attacker else defenders_have_terror
+                ),
                 "ram": is_attacker and has_unit_special(unit_def, "ram") and ram_applicable,
             }
         return out
@@ -150,6 +156,7 @@ _ENGINE_SPECIAL_TO_PAYLOAD: tuple[tuple[str, str], ...] = (
     ("bombikazi", "bombikazi"),
     ("fearless", "fearless"),
     ("hope", "hope"),
+    ("light", "light"),
     ("ram", "ram"),
 )
 

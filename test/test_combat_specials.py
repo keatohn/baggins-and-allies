@@ -5,6 +5,7 @@ import pytest
 from backend.engine.combat import (
     compute_leader_stat_modifiers,
     get_siegework_dice_counts,
+    get_terror_reroll_targets,
     siegework_dice_round_applies,
 )
 from backend.engine.definitions import UnitDefinition, load_static_definitions
@@ -450,3 +451,93 @@ def test_king_and_captain_boost_own_faction_only():
     flags = specials_flags_for_round_payload(soldiers[0].instance_id, True, result)
     assert flags["king_bonus"] is True
     assert flags["captain_bonus"] is False
+
+
+def _plain_unit(unit_id: str, specials: list[str], defense: int = 6) -> UnitDefinition:
+    return UnitDefinition(
+        id=unit_id,
+        display_name=unit_id,
+        faction="test",
+        archetype="infantry",
+        tags=[],
+        attack=1,
+        defense=defense,
+        movement=1,
+        health=1,
+        cost={"power": 1},
+        specials=specials,
+    )
+
+
+def _inst(instance_id: str, unit_id: str) -> Unit:
+    return Unit(
+        instance_id=instance_id,
+        unit_id=unit_id,
+        remaining_movement=1,
+        remaining_health=1,
+        base_movement=1,
+        base_health=1,
+    )
+
+
+def test_light_cancels_all_opposing_terror():
+    """One defending Light unit wipes attacker terror. Hope still subtracts one. Attacker Light does not cancel its own side."""
+    unit_defs = {
+        "terror": _plain_unit("terror", ["terror"]),
+        "soldier": _plain_unit("soldier", []),
+        "hope": _plain_unit("hope", ["hope"]),
+        "light": _plain_unit("light", ["light"]),
+        "attacker_light": _plain_unit("attacker_light", ["light"]),
+    }
+    attackers = [_inst("t1", "terror"), _inst("t2", "terror"), _inst("t3", "terror")]
+    defenders = [_inst("d1", "soldier"), _inst("d2", "soldier")]
+    rolls = {"defender": [1, 1]}
+
+    rerolls, count = get_terror_reroll_targets(attackers, defenders, unit_defs, rolls, None)
+    assert count == 2
+    assert rerolls == [0, 1]
+
+    hope_defenders = [_inst("d1", "hope"), _inst("d2", "soldier"), _inst("d3", "soldier")]
+    _, hope_count = get_terror_reroll_targets(
+        attackers, hope_defenders, unit_defs, {"defender": [1, 1, 1]}, None
+    )
+    assert hope_count == 2  # 3 terror - 1 hope
+
+    light_defenders = [_inst("d1", "light"), _inst("d2", "soldier")]
+    light_rerolls, light_count = get_terror_reroll_targets(
+        attackers, light_defenders, unit_defs, rolls, None
+    )
+    assert light_rerolls == []
+    assert light_count == 0
+
+    both = [_inst("d1", "light"), _inst("d2", "hope")]
+    assert get_terror_reroll_targets(attackers, both, unit_defs, rolls, None) == ([], 0)
+
+    attackers_with_light = attackers + [_inst("a_light", "attacker_light")]
+    _, still = get_terror_reroll_targets(attackers_with_light, defenders, unit_defs, rolls, None)
+    assert still == 2
+
+
+def test_light_badge_when_opposing_side_has_terror():
+    """Light is flagged only on the side facing terror."""
+    unit_defs = {
+        "terror": _plain_unit("terror", ["terror"]),
+        "light": _plain_unit("light", ["light"]),
+        "soldier": _plain_unit("soldier", []),
+    }
+    attackers = [_inst("t1", "terror"), _inst("a_light", "light")]
+    defenders = [_inst("d_light", "light"), _inst("d1", "soldier")]
+    result = compute_battle_specials_and_modifiers(attackers, defenders, None, unit_defs)
+    assert result.specials_defender["d_light"]["light"] is True
+    assert result.specials_attacker["a_light"]["light"] is False
+    flags = specials_flags_for_round_payload("d_light", False, result)
+    assert flags["light"] is True
+
+    swapped = compute_battle_specials_and_modifiers(
+        [_inst("a_light", "light")],
+        [_inst("d_terror", "terror")],
+        None,
+        unit_defs,
+    )
+    assert swapped.specials_attacker["a_light"]["light"] is True
+    assert swapped.specials_defender["d_terror"]["terror"] is False

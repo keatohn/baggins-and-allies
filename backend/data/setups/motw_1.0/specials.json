@@ -13,6 +13,7 @@
         "hope",
         "king",
         "ladder",
+        "light",
         "ram",
         "sea_raider",
         "stealth",
@@ -79,6 +80,11 @@
         "name": "Ladder",
         "display_code": "L",
         "description": "Allows up to 2 attacking infantry to bypass stronghold HP and direct hits at defending units"
+    },
+    "light": {
+        "name": "Light",
+        "display_code": "LT",
+        "description": "Cancels all terror in the opposing ranks"
     },
     "ram": {
         "name": "Ram",

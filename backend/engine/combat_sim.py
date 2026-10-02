@@ -562,7 +562,7 @@ def run_one_battle(
             exclude_archetypes={"siegework"},
         )
 
-        # Round 1 terror: hope cancels terror then cap at 3 defender hit dice re-rolled
+        # Round 1 terror: light cancels all opposing terror, else hope cancels 1 each, then cap at 3 defender hit dice re-rolled
         if round_number == 1:
             terrain_att, terrain_def = compute_terrain_stat_modifiers(
                 territory_def, attacker_units, defender_units, unit_defs
