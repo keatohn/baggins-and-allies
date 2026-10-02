@@ -755,7 +755,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     const key = `${GAME_ID}:${backendState.turn_number ?? 0}:${cf}:${musicKey}`;
     if (lastTurnAudioKeyRef.current === key) return;
     lastTurnAudioKeyRef.current = key;
-    playFactionTurnCue(cf, musicRaw ?? null);
+    playFactionTurnCue(cf, musicRaw ?? null, backendState.turn_number);
   }, [
     GAME_ID,
     definitions?.factions,

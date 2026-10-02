@@ -302,14 +302,23 @@ class TurnPlaylistPair {
 
   readonly sessionId: number;
   readonly stems: readonly string[];
+  /** +1 follows admin order; -1 walks that same list backward. */
+  private readonly step: 1 | -1;
   private playingStemIndex: number;
   readonly a: HTMLAudioElement;
   readonly b: HTMLAudioElement;
 
-  constructor(stems: readonly string[], initialStemIndex: number, firstUrl: string, sessionId: number) {
+  constructor(
+    stems: readonly string[],
+    initialStemIndex: number,
+    firstUrl: string,
+    sessionId: number,
+    step: 1 | -1 = 1,
+  ) {
     this.stems = stems;
     this.playingStemIndex = initialStemIndex;
     this.sessionId = sessionId;
+    this.step = step;
     this.a = new Audio(firstUrl);
     this.b = new Audio();
     this.a.preload = 'auto';
@@ -320,7 +329,7 @@ class TurnPlaylistPair {
 
     const startHandoff = () => {
       if (sessionId !== turnSession.v || this.handoff) return;
-      const nextStemIndex = (this.playingStemIndex + 1) % this.stems.length;
+      const nextStemIndex = this.nextStemIndex(this.playingStemIndex);
       const incoming = this.activeIsA ? this.b : this.a;
       if (!incoming.src) return;
       this.handoff = true;
@@ -337,7 +346,7 @@ class TurnPlaylistPair {
           this.playingStemIndex = nextStemIndex;
           this.handoff = false;
           const idle = this.getIdleElement();
-          this.preloadStemForIndex(idle, (this.playingStemIndex + 1) % this.stems.length, sessionId);
+          this.preloadStemForIndex(idle, this.nextStemIndex(this.playingStemIndex), sessionId);
         });
       }).catch(() => {
         this.handoff = false;
@@ -374,8 +383,14 @@ class TurnPlaylistPair {
 
     queueMicrotask(() => {
       if (sessionId !== turnSession.v) return;
-      this.preloadStemForIndex(this.b, (initialStemIndex + 1) % this.stems.length, sessionId);
+      this.preloadStemForIndex(this.b, this.nextStemIndex(initialStemIndex), sessionId);
     });
+  }
+
+  private nextStemIndex(from: number): number {
+    const n = this.stems.length;
+    if (n <= 0) return 0;
+    return (from + this.step + n) % n;
   }
 
   private preloadStemForIndex(el: HTMLAudioElement, stemIndex: number, sid: number): void {
@@ -963,17 +978,26 @@ export function stopMenuAmbienceImmediate(): void {
 /**
  * Start crossfaded turn music for the current faction.
  * @param factionId Used for debouncing and fallback track when `setupMusicFile` is missing/invalid.
- * @param setupMusicFile Optional factions.json `music`: one filename or ordered list; stems must match assets/audio/music. Multiple tracks cycle (with crossfade) until the turn changes.
+ * @param setupMusicFile Optional factions.json `music`: one filename or ordered list; stems must match assets/audio/music. Multiple tracks cycle (with crossfade) until the turn changes. Odd game turns walk that list forward from the first track; even turns walk it backward from the last.
+ * @param turnNumber Game turn (round). Missing or non-numeric values use turn 1 (forward).
  */
-export function playFactionTurnCue(factionId: string, setupMusicFile?: string | string[] | null): void {
+export function playFactionTurnCue(
+  factionId: string,
+  setupMusicFile?: string | string[] | null,
+  turnNumber?: number,
+): void {
   const safe = sanitizeFactionId(factionId);
   if (!safe) return;
 
   const stems = normalizeTurnTrackStems(setupMusicFile, safe);
   if (stems.length === 0) return;
 
+  const turn = Number.isFinite(turnNumber) ? Math.trunc(turnNumber as number) : 1;
+  const step: 1 | -1 = turn % 2 === 0 ? -1 : 1;
+  const startIdx = step === -1 ? stems.length - 1 : 0;
+
   const now = Date.now();
-  const debounceKey = `${safe}:${stems.join('|')}`;
+  const debounceKey = `${safe}:${stems.join('|')}:${step}`;
   const sameFactionReplay =
     safe === lastTurnCueFactionId &&
     debounceKey === lastDebouncedTurnCueKey &&
@@ -1001,13 +1025,13 @@ export function playFactionTurnCue(factionId: string, setupMusicFile?: string | 
   }
 
   const tryStart = (stemIdx: number) => {
-    if (stemIdx >= stems.length) return;
+    if (stemIdx < 0 || stemIdx >= stems.length) return;
     tryPlayFirstWorkingUrl(
       TURN_AUDIO_EXTS.map((ext) => `${MUSIC_AUDIO_BASE}/${stems[stemIdx]}${ext}`),
       (url) => {
         if (sessionId !== turnSession.v) return;
 
-        const pair = new TurnPlaylistPair(stems, stemIdx, url, sessionId);
+        const pair = new TurnPlaylistPair(stems, stemIdx, url, sessionId, step);
         turnLoop = pair;
 
         void pair.startFirstPlay().then(() => {
@@ -1015,10 +1039,10 @@ export function playFactionTurnCue(factionId: string, setupMusicFile?: string | 
           fadeGain(pair.a, 0, 1, TURN_FADE_IN_MS, turnSession, sessionId);
         });
       },
-      () => tryStart(stemIdx + 1),
+      () => tryStart(stemIdx + step),
     );
   };
-  tryStart(0);
+  tryStart(startIdx);
 }
 
 export function stopMenuAmbience(): void {
