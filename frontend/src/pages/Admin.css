@@ -357,6 +357,134 @@
   margin: 0 0 0.85rem;
 }
 
+.admin-modal--balance {
+  width: min(100%, 72rem);
+  max-height: min(92vh, 52rem);
+  overflow: auto;
+}
+
+.balance-modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.balance-modal__header .admin-modal__title {
+  margin-bottom: 0.15rem;
+}
+
+.balance-share-block {
+  margin: 0.35rem 0 0.85rem;
+}
+
+.balance-share-legend {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.92rem;
+  font-weight: 650;
+  margin-bottom: 0.3rem;
+}
+
+.balance-share {
+  display: flex;
+  height: 0.7rem;
+  border: 1px solid var(--ink-faded);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--parchment);
+}
+
+.balance-share__good {
+  background: #c5d7c2;
+}
+
+.balance-share__evil {
+  background: #4a342f;
+}
+
+.balance-readings {
+  margin: 0 0 0.9rem;
+  padding-left: 1.15rem;
+}
+
+.balance-readings li + li {
+  margin-top: 0.25rem;
+}
+
+.balance-table-scroll {
+  overflow-x: auto;
+  margin-bottom: 0.75rem;
+}
+
+.balance-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.84rem;
+}
+
+.balance-table th,
+.balance-table td {
+  padding: 0.28rem 0.45rem;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid rgba(60, 48, 36, 0.12);
+}
+
+.balance-table th:first-child,
+.balance-table td:first-child {
+  text-align: left;
+}
+
+.balance-table thead th {
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: var(--ink-faded);
+}
+
+.balance-table__alliance th,
+.balance-table__alliance td {
+  font-weight: 700;
+  background: rgba(60, 48, 36, 0.06);
+}
+
+.balance-faction {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding-left: 0.85rem;
+  font-weight: 500;
+}
+
+.balance-faction img {
+  width: 1.15rem;
+  height: 1.15rem;
+  object-fit: contain;
+}
+
+.balance-subtitle {
+  font-family: 'Cinzel', serif;
+  font-size: 0.95rem;
+  margin: 0.4rem 0 0.45rem;
+}
+
+.balance-formula {
+  margin-top: 0.4rem;
+  font-size: 0.84rem;
+  color: var(--ink);
+}
+
+.balance-formula summary {
+  cursor: pointer;
+  color: var(--ink-faded);
+}
+
+.balance-formula p {
+  margin: 0.45rem 0 0;
+  line-height: 1.45;
+}
+
 .admin-modal--graph {
   width: min(100%, 96vw);
   max-width: 1400px;

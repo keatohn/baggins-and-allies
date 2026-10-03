@@ -34,6 +34,7 @@ from .auth import (
     verify_password,
 )
 
+from backend.balance.starting_strength import compute_starting_strength
 from backend.engine.state import GameState, PendingMove
 from backend.engine.actions import (
     Action,
@@ -1319,6 +1320,15 @@ class AdminCreateSetupBody(BaseModel):
             "client sends one JSON document instead of double-encoding nested objects."
         ),
     )
+
+
+@app.post("/admin/balance")
+def admin_balance(
+    body: AdminSetupPayload,
+    _admin: Player = Depends(get_current_admin),
+):
+    """Starting-strength report for the setup currently open in the admin editor."""
+    return compute_starting_strength(body.model_dump())
 
 
 @app.get("/admin/setups")

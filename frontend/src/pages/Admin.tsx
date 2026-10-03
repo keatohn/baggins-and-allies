@@ -15,6 +15,7 @@ import {
 } from './admin/SetupEditorPanels';
 import { AudioPanel } from './admin/AudioPanel';
 import { isValidSetupId } from './admin/setupId';
+import { BalanceModal } from './admin/BalanceModal';
 import { previewStatsFromBundle } from './admin/previewStats';
 import { GameStatsModal, UnitStatsModal } from '../components/StatsModals';
 import './Admin.css';
@@ -290,6 +291,7 @@ export default function Admin() {
   const [audioJsonMode, setAudioJsonMode] = useState(false);
   const [unitStatsOpen, setUnitStatsOpen] = useState(false);
   const [gameStatsOpen, setGameStatsOpen] = useState(false);
+  const [balanceOpen, setBalanceOpen] = useState(false);
   const audioJson = useMemo(() => ({ gains: audioGains, menu_music: menuMusic }), [audioGains, menuMusic]);
   const statsPreview = useMemo(() => previewStatsFromBundle(bundle), [bundle]);
 
@@ -720,6 +722,14 @@ export default function Admin() {
             >
               Game stats
             </button>
+            <button
+              type="button"
+              className="admin-page__tab"
+              disabled={!bundle || !statsPreview}
+              onClick={() => setBalanceOpen(true)}
+            >
+              Balance
+            </button>
           </div>
         </div>
         <div className="admin-page__panel">{renderTabBody()}</div>
@@ -812,6 +822,13 @@ export default function Admin() {
           factionData={statsPreview.factionData}
           turnOrder={statsPreview.turnOrder}
           onClose={() => setGameStatsOpen(false)}
+        />
+      )}
+      {balanceOpen && bundle && statsPreview && (
+        <BalanceModal
+          bundle={bundle}
+          factionData={statsPreview.factionData}
+          onClose={() => setBalanceOpen(false)}
         />
       )}
     </div>

@@ -616,6 +616,70 @@ export interface AdminSetupBundle {
 
 export type AdminSetupSavePayload = Omit<AdminSetupBundle, 'id'>;
 
+export interface BalanceSide {
+  id: string;
+  display_name: string;
+  alliance?: string;
+  territories: number;
+  strongholds: number;
+  stronghold_target?: number | null;
+  strongholds_to_win?: number | null;
+  units: number;
+  unit_power: number;
+  effective_unit_power_attack: number;
+  effective_unit_power_defense: number;
+  effective_unit_power: number;
+  position_ratio: number | null;
+  immediate_attack_power: number;
+  immediate_defense_power: number;
+  unreachable_attack_power: number;
+  power_production: number;
+  economic_power: number;
+  starting_power_score: number;
+  starting_power_share?: number | null;
+}
+
+export interface BalanceDiscount {
+  faction_id: string;
+  faction_name: string;
+  alliance: string;
+  territory_id: string;
+  territory_name: string;
+  unit_id: string;
+  unit_name: string;
+  count: number;
+  unit_power: number;
+  attack_turns: number | null;
+  defense_turns: number | null;
+  attack_turn_label: string;
+  defense_turn_label: string;
+  effective_unit_power: number;
+  power_discounted: number;
+}
+
+export interface StartingStrengthReport {
+  parameters: {
+    horizon_rounds: number;
+    discount: number;
+    attack_weight: number;
+    defense_weight: number;
+    high_production: number;
+    economic_coefficient: number;
+    availability: { turns: string; factor: number }[];
+    summary: string;
+  };
+  factions: BalanceSide[];
+  alliances: BalanceSide[];
+  neutral: {
+    territories: number;
+    strongholds: number;
+    units: number;
+    unit_power: number;
+  };
+  largest_discounts: BalanceDiscount[];
+  readings: string[];
+}
+
 export type AudioGainsMap = Record<string, number>;
 
 export interface PatchProfileBody {
@@ -799,6 +863,11 @@ export const api = {
     setMenuMusicFiles(r.menu_music);
     return r;
   },
+  adminBalance: (body: AdminSetupSavePayload) =>
+    fetchJson<StartingStrengthReport>('/admin/balance', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   adminGetSetup: (setupId: string) => fetchJson<AdminSetupBundle>(`/admin/setups/${encodeURIComponent(setupId)}`),
   adminPutSetup: (setupId: string, body: AdminSetupSavePayload) =>
     fetchJson<{ ok: boolean; id: string }>(`/admin/setups/${encodeURIComponent(setupId)}`, {
