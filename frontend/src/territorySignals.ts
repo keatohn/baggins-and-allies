@@ -44,3 +44,23 @@ export function presetMatchesRelation(appliesTo: string, relation: string | null
   if (appliesTo === 'any') return true;
   return relation != null && appliesTo === relation;
 }
+
+/**
+ * Which alliance a pin belongs to. An owned territory uses its owner's alliance
+ * when the player is on that side. Otherwise the player's only alliance, then
+ * the side they are currently playing.
+ */
+export function inferSignalAlliance(
+  ownerAlliance: string | null | undefined,
+  myAlliances: string[],
+  currentAlliance: string | null | undefined,
+): string | null {
+  const mine = myAlliances.filter((alliance) => alliance && alliance !== 'neutral');
+  if (mine.length === 0) return null;
+  const owner = (ownerAlliance || '').trim();
+  if (owner && owner !== 'neutral' && mine.includes(owner)) return owner;
+  if (mine.length === 1) return mine[0];
+  const current = (currentAlliance || '').trim();
+  if (current && current !== 'neutral' && mine.includes(current)) return current;
+  return mine[0];
+}

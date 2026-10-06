@@ -634,7 +634,6 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   const [backendState, setBackendState] = useState<ApiGameState | null>(initialStateProp ?? null);
   const [territorySignals, setTerritorySignals] = useState<TerritorySignalMap>({});
   const [signalPresets, setSignalPresets] = useState<SignalPreset[]>([]);
-  const [signalAlliance, setSignalAlliance] = useState<string | null>(null);
   const [signalBusy, setSignalBusy] = useState(false);
   const [availableActions, setAvailableActions] = useState<AvailableActionsResponse | null>(null);
   const [canAct, setCanAct] = useState(true);
@@ -994,10 +993,6 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     }
     return out;
   }, [currentPlayerId, gameMeta, factionData]);
-
-  useEffect(() => {
-    setSignalAlliance((prev) => (prev && mySignalAlliances.includes(prev) ? prev : mySignalAlliances[0] ?? null));
-  }, [mySignalAlliances]);
 
   const territoryDefs = useMemo(() => {
     if (!definitions) return {};
@@ -2416,7 +2411,6 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         territory_id: territoryId,
         preset_id: presetId,
         clear: presetId == null,
-        alliance: signalAlliance,
       });
       setTerritorySignals(res.territory_signals ?? {});
     } catch (err) {
@@ -2424,7 +2418,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     } finally {
       setSignalBusy(false);
     }
-  }, [GAME_ID, addLogEntry, signalAlliance, signalBusy]);
+  }, [GAME_ID, addLogEntry, signalBusy]);
 
   const handleSetTerritoryDefenderCasualtyOrder = useCallback(async (territoryId: string, casualtyOrder: 'best_unit' | 'best_defense') => {
     try {
@@ -4421,9 +4415,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               forcedNavalStandoffSeaZoneIds={availableActions?.forced_naval_standoff_sea_zone_ids ?? []}
               signalPresets={signalPresets}
               territorySignals={territorySignals}
-              signalAlliance={signalAlliance}
               signalAlliances={mySignalAlliances}
-              onSignalAllianceChange={setSignalAlliance}
               onSetTerritorySignal={handleSetTerritorySignal}
               canPlaceSignal={!backendState?.winner && gameMeta?.status === 'active' && mySignalAlliances.length > 0}
               signalBusy={signalBusy}

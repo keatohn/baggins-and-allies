@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import type { GameState, GamePhase, GameEvent, DeclaredBattle, PendingMove } from '../types/game';
 import { mergeGroupedEventLogForDisplay } from '../utils/eventLogDisplay';
 import { compareUnitStacksByMapOrder } from '../utils/unitStackSort';
-import { presetMatchesRelation, territorySignalRelation, type SignalPreset, type TerritorySignalMap } from '../territorySignals';
+import { inferSignalAlliance, presetMatchesRelation, territorySignalRelation, type SignalPreset, type TerritorySignalMap } from '../territorySignals';
 import type { PendingMoveConfirm } from './GameMap';
 import type { BulkMoveConfirmState, PendingMobilization, BulkMobilizeConfirmState } from '../App';
 import './Sidebar.css';
@@ -159,13 +159,10 @@ interface SidebarProps {
   turnAccentColor?: string;
   /** Cross-setup signal catalog. */
   signalPresets?: SignalPreset[];
-  /** Pins visible to this player's alliance, keyed by territory id. */
+  /** Pins visible to this player's alliances, keyed by territory id. */
   territorySignals?: TerritorySignalMap;
-  /** Alliance the next pin is placed for. */
-  signalAlliance?: string | null;
-  /** Alliances this player can signal as. More than one shows a picker. */
+  /** Alliances this player can signal for. The territory owner picks which one. */
   signalAlliances?: string[];
-  onSignalAllianceChange?: (alliance: string) => void;
   /** Pass a preset id to place or toggle off. Null clears whatever is pinned. */
   onSetTerritorySignal?: (territoryId: string, presetId: string | null) => void;
   canPlaceSignal?: boolean;
@@ -360,9 +357,13 @@ function plannedNonCombatMoveTypeLabel(
   return mt.charAt(0).toUpperCase() + mt.slice(1);
 }
 
-function allianceLabel(alliance: string): string {
-  if (!alliance) return alliance;
-  return alliance.charAt(0).toUpperCase() + alliance.slice(1);
+function SignalFlag({ color }: { color: string }) {
+  return (
+    <svg className="territory-signal-pill-flag" viewBox="0 0 24 28" aria-hidden>
+      <path d="M11.2 2.2v23.2" fill="none" stroke="#2a1c12" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M12 3.2 22.2 8.4 12 13.4Z" fill={color} stroke="#2a1c12" strokeWidth="0.7" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 function TerritorySignalControls({
@@ -370,94 +371,74 @@ function TerritorySignalControls({
   territory,
   presets,
   current,
-  alliance,
   alliances,
+  currentFactionId,
   factionData,
   canPlace,
   busy,
-  onAllianceChange,
   onSet,
 }: {
   territoryId: string;
   territory: { owner?: string; ownable?: boolean; terrain: string };
   presets: SignalPreset[];
   current: TerritorySignalMap[string] | null;
-  alliance: string | null;
   alliances: string[];
+  currentFactionId?: string | null;
   factionData: Record<string, { name: string; alliance: string }>;
   canPlace: boolean;
   busy: boolean;
-  onAllianceChange?: (alliance: string) => void;
   onSet: (presetId: string | null) => void;
 }) {
-  const relation = territorySignalRelation(
-    territoryId,
-    territory,
-    alliance,
-    (factionId) => factionData[factionId]?.alliance,
+  const factionAlliance = (factionId: string) => factionData[factionId]?.alliance;
+  const alliance = inferSignalAlliance(
+    territory.owner ? factionAlliance(territory.owner) : null,
+    alliances,
+    currentFactionId ? factionAlliance(currentFactionId) : null,
   );
+  const relation = territorySignalRelation(territoryId, territory, alliance, factionAlliance);
   const matching = canPlace
     ? presets.filter((preset) => presetMatchesRelation(preset.applies_to, relation))
     : [];
-  const currentMatchesButton = current != null && matching.some((preset) => preset.id === current.preset_id);
-  const placedBy = current?.faction_id ? factionData[current.faction_id]?.name ?? current.faction_id : null;
-  if (matching.length === 0 && !current) return null;
+  const shownCurrent = current && (!current.alliance || !alliance || current.alliance === alliance) ? current : null;
+  const currentMatchesButton = shownCurrent != null && matching.some((preset) => preset.id === shownCurrent.preset_id);
+  if (matching.length === 0 && !shownCurrent) return null;
   return (
     <div className="territory-signals">
-      <span className="defender-casualty-order-label">Signal</span>
-      {canPlace && alliances.length > 1 && (
-        <label className="territory-signal-alliance">
-          <span>As</span>
-          <select
-            value={alliance ?? alliances[0]}
-            onChange={(e) => onAllianceChange?.(e.target.value)}
-            disabled={busy}
-          >
-            {alliances.map((id) => (
-              <option key={id} value={id}>
-                {allianceLabel(id)}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
       {matching.length > 0 && (
         <div className="territory-signal-pills">
           {matching.map((preset) => {
-            const active = current?.preset_id === preset.id;
+            const active = shownCurrent?.preset_id === preset.id;
             return (
               <button
                 key={preset.id}
                 type="button"
                 className={`territory-signal-pill${active ? ' territory-signal-pill--active' : ''}`}
                 aria-pressed={active}
+                aria-label={preset.label}
                 disabled={busy}
-                title={active ? `Clear “${preset.label}”` : preset.label}
+                title={preset.label}
                 onClick={() => onSet(preset.id)}
               >
-                <span className="territory-signal-swatch" style={{ background: preset.color }} aria-hidden />
-                <span className="territory-signal-pill-icon" aria-hidden>{preset.icon}</span>
-                {preset.label}
+                <SignalFlag color={preset.color} />
               </button>
             );
           })}
         </div>
       )}
-      {current && !currentMatchesButton && (
-        <div className="territory-signal-current">
-          <span className="territory-signal-pill territory-signal-pill--active territory-signal-pill--readonly">
-            <span className="territory-signal-swatch" style={{ background: current.color || '#6b5b4b' }} aria-hidden />
-            <span className="territory-signal-pill-icon" aria-hidden>{current.icon}</span>
-            {current.label}
-          </span>
-          {canPlace && (
-            <button type="button" className="territory-signal-clear" disabled={busy} onClick={() => onSet(null)}>
-              Clear
-            </button>
-          )}
+      {shownCurrent && !currentMatchesButton && (
+        <div className="territory-signal-pills">
+          <button
+            type="button"
+            className="territory-signal-pill territory-signal-pill--active"
+            aria-label={shownCurrent.label}
+            title={shownCurrent.label}
+            disabled={!canPlace || busy}
+            onClick={() => onSet(null)}
+          >
+            <SignalFlag color={shownCurrent.color || '#6b5b4b'} />
+          </button>
         </div>
       )}
-      {placedBy && <div className="territory-signal-by">Flagged by {placedBy}</div>}
     </div>
   );
 }
@@ -530,9 +511,7 @@ function Sidebar({
   turnAccentColor,
   signalPresets = [],
   territorySignals = {},
-  signalAlliance = null,
   signalAlliances = [],
-  onSignalAllianceChange,
   onSetTerritorySignal,
   canPlaceSignal = false,
   signalBusy = false,
@@ -1400,21 +1379,6 @@ function Sidebar({
             {territory.hasPort && (
               <div className="camp-badge">Port</div>
             )}
-            {selectedTerritory && (canPlaceSignal || territorySignals[selectedTerritory]) && (
-              <TerritorySignalControls
-                territoryId={selectedTerritory}
-                territory={territory}
-                presets={signalPresets}
-                current={territorySignals[selectedTerritory] ?? null}
-                alliance={signalAlliance}
-                alliances={signalAlliances}
-                factionData={factionData}
-                canPlace={canPlaceSignal}
-                busy={signalBusy}
-                onAllianceChange={onSignalAllianceChange}
-                onSet={(presetId) => onSetTerritorySignal?.(selectedTerritory, presetId)}
-              />
-            )}
             {selectedTerritory &&
               territory.owner &&
               (() => {
@@ -1492,7 +1456,7 @@ function Sidebar({
               </div>
             )}
 
-            {/* Bottom row: defensive casualty (left), original owner from starting setup (right) */}
+            {/* Bottom row: casualty priority, signal flags, original owner */}
             {selectedTerritory && territory && (
               <div className="territory-panel-footer-row">
                 <div className="defender-casualty-order">
@@ -1527,24 +1491,42 @@ function Sidebar({
                     </div>
                   )}
                 </div>
-                {(() => {
-                  const oid = typeof territory.original_owner === 'string' ? territory.original_owner.trim() : '';
-                  if (!oid || oid.toLowerCase() === 'neutral') return null;
-                  const origFaction = factionData[oid];
-                  return (
-                    <div className="territory-original-owner">
-                      <span className="defender-casualty-order-label">Original Owner</span>
-                      {origFaction?.icon ? (
-                        <img
-                          className="territory-original-owner-logo"
-                          src={origFaction.icon}
-                          alt={origFaction.name ?? oid}
-                          title={origFaction.name ?? oid}
-                        />
-                      ) : null}
-                    </div>
-                  );
-                })()}
+                <div className="territory-panel-footer-signals">
+                  {(canPlaceSignal || territorySignals[selectedTerritory]) && (
+                    <TerritorySignalControls
+                      territoryId={selectedTerritory}
+                      territory={territory}
+                      presets={signalPresets}
+                      current={territorySignals[selectedTerritory] ?? null}
+                      alliances={signalAlliances}
+                      currentFactionId={gameState.current_faction}
+                      factionData={factionData}
+                      canPlace={canPlaceSignal}
+                      busy={signalBusy}
+                      onSet={(presetId) => onSetTerritorySignal?.(selectedTerritory, presetId)}
+                    />
+                  )}
+                </div>
+                <div className="territory-panel-footer-owner">
+                  {(() => {
+                    const oid = typeof territory.original_owner === 'string' ? territory.original_owner.trim() : '';
+                    if (!oid || oid.toLowerCase() === 'neutral') return null;
+                    const origFaction = factionData[oid];
+                    return (
+                      <div className="territory-original-owner">
+                        <span className="defender-casualty-order-label">Original Owner</span>
+                        {origFaction?.icon ? (
+                          <img
+                            className="territory-original-owner-logo"
+                            src={origFaction.icon}
+                            alt={origFaction.name ?? oid}
+                            title={origFaction.name ?? oid}
+                          />
+                        ) : null}
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
             )}
           </div>

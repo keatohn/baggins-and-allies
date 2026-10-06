@@ -511,6 +511,11 @@
   flex-shrink: 0;
 }
 
+.territory-signal-flag--selected .territory-signal-flag__svg {
+  width: 31px;
+  height: 37px;
+}
+
 .territory-signal-flag__label {
   margin-top: 1px;
   max-width: 132px;

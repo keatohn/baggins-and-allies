@@ -5,6 +5,7 @@ from backend.signals import (
     apply_territory_signal,
     classify_territory_for_signal,
     normalize_signal_presets,
+    resolve_signal_alliance,
     signal_applies,
     visible_territory_signals,
 )
@@ -76,6 +77,14 @@ def test_classify_and_apply_rules():
     assert not signal_applies(attack, "allied")
     assert not signal_applies(attack, None)
     assert signal_applies({**attack, "applies_to": "any"}, None)
+
+
+def test_signal_alliance_follows_the_territory_owner():
+    both = ["good", "evil"]
+    assert resolve_signal_alliance(owner_alliance="good", my_alliances=both, current_alliance="evil") == "good"
+    assert resolve_signal_alliance(owner_alliance="evil", my_alliances=both, current_alliance="good") == "evil"
+    assert resolve_signal_alliance(owner_alliance=None, my_alliances=both, current_alliance="evil") == "evil"
+    assert resolve_signal_alliance(owner_alliance="evil", my_alliances=["good"], current_alliance="good") == "good"
 
 
 def test_place_toggle_and_visibility():

@@ -103,6 +103,7 @@ from backend.signals import (
     apply_territory_signal,
     classify_territory_for_signal,
     load_signal_presets,
+    resolve_signal_alliance,
     save_signal_presets,
     signal_applies,
     visible_territory_signals,
@@ -2079,7 +2080,9 @@ def get_game_state(
         "setup_id": setup_id,
         "event_log": event_log,
         "territory_signals": visible_territory_signals(
-            state, _viewer_signal_alliances(game_id, player, db)
+            state,
+            _viewer_signal_alliances(game_id, player, db),
+            lambda fid: _faction_alliance(fd, fid),
         ),
     }
 
@@ -3925,17 +3928,30 @@ def do_set_territory_signal(
     by_alliance: dict[str, list[str]] = {}
     for fid in my_factions:
         by_alliance.setdefault(_faction_alliance(fd, fid), []).append(fid)
-    if request.alliance:
-        if request.alliance not in by_alliance:
-            raise HTTPException(status_code=403, detail="You are not on that alliance")
-        alliance = request.alliance
-    elif len(by_alliance) == 1:
-        alliance = next(iter(by_alliance))
-    else:
-        raise HTTPException(status_code=400, detail="Choose which alliance this signal is for")
     territory_id = (request.territory_id or "").strip()
     if territory_id not in state.territories:
         raise HTTPException(status_code=400, detail="Unknown territory")
+    ordered_alliances: list[str] = []
+    for fid in list(state.turn_order) + list(my_factions):
+        side = _faction_alliance(fd, fid)
+        if side in by_alliance and side != "neutral" and side not in ordered_alliances:
+            ordered_alliances.append(side)
+    if not ordered_alliances:
+        ordered_alliances = [side for side in by_alliance if side != "neutral"]
+    territory = state.territories[territory_id]
+    owner = getattr(territory, "owner", None)
+    owner_name = (owner or "").strip() if isinstance(owner, str) else ""
+    owner_alliance = None
+    if owner_name and owner_name.lower() not in ("neutral", "none"):
+        owner_alliance = _faction_alliance(fd, owner_name)
+    current_alliance = _faction_alliance(fd, state.current_faction)
+    alliance = resolve_signal_alliance(
+        owner_alliance=owner_alliance,
+        my_alliances=ordered_alliances,
+        current_alliance=current_alliance,
+    )
+    if not alliance or alliance not in by_alliance:
+        raise HTTPException(status_code=403, detail="You are not on an alliance that can signal this territory")
     preset = None
     if not request.clear and request.preset_id:
         catalog = {p["id"]: p for p in load_signal_presets(db)}
@@ -3973,7 +3989,11 @@ def do_set_territory_signal(
     )
     save_game(game_id, state, db)
     return {
-        "territory_signals": visible_territory_signals(state, set(by_alliance)),
+        "territory_signals": visible_territory_signals(
+            state,
+            set(by_alliance),
+            lambda fid: _faction_alliance(fd, fid),
+        ),
     }
 
 

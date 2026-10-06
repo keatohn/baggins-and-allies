@@ -256,6 +256,27 @@ def classify_territory_for_signal(
     return "enemy"
 
 
+def resolve_signal_alliance(
+    *,
+    owner_alliance: str | None,
+    my_alliances: list[str],
+    current_alliance: str | None,
+) -> str | None:
+    """Alliance a pin is stored under. Owned land follows that owner when the player is on that side."""
+    mine = [a for a in my_alliances if a and a != "neutral"]
+    if not mine:
+        return None
+    owner = (owner_alliance or "").strip()
+    if owner and owner != "neutral" and owner in mine:
+        return owner
+    if len(mine) == 1:
+        return mine[0]
+    current = (current_alliance or "").strip()
+    if current and current != "neutral" and current in mine:
+        return current
+    return mine[0]
+
+
 def signal_applies(preset: dict[str, str], relation: str | None) -> bool:
     target = preset.get("applies_to")
     if target == "any":
@@ -295,12 +316,19 @@ def apply_territory_signal(
     return "set"
 
 
-def visible_territory_signals(state: Any, alliances: set[str]) -> dict[str, dict[str, str]]:
-    """Flat territory_id -> pin, only for the given alliances."""
-    out: dict[str, dict[str, str]] = {}
+def visible_territory_signals(
+    state: Any,
+    alliances: set[str],
+    faction_alliance: Any = None,
+) -> dict[str, dict[str, str]]:
+    """Flat territory_id -> pin, only for the given alliances.
+
+    When both sides pinned the same territory, keep the pin for the owner's side.
+    """
+    grouped: dict[str, list[tuple[str, dict]]] = {}
     stored = getattr(state, "territory_signals", None) or {}
     if not isinstance(stored, dict):
-        return out
+        return {}
     for alliance in sorted(alliances):
         book = stored.get(alliance)
         if not isinstance(book, dict):
@@ -308,12 +336,25 @@ def visible_territory_signals(state: Any, alliances: set[str]) -> dict[str, dict
         for tid, sig in book.items():
             if not isinstance(sig, dict):
                 continue
-            out[str(tid)] = {
-                "preset_id": str(sig.get("preset_id") or ""),
-                "label": str(sig.get("label") or ""),
-                "icon": str(sig.get("icon") or ""),
-                "color": str(sig.get("color") or "#6b5b4b"),
-                "faction_id": str(sig.get("faction_id") or ""),
-                "alliance": alliance,
-            }
+            grouped.setdefault(str(tid), []).append((alliance, sig))
+    out: dict[str, dict[str, str]] = {}
+    territories = getattr(state, "territories", None) or {}
+    for tid, pins in grouped.items():
+        chosen_alliance, chosen = pins[-1]
+        if faction_alliance is not None and len(pins) > 1:
+            territory = territories.get(tid) if isinstance(territories, dict) else None
+            owner = getattr(territory, "owner", None) if territory is not None else None
+            owner_side = faction_alliance(owner) if owner else None
+            for alliance, sig in pins:
+                if owner_side and alliance == owner_side:
+                    chosen_alliance, chosen = alliance, sig
+                    break
+        out[tid] = {
+            "preset_id": str(chosen.get("preset_id") or ""),
+            "label": str(chosen.get("label") or ""),
+            "icon": str(chosen.get("icon") or ""),
+            "color": str(chosen.get("color") or "#6b5b4b"),
+            "faction_id": str(chosen.get("faction_id") or ""),
+            "alliance": chosen_alliance,
+        }
     return out
