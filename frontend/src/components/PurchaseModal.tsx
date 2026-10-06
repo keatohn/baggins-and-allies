@@ -25,6 +25,8 @@ interface UnitPurchaseInfo {
   specialLabels?: string[];
   /** Home territory count for this unit type (adds to land mobilization display denominator when in cart). */
   homeTerritoryCount?: number;
+  /** Land units this ship can carry. Shown on the Sea tab. */
+  transportCapacity?: number;
 }
 
 function heroFamilyInCart(
@@ -134,12 +136,14 @@ function canAffordCostTotals(available: Record<string, number>, costs: Record<st
   return true;
 }
 
-function UnitStatBlock({ unit }: { unit: UnitPurchaseInfo }) {
+function UnitStatBlock({ unit, showTransport }: { unit: UnitPurchaseInfo; showTransport?: boolean }) {
   const labels = unit.specialLabels?.filter(Boolean) ?? [];
+  const transport = Number.isFinite(unit.transportCapacity) ? unit.transportCapacity : 0;
   return (
     <div className="unit-stat-stack">
       <span className="unit-stats unit-stats--inline">
         {unit.attack}A | {unit.defense}D | {unit.dice}R | {unit.movement}M | {unit.health}HP
+        {showTransport ? ` | ${transport}TC` : ''}
       </span>
       <div className="unit-stats-specials-row">
         {labels.length > 0 ? (
@@ -419,7 +423,7 @@ function PurchaseModal({
     return heroFamilyInCart(availableUnits, quantities, unit.heroId) >= 1;
   };
 
-  const renderUnitList = (units: UnitPurchaseInfo[]) => (
+  const renderUnitList = (units: UnitPurchaseInfo[], showTransport = false) => (
     <>
       <div className="unit-list">
         {units.map(unit => {
@@ -437,7 +441,7 @@ function PurchaseModal({
                 </span>
                 <div className="unit-details">
                   <span className="unit-name">{unit.name}</span>
-                  <UnitStatBlock unit={unit} />
+                  <UnitStatBlock unit={unit} showTransport={showTransport} />
                 </div>
               </div>
               <div className="unit-cost">
@@ -454,6 +458,7 @@ function PurchaseModal({
       </div>
       <p className="unit-stats-key">
         A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points
+        {showTransport ? ' | TC = Transport capacity' : ''}
       </p>
     </>
   );
@@ -589,7 +594,7 @@ function PurchaseModal({
 
         {activeTab === 'land' && renderUnitList(landTabUnits)}
 
-        {activeTab === 'sea' && renderUnitList(seaTabUnits)}
+        {activeTab === 'sea' && renderUnitList(seaTabUnits, true)}
 
         {activeTab === 'siege' && renderUnitList(siegeUnits)}
 

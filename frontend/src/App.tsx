@@ -1442,6 +1442,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         isSiegework: !isNaval && !isRiver && siegeworkUnitIds.has(u.unit_id),
         specialLabels,
         homeTerritoryCount,
+        transportCapacity: Number(unitDefs[u.unit_id]?.transport_capacity ?? 0) || 0,
       };
     }).filter((u) => heroesOn || !u.heroId);
   }, [availableActions, unitDefs, navalUnitIds, riverUnitIds, siegeworkUnitIds, definitions?.units, definitions?.specials, backendState?.heroes_enabled]);
