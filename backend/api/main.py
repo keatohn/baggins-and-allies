@@ -1308,7 +1308,7 @@ def update_profile(
 
 @app.get("/setups")
 def get_setups(db: Session = Depends(get_db)):
-    """List available game setups (id, display_name, map_asset). Use setup_id in POST /games/create."""
+    """List available game setups (id, display_name, map_asset, timeline_image). Use setup_id in POST /games/create."""
     return {"setups": try_list_setups_menu(db)}
 
 

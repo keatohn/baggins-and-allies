@@ -24,3 +24,8 @@ declare module 'virtual:territory-image-png' {
   const files: string[];
   export default files;
 }
+
+declare module 'virtual:scenario-image' {
+  const files: string[];
+  export default files;
+}

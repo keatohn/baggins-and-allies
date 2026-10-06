@@ -25,6 +25,7 @@ from backend.engine.definitions import (
     list_setups as list_setups_from_files,
     lobby_music_filenames,
     menu_order_sort_value,
+    scenario_menu_entry,
     parse_prefire_penalty_from_manifest,
     scenario_display_from_setup_id as scenario_display_from_files,
 )
@@ -225,19 +226,8 @@ def list_setups_menu_from_db(db: Session) -> list[dict[str, Any]]:
         ctx = m.get("context")
         if not isinstance(ctx, dict) or not ctx:
             continue
-        sid = m.get("id", row.id)
-        rows.append(
-            (
-                menu_order_sort_value(m),
-                sid,
-                {
-                    "id": sid,
-                    "display_name": m.get("display_name", row.id),
-                    "map_asset": m.get("map_asset", row.id),
-                    "context": ctx,
-                },
-            )
-        )
+        entry = scenario_menu_entry(m, row.id)
+        rows.append((menu_order_sort_value(m), str(entry["id"]), entry))
     rows.sort(key=lambda t: (t[0], t[1]))
     return [t[2] for t in rows]
 

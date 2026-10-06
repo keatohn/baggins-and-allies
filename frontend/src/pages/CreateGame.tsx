@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { api, type SetupInfo } from '../services/api';
+import ScenarioTimeline from '../components/ScenarioTimeline';
 import './CreateGame.css';
 
 export default function CreateGame() {
@@ -77,17 +78,7 @@ export default function CreateGame() {
       <h1 className="create-game-page__title">Create game</h1>
       <form className="create-game-form" onSubmit={handleSubmit}>
         {error && <p className="create-game-form__error">{error}</p>}
-        <label className="create-game-form__label">
-          Name
-          <input
-            type="text"
-            className="create-game-form__input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="My game"
-          />
-        </label>
-        <div className="create-game-form__field">
+        <div className="create-game-form__field create-game-form__field--scenario">
           <span className="create-game-form__field-label">Scenario</span>
           {loadingSetups ? (
             <p className="create-game-form__hint">Loading scenarios…</p>
@@ -98,33 +89,24 @@ export default function CreateGame() {
           ) : scenariosWithContext.length === 0 ? (
             <p className="create-game-form__hint">No scenarios available.</p>
           ) : (
-            <>
-              <div className="create-game-form__scenarios">
-                {scenariosWithContext.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    className={`create-game-form__scenario ${selectedSetupId === s.id ? 'create-game-form__scenario--active' : ''}`}
-                    onClick={() => setSelectedSetupId(s.id)}
-                  >
-                    <span className="create-game-form__scenario-name">{s.display_name}</span>
-                    {s.context && (
-                      <span className="create-game-form__scenario-context">
-                        {[s.context.year, s.context.map].filter(Boolean).join(' · ')}
-                        {s.context.faction_count != null && ` · ${s.context.faction_count} factions`}
-                        {Array.isArray(s.context.factions) && s.context.factions.length > 0 && (
-                          <span className="create-game-form__scenario-factions">
-                            {s.context.factions.join(', ')}
-                          </span>
-                        )}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </>
+            <ScenarioTimeline
+              scenarios={scenariosWithContext}
+              selectedId={selectedSetupId}
+              onSelect={setSelectedSetupId}
+            />
           )}
         </div>
+        <div className="create-game-form__setup">
+        <label className="create-game-form__label">
+          Name
+          <input
+            type="text"
+            className="create-game-form__input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="My game"
+          />
+        </label>
         <div className="create-game-form__field">
           <span className="create-game-form__field-label">Mode</span>
           <div className="create-game-form__picker" role="group" aria-label="Single or multiplayer">
@@ -166,6 +148,7 @@ export default function CreateGame() {
         <button type="submit" className="create-game-form__submit primary" disabled={loading || loadingSetups}>
           {loading ? 'Creating…' : 'Create game'}
         </button>
+        </div>
       </form>
       <Link to="/" className="page-menu-btn create-game-page__menu-anchor">Menu</Link>
     </div>

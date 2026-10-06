@@ -3,6 +3,7 @@ import MUSIC_M4A from 'virtual:music-m4a';
 import UNIT_ICON_PNG from 'virtual:unit-icon-png';
 import FACTION_ICON_PNG from 'virtual:faction-icon-png';
 import TERRITORY_IMAGE_PNG from 'virtual:territory-image-png';
+import SCENARIO_IMAGE from 'virtual:scenario-image';
 import { TerritoryGraphPane } from './TerritoryGraphPane';
 import type { AdminSetupBundle } from '../../services/api';
 
@@ -240,7 +241,7 @@ function HeroIdField({
 }
 
 function iconStem(filename: string): string {
-  return filename.replace(/\.png$/i, '');
+  return filename.replace(/\.(png|jpe?g|webp|gif)$/i, '');
 }
 
 function AssetPngField({
@@ -547,6 +548,30 @@ export function ManifestPanel({
           value={String(manifest.map_asset ?? '')}
           onChange={(e) => onManifestChange({ ...manifest, map_asset: e.target.value })}
         />,
+      )}
+      {fieldRow(
+        'Timeline image',
+        <>
+          <AssetPngField
+            value={manifest.timeline_image}
+            files={SCENARIO_IMAGE}
+            dir="scenarios"
+            noneLabel="None"
+            ariaLabel="Timeline image"
+            onApply={(image) => {
+              if (!image) {
+                const next = { ...manifest };
+                delete next.timeline_image;
+                onManifestChange(next);
+                return;
+              }
+              onManifestChange({ ...manifest, timeline_image: image });
+            }}
+          />
+          <p className="admin-form__micro">
+            Image file in public/assets/scenarios. Scenarios that share this image and the same year appear as one point on the create-game timeline, with each scenario listed underneath. Scenarios with no image still share a point when their year matches.
+          </p>
+        </>,
       )}
       {fieldRow(
         'Lobby music',

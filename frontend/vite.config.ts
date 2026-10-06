@@ -8,17 +8,22 @@ function publicFilenamesPlugin(opts: {
   name: string
   virtualId: string
   relDir: string
-  ext: string
+  ext?: string
+  exts?: string[]
 }): Plugin {
   const dir = path.resolve(__dirname, opts.relDir)
   const resolvedId = `\0${opts.virtualId}`
-  const ext = opts.ext.toLowerCase()
+  const exts = (opts.exts && opts.exts.length > 0 ? opts.exts : opts.ext ? [opts.ext] : []).map((e) => {
+    const lower = e.toLowerCase()
+    return lower.startsWith('.') ? lower : `.${lower}`
+  })
+  const matches = (filename: string) => exts.some((ext) => filename.toLowerCase().endsWith(ext))
 
   const list = (): string[] => {
     if (!fs.existsSync(dir)) return []
     return fs
       .readdirSync(dir)
-      .filter((f) => f.toLowerCase().endsWith(ext))
+      .filter((f) => matches(f))
       .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
   }
 
@@ -35,7 +40,7 @@ function publicFilenamesPlugin(opts: {
     configureServer(server) {
       if (fs.existsSync(dir)) server.watcher.add(dir)
       const invalidate = (file: string) => {
-        if (path.dirname(file) !== dir || !file.toLowerCase().endsWith(ext)) return
+        if (path.dirname(file) !== dir || !matches(path.basename(file))) return
         const mod = server.moduleGraph.getModuleById(resolvedId)
         if (mod) void server.reloadModule(mod)
       }
@@ -78,6 +83,12 @@ export default defineConfig({
       virtualId: 'virtual:territory-image-png',
       relDir: 'public/assets/territories',
       ext: '.png',
+    }),
+    publicFilenamesPlugin({
+      name: 'scenario-image',
+      virtualId: 'virtual:scenario-image',
+      relDir: 'public/assets/scenarios',
+      exts: ['.png', '.jpg', '.jpeg', '.webp', '.gif'],
     }),
     react(),
     // GitHub Pages has no server rewrite for /login etc.; unknown paths get 404.html (same shell as index.html).

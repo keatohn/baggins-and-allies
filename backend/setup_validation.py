@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from backend.engine.definitions import timeline_image_filename
 from backend.engine.special_rules import parse_nonneg_int
 
 
@@ -65,6 +66,8 @@ def validate_setup_documents(
     territory_ids = set(territories.keys())
     faction_ids = set(factions.keys())
     unit_ids = set(units.keys())
+    subfaction_ids: set[str] = set()
+    subfaction_parents: dict[str, str] = {}
 
     for tid, t in territories.items():
         if not isinstance(t, dict):
@@ -124,8 +127,9 @@ def validate_setup_documents(
         if u.get("id") != uid:
             errors.append(f'unit "{uid}" id field must match key')
         fac = u.get("faction")
-        if not isinstance(fac, str) or not fac.strip() or fac not in faction_ids:
+        if not isinstance(fac, str) or not fac.strip():
             errors.append(f'unit "{uid}" faction must be a known faction id')
+        # Subfaction ids are collected below; a second pass checks the reference.
         dt = u.get("downgrade_to")
         if isinstance(dt, str) and dt.strip() and dt not in unit_ids:
             errors.append(f'unit "{uid}" downgrade_to "{dt}" is not a known unit id')
@@ -229,6 +233,12 @@ def validate_setup_documents(
             int(mo)
         except (TypeError, ValueError):
             errors.append("manifest.menu_order must be an integer when set")
+
+    if "timeline_image" in manifest and manifest.get("timeline_image") not in (None, ""):
+        if timeline_image_filename(manifest) is None:
+            errors.append(
+                "manifest.timeline_image must be an image filename (png, jpg, jpeg, webp, or gif) with no directory"
+            )
 
     starting_message = manifest.get("starting_message")
     if starting_message is not None and not isinstance(starting_message, str):

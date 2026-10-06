@@ -784,6 +784,7 @@ export interface SetupInfo {
   id: string;
   display_name: string;
   map_asset: string;
+  timeline_image?: string;
   context?: {
     year?: string;
     map?: string;

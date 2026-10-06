@@ -10,6 +10,39 @@ from pathlib import Path
 from typing import Any, Optional
 
 
+_TIMELINE_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+
+
+def timeline_image_filename(manifest: dict[str, Any]) -> str | None:
+    """Basename of a create-game timeline image under public/assets/scenarios, or None."""
+    raw = manifest.get("timeline_image")
+    if not isinstance(raw, str):
+        return None
+    name = raw.strip()
+    if not name or name != Path(name).name or name in {".", ".."}:
+        return None
+    if Path(name).suffix.lower() not in _TIMELINE_IMAGE_EXTS:
+        return None
+    return name
+
+
+def scenario_menu_entry(manifest: dict[str, Any], folder_id: str) -> dict[str, Any]:
+    """One create-game menu row. Includes timeline_image when the manifest names a scenario asset."""
+    sid = manifest.get("id", folder_id)
+    if not isinstance(sid, str) or not sid:
+        sid = folder_id
+    entry: dict[str, Any] = {
+        "id": sid,
+        "display_name": manifest.get("display_name", folder_id),
+        "map_asset": manifest.get("map_asset", folder_id),
+        "context": manifest.get("context"),
+    }
+    image = timeline_image_filename(manifest)
+    if image is not None:
+        entry["timeline_image"] = image
+    return entry
+
+
 def menu_order_sort_value(manifest: dict[str, Any]) -> int:
     """
     Create-game menu / GET /setups ordering: lower values list first.
@@ -120,7 +153,7 @@ def scenario_display_from_setup_id(setup_id: str) -> dict[str, Any] | None:
 
 
 def list_setups() -> list[dict]:
-    """Return [{ id, display_name, map_asset, context }, ...] for the create-game menu.
+    """Return [{ id, display_name, map_asset, context, timeline_image? }, ...] for the create-game menu.
 
     Requires manifest `is_active` to be exactly true (no default). Also requires non-empty context.
     Sort order: ``manifest.menu_order`` (ascending, lower first), then setup id for stability.
@@ -147,14 +180,8 @@ def list_setups() -> list[dict]:
         ctx = m.get("context")
         if not isinstance(ctx, dict) or not ctx:
             continue
-        sid = m.get("id", setup_id)
-        entry = {
-            "id": sid,
-            "display_name": m.get("display_name", setup_id),
-            "map_asset": m.get("map_asset", setup_id),
-            "context": ctx,
-        }
-        rows.append((menu_order_sort_value(m), sid, entry))
+        entry = scenario_menu_entry(m, setup_id)
+        rows.append((menu_order_sort_value(m), str(entry["id"]), entry))
     rows.sort(key=lambda t: (t[0], t[1]))
     return [t[2] for t in rows]
 
@@ -295,6 +322,15 @@ def _coerce_faction_music(raw: Any) -> str | list[str] | None:
 
 
 @dataclass
+class SubfactionDefinition:
+    """A faction-owned side with its own territories and units, and no turn of its own."""
+    id: str
+    display_name: str
+    color: str
+    icon: Optional[str] = None  # Filename in frontend/assets/factions/; None uses the parent icon
+
+
+@dataclass
 class FactionDefinition:
     """Defines immutable properties of a faction."""
     id: str
@@ -305,6 +341,124 @@ class FactionDefinition:
     icon: Optional[str] = None  # Filename in frontend/assets/factions/
     # Turn music: one filename or ordered list under public/assets/audio/music/ (may differ from id).
     music: str | list[str] | None = None
+    # Set on a resolved subfaction view. Playable factions leave this empty.
+    parent: str | None = None
+    subfactions: tuple[SubfactionDefinition, ...] = ()
+
+
+class FactionTable(dict[str, FactionDefinition]):
+    """
+    Playable factions only, for iteration, turn order, and seats.
+
+    ``get`` and ``[]`` also resolve a subfaction id to a view that inherits alliance
+    from its parent. Membership (``id in table``) stays playable factions, so a
+    subfaction is never treated as a seat.
+    """
+
+    def __init__(self, factions: dict[str, FactionDefinition]):
+        super().__init__(factions)
+        resolved: dict[str, FactionDefinition] = dict(factions)
+        for parent in factions.values():
+            for sub in parent.subfactions:
+                resolved[sub.id] = FactionDefinition(
+                    id=sub.id,
+                    display_name=sub.display_name,
+                    alliance=parent.alliance,
+                    capital="",
+                    color=sub.color,
+                    icon=sub.icon or parent.icon,
+                    music=None,
+                    parent=parent.id,
+                    subfactions=(),
+                )
+        self._resolved = resolved
+
+    def get(self, key: str, default: Any = None) -> FactionDefinition | Any:
+        if key in self._resolved:
+            return self._resolved[key]
+        return default
+
+    def __getitem__(self, key: str) -> FactionDefinition:
+        try:
+            return self._resolved[key]
+        except KeyError:
+            raise KeyError(key) from None
+
+
+def faction_acts_as(
+    faction_defs: dict[str, FactionDefinition] | None,
+    subject_faction_id: str | None,
+    acting_faction_id: str | None,
+) -> bool:
+    """True when subject is the acting faction, or a subfaction controlled by it."""
+    if not subject_faction_id or not acting_faction_id:
+        return False
+    if subject_faction_id == acting_faction_id:
+        return True
+    if not faction_defs:
+        return False
+    subject = faction_defs.get(subject_faction_id)
+    parent = getattr(subject, "parent", None) if subject else None
+    return isinstance(parent, str) and parent == acting_faction_id
+
+
+def controlling_faction_id(
+    faction_defs: dict[str, FactionDefinition] | None,
+    faction_id: str | None,
+) -> str | None:
+    """Playable faction that commands this id. A faction with no parent returns itself."""
+    if not faction_id:
+        return None
+    if not faction_defs:
+        return faction_id
+    subject = faction_defs.get(faction_id)
+    parent = getattr(subject, "parent", None) if subject else None
+    if isinstance(parent, str) and parent:
+        return parent
+    return faction_id
+
+
+def _parse_subfactions(raw: Any) -> tuple[SubfactionDefinition, ...]:
+    if not isinstance(raw, list):
+        return ()
+    out: list[SubfactionDefinition] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        sid = item.get("id")
+        if not isinstance(sid, str) or not sid.strip():
+            continue
+        icon = item.get("icon")
+        icon_s = icon.strip() if isinstance(icon, str) and icon.strip() else None
+        name = item.get("display_name")
+        color = item.get("color")
+        out.append(SubfactionDefinition(
+            id=sid.strip(),
+            display_name=name.strip() if isinstance(name, str) and name.strip() else sid.strip(),
+            color=color.strip() if isinstance(color, str) and color.strip() else "#888888",
+            icon=icon_s,
+        ))
+    return tuple(out)
+
+
+def _faction_from_json(faction_id: str, data: dict) -> FactionDefinition:
+    return FactionDefinition(
+        id=data["id"],
+        display_name=data["display_name"],
+        alliance=data["alliance"],
+        capital=_faction_capital_from_json(data.get("capital")),
+        color=data["color"],
+        icon=data.get("icon"),
+        music=_coerce_faction_music(data.get("music")),
+        subfactions=_parse_subfactions(data.get("subfactions")),
+    )
+
+
+def factions_from_json(factions_data: dict) -> FactionTable:
+    factions: dict[str, FactionDefinition] = {}
+    for faction_id, data in factions_data.items():
+        factions[faction_id] = _faction_from_json(faction_id, data)
+    return FactionTable(factions)
 
 
 def is_transportable(ud: "UnitDefinition | None") -> bool:
@@ -416,17 +570,7 @@ def load_static_definitions(
     with open(data_dir / "factions.json", "r") as f:
         factions_data = json.load(f)
 
-    factions = {}
-    for faction_id, data in factions_data.items():
-        factions[faction_id] = FactionDefinition(
-            id=data["id"],
-            display_name=data["display_name"],
-            alliance=data["alliance"],
-            capital=_faction_capital_from_json(data.get("capital")),
-            color=data["color"],
-            icon=data.get("icon"),
-            music=_coerce_faction_music(data.get("music")),
-        )
+    factions = factions_from_json(factions_data)
 
     # Load camps (mobilization points; each has a territory, destroyed when territory is captured)
     camps = {}
@@ -512,17 +656,7 @@ def definitions_from_snapshot(snapshot: dict) -> tuple[
             image=_parse_optional_str(data.get("image")),
         )
 
-    factions = {}
-    for faction_id, data in factions_data.items():
-        factions[faction_id] = FactionDefinition(
-            id=data["id"],
-            display_name=data["display_name"],
-            alliance=data["alliance"],
-            capital=_faction_capital_from_json(data.get("capital")),
-            color=data["color"],
-            icon=data.get("icon"),
-            music=_coerce_faction_music(data.get("music")),
-        )
+    factions = factions_from_json(factions_data)
 
     camps = {}
     for camp_id, data in camps_data.items():
