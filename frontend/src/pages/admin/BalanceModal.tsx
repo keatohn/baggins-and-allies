@@ -106,7 +106,10 @@ export function BalanceModal({
                   <div className="balance-share__good" style={{ width: `${goodShare}%` }} />
                   <div className="balance-share__evil" style={{ width: `${evilShare}%` }} />
                 </div>
-                <p className="admin-form__micro">Share of modeled starting power (effective units + discounted production).</p>
+                <p className="admin-form__micro">
+                  Share of modeled starting power. Each alliance score is effective units plus discounted production, minus{' '}
+                  {report.parameters.stronghold_value} for each stronghold it still needs.
+                </p>
               </div>
             ) : null}
 
@@ -130,7 +133,10 @@ export function BalanceModal({
                     <th title="Defense half of effective unit power">Def</th>
                     <th title="Power production per turn">PP</th>
                     <th title="Discounted production over the next few rounds">Econ</th>
-                    <th title="Starting power score: effective unit power plus economic power">Score</th>
+                    <th title={`Victory adjustment. Each stronghold still required subtracts ${report.parameters.stronghold_value} from the alliance score. Needing none is 0.`}>
+                      VP
+                    </th>
+                    <th title="Alliance rows include the victory adjustment. Faction rows are units plus economy only.">Score</th>
                     <th title="Strongholds owned">S</th>
                     <th title="Strongholds this alliance still needs. Shown on the alliance row.">Need</th>
                     <th title="Territories owned. Listed only; not part of the score.">T</th>
@@ -150,6 +156,7 @@ export function BalanceModal({
                           <td>{score(alliance.effective_unit_power_defense)}</td>
                           <td>{whole(alliance.power_production)}</td>
                           <td>{score(alliance.economic_power)}</td>
+                          <td>{score(alliance.victory_adjustment ?? 0)}</td>
                           <td>{score(alliance.starting_power_score)}</td>
                           <td>{whole(alliance.strongholds)}</td>
                           <td>{alliance.strongholds_to_win == null ? '—' : whole(alliance.strongholds_to_win)}</td>
@@ -172,6 +179,7 @@ export function BalanceModal({
                               <td>{score(row.effective_unit_power_defense)}</td>
                               <td>{whole(row.power_production)}</td>
                               <td>{score(row.economic_power)}</td>
+                              <td>—</td>
                               <td>{score(row.starting_power_score)}</td>
                               <td>{whole(row.strongholds)}</td>
                               <td>—</td>

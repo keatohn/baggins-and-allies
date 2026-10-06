@@ -7,9 +7,10 @@ Three separate readings, then one optional index:
   a stack needs before it can affect an important attack or defense.
 - Flow: economic power. Future production over a short horizon, discounted,
   with fading-territory schedules applied turn by turn.
-- Victory pressure: strongholds still required to win. Reported, not scored.
+- Victory pressure: each stronghold an alliance still needs subtracts a fixed
+  amount from that alliance's score. Needing none removes the penalty.
 
-    SPS = EUP + EP
+    SPS = EUP + EP - stronghold_value * strongholds_still_needed
     EUP = attack_weight * EUP_attack + defense_weight * EUP_defense
     EP  = sum_{t=1..H} discount^t * PP_t
 
@@ -44,6 +45,8 @@ class BalanceConfig:
     attack_weight: float = 0.5
     defense_weight: float = 0.5
     high_production: int = 3
+    # One stronghold still required is about one side's economic lead on the War of the Ring setup.
+    stronghold_value: int = 50
     availability_by_turns: tuple[float, float, float, float] = (1.0, 0.8, 0.6, 0.4)
     availability_floor: float = 0.25
 
@@ -200,7 +203,7 @@ def compute_starting_strength(
 
     neutral = _neutral_summary(territories, factions, owners, stacks)
     faction_rows = [_faction_row(factions[fid], accs[fid]) for fid in faction_ids]
-    alliance_rows = _alliance_rows(alliances, faction_rows, manifest)
+    alliance_rows = _alliance_rows(alliances, faction_rows, manifest, cfg)
     discounts = _largest_discounts(faction_rows)
     for row in faction_rows:
         for key in [k for k in row if k.startswith("_")]:
@@ -212,7 +215,7 @@ def compute_starting_strength(
         "alliances": alliance_rows,
         "neutral": neutral,
         "largest_discounts": discounts,
-        "readings": _readings(alliance_rows, cfg.horizon_rounds),
+        "readings": _readings(alliance_rows, cfg.horizon_rounds, cfg.stronghold_value),
     }
 
 
@@ -224,7 +227,9 @@ def _parameters(cfg: BalanceConfig) -> dict[str, Any]:
     ]
     ladder.append({"turns": f"{len(cfg.availability_by_turns)}+", "factor": cfg.availability_floor})
     summary = (
-        "Starting power score is effective unit power plus discounted production. "
+        "Starting power score is effective unit power plus discounted production, minus "
+        f"{cfg.stronghold_value} for each stronghold that alliance still needs in order to win. "
+        "Needing none removes that penalty. "
         "Attack availability is how soon a unit can reach an enemy or unowned stronghold, "
         "capital, or territory producing "
         f"{cfg.high_production} or more. Defense availability is how soon it can stand on a "
@@ -246,6 +251,7 @@ def _parameters(cfg: BalanceConfig) -> dict[str, Any]:
         "attack_weight": cfg.attack_weight,
         "defense_weight": cfg.defense_weight,
         "high_production": cfg.high_production,
+        "stronghold_value": cfg.stronghold_value,
         "economic_coefficient": _q(factor),
         "availability": ladder,
         "summary": summary,
@@ -626,6 +632,7 @@ def _alliance_rows(
     alliances: list[str],
     faction_rows: list[dict[str, Any]],
     manifest: dict[str, Any],
+    cfg: BalanceConfig,
 ) -> list[dict[str, Any]]:
     thresholds = _stronghold_thresholds(manifest)
     rows: list[dict[str, Any]] = []
@@ -634,11 +641,12 @@ def _alliance_rows(
         members = [row for row in faction_rows if row["alliance"] == alliance]
         eup = sum(row["_eup_raw"] for row in members)
         economic = sum(row["_economic_raw"] for row in members)
-        score = eup + economic
-        raw_scores.append(score)
         owned = sum(int(row["strongholds"]) for row in members)
         target = thresholds.get(alliance)
         needed = None if target is None else max(0, target - owned)
+        victory = 0.0 if needed is None else -cfg.stronghold_value * needed
+        score = max(0.0, eup + economic + victory)
+        raw_scores.append(score)
         rows.append(
             {
                 "id": alliance,
@@ -647,6 +655,7 @@ def _alliance_rows(
                 "strongholds": owned,
                 "stronghold_target": target,
                 "strongholds_to_win": needed,
+                "victory_adjustment": _q(victory),
                 "units": sum(int(row["units"]) for row in members),
                 "unit_power": sum(int(row["unit_power"]) for row in members),
                 "effective_unit_power_attack": _q(sum(row["_eup_attack_raw"] for row in members)),
@@ -695,7 +704,7 @@ def _largest_discounts(faction_rows: list[dict[str, Any]]) -> list[dict[str, Any
     return found[:8]
 
 
-def _readings(alliances: list[dict[str, Any]], horizon: int) -> list[str]:
+def _readings(alliances: list[dict[str, Any]], horizon: int, stronghold_value: int) -> list[str]:
     scored = [row for row in alliances if row.get("starting_power_share") is not None]
     lines: list[str] = []
     if len(scored) >= 2:
@@ -752,6 +761,17 @@ def _readings(alliances: list[dict[str, Any]], horizon: int) -> list[str]:
             victory_bits.append(f"{row['display_name']} needs {needed} more strongholds to win")
     if victory_bits:
         lines.append(". ".join(_sentence(bit) for bit in victory_bits) + ".")
+    valued = [row for row in alliances if isinstance(row.get("strongholds_to_win"), int)]
+    if len(valued) >= 2:
+        lightest = min(valued, key=lambda row: row["strongholds_to_win"])
+        heaviest = max(valued, key=lambda row: row["strongholds_to_win"])
+        gap = heaviest["strongholds_to_win"] - lightest["strongholds_to_win"]
+        if gap > 0:
+            noun = "stronghold" if gap == 1 else "strongholds"
+            lines.append(
+                f"{lightest['display_name']} needs {gap} fewer {noun} than {heaviest['display_name']}, "
+                f"worth {gap * stronghold_value} starting power."
+            )
 
     for row in alliances:
         up = row["unit_power"]

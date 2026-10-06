@@ -396,11 +396,11 @@
 }
 
 .balance-share__good {
-  background: #c5d7c2;
+  background: #fff;
 }
 
 .balance-share__evil {
-  background: #4a342f;
+  background: #000;
 }
 
 .balance-readings {

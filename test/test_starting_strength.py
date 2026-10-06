@@ -159,7 +159,14 @@ def test_faster_units_close_the_same_ground_sooner():
 def test_flat_economy_uses_the_three_round_discount():
     territories, owners = _line_map()
     report = compute_starting_strength(
-        _bundle(territories=territories, owners=owners, units={}, starting_units={})
+        _bundle(
+            territories=territories,
+            owners=owners,
+            units={},
+            starting_units={},
+            good_target=0,
+            evil_target=1,
+        )
     )
     good = _by_id(report["alliances"])["good"]
     evil = _by_id(report["alliances"])["evil"]
@@ -303,6 +310,44 @@ def test_ship_in_port_uses_the_sea_graph():
     assert good["unreachable_attack_power"] == 0
 
 
+def test_fewer_strongholds_required_raises_that_side_share():
+    territories = {
+        "west": _territory("west", ["east"], power=100, stronghold=True),
+        "east": _territory("east", ["west"], power=100, stronghold=True),
+    }
+    owners = {"west": "goodland", "east": "evilland"}
+
+    def report(good_target: int, evil_target: int):
+        return compute_starting_strength(
+            _bundle(
+                territories=territories,
+                owners=owners,
+                units={},
+                starting_units={},
+                good_target=good_target,
+                evil_target=evil_target,
+                extra_factions={
+                    "goodland": {"id": "goodland", "display_name": "Goodland", "alliance": "good", "capital": "west"},
+                    "evilland": {"id": "evilland", "display_name": "Evilland", "alliance": "evil", "capital": "east"},
+                },
+            )
+        )
+
+    even = _by_id(report(2, 2)["alliances"])
+    one_fewer = _by_id(report(2, 1)["alliances"])
+    already = _by_id(report(3, 1)["alliances"])
+    assert even["good"]["strongholds_to_win"] == 1
+    assert even["evil"]["strongholds_to_win"] == 1
+    assert even["evil"]["starting_power_share"] == pytest.approx(0.5, abs=0.001)
+    assert one_fewer["evil"]["strongholds_to_win"] == 0
+    assert one_fewer["evil"]["victory_adjustment"] == 0
+    assert one_fewer["good"]["victory_adjustment"] == -50
+    assert one_fewer["evil"]["starting_power_share"] > even["evil"]["starting_power_share"] + 0.05
+    # Evil is already at the threshold in both. Good needing 2 instead of 1 raises Evil's share further.
+    assert already["evil"]["starting_power_share"] > one_fewer["evil"]["starting_power_share"]
+    assert any("worth 50 starting power" in line for line in report(2, 1)["readings"])
+
+
 def test_strongholds_to_win_is_the_remaining_burden():
     territories, owners = _line_map()
     territories["border"] = _territory("border", ["mid", "gate"], power=1, stronghold=True)
@@ -343,6 +388,8 @@ def test_neutral_units_stay_out_of_the_alliance_split():
                 "dark": [{"unit_id": "orc", "count": 1}],
                 "mid": [{"unit_id": "wight", "count": 1}],
             },
+            good_target=0,
+            evil_target=1,
         )
     )
     assert report["neutral"]["unit_power"] == 50
@@ -365,6 +412,8 @@ def test_share_uses_effective_power_plus_economy():
                 "border": [{"unit_id": "infantry", "count": 1}],
                 "dark": [{"unit_id": "orc", "count": 1}],
             },
+            good_target=0,
+            evil_target=1,
         )
     )
     alliances = _by_id(report["alliances"])

@@ -624,6 +624,8 @@ export interface BalanceSide {
   strongholds: number;
   stronghold_target?: number | null;
   strongholds_to_win?: number | null;
+  /** Alliance only. Negative: each stronghold still required subtracts stronghold_value. */
+  victory_adjustment?: number;
   units: number;
   unit_power: number;
   effective_unit_power_attack: number;
@@ -664,6 +666,7 @@ export interface StartingStrengthReport {
     attack_weight: number;
     defense_weight: number;
     high_production: number;
+    stronghold_value: number;
     economic_coefficient: number;
     availability: { turns: string; factor: number }[];
     summary: string;
