@@ -2079,10 +2079,14 @@ def get_game_state(
         "can_act": can_act,
         "setup_id": setup_id,
         "event_log": event_log,
-        "territory_signals": visible_territory_signals(
-            state,
-            _viewer_signal_alliances(game_id, player, db),
-            lambda fid: _faction_alliance(fd, fid),
+        "territory_signals": (
+            {}
+            if row is None or not row.game_code
+            else visible_territory_signals(
+                state,
+                _viewer_signal_alliances(game_id, player, db),
+                lambda fid: _faction_alliance(fd, fid),
+            )
         ),
     }
 
@@ -3910,6 +3914,8 @@ def do_set_territory_signal(
     row = db.query(GameModel).filter(GameModel.id == game_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Game not found")
+    if row.game_code is None:
+        raise HTTPException(status_code=400, detail="Signals are only available in multiplayer")
     if row.status != "active":
         raise HTTPException(status_code=400, detail="Signals are available once the match has started")
     try:
@@ -3952,6 +3958,30 @@ def do_set_territory_signal(
     )
     if not alliance or alliance not in by_alliance:
         raise HTTPException(status_code=403, detail="You are not on an alliance that can signal this territory")
+    # A pin is shared by the whole alliance. Toggling or clearing it hits that pin,
+    # even when this player would otherwise resolve a different side.
+    preset_id = (request.preset_id or "").strip()
+    shared_alliance = None
+    if preset_id:
+        for side in ordered_alliances:
+            book = state.territory_signals.get(side) or {}
+            pin = book.get(territory_id) if isinstance(book, dict) else None
+            if isinstance(pin, dict) and pin.get("preset_id") == preset_id:
+                shared_alliance = side
+                if side == owner_alliance:
+                    break
+        if shared_alliance:
+            alliance = shared_alliance
+    elif request.clear:
+        resolved_book = state.territory_signals.get(alliance) or {}
+        resolved_pin = resolved_book.get(territory_id) if isinstance(resolved_book, dict) else None
+        if not isinstance(resolved_pin, dict):
+            for side in ordered_alliances:
+                book = state.territory_signals.get(side) or {}
+                pin = book.get(territory_id) if isinstance(book, dict) else None
+                if isinstance(pin, dict):
+                    alliance = side
+                    break
     preset = None
     if not request.clear and request.preset_id:
         catalog = {p["id"]: p for p in load_signal_presets(db)}

@@ -2404,7 +2404,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   }, [addLogEntry, refreshState]);
 
   const handleSetTerritorySignal = useCallback(async (territoryId: string, presetId: string | null) => {
-    if (signalBusy) return;
+    if (signalBusy || !isMultiplayer) return;
     setSignalBusy(true);
     try {
       const res = await api.setTerritorySignal(GAME_ID, {
@@ -2418,7 +2418,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     } finally {
       setSignalBusy(false);
     }
-  }, [GAME_ID, addLogEntry, signalBusy]);
+  }, [GAME_ID, addLogEntry, isMultiplayer, signalBusy]);
 
   const handleSetTerritoryDefenderCasualtyOrder = useCallback(async (territoryId: string, casualtyOrder: 'best_unit' | 'best_defense') => {
     try {
@@ -4199,7 +4199,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               unitDefs={unitDefs}
               unitStats={unitStats}
               factionData={factionData}
-              territorySignals={territorySignals}
+              territorySignals={isMultiplayer ? territorySignals : {}}
               onTerritorySelect={handleTerritorySelect}
               onSeaZoneStackClick={isMovementPhase ? handleSeaZoneStackClick : undefined}
               onUnitSelect={handleUnitSelect}
@@ -4414,10 +4414,10 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               isCurrentFactionAI={isAITurn}
               forcedNavalStandoffSeaZoneIds={availableActions?.forced_naval_standoff_sea_zone_ids ?? []}
               signalPresets={signalPresets}
-              territorySignals={territorySignals}
+              territorySignals={isMultiplayer ? territorySignals : {}}
               signalAlliances={mySignalAlliances}
               onSetTerritorySignal={handleSetTerritorySignal}
-              canPlaceSignal={!backendState?.winner && gameMeta?.status === 'active' && mySignalAlliances.length > 0}
+              canPlaceSignal={isMultiplayer && !backendState?.winner && gameMeta?.status === 'active' && mySignalAlliances.length > 0}
               signalBusy={signalBusy}
             />
           )}

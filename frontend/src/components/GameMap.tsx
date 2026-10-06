@@ -4514,18 +4514,15 @@ function GameMap({
                         const anchor = layout?.center ?? layout?.marker ?? territoryCentroids[territoryId];
                         if (!anchor || !signal?.label) return null;
                         const screenPos = clampToMap(svgToScreen(anchor.x, anchor.y));
-                        const factionName = signal.faction_id ? factionData[signal.faction_id]?.name : '';
                         const flagColor = signal.color || '#6b5b4b';
-                        const message = factionName ? `${signal.label} — ${factionName}` : signal.label;
-                        const selected = selectedTerritory === territoryId;
                         return (
                           <button
                             key={territoryId}
                             type="button"
-                            className={`territory-signal-flag${selected ? ' territory-signal-flag--selected' : ''}`}
+                            className="territory-signal-flag"
                             style={{ left: screenPos.x, top: screenPos.y }}
-                            title={message}
-                            aria-label={message}
+                            title={signal.label}
+                            aria-label={signal.label}
                             onPointerDown={(e) => e.stopPropagation()}
                             onClick={(e) => {
                               e.stopPropagation();
@@ -4536,7 +4533,7 @@ function GameMap({
                               <path d="M11.2 2.2v23.2" fill="none" stroke="#2a1c12" strokeWidth="1.7" strokeLinecap="round" />
                               <path d="M12 3.2 22.2 8.4 12 13.4Z" fill={flagColor} stroke="#2a1c12" strokeWidth="0.7" strokeLinejoin="round" />
                             </svg>
-                            {selected ? <span className="territory-signal-flag__label">{signal.label}</span> : null}
+                            <span className="territory-signal-flag__label">{signal.label}</span>
                           </button>
                         );
                       })}

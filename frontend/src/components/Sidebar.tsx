@@ -390,16 +390,18 @@ function TerritorySignalControls({
   onSet: (presetId: string | null) => void;
 }) {
   const factionAlliance = (factionId: string) => factionData[factionId]?.alliance;
-  const alliance = inferSignalAlliance(
+  const inferredAlliance = inferSignalAlliance(
     territory.owner ? factionAlliance(territory.owner) : null,
     alliances,
     currentFactionId ? factionAlliance(currentFactionId) : null,
   );
+  const sharedAlliance = current?.alliance && alliances.includes(current.alliance) ? current.alliance : null;
+  const alliance = sharedAlliance ?? inferredAlliance;
   const relation = territorySignalRelation(territoryId, territory, alliance, factionAlliance);
   const matching = canPlace
     ? presets.filter((preset) => presetMatchesRelation(preset.applies_to, relation))
     : [];
-  const shownCurrent = current && (!current.alliance || !alliance || current.alliance === alliance) ? current : null;
+  const shownCurrent = current && (!current.alliance || current.alliance === alliance) ? current : null;
   const currentMatchesButton = shownCurrent != null && matching.some((preset) => preset.id === shownCurrent.preset_id);
   if (matching.length === 0 && !shownCurrent) return null;
   return (

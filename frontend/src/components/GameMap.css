@@ -505,26 +505,22 @@
 }
 
 .territory-signal-flag__svg {
-  width: 22px;
-  height: 26px;
+  width: 44px;
+  height: 52px;
   display: block;
   flex-shrink: 0;
 }
 
-.territory-signal-flag--selected .territory-signal-flag__svg {
-  width: 31px;
-  height: 37px;
-}
-
 .territory-signal-flag__label {
-  margin-top: 1px;
-  max-width: 132px;
-  padding: 0.1rem 0.35rem;
+  margin-top: 6px;
+  max-width: 220px;
+  padding: 0.28rem 0.6rem;
   border-radius: 999px;
-  background: rgba(28, 22, 16, 0.9);
+  background: rgba(28, 22, 16, 0.92);
   color: #f4ead6;
-  font-size: 11px;
-  line-height: 1.2;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
