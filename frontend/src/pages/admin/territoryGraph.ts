@@ -290,6 +290,16 @@ export function adjacencyEdges(
 
 const TERRITORY_EDGE_FIELDS = ['adjacent', 'aerial_adjacent', 'ford_adjacent'] as const;
 
+export type TerritoryEdgeField = (typeof TERRITORY_EDGE_FIELDS)[number];
+
+export type TerritoryEdgeEdit = {
+  source: string;
+  neighbor: string;
+  field: TerritoryEdgeField;
+  on: boolean;
+  seq: number;
+};
+
 function neighborIds(def: Record<string, unknown> | undefined, field: string): string[] {
   const raw = def?.[field];
   if (!Array.isArray(raw)) return [];
@@ -319,6 +329,66 @@ export function completeTerritoryAsymmetries(
         next[other] = { ...otherDef, [field]: [...back, tid] };
       }
     }
+  }
+  return next;
+}
+
+function cloneTerritories(
+  territories: Record<string, Record<string, unknown>>,
+): Record<string, Record<string, unknown>> {
+  const next: Record<string, Record<string, unknown>> = {};
+  for (const [id, def] of Object.entries(territories)) {
+    if (!isTerritory(def)) continue;
+    const copy: Record<string, unknown> = { ...def };
+    for (const field of TERRITORY_EDGE_FIELDS) {
+      if (Array.isArray(def[field])) copy[field] = neighborIds(def, field);
+    }
+    next[id] = copy;
+  }
+  return next;
+}
+
+function pairFieldKey(a: string, b: string, field: TerritoryEdgeField): string {
+  const [x, y] = a < b ? [a, b] : [b, a];
+  return `${x}\0${y}\0${field}`;
+}
+
+function writeEdge(
+  territories: Record<string, Record<string, unknown>>,
+  from: string,
+  to: string,
+  field: TerritoryEdgeField,
+  on: boolean,
+) {
+  const def = territories[from];
+  if (!isTerritory(def)) return;
+  const raw = def[field];
+  if (raw != null && !Array.isArray(raw)) return;
+  const kept = neighborIds(def, field).filter((id) => !sameTerritoryId(id, to));
+  if (!on) {
+    if (!Array.isArray(raw)) return;
+    territories[from] = { ...def, [field]: kept };
+    return;
+  }
+  territories[from] = { ...def, [field]: [...kept, to] };
+}
+
+/** Apply adjacency edits to both ends of each link. The latest edit for a pair wins. */
+export function territoriesWithEdgeEdits(
+  territories: Record<string, Record<string, unknown>>,
+  edits: TerritoryEdgeEdit[],
+): Record<string, Record<string, unknown>> {
+  const next = cloneTerritories(territories);
+  const final = new Map<string, TerritoryEdgeEdit>();
+  for (const edit of edits) {
+    const key = pairFieldKey(edit.source, edit.neighbor, edit.field);
+    const prev = final.get(key);
+    if (!prev || edit.seq >= prev.seq) final.set(key, edit);
+  }
+  const ordered = [...final.values()].sort((a, b) => a.seq - b.seq);
+  for (const edit of ordered) {
+    writeEdge(next, edit.source, edit.neighbor, edit.field, edit.on);
+    writeEdge(next, edit.neighbor, edit.source, edit.field, edit.on);
   }
   return next;
 }

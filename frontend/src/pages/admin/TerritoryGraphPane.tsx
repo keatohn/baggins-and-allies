@@ -6,7 +6,10 @@ import {
   lookupCentroid,
   resolveTerritoryKey,
   sameTerritoryId,
+  territoriesWithEdgeEdits,
   toMapBase,
+  type TerritoryEdgeEdit,
+  type TerritoryEdgeField,
   type TerritoryPathData,
 } from './territoryGraph';
 
@@ -43,6 +46,36 @@ function offsetEdge(pa: Pt, pb: Pt, dist: number): { a: Pt; b: Pt } {
   };
 }
 
+const EDGE_TYPES: { field: TerritoryEdgeField; label: string; kind: 'land' | 'aerial' | 'ford' }[] = [
+  { field: 'adjacent', label: 'Land', kind: 'land' },
+  { field: 'aerial_adjacent', label: 'Aerial', kind: 'aerial' },
+  { field: 'ford_adjacent', label: 'Ford', kind: 'ford' },
+];
+
+function ownNeighborIds(
+  territories: Record<string, Record<string, unknown>>,
+  selectedKey: string,
+  field: TerritoryEdgeField,
+): string[] {
+  const raw = territories[selectedKey]?.[field];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((id): id is string => typeof id === 'string');
+}
+
+function listsNeighbor(
+  territories: Record<string, Record<string, unknown>>,
+  from: string,
+  to: string,
+  field: TerritoryEdgeField,
+): boolean {
+  return ownNeighborIds(territories, from, field).some((id) => sameTerritoryId(id, to));
+}
+
+function territoryLabel(id: string, def: Record<string, unknown> | undefined): string {
+  const name = def && typeof def.display_name === 'string' ? def.display_name.trim() : '';
+  return name || id;
+}
+
 function territoryIdFromPoint(clientX: number, clientY: number): string | null {
   try {
     for (const node of document.elementsFromPoint(clientX, clientY)) {
@@ -61,10 +94,12 @@ export function TerritoryGraphPane({
   mapAsset,
   territories,
   onClose,
+  onSave,
 }: {
   mapAsset: string | undefined;
   territories: Record<string, Record<string, unknown>>;
   onClose: () => void;
+  onSave: (next: Record<string, Record<string, unknown>>) => Promise<void>;
 }) {
   const mapBase = toMapBase(mapAsset);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -79,6 +114,27 @@ export function TerritoryGraphPane({
   const didDragRef = useRef(false);
   const fittedRef = useRef(false);
   const [pngFailed, setPngFailed] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [edgeField, setEdgeField] = useState<TerritoryEdgeField>('adjacent');
+  const [editId, setEditId] = useState<string | null>(null);
+  const [edits, setEdits] = useState<TerritoryEdgeEdit[]>([]);
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const seqRef = useRef(0);
+
+  const draft = useMemo(() => territoriesWithEdgeEdits(territories, edits), [territories, edits]);
+  const shown = editing ? draft : territories;
+  const dirty = edits.length > 0;
+
+  const requestClose = () => {
+    if (saving) return;
+    if (editing && dirty) {
+      setDiscardOpen(true);
+      return;
+    }
+    onClose();
+  };
 
   useEffect(() => {
     setPngFailed(false);
@@ -86,11 +142,21 @@ export function TerritoryGraphPane({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape') return;
+      if (discardOpen) {
+        setDiscardOpen(false);
+        return;
+      }
+      if (saving) return;
+      if (editing && dirty) {
+        setDiscardOpen(true);
+        return;
+      }
+      onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [discardOpen, saving, editing, dirty, onClose]);
 
   useEffect(() => {
     let cancelled = false;
@@ -116,25 +182,56 @@ export function TerritoryGraphPane({
     };
   }, [mapBase]);
 
-  const selectedKey = selected ? resolveTerritoryKey(territories, selected) ?? selected : null;
+  const focusId = editing ? editId : selected;
+  const selectedKey = focusId ? resolveTerritoryKey(shown, focusId) ?? focusId : null;
 
   const landNeighborIds = useMemo(
-    () => (selectedKey ? neighborIdsForField(territories, selectedKey, 'adjacent') : []),
-    [selectedKey, territories],
+    () =>
+      selectedKey
+        ? editing
+          ? ownNeighborIds(shown, selectedKey, 'adjacent')
+          : neighborIdsForField(shown, selectedKey, 'adjacent')
+        : [],
+    [selectedKey, shown, editing],
   );
   const aerialNeighborIds = useMemo(
-    () => (selectedKey ? neighborIdsForField(territories, selectedKey, 'aerial_adjacent') : []),
-    [selectedKey, territories],
+    () =>
+      selectedKey
+        ? editing
+          ? ownNeighborIds(shown, selectedKey, 'aerial_adjacent')
+          : neighborIdsForField(shown, selectedKey, 'aerial_adjacent')
+        : [],
+    [selectedKey, shown, editing],
   );
   const fordNeighborIds = useMemo(
-    () => (selectedKey ? neighborIdsForField(territories, selectedKey, 'ford_adjacent') : []),
-    [selectedKey, territories],
+    () =>
+      selectedKey
+        ? editing
+          ? ownNeighborIds(shown, selectedKey, 'ford_adjacent')
+          : neighborIdsForField(shown, selectedKey, 'ford_adjacent')
+        : [],
+    [selectedKey, shown, editing],
   );
 
   const isLandNeighborTid = (tid: string) => landNeighborIds.some((n) => sameTerritoryId(n, tid));
   const isAerialNeighborTid = (tid: string) => aerialNeighborIds.some((n) => sameTerritoryId(n, tid));
   const isFordNeighborTid = (tid: string) => fordNeighborIds.some((n) => sameTerritoryId(n, tid));
-  const isSelectedTid = (tid: string) => selected != null && sameTerritoryId(tid, selected);
+  const isSelectedTid = (tid: string) => focusId != null && sameTerritoryId(tid, focusId);
+  const activeKind = EDGE_TYPES.find((type) => type.field === edgeField)?.kind ?? 'land';
+  const activeNeighborTid = (tid: string) => {
+    if (edgeField === 'adjacent') return isLandNeighborTid(tid);
+    if (edgeField === 'aerial_adjacent') return isAerialNeighborTid(tid);
+    return isFordNeighborTid(tid);
+  };
+
+  const territoryChoices = useMemo(() => {
+    const rows = Object.entries(territories).map(([id, def]) => ({
+      id,
+      label: territoryLabel(id, def),
+    }));
+    rows.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }) || a.id.localeCompare(b.id));
+    return rows;
+  }, [territories]);
 
   useEffect(() => {
     if (loading || err || fittedRef.current) return;
@@ -151,9 +248,50 @@ export function TerritoryGraphPane({
     });
   }, [loading, err, viewBox.width, viewBox.height, paths]);
 
-  const landEdges = useMemo(() => adjacencyEdges(territories, 'adjacent'), [territories]);
-  const aerialEdges = useMemo(() => adjacencyEdges(territories, 'aerial_adjacent'), [territories]);
-  const fordEdges = useMemo(() => adjacencyEdges(territories, 'ford_adjacent'), [territories]);
+  const landEdges = useMemo(() => adjacencyEdges(shown, 'adjacent'), [shown]);
+  const aerialEdges = useMemo(() => adjacencyEdges(shown, 'aerial_adjacent'), [shown]);
+  const fordEdges = useMemo(() => adjacencyEdges(shown, 'ford_adjacent'), [shown]);
+
+  const toggleEdge = (source: string, neighbor: string) => {
+    const currently = listsNeighbor(shown, source, neighbor, edgeField);
+    const turningOn = !currently;
+    const batch: TerritoryEdgeEdit[] = [];
+    const nextSeq = () => {
+      seqRef.current += 1;
+      return seqRef.current;
+    };
+    batch.push({ source, neighbor, field: edgeField, on: turningOn, seq: nextSeq() });
+    if (turningOn && edgeField === 'adjacent') {
+      for (const other of ['aerial_adjacent', 'ford_adjacent'] as const) {
+        if (listsNeighbor(shown, source, neighbor, other) || listsNeighbor(shown, neighbor, source, other)) {
+          batch.push({ source, neighbor, field: other, on: false, seq: nextSeq() });
+        }
+      }
+    } else if (turningOn && (edgeField === 'aerial_adjacent' || edgeField === 'ford_adjacent')) {
+      if (listsNeighbor(shown, source, neighbor, 'adjacent') || listsNeighbor(shown, neighbor, source, 'adjacent')) {
+        batch.push({ source, neighbor, field: 'adjacent', on: false, seq: nextSeq() });
+      }
+    }
+    setEdits((prev) => [...prev, ...batch]);
+    setSaveError(null);
+  };
+
+  const saveEdits = async () => {
+    if (!dirty || saving) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onSave(draft);
+      seqRef.current = 0;
+      setEdits([]);
+      setEditing(false);
+      setDiscardOpen(false);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const onWheel = (e: ReactWheelEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -212,7 +350,15 @@ export function TerritoryGraphPane({
     dragRef.current = null;
     if (didDragRef.current) return;
     const tid = territoryIdFromPoint(e.clientX, e.clientY);
-    setSelected(tid);
+    if (!editing) {
+      setSelected(tid);
+      return;
+    }
+    if (!tid || !editId) return;
+    const source = resolveTerritoryKey(shown, editId);
+    const neighbor = resolveTerritoryKey(shown, tid);
+    if (!source || !neighbor || sameTerritoryId(source, neighbor)) return;
+    toggleEdge(source, neighbor);
   };
 
   const renderEdge = (
@@ -222,7 +368,7 @@ export function TerritoryGraphPane({
     pa: Pt,
     pb: Pt,
   ) => {
-    const isHot = selected != null && (sameTerritoryId(a, selected) || sameTerritoryId(b, selected));
+    const isHot = focusId != null && (sameTerritoryId(a, focusId) || sameTerritoryId(b, focusId));
     const pts =
       kind === 'aerial' ? offsetEdge(pa, pb, 7) : kind === 'ford' ? offsetEdge(pa, pb, -7) : { a: pa, b: pb };
     return (
@@ -239,7 +385,7 @@ export function TerritoryGraphPane({
   };
 
   return (
-    <div className="admin-modal-overlay" role="presentation" onClick={onClose}>
+    <div className="admin-modal-overlay" role="presentation" onClick={requestClose}>
       <div
         className="admin-modal admin-modal--graph"
         role="dialog"
@@ -252,9 +398,46 @@ export function TerritoryGraphPane({
             Territory graph
           </h2>
           <p className="admin-form__micro">
-            Landscape from {mapBase}.png with borders from the SVG. Click a territory to highlight neighbors.
-            Scroll to zoom, drag to pan.
+            {editing
+              ? 'Choose a territory, then click the map to toggle its neighbors. Land replaces aerial and ford on that border. Aerial and ford can both stay. Save writes both sides.'
+              : `Landscape from ${mapBase}.png with borders from the SVG. Click a territory to highlight neighbors. Scroll to zoom, drag to pan.`}
           </p>
+          {editing ? (
+            <div className="admin-graph__types" role="group" aria-label="Adjacency type">
+              {EDGE_TYPES.map((type) => (
+                <button
+                  key={type.field}
+                  type="button"
+                  className={`admin-graph__type admin-graph__type--${type.kind}${edgeField === type.field ? ' admin-graph__type--active' : ''}`}
+                  aria-pressed={edgeField === type.field}
+                  onClick={() => setEdgeField(type.field)}
+                >
+                  {type.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <div className="admin-graph__header-actions">
+            <button
+              type="button"
+              className={`admin-page__btn${editing ? ' admin-page__btn--primary' : ''}`}
+              disabled={saving || (editing && !dirty)}
+              onClick={() => {
+                if (editing) void saveEdits();
+                else {
+                  setEditing(true);
+                  setEdgeField('adjacent');
+                  setEditId(null);
+                  setSaveError(null);
+                }
+              }}
+            >
+              {saving ? 'Saving…' : editing ? 'Save' : 'Edit'}
+            </button>
+            <button type="button" className="admin-page__btn" onClick={requestClose} disabled={saving}>
+              Close
+            </button>
+          </div>
           <ul className="admin-graph__key" aria-label="Edge colors">
             <li>
               <span className="admin-graph__key-swatch admin-graph__key-swatch--land" aria-hidden />
@@ -269,13 +452,28 @@ export function TerritoryGraphPane({
               Ford adjacent
             </li>
           </ul>
-          <button type="button" className="admin-page__btn" onClick={onClose}>
-            Close
-          </button>
         </div>
         {loading ? <p className="admin-form__micro">Loading map…</p> : null}
         {err ? <p className="admin-page__error">{err}</p> : null}
+        {saveError ? <p className="admin-page__error">{saveError}</p> : null}
         {!loading && !err ? (
+          <div className="admin-graph__body">
+            {editing ? (
+              <div className="admin-graph__list" role="listbox" aria-label="Territories">
+                {territoryChoices.map((row) => (
+                  <button
+                    key={row.id}
+                    type="button"
+                    role="option"
+                    aria-selected={editId === row.id}
+                    className={`admin-graph__list-item${editId === row.id ? ' admin-graph__list-item--selected' : ''}`}
+                    onClick={() => setEditId(row.id)}
+                  >
+                    {row.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           <div
             ref={wrapRef}
             className="admin-graph__viewport"
@@ -315,7 +513,9 @@ export function TerritoryGraphPane({
                 const isFordN = !isSel && isFordNeighborTid(tid);
                 let cls = 'admin-graph__path';
                 if (isSel) cls += ' admin-graph__path--selected';
-                else if (isFordN && isAerialN) cls += ' admin-graph__path--neighbor-ford';
+                else if (editing) {
+                  if (activeNeighborTid(tid)) cls += ` admin-graph__path--neighbor-${activeKind}`;
+                } else if (isFordN && isAerialN) cls += ' admin-graph__path--neighbor-ford';
                 else if (isLandN && isAerialN) cls += ' admin-graph__path--neighbor-both';
                 else if (isLandN) cls += ' admin-graph__path--neighbor-land';
                 else if (isFordN) cls += ' admin-graph__path--neighbor-ford';
@@ -366,15 +566,19 @@ export function TerritoryGraphPane({
                   className={
                     isSelectedTid(tid)
                       ? 'admin-graph__node admin-graph__node--selected'
-                      : isFordNeighborTid(tid) && isAerialNeighborTid(tid)
-                        ? 'admin-graph__node admin-graph__node--ford'
-                        : isLandNeighborTid(tid)
-                          ? 'admin-graph__node admin-graph__node--land'
-                          : isFordNeighborTid(tid)
-                            ? 'admin-graph__node admin-graph__node--ford'
-                            : isAerialNeighborTid(tid)
-                              ? 'admin-graph__node admin-graph__node--aerial'
-                              : 'admin-graph__node'
+                      : editing
+                        ? activeNeighborTid(tid)
+                          ? `admin-graph__node admin-graph__node--${activeKind}`
+                          : 'admin-graph__node'
+                        : isFordNeighborTid(tid) && isAerialNeighborTid(tid)
+                          ? 'admin-graph__node admin-graph__node--ford'
+                          : isLandNeighborTid(tid)
+                            ? 'admin-graph__node admin-graph__node--land'
+                            : isFordNeighborTid(tid)
+                              ? 'admin-graph__node admin-graph__node--ford'
+                              : isAerialNeighborTid(tid)
+                                ? 'admin-graph__node admin-graph__node--aerial'
+                                : 'admin-graph__node'
                   }
                   pointerEvents="none"
                 />
@@ -382,8 +586,15 @@ export function TerritoryGraphPane({
               </svg>
             </div>
           </div>
+          </div>
         ) : null}
-        {selected ? (
+        {editing ? (
+          <p className="admin-graph__status">
+            {editId
+              ? `${territoryLabel(editId, territories[editId])} · ${EDGE_TYPES.find((type) => type.field === edgeField)?.label ?? 'Land'}: ${(edgeField === 'adjacent' ? landNeighborIds : edgeField === 'aerial_adjacent' ? aerialNeighborIds : fordNeighborIds).join(', ') || 'none'}`
+              : 'Choose a territory'}
+          </p>
+        ) : selected ? (
           <p className="admin-graph__status">
             {selected}
             {landNeighborIds.length ? ` · adjacent: ${landNeighborIds.join(', ')}` : ''}
@@ -394,6 +605,30 @@ export function TerritoryGraphPane({
         ) : (
           <p className="admin-graph__status">No territory selected</p>
         )}
+        {discardOpen ? (
+          <div className="admin-modal-overlay admin-graph__confirm" role="presentation" onClick={() => setDiscardOpen(false)}>
+            <div
+              className="admin-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="admin-graph-discard-title"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 id="admin-graph-discard-title" className="admin-modal__title">
+                Close without saving?
+              </h2>
+              <p className="admin-form__micro">Adjacency edits will be discarded.</p>
+              <div className="admin-modal__actions">
+                <button type="button" className="admin-page__btn" onClick={() => setDiscardOpen(false)}>
+                  Keep editing
+                </button>
+                <button type="button" className="admin-page__btn admin-page__btn--danger" onClick={onClose}>
+                  Discard and close
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

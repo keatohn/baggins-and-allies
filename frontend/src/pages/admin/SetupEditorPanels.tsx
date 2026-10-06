@@ -924,16 +924,23 @@ export function TerritoriesPanel({
   territories,
   mapAsset,
   onChange,
+  onSave,
 }: {
   territories: Record<string, Record<string, unknown>>;
   mapAsset?: string;
   onChange: (next: Record<string, Record<string, unknown>>) => void;
+  onSave: (next: Record<string, Record<string, unknown>>) => Promise<void>;
 }) {
   const [graphOpen, setGraphOpen] = useState(false);
   return (
     <>
       {graphOpen ? (
-        <TerritoryGraphPane mapAsset={mapAsset} territories={territories} onClose={() => setGraphOpen(false)} />
+        <TerritoryGraphPane
+          mapAsset={mapAsset}
+          territories={territories}
+          onClose={() => setGraphOpen(false)}
+          onSave={onSave}
+        />
       ) : null}
       <EntityDictPanel
         title="territory"

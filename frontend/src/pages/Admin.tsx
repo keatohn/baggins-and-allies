@@ -432,6 +432,32 @@ export default function Admin() {
     }
   };
 
+  const saveSetupTerritories = async (territories: DictEntityMap) => {
+    if (!selectedId || !bundle) throw new Error('No setup loaded');
+    const body = {
+      manifest: { ...(bundle.manifest as Record<string, unknown>), id: selectedId },
+      units: bundle.units as DictEntityMap,
+      territories,
+      factions: bundle.factions as DictEntityMap,
+      camps: bundle.camps as DictEntityMap,
+      ports: bundle.ports as DictEntityMap,
+      starting_setup: bundle.starting_setup as Record<string, unknown>,
+      specials: bundle.specials as Record<string, unknown>,
+    };
+    try {
+      await api.adminPutSetup(selectedId, body);
+      setBundle({ ...bundle, territories });
+      setSaveError(null);
+      setSaveOk(true);
+      await refreshList();
+      loadBundle(selectedId);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Save failed';
+      setSaveError(message);
+      throw new Error(message);
+    }
+  };
+
   const confirmResolveAsymmetries = () => {
     if (!bundle?.territories || typeof bundle.territories !== 'object' || Array.isArray(bundle.territories)) return;
     const territories = completeTerritoryAsymmetries(bundle.territories as Record<string, Record<string, unknown>>);
@@ -601,6 +627,7 @@ export default function Admin() {
             territories={(bundle.territories as DictEntityMap) ?? {}}
             mapAsset={typeof bundle.manifest?.map_asset === 'string' ? bundle.manifest.map_asset : undefined}
             onChange={(next) => setBundle((b) => (b ? { ...b, territories: next as typeof b.territories } : null))}
+            onSave={saveSetupTerritories}
           />
         );
       case 'factions':
