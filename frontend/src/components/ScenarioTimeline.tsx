@@ -22,7 +22,7 @@ function ScenarioMetaLine({ scenario, showYear }: { scenario: SetupInfo; showYea
   };
   if (showYear && ctx?.year) add('year', ctx.year);
   if (count != null) {
-    add('count', <span className="chronicle__option-count">{count} {count === 1 ? 'faction' : 'factions'}</span>);
+    add('count', `${count} ${count === 1 ? 'faction' : 'factions'}`);
   }
   if (ctx?.good_count != null && ctx?.evil_count != null) {
     add('sides', `${ctx.good_count}vs${ctx.evil_count}`);

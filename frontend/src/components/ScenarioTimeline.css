@@ -329,19 +329,16 @@ button.chronicle__option--active {
 .chronicle__option-meta,
 .chronicle__option-factions {
   font-family: var(--font-parchment), Georgia, serif;
-  color: var(--ink-faded);
 }
 
 .chronicle__option-meta {
   font-size: 0.92rem;
-}
-
-.chronicle__option-count {
-  color: var(--ink);
+  color: color-mix(in srgb, var(--ink) 50%, var(--ink-faded));
 }
 
 .chronicle__option-factions {
   font-size: 0.78rem;
+  color: var(--ink-faded);
 }
 
 .chronicle__option--active .chronicle__option-meta,
