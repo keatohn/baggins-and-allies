@@ -98,6 +98,15 @@ from backend.engine.special_rules import (
     territory_current_power,
 )
 from backend.audio_gains import load_audio_gains, load_menu_music, save_audio_settings
+from backend.signals import (
+    SignalPresetError,
+    apply_territory_signal,
+    classify_territory_for_signal,
+    load_signal_presets,
+    save_signal_presets,
+    signal_applies,
+    visible_territory_signals,
+)
 from backend.setup_data import (
     create_setup_from_bundle,
     create_setup,
@@ -424,6 +433,13 @@ class SetTerritoryDefenderCasualtyOrderRequest(BaseModel):
     game_id: str
     territory_id: str
     casualty_order: str  # "best_unit" | "best_defense"
+
+
+class SetTerritorySignalRequest(BaseModel):
+    territory_id: str
+    preset_id: str | None = None
+    clear: bool = False
+    alliance: str | None = None
 
 
 class SimulateCombatOptionsRequest(BaseModel):
@@ -769,6 +785,31 @@ def get_game_definitions(game_id: str, db: Session | None = None):
         return (unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
 
 
+def _viewer_signal_alliances(game_id: str, player: Player | None, db: Session) -> set[str]:
+    """Alliances of factions this player controls. Empty for spectators and signed-out viewers."""
+    if player is None:
+        return set()
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not row:
+        return set()
+    try:
+        players_list = json.loads(row.players) if isinstance(row.players, str) else row.players
+    except (TypeError, json.JSONDecodeError):
+        return set()
+    if not isinstance(players_list, list):
+        return set()
+    my_factions = _forfeit_my_faction_ids(
+        row, str(player.id), players_list, _get_lobby_claims_from_config(row)
+    )
+    if not my_factions:
+        return set()
+    try:
+        _, _, fd, _, _ = get_game_definitions(game_id, db)
+    except Exception:
+        fd = {}
+    return {_faction_alliance(fd, fid) for fid in my_factions if fid}
+
+
 def _player_can_act(game_id: str, player: Player, db: Session) -> bool:
     """True if this player is in the game and assigned to the faction whose turn it is."""
     row = db.query(GameModel).filter(GameModel.id == game_id).first()
@@ -1033,6 +1074,8 @@ def state_for_response(state: GameState, game_id: str | None = None, db: Session
     """State dict including computed faction_stats for the UI. Uses game's definitions if game_id provided.
     When state.turn_order is empty, fills from game config starting_setup so the turn ticker and faction order are correct."""
     out = state_to_dict(state)
+    # Pins are alliance-private. Callers that know the viewer attach a filtered copy beside state.
+    out.pop("territory_signals", None)
     # Ensure pending_camps is always present so frontend can show camp placement during mobilization
     if "pending_camps" not in out:
         out["pending_camps"] = getattr(state, "pending_camps", [])
@@ -1289,6 +1332,30 @@ def admin_put_audio(
     """Replace the global per-file audio mix and (when sent) the menu music playlist."""
     gains, menu_music = save_audio_settings(db, body.gains, body.menu_music)
     return {"ok": True, "gains": gains, "menu_music": menu_music}
+
+
+@app.get("/signals")
+def get_signals(db: Session = Depends(get_db)):
+    """Preset territory callouts (labels, icons, and which ownership they apply to)."""
+    return {"presets": load_signal_presets(db)}
+
+
+class AdminSignalsBody(BaseModel):
+    presets: list[dict[str, Any]]
+
+
+@app.put("/admin/signals")
+def admin_put_signals(
+    body: AdminSignalsBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Replace the cross-setup signal catalog."""
+    try:
+        presets = save_signal_presets(db, {"presets": body.presets})
+    except SignalPresetError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True, "presets": presets}
 
 
 class AdminSetupPayload(BaseModel):
@@ -2006,6 +2073,9 @@ def get_game_state(
         "can_act": can_act,
         "setup_id": setup_id,
         "event_log": event_log,
+        "territory_signals": visible_territory_signals(
+            state, _viewer_signal_alliances(game_id, player, db)
+        ),
     }
 
 
@@ -3807,6 +3877,87 @@ def do_set_territory_defender_casualty_order(
         "state": state_for_response(new_state, game_id, db),
         "events": [e.to_dict() for e in events],
         "can_act": _player_can_act(game_id, player, db),
+    }
+
+
+@app.post("/games/{game_id}/territory-signal")
+def do_set_territory_signal(
+    game_id: str,
+    request: SetTerritorySignalRequest,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Pin or clear an alliance-only signal on a territory. Allowed on any turn, not only yours."""
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Game not found")
+    if row.status != "active":
+        raise HTTPException(status_code=400, detail="Signals are available once the match has started")
+    try:
+        players_list = json.loads(row.players) if isinstance(row.players, str) else row.players
+    except (TypeError, json.JSONDecodeError):
+        players_list = []
+    if not isinstance(players_list, list):
+        players_list = []
+    my_factions = _forfeit_my_faction_ids(
+        row, str(player.id), players_list, _get_lobby_claims_from_config(row)
+    )
+    if not my_factions:
+        raise HTTPException(status_code=403, detail="You are not assigned to a faction in this match")
+    state = get_game(game_id, db)
+    _, td, fd, _, _ = get_game_definitions(game_id, db)
+    by_alliance: dict[str, list[str]] = {}
+    for fid in my_factions:
+        by_alliance.setdefault(_faction_alliance(fd, fid), []).append(fid)
+    if request.alliance:
+        if request.alliance not in by_alliance:
+            raise HTTPException(status_code=403, detail="You are not on that alliance")
+        alliance = request.alliance
+    elif len(by_alliance) == 1:
+        alliance = next(iter(by_alliance))
+    else:
+        raise HTTPException(status_code=400, detail="Choose which alliance this signal is for")
+    territory_id = (request.territory_id or "").strip()
+    if territory_id not in state.territories:
+        raise HTTPException(status_code=400, detail="Unknown territory")
+    preset = None
+    if not request.clear and request.preset_id:
+        catalog = {p["id"]: p for p in load_signal_presets(db)}
+        preset = catalog.get(request.preset_id.strip())
+        if preset is None:
+            raise HTTPException(status_code=400, detail="Unknown signal")
+        tdef = td.get(territory_id)
+        territory = state.territories[territory_id]
+        owner = getattr(territory, "owner", None)
+        owner_alliance = _faction_alliance(fd, owner) if owner else None
+        relation = classify_territory_for_signal(
+            owner=owner,
+            territory_id=territory_id,
+            ownable=bool(getattr(tdef, "ownable", True)) if tdef is not None else True,
+            terrain_type=getattr(tdef, "terrain_type", None) if tdef is not None else None,
+            my_alliance=alliance,
+            owner_alliance=owner_alliance,
+        )
+        current = (state.territory_signals.get(alliance) or {}).get(territory_id)
+        already = isinstance(current, dict) and current.get("preset_id") == preset["id"]
+        if not already and not signal_applies(preset, relation):
+            raise HTTPException(status_code=400, detail="That signal does not apply to this territory")
+    fids = by_alliance[alliance]
+    if state.current_faction in fids:
+        faction_id = state.current_faction
+    else:
+        faction_id = next((fid for fid in state.turn_order if fid in fids), fids[0])
+    apply_territory_signal(
+        state,
+        alliance=alliance,
+        territory_id=territory_id,
+        faction_id=faction_id,
+        preset=preset,
+        clear=request.clear or preset is None,
+    )
+    save_game(game_id, state, db)
+    return {
+        "territory_signals": visible_territory_signals(state, set(by_alliance)),
     }
 
 

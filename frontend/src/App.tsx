@@ -36,6 +36,7 @@ import {
   stopMenuAmbience,
   stopTurnCueImmediate,
 } from './audio/gameAudio';
+import type { SignalPreset, TerritorySignalMap } from './territorySignals';
 import './App.css';
 
 /** API/DB may send combat integers as strings; strict `typeof === 'number'` would show 0 in the UI. */
@@ -618,6 +619,10 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   // Backend state (use initialState from navigation when we just created this game)
   const [definitions, setDefinitions] = useState<Definitions | null>(null);
   const [backendState, setBackendState] = useState<ApiGameState | null>(initialStateProp ?? null);
+  const [territorySignals, setTerritorySignals] = useState<TerritorySignalMap>({});
+  const [signalPresets, setSignalPresets] = useState<SignalPreset[]>([]);
+  const [signalAlliance, setSignalAlliance] = useState<string | null>(null);
+  const [signalBusy, setSignalBusy] = useState(false);
   const [availableActions, setAvailableActions] = useState<AvailableActionsResponse | null>(null);
   const [canAct, setCanAct] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -948,6 +953,38 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     }
     return data;
   }, [definitions]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getSignals()
+      .then((r) => {
+        if (!cancelled) setSignalPresets(r.presets ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setSignalPresets([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const mySignalAlliances = useMemo(() => {
+    if (!currentPlayerId || !gameMeta) return [];
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const row of gameMeta.players ?? []) {
+      if (row.player_id !== currentPlayerId || !row.faction_id) continue;
+      const alliance = factionData[row.faction_id]?.alliance;
+      if (!alliance || seen.has(alliance)) continue;
+      seen.add(alliance);
+      out.push(alliance);
+    }
+    return out;
+  }, [currentPlayerId, gameMeta, factionData]);
+
+  useEffect(() => {
+    setSignalAlliance((prev) => (prev && mySignalAlliances.includes(prev) ? prev : mySignalAlliances[0] ?? null));
+  }, [mySignalAlliances]);
 
   const territoryDefs = useMemo(() => {
     if (!definitions) return {};
@@ -1490,6 +1527,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         ...stateRes.state,
         pending_camps: stateRes.pending_camps ?? stateRes.state?.pending_camps ?? [],
       });
+      setTerritorySignals(stateRes.territory_signals ?? {});
       if (stateRes.definitions) setDefinitions(stateRes.definitions);
       setCanAct(stateRes.can_act ?? true);
       setAvailableActions(actionsRes);
@@ -1519,6 +1557,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       try {
         const createRes = await api.createGameLegacy(GAME_ID);
         setBackendState(createRes.state);
+        setTerritorySignals({});
         setCanAct(true);
         const actionsRes = await api.getAvailableActions(GAME_ID);
         setAvailableActions(actionsRes);
@@ -1544,6 +1583,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         let gotDefinitionsFromGame = false;
         try {
           const stateRes = await api.getGame(GAME_ID);
+          setTerritorySignals(stateRes.territory_signals ?? {});
           const hadInitialState = initialTurnOrderRef.current != null;
           if (hadInitialState) {
             // Keep create response as source of truth; only pull definitions and can_act from fetch
@@ -1591,6 +1631,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           if (GAME_ID === DEFAULT_GAME_ID) {
             const createRes = await api.createGameLegacy(GAME_ID);
             setBackendState(createRes.state);
+            setTerritorySignals({});
             setCanAct(true);
             addLogEntry('New game created!', 'info');
           } else {
@@ -2309,6 +2350,24 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       addLogEntry(err instanceof Error ? err.message : 'Cancel camp placement failed', 'error');
     }
   }, [addLogEntry, refreshState]);
+
+  const handleSetTerritorySignal = useCallback(async (territoryId: string, presetId: string | null) => {
+    if (signalBusy) return;
+    setSignalBusy(true);
+    try {
+      const res = await api.setTerritorySignal(GAME_ID, {
+        territory_id: territoryId,
+        preset_id: presetId,
+        clear: presetId == null,
+        alliance: signalAlliance,
+      });
+      setTerritorySignals(res.territory_signals ?? {});
+    } catch (err) {
+      addLogEntry(err instanceof Error ? err.message : 'Failed to set signal', 'error');
+    } finally {
+      setSignalBusy(false);
+    }
+  }, [GAME_ID, addLogEntry, signalAlliance, signalBusy]);
 
   const handleSetTerritoryDefenderCasualtyOrder = useCallback(async (territoryId: string, casualtyOrder: 'best_unit' | 'best_defense') => {
     try {
@@ -4095,6 +4154,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               unitDefs={unitDefs}
               unitStats={unitStats}
               factionData={factionData}
+              territorySignals={territorySignals}
               onTerritorySelect={handleTerritorySelect}
               onSeaZoneStackClick={isMovementPhase ? handleSeaZoneStackClick : undefined}
               onUnitSelect={handleUnitSelect}
@@ -4308,6 +4368,14 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               onSpectateBattle={setSpectatingBattle}
               isCurrentFactionAI={isAITurn}
               forcedNavalStandoffSeaZoneIds={availableActions?.forced_naval_standoff_sea_zone_ids ?? []}
+              signalPresets={signalPresets}
+              territorySignals={territorySignals}
+              signalAlliance={signalAlliance}
+              signalAlliances={mySignalAlliances}
+              onSignalAllianceChange={setSignalAlliance}
+              onSetTerritorySignal={handleSetTerritorySignal}
+              canPlaceSignal={!backendState?.winner && gameMeta?.status === 'active' && mySignalAlliances.length > 0}
+              signalBusy={signalBusy}
             />
           )}
         </div>

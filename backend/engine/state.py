@@ -43,6 +43,37 @@ def _ensure_territory_sea_raid_passenger_instance_ids(value: Any) -> dict[str, l
     }
 
 
+def _ensure_territory_signals(value: Any) -> dict[str, dict[str, dict[str, str]]]:
+    """alliance -> territory_id -> {preset_id, label, icon, color, faction_id}."""
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, dict[str, dict[str, str]]] = {}
+    for alliance, book in value.items():
+        if not isinstance(alliance, str) or not alliance.strip() or not isinstance(book, dict):
+            continue
+        cleaned: dict[str, dict[str, str]] = {}
+        for tid, sig in book.items():
+            if not isinstance(tid, str) or not tid.strip() or not isinstance(sig, dict):
+                continue
+            preset_id = sig.get("preset_id")
+            label = sig.get("label")
+            icon = sig.get("icon")
+            faction_id = sig.get("faction_id")
+            if not all(isinstance(x, str) and x.strip() for x in (preset_id, label, icon, faction_id)):
+                continue
+            color = sig.get("color")
+            cleaned[tid.strip()] = {
+                "preset_id": preset_id.strip(),
+                "label": label.strip(),
+                "icon": icon.strip(),
+                "color": color.strip() if isinstance(color, str) and color.strip() else "#6b5b4b",
+                "faction_id": faction_id.strip(),
+            }
+        if cleaned:
+            out[alliance.strip()] = cleaned
+    return out
+
+
 def _ensure_victory_criteria(value: Any) -> dict[str, Any]:
     """
     Parse victory_criteria from dict.
@@ -625,6 +656,8 @@ class GameState:
     territory_sea_raid_faction: dict[str, str] = field(default_factory=dict)
     # Land territory_id -> instance_ids that offloaded from sea this combat_move (only these removed if naval battle lost in staging sea).
     territory_sea_raid_passenger_instance_ids: dict[str, list[str]] = field(default_factory=dict)
+    # Alliance -> territory_id -> {preset_id, label, icon, color, faction_id}. Visible only to that alliance.
+    territory_signals: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
 
     def copy(self) -> "GameState":
         """Return a deep copy of this game state."""
@@ -685,6 +718,7 @@ class GameState:
             "territory_sea_raid_faction": getattr(self, "territory_sea_raid_faction", {}),
             "territory_sea_raid_passenger_instance_ids": getattr(self, "territory_sea_raid_passenger_instance_ids", {}),
             "starting_territory_owners": dict(getattr(self, "starting_territory_owners", {}) or {}),
+            "territory_signals": getattr(self, "territory_signals", {}) or {},
         }
 
     @classmethod
@@ -791,6 +825,7 @@ class GameState:
             starting_territory_owners=dict(data.get("starting_territory_owners") or {})
             if isinstance(data.get("starting_territory_owners"), dict)
             else {},
+            territory_signals=_ensure_territory_signals(data.get("territory_signals")),
         )
 
     def to_json(self, indent: int = 2) -> str:

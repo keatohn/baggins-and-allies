@@ -14,6 +14,8 @@ import {
   UnitsPanel,
 } from './admin/SetupEditorPanels';
 import { AudioPanel } from './admin/AudioPanel';
+import { SignalsPanel } from './admin/SignalsPanel';
+import type { SignalPreset } from '../territorySignals';
 import { isValidSetupId } from './admin/setupId';
 import { BalanceModal } from './admin/BalanceModal';
 import { previewStatsFromBundle } from './admin/previewStats';
@@ -289,10 +291,14 @@ export default function Admin() {
   const [menuMusic, setMenuMusic] = useState<string[]>([]);
   const [audioOpen, setAudioOpen] = useState(false);
   const [audioJsonMode, setAudioJsonMode] = useState(false);
+  const [signalsOpen, setSignalsOpen] = useState(false);
+  const [signalsJsonMode, setSignalsJsonMode] = useState(false);
+  const [signalPresets, setSignalPresets] = useState<SignalPreset[]>([]);
   const [unitStatsOpen, setUnitStatsOpen] = useState(false);
   const [gameStatsOpen, setGameStatsOpen] = useState(false);
   const [balanceOpen, setBalanceOpen] = useState(false);
   const audioJson = useMemo(() => ({ gains: audioGains, menu_music: menuMusic }), [audioGains, menuMusic]);
+  const signalsJson = useMemo(() => ({ presets: signalPresets }), [signalPresets]);
   const statsPreview = useMemo(() => previewStatsFromBundle(bundle), [bundle]);
 
   const useJson = jsonTab[activeTab] === true;
@@ -337,6 +343,10 @@ export default function Admin() {
         setMenuMusic(r.menu_music ?? []);
       })
       .catch(() => setAudioGains({}));
+    api
+      .getSignals()
+      .then((r) => setSignalPresets(r.presets ?? []))
+      .catch(() => setSignalPresets([]));
   }, [player?.is_admin]);
 
   const loadBundle = useCallback((id: string) => {
@@ -374,6 +384,19 @@ export default function Admin() {
         const res = await api.adminPutAudio({ gains: audioGains, menu_music: menuMusic });
         setAudioGains(res.gains ?? {});
         setMenuMusic(res.menu_music ?? []);
+        setSaveOk(true);
+      } catch (e) {
+        setSaveError(e instanceof Error ? e.message : 'Save failed');
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+    if (signalsOpen) {
+      setSaving(true);
+      try {
+        const res = await api.adminPutSignals(signalPresets);
+        setSignalPresets(res.presets ?? []);
         setSaveOk(true);
       } catch (e) {
         setSaveError(e instanceof Error ? e.message : 'Save failed');
@@ -447,6 +470,39 @@ export default function Admin() {
   };
 
   const renderTabBody = () => {
+    if (signalsOpen) {
+      if (signalsJsonMode) {
+        return (
+          <JsonTabEditor
+            value={signalsJson}
+            onChange={(p) => {
+              const obj = p && typeof p === 'object' && !Array.isArray(p) ? (p as Record<string, unknown>) : {};
+              const list = Array.isArray(obj.presets) ? obj.presets : [];
+              const next: SignalPreset[] = [];
+              for (const item of list) {
+                if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+                const row = item as Record<string, unknown>;
+                const applies = row.applies_to;
+                if (
+                  typeof row.id !== 'string' ||
+                  typeof row.label !== 'string' ||
+                  typeof row.icon !== 'string' ||
+                  (applies !== 'enemy' && applies !== 'allied' && applies !== 'neutral' && applies !== 'any')
+                ) {
+                  continue;
+                }
+                const color = typeof row.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(row.color)
+                  ? row.color
+                  : '#6b5b4b';
+                next.push({ id: row.id, label: row.label, icon: row.icon, applies_to: applies, color });
+              }
+              setSignalPresets(next);
+            }}
+          />
+        );
+      }
+      return <SignalsPanel presets={signalPresets} onChange={setSignalPresets} />;
+    }
     if (audioOpen) {
       if (audioJsonMode) {
         return (
@@ -589,15 +645,39 @@ export default function Admin() {
           className={`page-menu-btn${audioOpen ? ' admin-page__audio-btn--active' : ''}`}
           onClick={() => {
             setAudioOpen((open) => !open);
+            setSignalsOpen(false);
             setSaveOk(false);
             setSaveError(null);
           }}
         >
           Audio
         </button>
+        <button
+          type="button"
+          className={`page-menu-btn${signalsOpen ? ' admin-page__audio-btn--active' : ''}`}
+          onClick={() => {
+            setSignalsOpen((open) => !open);
+            setAudioOpen(false);
+            setSaveOk(false);
+            setSaveError(null);
+          }}
+        >
+          Signals
+        </button>
       </div>
 
-      {audioOpen ? (
+      {signalsOpen ? (
+        <div className="admin-page__toolbar admin-page__toolbar--wrap">
+          <label className="admin-page__checkbox-label">
+            <input
+              type="checkbox"
+              checked={signalsJsonMode}
+              onChange={() => setSignalsJsonMode((v) => !v)}
+            />
+            Raw JSON
+          </label>
+        </div>
+      ) : audioOpen ? (
         <div className="admin-page__toolbar admin-page__toolbar--wrap">
           <label className="admin-page__checkbox-label">
             <input
@@ -674,7 +754,7 @@ export default function Admin() {
         </div>
       ) : null}
 
-      {setups.length === 0 && !loadError && !loadingBundle ? (
+      {setups.length === 0 && !loadError && !loadingBundle && !audioOpen && !signalsOpen ? (
         <p className="admin-page__empty">
           No setups in the database. Restart the API once so it can create the <code>setups</code> table and seed from{' '}
           <code>backend/data/setups</code> (only runs when the table is empty). Then use <strong>New setup</strong> to add
@@ -682,7 +762,7 @@ export default function Admin() {
         </p>
       ) : null}
 
-      {audioOpen ? (
+      {audioOpen || signalsOpen ? (
         <div className="admin-page__panel">{renderTabBody()}</div>
       ) : (
       <>
@@ -740,7 +820,7 @@ export default function Admin() {
         <button
           type="button"
           className="admin-page__btn admin-page__btn--primary"
-          disabled={(audioOpen ? false : !bundle) || saving}
+          disabled={(audioOpen || signalsOpen ? false : !bundle) || saving}
           onClick={handleSave}
         >
           {saving ? 'Saving…' : 'Save'}
@@ -748,7 +828,7 @@ export default function Admin() {
         <button
           type="button"
           className="admin-page__btn admin-page__btn--danger"
-          disabled={!bundle || saving || deleting || audioOpen}
+          disabled={!bundle || saving || deleting || audioOpen || signalsOpen}
           onClick={openDeleteDialog}
         >
           Delete setup
@@ -758,7 +838,7 @@ export default function Admin() {
       {saveError ? <div className="admin-page__error">{saveError}</div> : null}
       {saveOk ? (
         <p className="admin-page__success">
-          {audioOpen ? 'Saved audio mix.' : 'Saved. New games will use this data.'}
+          {audioOpen ? 'Saved audio mix.' : signalsOpen ? 'Saved signals.' : 'Saved. New games will use this data.'}
         </p>
       ) : null}
 

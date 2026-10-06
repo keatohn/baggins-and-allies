@@ -4,6 +4,7 @@ import type { CollisionDetection, DragEndEvent, DragStartEvent } from '@dnd-kit/
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import type { GameState, SelectedUnit, MapTransform, PendingMove } from '../types/game';
+import type { TerritorySignalMap } from '../territorySignals';
 import DraggableUnit from './DraggableUnit';
 import DragOverlay, { type BulkDragOverlayStack } from './DragOverlay';
 import MobilizationTray from './MobilizationTray';
@@ -487,6 +488,8 @@ interface GameMapProps {
    * Keeps the destination territory highlighted on the map after tap (e.g. mobile).
    */
   mobilizationPendingDestination?: string | null;
+  /** Alliance-visible pins, keyed by territory id. */
+  territorySignals?: TerritorySignalMap;
 }
 
 const MAX_SCALE = 3;
@@ -850,6 +853,7 @@ function GameMap({
   combatMoveNavalIdleSailInstanceIds = [],
   forcedNavalCombatInstanceIds = [],
   seaZoneIdsEligibleForNavalTrayStackClick = EMPTY_ELIGIBLE_SEA_ZONES_FOR_TRAY,
+  territorySignals = {},
 }: GameMapProps) {
   /** Unique territory colors for SVG glow filters (Safari doesn't render CSS drop-shadow on SVG). */
   const uniqueGlowColors = useMemo(() => {
@@ -894,8 +898,8 @@ function GameMap({
     transformRef.current = transform;
   }, [transform]);
   const [territoryCentroids, setTerritoryCentroids] = useState<Record<string, { x: number; y: number }>>({});
-  /** For larger territories: marker position (pp/logo/emojis) and unit position (stacks) can differ to avoid overlap. */
-  const [territoryPositions, setTerritoryPositions] = useState<Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number } }>>({});
+  /** For larger territories: marker position (pp/logo/emojis) and unit position (stacks) can differ to avoid overlap. `center` is the interior point used for signals and is not nudged with the unit stack. */
+  const [territoryPositions, setTerritoryPositions] = useState<Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number }; center?: { x: number; y: number } }>>({});
   const [validDropTargets, setValidDropTargets] = useState<Set<string>>(new Set());
   const [activeUnit, setActiveUnit] = useState<{
     unitId: string;
@@ -1162,9 +1166,9 @@ function GameMap({
       return;
     }
 
-    const computeCentroidsAndPositions = (): { centroids: Record<string, { x: number; y: number }>; positions: Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number } }> } => {
+    const computeCentroidsAndPositions = (): { centroids: Record<string, { x: number; y: number }>; positions: Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number }; center?: { x: number; y: number } }> } => {
       const centroids: Record<string, { x: number; y: number }> = {};
-      const positions: Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number } }> = {};
+      const positions: Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number }; center?: { x: number; y: number } }> = {};
       const bboxCenter = (b: DOMRect) => ({ x: b.x + b.width / 2, y: b.y + b.height / 2 });
 
       const osgiliathForThisMap = osgiliathCentroidsForMap(mapBase);
@@ -1484,12 +1488,16 @@ function GameMap({
         }
       });
 
+      for (const pos of Object.values(positions)) {
+        if (!pos.center) pos.center = { x: pos.unit.x, y: pos.unit.y };
+      }
+
       for (const [tid, off] of Object.entries(TERRITORY_UNIT_OFFSET_FROM_MARKER)) {
         const pos = positions[tid];
         if (!pos) continue;
         const marker = pos.marker;
         const unit = { x: marker.x + off.dx, y: marker.y + off.dy };
-        positions[tid] = { marker, unit };
+        positions[tid] = { marker, unit, center: pos.center ?? marker };
         // Keep centroid at marker anchor so move/combat arrows (which use territoryCentroids) don’t
         // originate from the nudged unit stack (e.g. Umbar’s line shooting up from under the hex).
         centroids[tid] = marker;
@@ -1499,7 +1507,7 @@ function GameMap({
       if (ringHarborForMap) {
         for (const [tid, pts] of Object.entries(ringHarborForMap)) {
           if (!positions[tid]) continue;
-          positions[tid] = { marker: pts.marker, unit: pts.unit };
+          positions[tid] = { marker: pts.marker, unit: pts.unit, center: pts.marker };
           centroids[tid] = pts.marker;
         }
       }
@@ -4474,6 +4482,40 @@ function GameMap({
                               )}
                             </div>
                           </Fragment>
+                        );
+                      })}
+                    </div>
+
+                    <div className="territory-signal-layer">
+                      {Object.entries(territorySignals).map(([territoryId, signal]) => {
+                        const layout = territoryPositions[territoryId];
+                        const anchor = layout?.center ?? layout?.marker ?? territoryCentroids[territoryId];
+                        if (!anchor || !signal?.label) return null;
+                        const screenPos = clampToMap(svgToScreen(anchor.x, anchor.y));
+                        const factionName = signal.faction_id ? factionData[signal.faction_id]?.name : '';
+                        const flagColor = signal.color || '#6b5b4b';
+                        const message = factionName ? `${signal.label} — ${factionName}` : signal.label;
+                        const selected = selectedTerritory === territoryId;
+                        return (
+                          <button
+                            key={territoryId}
+                            type="button"
+                            className={`territory-signal-flag${selected ? ' territory-signal-flag--selected' : ''}`}
+                            style={{ left: screenPos.x, top: screenPos.y }}
+                            title={message}
+                            aria-label={message}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onTerritorySelect(territoryId);
+                            }}
+                          >
+                            <svg className="territory-signal-flag__svg" viewBox="0 0 24 28" aria-hidden>
+                              <path d="M11.2 2.2v23.2" fill="none" stroke="#2a1c12" strokeWidth="1.7" strokeLinecap="round" />
+                              <path d="M12 3.2 22.2 8.4 12 13.4Z" fill={flagColor} stroke="#2a1c12" strokeWidth="0.7" strokeLinejoin="round" />
+                            </svg>
+                            {selected ? <span className="territory-signal-flag__label">{signal.label}</span> : null}
+                          </button>
                         );
                       })}
                     </div>

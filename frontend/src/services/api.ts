@@ -3,6 +3,7 @@
  */
 
 import { syncAudioFromAuthPlayer, setAudioFileGains, setMenuMusicFiles } from '../audio/gameAudio';
+import type { SignalPreset, TerritorySignalMap } from '../territorySignals';
 
 /**
  * Empty string must count as unset — otherwise fetch uses same-origin URLs and static hosts return 405 on POST.
@@ -78,6 +79,8 @@ export interface GameStateResponse {
   setup_id?: string | null;
   /** Full game event log (oldest first). Used for persistent, filterable history. */
   event_log?: PersistedEvent[];
+  /** Alliance-only territory pins visible to the authenticated player. Omitted from `state` so opponents never receive them. */
+  territory_signals?: TerritorySignalMap;
 }
 
 export interface ApiPendingMove {
@@ -857,6 +860,12 @@ export const api = {
     setMenuMusicFiles(r.menu_music);
     return r;
   },
+  getSignals: () => fetchJson<{ presets: SignalPreset[] }>('/signals'),
+  adminPutSignals: (presets: SignalPreset[]) =>
+    fetchJson<{ ok: boolean; presets: SignalPreset[] }>('/admin/signals', {
+      method: 'PUT',
+      body: JSON.stringify({ presets }),
+    }),
   adminPutAudio: async (body: { gains: AudioGainsMap; menu_music?: string[] }) => {
     const r = await fetchJson<{ ok: boolean; gains: AudioGainsMap; menu_music?: string[] }>('/admin/audio', {
       method: 'PUT',
@@ -1150,6 +1159,15 @@ export const api = {
     fetchJson<ActionResponse>(`/games/${gameId}/set-territory-defender-casualty-order`, {
       method: 'POST',
       body: JSON.stringify({ game_id: gameId, territory_id: territoryId, casualty_order: casualtyOrder }),
+    }),
+
+  setTerritorySignal: (
+    gameId: string,
+    body: { territory_id: string; preset_id?: string | null; clear?: boolean; alliance?: string | null },
+  ) =>
+    fetchJson<{ territory_signals: TerritorySignalMap }>(`/games/${gameId}/territory-signal`, {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
 
   // Retreat from combat

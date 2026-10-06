@@ -1,0 +1,25 @@
+{
+  "presets": [
+    {
+      "id": "attack",
+      "label": "Attack here",
+      "icon": "⚔️",
+      "applies_to": "enemy",
+      "color": "#b4332a"
+    },
+    {
+      "id": "reinforce",
+      "label": "Reinforce here",
+      "icon": "🛡️",
+      "applies_to": "allied",
+      "color": "#2c6e9a"
+    },
+    {
+      "id": "conquer",
+      "label": "Conquer here",
+      "icon": "⚑",
+      "applies_to": "neutral",
+      "color": "#c4922a"
+    }
+  ]
+}
