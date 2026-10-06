@@ -632,7 +632,11 @@ export interface BalanceSide {
   strongholds: number;
   stronghold_target?: number | null;
   strongholds_to_win?: number | null;
-  /** Alliance only. Negative: each stronghold still required subtracts stronghold_value. */
+  /** Strongholds on the map. Alliance rows. */
+  strongholds_on_map?: number;
+  /** Fraction of unit-plus-economy score kept for the strongholds still needed. Alliance rows. */
+  victory_kept?: number;
+  /** Alliance only. Score minus units and economy. Negative when strongholds remain. */
   victory_adjustment?: number;
   units: number;
   unit_power: number;
@@ -674,7 +678,7 @@ export interface StartingStrengthReport {
     attack_weight: number;
     defense_weight: number;
     high_production: number;
-    stronghold_value: number;
+    victory_closeness: { needed: string; kept: number }[];
     economic_coefficient: number;
     availability: { turns: string; factor: number }[];
     summary: string;

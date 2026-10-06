@@ -16,6 +16,16 @@ function place(ratio: number | null): string {
   return `${Math.round(ratio * 100)}%`;
 }
 
+function needTitle(row: BalanceSide): string | undefined {
+  if (row.strongholds_to_win == null || row.strongholds_on_map == null) return undefined;
+  const target = row.stronghold_target == null ? '' : ` Target is ${whole(row.stronghold_target)}.`;
+  const unreachable =
+    row.stronghold_target != null && row.stronghold_target > row.strongholds_on_map
+      ? ' That target is higher than the number of strongholds on the map.'
+      : '';
+  return `Still needs ${whole(row.strongholds_to_win)}. The map has ${whole(row.strongholds_on_map)} strongholds.${target}${unreachable}`;
+}
+
 function shareLabel(row: BalanceSide): string {
   if (row.starting_power_share == null) return '—';
   return `${(row.starting_power_share * 100).toFixed(1)}%`;
@@ -107,8 +117,10 @@ export function BalanceModal({
                   <div className="balance-share__evil" style={{ width: `${evilShare}%` }} />
                 </div>
                 <p className="admin-form__micro">
-                  Share of modeled starting power. Each alliance score is effective units plus discounted production, minus{' '}
-                  {report.parameters.stronghold_value} for each stronghold it still needs.
+                  Share of modeled starting power. An alliance that already holds enough strongholds takes the whole share.
+                  An alliance whose target is higher than the number of strongholds on the map cannot win and scores 0
+                  while another alliance still can. Otherwise each side keeps less of its units and economy as more
+                  strongholds remain.
                 </p>
               </div>
             ) : null}
@@ -133,12 +145,12 @@ export function BalanceModal({
                     <th title="Defense half of effective unit power">Def</th>
                     <th title="Power production per turn">PP</th>
                     <th title="Discounted production over the next few rounds">Econ</th>
-                    <th title={`Victory adjustment. Each stronghold still required subtracts ${report.parameters.stronghold_value} from the alliance score. Needing none is 0.`}>
+                    <th title="Victory adjustment. Each alliance keeps less of its units and economy as more strongholds remain. The score is 0 when another alliance has already won, or when this target is higher than the number of strongholds on the map and the other alliance can still win.">
                       VP
                     </th>
                     <th title="Alliance rows include the victory adjustment. Faction rows are units plus economy only.">Score</th>
                     <th title="Strongholds owned">S</th>
-                    <th title="Strongholds this alliance still needs. Shown on the alliance row.">Need</th>
+                    <th title="Strongholds this alliance still needs, over how many strongholds are on the map.">Need</th>
                     <th title="Territories owned. Listed only; not part of the score.">T</th>
                   </tr>
                 </thead>
@@ -159,7 +171,16 @@ export function BalanceModal({
                           <td>{score(alliance.victory_adjustment ?? 0)}</td>
                           <td>{score(alliance.starting_power_score)}</td>
                           <td>{whole(alliance.strongholds)}</td>
-                          <td>{alliance.strongholds_to_win == null ? '—' : whole(alliance.strongholds_to_win)}</td>
+                          <td title={needTitle(alliance)}>
+                            {alliance.strongholds_to_win == null || alliance.strongholds_on_map == null ? (
+                              '—'
+                            ) : (
+                              <>
+                                {whole(alliance.strongholds_to_win)}
+                                <span className="balance-need__map"> / {whole(alliance.strongholds_on_map)}</span>
+                              </>
+                            )}
+                          </td>
                           <td>{whole(alliance.territories)}</td>
                         </tr>
                         {members.map((row) => {
@@ -243,8 +264,82 @@ export function BalanceModal({
             )}
 
             <details className="balance-formula">
-              <summary>How this is calculated</summary>
-              <p>{report.parameters.summary}</p>
+              <summary>Column definitions</summary>
+              <dl className="balance-defs">
+                <dt>UP</dt>
+                <dd>IPC cost of the starting units.</dd>
+                <dt>Place</dt>
+                <dd>Share of that unit power already near an important fight. Effective unit power divided by unit power.</dd>
+                <dt>Atk</dt>
+                <dd>
+                  Attack half of effective unit power. A unit counts less the longer it takes to reach an enemy or unowned
+                  stronghold, capital, or territory producing {report.parameters.high_production} or more. Land armies do not
+                  board ships, so a stack with no land route uses the floor.
+                </dd>
+                <dt>Def</dt>
+                <dd>
+                  Defense half. A unit counts less the longer it takes to stand on a threatened friendly stronghold, capital,
+                  or territory producing {report.parameters.high_production} or more. A unit already standing on one counts in
+                  full.
+                </dd>
+                <dt>EUP</dt>
+                <dd>
+                  Effective unit power. The average of Atk and Def.
+                  <ul className="balance-defs__ladder">
+                    {report.parameters.availability.map((row) => (
+                      <li key={row.turns}>
+                        {row.turns === '1' ? '1 turn' : `${row.turns} turns`}: {Math.round(row.factor * 100)}%
+                      </li>
+                    ))}
+                  </ul>
+                </dd>
+                <dt>PP</dt>
+                <dd>Power produced per turn from owned land.</dd>
+                <dt>Econ</dt>
+                <dd>
+                  That production over the next {report.parameters.horizon_rounds} rounds, discounted by {report.parameters.discount}{' '}
+                  each round. A flat economy counts as {report.parameters.economic_coefficient.toFixed(2)} times current
+                  production. Fading territories use their printed decline.
+                </dd>
+                <dt>VP</dt>
+                <dd>
+                  How much of the unit and economy score this alliance keeps. Alliance row only. Faction rows leave this
+                  blank.
+                  <ul className="balance-defs__ladder">
+                    {report.parameters.victory_closeness.map((row) => (
+                      <li key={row.needed}>
+                        {row.needed} still needed: keep {Math.round(row.kept * 100)}%
+                      </li>
+                    ))}
+                  </ul>
+                </dd>
+                <dt>Score</dt>
+                <dd>Alliance row is EUP + Econ + VP. Faction row is EUP + Econ only.</dd>
+                <dt>S</dt>
+                <dd>Strongholds owned.</dd>
+                <dt>Need</dt>
+                <dd>
+                  Strongholds this alliance still needs, shown over how many strongholds are on the map. 3 / 13 means 3
+                  still needed on a map of 13. Alliance row only.
+                </dd>
+                <dt>T</dt>
+                <dd>Territories owned. Shown only, and left out of the score.</dd>
+                <dt>Attack</dt>
+                <dd>In the discount table, turns until that stack can attack an important target.</dd>
+                <dt>Defense</dt>
+                <dd>In the discount table, turns until that stack is defending an important friendly position.</dd>
+                <dt>Lost</dt>
+                <dd>In the discount table, unit power removed by the availability discount.</dd>
+              </dl>
+              <h4>When the share leaves the column math</h4>
+              <ul className="balance-defs__notes">
+                <li>An alliance that already holds enough strongholds takes the whole share, and the other scores 0.</li>
+                <li>
+                  An alliance whose target is higher than the number of strongholds on the map scores 0 while another alliance
+                  can still win.
+                </li>
+                <li>Neutral units and unowned strongholds stay out of the alliance split.</li>
+              </ul>
             </details>
           </>
         ) : null}

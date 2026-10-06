@@ -488,9 +488,45 @@
   color: var(--ink-faded);
 }
 
-.balance-formula p {
-  margin: 0.45rem 0 0;
-  line-height: 1.45;
+.balance-formula h4 {
+  margin: 0.85rem 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+}
+
+.balance-defs {
+  display: grid;
+  grid-template-columns: 4.75rem minmax(0, 1fr);
+  gap: 0.45rem 0.85rem;
+  margin: 0.65rem 0 0;
+  line-height: 1.4;
+}
+
+.balance-defs dt {
+  font-weight: 650;
+}
+
+.balance-defs dd {
+  margin: 0;
+}
+
+.balance-defs__ladder,
+.balance-defs__notes {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.balance-defs__ladder li + li,
+.balance-defs__notes li + li {
+  margin-top: 0.15rem;
+}
+
+.balance-need__map {
+  color: var(--ink-faded);
+  font-weight: 500;
 }
 
 .admin-modal--graph {

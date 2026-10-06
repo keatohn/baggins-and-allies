@@ -314,6 +314,8 @@ def test_fewer_strongholds_required_raises_that_side_share():
     territories = {
         "west": _territory("west", ["east"], power=100, stronghold=True),
         "east": _territory("east", ["west"], power=100, stronghold=True),
+        "north": _territory("north", ["west"], stronghold=True),
+        "south": _territory("south", ["east"], stronghold=True),
     }
     owners = {"west": "goodland", "east": "evilland"}
 
@@ -333,24 +335,71 @@ def test_fewer_strongholds_required_raises_that_side_share():
             )
         )
 
-    even = _by_id(report(2, 2)["alliances"])
-    one_fewer = _by_id(report(2, 1)["alliances"])
-    already = _by_id(report(3, 1)["alliances"])
-    assert even["good"]["strongholds_to_win"] == 1
-    assert even["evil"]["strongholds_to_win"] == 1
+    even = _by_id(report(3, 3)["alliances"])
+    one_fewer = _by_id(report(3, 2)["alliances"])
+    wider = _by_id(report(4, 2)["alliances"])
+    already = report(2, 1)
+    already_rows = _by_id(already["alliances"])
+    assert even["good"]["strongholds_to_win"] == 2
+    assert even["evil"]["strongholds_to_win"] == 2
     assert even["evil"]["starting_power_share"] == pytest.approx(0.5, abs=0.001)
-    assert one_fewer["evil"]["strongholds_to_win"] == 0
-    assert one_fewer["evil"]["victory_adjustment"] == 0
-    assert one_fewer["good"]["victory_adjustment"] == -50
+    assert one_fewer["evil"]["strongholds_to_win"] == 1
+    assert one_fewer["good"]["strongholds_to_win"] == 2
+    assert one_fewer["evil"]["victory_kept"] == pytest.approx(1)
+    assert one_fewer["good"]["victory_kept"] == pytest.approx(0.70)
+    assert one_fewer["evil"]["strongholds_on_map"] == 4
     assert one_fewer["evil"]["starting_power_share"] > even["evil"]["starting_power_share"] + 0.05
-    # Evil is already at the threshold in both. Good needing 2 instead of 1 raises Evil's share further.
-    assert already["evil"]["starting_power_share"] > one_fewer["evil"]["starting_power_share"]
-    assert any("worth 50 starting power" in line for line in report(2, 1)["readings"])
+    assert wider["good"]["victory_kept"] == pytest.approx(0.45)
+    assert wider["evil"]["starting_power_share"] > one_fewer["evil"]["starting_power_share"] + 0.08
+    assert any("keeps 100.0% of its strength" in line for line in report(3, 2)["readings"])
+    assert any("keeps 70.0%" in line for line in report(3, 2)["readings"])
+    # Each side owns 1. Evil's target of 1 means Evil has already won.
+    assert already_rows["evil"]["strongholds_to_win"] == 0
+    assert already_rows["good"]["strongholds_to_win"] == 1
+    assert already_rows["evil"]["starting_power_share"] == pytest.approx(1, abs=0.0001)
+    assert already_rows["good"]["starting_power_share"] == pytest.approx(0, abs=0.0001)
+    assert already_rows["good"]["starting_power_score"] == 0
+    assert any("wins at the start" in line for line in already["readings"])
+
+
+def test_unreachable_stronghold_target_scores_zero():
+    territories = {
+        "west": _territory("west", ["east"], power=100, stronghold=True),
+        "east": _territory("east", ["west"], power=100, stronghold=True),
+    }
+    report = compute_starting_strength(
+        _bundle(
+            territories=territories,
+            owners={"west": "goodland", "east": "evilland"},
+            units={},
+            starting_units={},
+            good_target=3,
+            evil_target=2,
+            extra_factions={
+                "goodland": {"id": "goodland", "display_name": "Goodland", "alliance": "good", "capital": "west"},
+                "evilland": {"id": "evilland", "display_name": "Evilland", "alliance": "evil", "capital": "east"},
+            },
+        )
+    )
+    alliances = _by_id(report["alliances"])
+    assert alliances["good"]["stronghold_target"] == 3
+    assert alliances["good"]["strongholds_on_map"] == 2
+    assert alliances["good"]["victory_possible"] is False
+    assert alliances["good"]["starting_power_score"] == 0
+    assert alliances["good"]["starting_power_share"] == pytest.approx(0, abs=0.0001)
+    assert alliances["evil"]["strongholds_to_win"] == 1
+    assert alliances["evil"]["starting_power_share"] == pytest.approx(1, abs=0.0001)
+    text = " ".join(report["readings"])
+    assert "map has 2" in text
+    assert "Good cannot win" in text
+    assert "Evil takes the whole share" in text
 
 
 def test_strongholds_to_win_is_the_remaining_burden():
     territories, owners = _line_map()
     territories["border"] = _territory("border", ["mid", "gate"], power=1, stronghold=True)
+    territories["north"] = _territory("north", ["border"], stronghold=True)
+    territories["south"] = _territory("south", ["dark"], stronghold=True)
     report = compute_starting_strength(
         _bundle(
             territories=territories,
@@ -366,9 +415,12 @@ def test_strongholds_to_win_is_the_remaining_burden():
     assert alliances["good"]["strongholds_to_win"] == 3
     assert alliances["evil"]["strongholds"] == 1
     assert alliances["evil"]["strongholds_to_win"] == 0
+    assert alliances["evil"]["starting_power_share"] == pytest.approx(1, abs=0.0001)
+    assert alliances["good"]["starting_power_score"] == 0
     text = " ".join(report["readings"])
     assert "needs 3 more strongholds" in text
     assert "already holds enough strongholds" in text
+    assert "wins at the start" in text
 
 
 def test_neutral_units_stay_out_of_the_alliance_split():

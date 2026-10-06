@@ -7,10 +7,15 @@ Three separate readings, then one optional index:
   a stack needs before it can affect an important attack or defense.
 - Flow: economic power. Future production over a short horizon, discounted,
   with fading-territory schedules applied turn by turn.
-- Victory pressure: each stronghold an alliance still needs subtracts a fixed
-  amount from that alliance's score. Needing none removes the penalty.
+- Victory pressure: an alliance keeps a smaller share of its units and economy
+  as more strongholds remain. One still needed keeps the full score. If one
+  alliance already holds enough and another still needs more, the first has
+  won at the start and takes the whole share. A target higher than the number
+  of strongholds on the map cannot be met, so that alliance scores 0 while
+  another alliance can still win.
 
-    SPS = EUP + EP - stronghold_value * strongholds_still_needed
+    SPS = (EUP + EP) * closeness(strongholds_still_needed)
+    already won at the start -> that alliance's share is 1 and the other scores 0
     EUP = attack_weight * EUP_attack + defense_weight * EUP_defense
     EP  = sum_{t=1..H} discount^t * PP_t
 
@@ -45,10 +50,19 @@ class BalanceConfig:
     attack_weight: float = 0.5
     defense_weight: float = 0.5
     high_production: int = 3
-    # One stronghold still required is about one side's economic lead on the War of the Ring setup.
-    stronghold_value: int = 50
+    # Fraction of unit-plus-economy score kept when 1, 2, 3, or 4 strongholds are still needed.
+    victory_closeness: tuple[float, float, float, float] = (1.0, 0.70, 0.45, 0.28)
+    victory_closeness_floor: float = 0.18
     availability_by_turns: tuple[float, float, float, float] = (1.0, 0.8, 0.6, 0.4)
     availability_floor: float = 0.25
+
+    def closeness(self, needed: int) -> float:
+        if needed <= 1:
+            return self.victory_closeness[0]
+        index = needed - 1
+        if index < len(self.victory_closeness):
+            return self.victory_closeness[index]
+        return self.victory_closeness_floor
 
     def availability(self, turns: int | None) -> float:
         if turns is None or turns >= len(self.availability_by_turns):
@@ -81,6 +95,8 @@ class _Faction:
     display_name: str
     alliance: str
     capital: str
+    parent: str = ""
+    is_subfaction: bool = False
 
 
 @dataclass(frozen=True)
@@ -178,9 +194,9 @@ def compute_starting_strength(
 
     accs = {fid: _Acc() for fid in faction_ids}
     for fid in faction_ids:
-        _add_economy(accs[fid], fid, territories, owners, rules, cfg)
+        _add_economy(accs[fid], fid, territories, owners, factions, rules, cfg)
     for stack in stacks:
-        faction = factions.get(stack.unit.faction)
+        faction = _controlled_faction(stack.unit.faction, factions)
         if not faction or faction.alliance in ("", "neutral"):
             continue
         acc = accs.get(faction.id)
@@ -203,7 +219,8 @@ def compute_starting_strength(
 
     neutral = _neutral_summary(territories, factions, owners, stacks)
     faction_rows = [_faction_row(factions[fid], accs[fid]) for fid in faction_ids]
-    alliance_rows = _alliance_rows(alliances, faction_rows, manifest, cfg)
+    map_strongholds = sum(1 for terr in territories.values() if terr.is_stronghold)
+    alliance_rows = _alliance_rows(alliances, faction_rows, manifest, cfg, map_strongholds)
     discounts = _largest_discounts(faction_rows)
     for row in faction_rows:
         for key in [k for k in row if k.startswith("_")]:
@@ -215,7 +232,7 @@ def compute_starting_strength(
         "alliances": alliance_rows,
         "neutral": neutral,
         "largest_discounts": discounts,
-        "readings": _readings(alliance_rows, cfg.horizon_rounds, cfg.stronghold_value),
+        "readings": _readings(alliance_rows, cfg.horizon_rounds),
     }
 
 
@@ -226,10 +243,16 @@ def _parameters(cfg: BalanceConfig) -> dict[str, Any]:
         for i, factor_i in enumerate(cfg.availability_by_turns)
     ]
     ladder.append({"turns": f"{len(cfg.availability_by_turns)}+", "factor": cfg.availability_floor})
+    closeness = _closeness_ladder(cfg)
     summary = (
-        "Starting power score is effective unit power plus discounted production, minus "
-        f"{cfg.stronghold_value} for each stronghold that alliance still needs in order to win. "
-        "Needing none removes that penalty. "
+        "Starting power score keeps a smaller share of effective unit power plus discounted production "
+        "as more strongholds are still needed. "
+        + ", ".join(f"{row['needed']} still needed keeps {_pct(row['kept'])}" for row in closeness)
+        + ". "
+        "If an alliance already holds enough strongholds and another still needs more, "
+        "the first has won at the start and takes the whole share. "
+        "A target higher than the number of strongholds on the map cannot be met, "
+        "so that alliance scores 0 while another alliance can still win. "
         "Attack availability is how soon a unit can reach an enemy or unowned stronghold, "
         "capital, or territory producing "
         f"{cfg.high_production} or more. Defense availability is how soon it can stand on a "
@@ -251,7 +274,7 @@ def _parameters(cfg: BalanceConfig) -> dict[str, Any]:
         "attack_weight": cfg.attack_weight,
         "defense_weight": cfg.defense_weight,
         "high_production": cfg.high_production,
-        "stronghold_value": cfg.stronghold_value,
+        "victory_closeness": closeness,
         "economic_coefficient": _q(factor),
         "availability": ladder,
         "summary": summary,
@@ -263,6 +286,7 @@ def _add_economy(
     faction_id: str,
     territories: dict[str, _Territory],
     owners: dict[str, str],
+    factions: dict[str, _Faction],
     rules: Any,
     cfg: BalanceConfig,
 ) -> None:
@@ -270,7 +294,13 @@ def _add_economy(
     for turn in range(1, cfg.horizon_rounds + 1):
         produced = 0
         for tid, owner in owners.items():
-            if owner != faction_id:
+            owner_faction = factions.get(owner)
+            controlled = owner == faction_id or (
+                owner_faction is not None
+                and owner_faction.is_subfaction
+                and owner_faction.parent == faction_id
+            )
+            if not controlled:
                 continue
             terr = territories.get(tid)
             if not terr or terr.is_sea:
@@ -279,6 +309,9 @@ def _add_economy(
                 acc.territories += 1
                 if terr.is_stronghold:
                     acc.strongholds += 1
+            # Subfaction land is counted above. It does not add power until a subfaction rule says so.
+            if owner != faction_id:
+                continue
             produced += effective_territory_power(terr.power, turn, rules, tid)
         schedule.append(produced)
     acc.power_production = schedule[0] if schedule else 0
@@ -503,7 +536,7 @@ def _occupied_seas(
     for stack in stacks:
         if stack.unit.mobility != "sea":
             continue
-        faction = factions.get(stack.unit.faction)
+        faction = _controlled_faction(stack.unit.faction, factions)
         if not faction:
             continue
         is_enemy = faction.alliance not in ("", "neutral", alliance)
@@ -588,7 +621,7 @@ def _neutral_summary(
     units = 0
     unit_power = 0
     for stack in stacks:
-        faction = factions.get(stack.unit.faction)
+        faction = _controlled_faction(stack.unit.faction, factions)
         if not faction or faction.alliance in ("", "neutral"):
             units += stack.count
             unit_power += stack.power
@@ -633,10 +666,10 @@ def _alliance_rows(
     faction_rows: list[dict[str, Any]],
     manifest: dict[str, Any],
     cfg: BalanceConfig,
+    map_strongholds: int,
 ) -> list[dict[str, Any]]:
     thresholds = _stronghold_thresholds(manifest)
     rows: list[dict[str, Any]] = []
-    raw_scores: list[float] = []
     for alliance in alliances:
         members = [row for row in faction_rows if row["alliance"] == alliance]
         eup = sum(row["_eup_raw"] for row in members)
@@ -644,9 +677,7 @@ def _alliance_rows(
         owned = sum(int(row["strongholds"]) for row in members)
         target = thresholds.get(alliance)
         needed = None if target is None else max(0, target - owned)
-        victory = 0.0 if needed is None else -cfg.stronghold_value * needed
-        score = max(0.0, eup + economic + victory)
-        raw_scores.append(score)
+        resource = eup + economic
         rows.append(
             {
                 "id": alliance,
@@ -655,7 +686,8 @@ def _alliance_rows(
                 "strongholds": owned,
                 "stronghold_target": target,
                 "strongholds_to_win": needed,
-                "victory_adjustment": _q(victory),
+                "victory_kept": 1.0,
+                "victory_adjustment": 0,
                 "units": sum(int(row["units"]) for row in members),
                 "unit_power": sum(int(row["unit_power"]) for row in members),
                 "effective_unit_power_attack": _q(sum(row["_eup_attack_raw"] for row in members)),
@@ -667,10 +699,13 @@ def _alliance_rows(
                 "unreachable_attack_power": sum(int(row["unreachable_attack_power"]) for row in members),
                 "power_production": sum(int(row["power_production"]) for row in members),
                 "economic_power": _q(economic),
-                "starting_power_score": _q(score),
-                "_score_raw": score,
+                "starting_power_score": _q(resource),
+                "_score_raw": resource,
+                "_resource_raw": resource,
             }
         )
+    _apply_victory_outcomes(rows, map_strongholds, cfg)
+    raw_scores = [float(row["_score_raw"]) for row in rows]
     total = sum(raw_scores)
     if total > 0 and rows:
         if len(rows) == 1:
@@ -685,7 +720,82 @@ def _alliance_rows(
             row["starting_power_share"] = None
     for row in rows:
         row.pop("_score_raw", None)
+        row.pop("_resource_raw", None)
     return rows
+
+
+def _wipe_score(row: dict[str, Any]) -> None:
+    row["victory_kept"] = 0.0
+    row["victory_adjustment"] = _q(-float(row["_resource_raw"]))
+    row["starting_power_score"] = 0
+    row["_score_raw"] = 0.0
+
+
+def _grant_share_tokens(rows: list[dict[str, Any]], takers: list[dict[str, Any]]) -> None:
+    """Give the remaining share to takers when every displayed score is already zero."""
+    if not takers or sum(float(row["_score_raw"]) for row in rows) > 0:
+        return
+    share = _q(1 / len(takers), "0.0001")
+    taker_ids = {id(row) for row in takers}
+    for row in rows:
+        row["_score_raw"] = share if id(row) in taker_ids else 0.0
+
+
+def _apply_closeness(row: dict[str, Any], cfg: BalanceConfig) -> None:
+    needed = row.get("strongholds_to_win")
+    if not isinstance(needed, int) or needed <= 0:
+        row["victory_kept"] = 1.0
+        return
+    factor = cfg.closeness(needed)
+    resource = float(row["_resource_raw"])
+    score = resource * factor
+    row["victory_kept"] = factor
+    row["_score_raw"] = score
+    row["starting_power_score"] = _q(score)
+    row["victory_adjustment"] = _q(score - resource)
+
+
+def _apply_victory_outcomes(rows: list[dict[str, Any]], map_strongholds: int, cfg: BalanceConfig) -> None:
+    """Turn an already-decided or unreachable stronghold target into the share."""
+    for row in rows:
+        row["strongholds_on_map"] = map_strongholds
+        target = row.get("stronghold_target")
+        needed = row.get("strongholds_to_win")
+        if not isinstance(target, int) or not isinstance(needed, int):
+            row["victory_possible"] = None
+            row["_victory_status"] = "unset"
+            continue
+        if target > map_strongholds:
+            row["victory_possible"] = False
+            row["_victory_status"] = "impossible"
+            continue
+        row["victory_possible"] = True
+        row["_victory_status"] = "won" if needed <= 0 else "open"
+
+    won = [row for row in rows if row["_victory_status"] == "won"]
+    impossible = [row for row in rows if row["_victory_status"] == "impossible"]
+    open_rows = [row for row in rows if row["_victory_status"] == "open"]
+    others = [row for row in rows if row["_victory_status"] != "won"]
+    for row in open_rows:
+        _apply_closeness(row, cfg)
+
+    if won and others:
+        for row in others:
+            _wipe_score(row)
+        _grant_share_tokens(rows, won)
+    elif impossible and open_rows:
+        for row in impossible:
+            _wipe_score(row)
+        _grant_share_tokens(rows, open_rows)
+    elif impossible and not open_rows and not won:
+        for row in impossible:
+            resource = float(row["_resource_raw"])
+            row["_score_raw"] = resource
+            row["starting_power_score"] = _q(resource)
+            row["victory_adjustment"] = 0
+
+    for row in rows:
+        row.pop("_victory_status", None)
 
 
 def _largest_discounts(faction_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -704,7 +814,7 @@ def _largest_discounts(faction_rows: list[dict[str, Any]]) -> list[dict[str, Any
     return found[:8]
 
 
-def _readings(alliances: list[dict[str, Any]], horizon: int, stronghold_value: int) -> list[str]:
+def _readings(alliances: list[dict[str, Any]], horizon: int) -> list[str]:
     scored = [row for row in alliances if row.get("starting_power_share") is not None]
     lines: list[str] = []
     if len(scored) >= 2:
@@ -753,7 +863,12 @@ def _readings(alliances: list[dict[str, Any]], horizon: int, stronghold_value: i
         needed = row.get("strongholds_to_win")
         if needed is None:
             continue
-        if needed == 0:
+        if row.get("victory_possible") is False:
+            victory_bits.append(
+                f"{row['display_name']} must hold {row.get('stronghold_target')} strongholds to win, "
+                f"and the map has {row.get('strongholds_on_map')}, so {row['display_name']} cannot win"
+            )
+        elif needed == 0:
             victory_bits.append(f"{row['display_name']} already holds enough strongholds to win")
         elif needed == 1:
             victory_bits.append(f"{row['display_name']} needs 1 more stronghold to win")
@@ -761,16 +876,31 @@ def _readings(alliances: list[dict[str, Any]], horizon: int, stronghold_value: i
             victory_bits.append(f"{row['display_name']} needs {needed} more strongholds to win")
     if victory_bits:
         lines.append(". ".join(_sentence(bit) for bit in victory_bits) + ".")
-    valued = [row for row in alliances if isinstance(row.get("strongholds_to_win"), int)]
-    if len(valued) >= 2:
-        lightest = min(valued, key=lambda row: row["strongholds_to_win"])
-        heaviest = max(valued, key=lambda row: row["strongholds_to_win"])
+    won = [row for row in alliances if row.get("victory_possible") is True and row.get("strongholds_to_win") == 0]
+    impossible = [row for row in alliances if row.get("victory_possible") is False]
+    open_rows = [
+        row for row in alliances
+        if row.get("victory_possible") is True and isinstance(row.get("strongholds_to_win"), int) and row["strongholds_to_win"] > 0
+    ]
+    if won and (impossible or open_rows):
+        name = won[0]["display_name"]
+        other = (impossible + open_rows)[0]["display_name"]
+        lines.append(f"{name} wins at the start, so {name} takes the whole share and {other} scores 0.")
+    elif impossible and open_rows:
+        name = open_rows[0]["display_name"]
+        lines.append(f"{name} takes the whole share.")
+    elif impossible and not open_rows and not won:
+        lines.append("No alliance can reach its stronghold target, so the share compares units and economy only.")
+    elif len(open_rows) >= 2:
+        lightest = min(open_rows, key=lambda row: row["strongholds_to_win"])
+        heaviest = max(open_rows, key=lambda row: row["strongholds_to_win"])
         gap = heaviest["strongholds_to_win"] - lightest["strongholds_to_win"]
         if gap > 0:
             noun = "stronghold" if gap == 1 else "strongholds"
             lines.append(
                 f"{lightest['display_name']} needs {gap} fewer {noun} than {heaviest['display_name']}, "
-                f"worth {gap * stronghold_value} starting power."
+                f"so {lightest['display_name']} keeps {_pct(lightest['victory_kept'])} of its strength "
+                f"and {heaviest['display_name']} keeps {_pct(heaviest['victory_kept'])}."
             )
 
     for row in alliances:
@@ -782,6 +912,15 @@ def _readings(alliances: list[dict[str, Any]], horizon: int, stronghold_value: i
                 "so that portion stays at the availability floor. Land armies do not board ships in this model."
             )
     return lines
+
+
+def _closeness_ladder(cfg: BalanceConfig) -> list[dict[str, Any]]:
+    rows = [
+        {"needed": str(index + 1), "kept": factor}
+        for index, factor in enumerate(cfg.victory_closeness)
+    ]
+    rows.append({"needed": f"{len(cfg.victory_closeness) + 1}+", "kept": cfg.victory_closeness_floor})
+    return rows
 
 
 def _sentence(text: str) -> str:
@@ -801,8 +940,21 @@ def _stronghold_thresholds(manifest: dict[str, Any]) -> dict[str, int]:
     return out
 
 
+def _controlled_faction(faction_id: str, factions: dict[str, _Faction]) -> _Faction | None:
+    """Playable faction row for a faction or subfaction id."""
+    faction = factions.get(faction_id)
+    if faction is None:
+        return None
+    if faction.is_subfaction and faction.parent:
+        return factions.get(faction.parent) or faction
+    return faction
+
+
 def _faction_order(factions: dict[str, _Faction], turn_order: list[str]) -> list[str]:
-    scored = [fid for fid, faction in factions.items() if faction.alliance not in ("", "neutral")]
+    scored = [
+        fid for fid, faction in factions.items()
+        if faction.alliance not in ("", "neutral") and not faction.is_subfaction
+    ]
     ordered = [fid for fid in turn_order if fid in scored]
     ordered.extend(fid for fid in scored if fid not in ordered)
     return ordered
@@ -871,12 +1023,31 @@ def _parse_factions(raw: dict[str, Any]) -> dict[str, _Faction]:
         fid = value.get("id") if isinstance(value.get("id"), str) and value.get("id") else key
         alliance = value.get("alliance")
         capital = value.get("capital")
+        alliance_s = alliance.strip().lower() if isinstance(alliance, str) else ""
         out[fid] = _Faction(
             id=fid,
             display_name=_text(value.get("display_name"), fid),
-            alliance=alliance.strip().lower() if isinstance(alliance, str) else "",
+            alliance=alliance_s,
             capital=capital.strip() if isinstance(capital, str) else "",
         )
+        subs = value.get("subfactions")
+        if not isinstance(subs, list):
+            continue
+        for sub in subs:
+            if not isinstance(sub, dict):
+                continue
+            sid = sub.get("id")
+            if not isinstance(sid, str) or not sid.strip():
+                continue
+            sid = sid.strip()
+            out[sid] = _Faction(
+                id=sid,
+                display_name=_text(sub.get("display_name"), sid),
+                alliance=alliance_s,
+                capital="",
+                parent=fid,
+                is_subfaction=True,
+            )
     return out
 
 
