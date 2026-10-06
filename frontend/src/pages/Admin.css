@@ -216,6 +216,10 @@
   white-space: pre-wrap;
 }
 
+.admin-page__error-action {
+  margin-top: 0.65rem;
+}
+
 .admin-page__error-hint {
   display: block;
   margin-top: 0.5rem;

@@ -19,6 +19,7 @@ import type { SignalPreset } from '../territorySignals';
 import { isValidSetupId } from './admin/setupId';
 import { BalanceModal } from './admin/BalanceModal';
 import { previewStatsFromBundle } from './admin/previewStats';
+import { completeTerritoryAsymmetries } from './admin/territoryGraph';
 import { GameStatsModal, UnitStatsModal } from '../components/StatsModals';
 import './Admin.css';
 
@@ -284,6 +285,7 @@ export default function Admin() {
   const [loadingBundle, setLoadingBundle] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [resolveAsymmetriesOpen, setResolveAsymmetriesOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -300,6 +302,7 @@ export default function Admin() {
   const audioJson = useMemo(() => ({ gains: audioGains, menu_music: menuMusic }), [audioGains, menuMusic]);
   const signalsJson = useMemo(() => ({ presets: signalPresets }), [signalPresets]);
   const statsPreview = useMemo(() => previewStatsFromBundle(bundle), [bundle]);
+  const asymmetryError = Boolean(saveError?.includes('territory graph asymmetry'));
 
   const useJson = jsonTab[activeTab] === true;
 
@@ -427,6 +430,20 @@ export default function Admin() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const confirmResolveAsymmetries = () => {
+    if (!bundle?.territories || typeof bundle.territories !== 'object' || Array.isArray(bundle.territories)) return;
+    const territories = completeTerritoryAsymmetries(bundle.territories as Record<string, Record<string, unknown>>);
+    setBundle({ ...bundle, territories });
+    const remaining = (saveError ?? '')
+      .split('; ')
+      .filter((part) => !part.includes('territory graph asymmetry'))
+      .join('; ')
+      .trim();
+    setSaveError(remaining || null);
+    setSaveOk(false);
+    setResolveAsymmetriesOpen(false);
   };
 
   const onCreatedSetup = (id: string) => {
@@ -850,6 +867,16 @@ export default function Admin() {
       </div>
 
       {saveError ? <div className="admin-page__error">{saveError}</div> : null}
+      {asymmetryError ? (
+        <button
+          type="button"
+          className="admin-page__btn admin-page__error-action"
+          disabled={!bundle || saving}
+          onClick={() => setResolveAsymmetriesOpen(true)}
+        >
+          Resolve Asymmetries
+        </button>
+      ) : null}
       {saveOk ? (
         <p className="admin-page__success">
           {audioOpen ? 'Saved audio mix.' : signalsOpen ? 'Saved signals.' : 'Saved. New games will use this data.'}
@@ -857,6 +884,32 @@ export default function Admin() {
       ) : null}
 
       <CreateSetupDialog open={createOpen} onClose={() => setCreateOpen(false)} setups={setups} onCreated={onCreatedSetup} />
+      {resolveAsymmetriesOpen && (
+        <div className="admin-modal-overlay" role="presentation" onClick={() => setResolveAsymmetriesOpen(false)}>
+          <div
+            className="admin-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-resolve-asymmetries-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="admin-resolve-asymmetries-title" className="admin-modal__title">
+              Resolve asymmetries?
+            </h2>
+            <p className="admin-form__micro">
+              Are you sure? This will assume that adjacencies are missing and update the territory graph to complete all graph asymmetries.
+            </p>
+            <div className="admin-modal__actions">
+              <button type="button" className="admin-page__btn" onClick={() => setResolveAsymmetriesOpen(false)}>
+                Cancel
+              </button>
+              <button type="button" className="admin-page__btn admin-page__btn--primary" onClick={confirmResolveAsymmetries}>
+                Resolve asymmetries
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {deleteOpen && (
         <div className="admin-modal-overlay" role="presentation" onClick={closeDeleteDialog}>
           <div

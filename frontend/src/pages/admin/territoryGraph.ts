@@ -287,3 +287,38 @@ export function adjacencyEdges(
   }
   return out;
 }
+
+const TERRITORY_EDGE_FIELDS = ['adjacent', 'aerial_adjacent', 'ford_adjacent'] as const;
+
+function neighborIds(def: Record<string, unknown> | undefined, field: string): string[] {
+  const raw = def?.[field];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((id): id is string => typeof id === 'string');
+}
+
+function isTerritory(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Add the missing reverse id for every one-way adjacent, aerial, or ford edge. */
+export function completeTerritoryAsymmetries(
+  territories: Record<string, Record<string, unknown>>,
+): Record<string, Record<string, unknown>> {
+  const next: Record<string, Record<string, unknown>> = { ...territories };
+  for (const field of TERRITORY_EDGE_FIELDS) {
+    for (const tid of Object.keys(next)) {
+      const def = next[tid];
+      if (!isTerritory(def)) continue;
+      for (const other of neighborIds(def, field)) {
+        const otherDef = next[other];
+        if (!isTerritory(otherDef)) continue;
+        const rawBack = otherDef[field];
+        if (rawBack != null && !Array.isArray(rawBack)) continue;
+        const back = neighborIds(otherDef, field);
+        if (back.includes(tid)) continue;
+        next[other] = { ...otherDef, [field]: [...back, tid] };
+      }
+    }
+  }
+  return next;
+}
