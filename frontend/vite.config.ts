@@ -68,6 +68,12 @@ export default defineConfig({
       ext: '.png',
     }),
     publicFilenamesPlugin({
+      name: 'faction-icon-png',
+      virtualId: 'virtual:faction-icon-png',
+      relDir: 'public/assets/factions',
+      ext: '.png',
+    }),
+    publicFilenamesPlugin({
       name: 'territory-image-png',
       virtualId: 'virtual:territory-image-png',
       relDir: 'public/assets/territories',

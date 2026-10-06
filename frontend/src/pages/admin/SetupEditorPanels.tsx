@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import MUSIC_M4A from 'virtual:music-m4a';
 import UNIT_ICON_PNG from 'virtual:unit-icon-png';
+import FACTION_ICON_PNG from 'virtual:faction-icon-png';
 import TERRITORY_IMAGE_PNG from 'virtual:territory-image-png';
 import { TerritoryGraphPane } from './TerritoryGraphPane';
 import type { AdminSetupBundle } from '../../services/api';
@@ -288,6 +289,19 @@ function AssetPngField({
         ))}
       </select>
     </div>
+  );
+}
+
+function FactionIconField({ value, onApply }: { value: unknown; onApply: (icon: string | undefined) => void }) {
+  return (
+    <AssetPngField
+      value={value}
+      files={FACTION_ICON_PNG}
+      dir="factions"
+      noneLabel="None (uses faction id)"
+      ariaLabel="Faction icon"
+      onApply={onApply}
+    />
   );
 }
 
@@ -1014,8 +1028,8 @@ export function FactionsPanel({
             <FactionColorField value={f.color} onApply={(color) => patch({ color })} />,
           )}
           {fieldRow(
-            'Icon filename',
-            <input type="text" className="admin-form__input" value={String(f.icon ?? '')} onChange={(e) => patch({ icon: e.target.value || undefined })} />,
+            'Icon',
+            <FactionIconField value={f.icon} onApply={(icon) => patch({ icon })} />,
           )}
           {fieldRow(
             'Music',
