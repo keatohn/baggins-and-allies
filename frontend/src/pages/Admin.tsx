@@ -640,30 +640,44 @@ export default function Admin() {
         <Link to="/" className="page-menu-btn">
           Menu
         </Link>
-        <button
-          type="button"
-          className={`page-menu-btn${audioOpen ? ' admin-page__audio-btn--active' : ''}`}
-          onClick={() => {
-            setAudioOpen((open) => !open);
-            setSignalsOpen(false);
-            setSaveOk(false);
-            setSaveError(null);
-          }}
-        >
-          Audio
-        </button>
-        <button
-          type="button"
-          className={`page-menu-btn${signalsOpen ? ' admin-page__audio-btn--active' : ''}`}
-          onClick={() => {
-            setSignalsOpen((open) => !open);
-            setAudioOpen(false);
-            setSaveOk(false);
-            setSaveError(null);
-          }}
-        >
-          Signals
-        </button>
+        <div className="admin-page__nav-tools">
+          <button
+            type="button"
+            className={`page-menu-btn${!audioOpen && !signalsOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => {
+              setAudioOpen(false);
+              setSignalsOpen(false);
+              setSaveOk(false);
+              setSaveError(null);
+            }}
+          >
+            Setups
+          </button>
+          <button
+            type="button"
+            className={`page-menu-btn${audioOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => {
+              setAudioOpen(true);
+              setSignalsOpen(false);
+              setSaveOk(false);
+              setSaveError(null);
+            }}
+          >
+            Audio
+          </button>
+          <button
+            type="button"
+            className={`page-menu-btn${signalsOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => {
+              setSignalsOpen(true);
+              setAudioOpen(false);
+              setSaveOk(false);
+              setSaveError(null);
+            }}
+          >
+            Signals
+          </button>
+        </div>
       </div>
 
       {signalsOpen ? (

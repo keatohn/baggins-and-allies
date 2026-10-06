@@ -245,21 +245,29 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 0.75rem;
   margin-bottom: 0.75rem;
+}
+
+.admin-page__nav-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
 }
 
 .admin-page__nav .page-menu-btn {
   margin-bottom: 0;
 }
 
-.admin-page__nav .page-menu-btn.admin-page__audio-btn--active {
+.admin-page__nav .page-menu-btn.admin-page__nav-btn--active {
   background: var(--ink);
   color: var(--parchment);
   border-color: var(--ink);
 }
 
-.admin-page__nav .page-menu-btn.admin-page__audio-btn--active:hover:not(:disabled) {
+.admin-page__nav .page-menu-btn.admin-page__nav-btn--active:hover:not(:disabled) {
   background: var(--ink);
   color: var(--parchment);
   border-color: var(--ink);
