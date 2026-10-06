@@ -26,16 +26,60 @@ def timeline_image_filename(manifest: dict[str, Any]) -> str | None:
     return name
 
 
-def scenario_menu_entry(manifest: dict[str, Any], folder_id: str) -> dict[str, Any]:
+def alliance_counts(context: dict[str, Any], factions: dict[str, Any]) -> tuple[int, int]:
+    """Good and evil counts for the factions named in manifest context."""
+    by_label: dict[str, str] = {}
+    for fid, raw in factions.items():
+        if not isinstance(raw, dict):
+            continue
+        alliance = str(raw.get("alliance") or "").strip().lower()
+        by_label[str(fid)] = alliance
+        display = raw.get("display_name")
+        if isinstance(display, str) and display.strip():
+            by_label[display.strip()] = alliance
+    names = context.get("factions")
+    listed = [name.strip() for name in names if isinstance(name, str) and name.strip()] if isinstance(names, list) else []
+    good = evil = 0
+    if listed:
+        for name in listed:
+            alliance = by_label.get(name)
+            if alliance == "good":
+                good += 1
+            elif alliance == "evil":
+                evil += 1
+        return good, evil
+    for raw in factions.values():
+        if not isinstance(raw, dict):
+            continue
+        alliance = str(raw.get("alliance") or "").strip().lower()
+        if alliance == "good":
+            good += 1
+        elif alliance == "evil":
+            evil += 1
+    return good, evil
+
+
+def scenario_menu_entry(
+    manifest: dict[str, Any],
+    folder_id: str,
+    factions: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """One create-game menu row. Includes timeline_image when the manifest names a scenario asset."""
     sid = manifest.get("id", folder_id)
     if not isinstance(sid, str) or not sid:
         sid = folder_id
+    ctx = manifest.get("context")
+    if isinstance(ctx, dict):
+        ctx = dict(ctx)
+        if isinstance(factions, dict):
+            good, evil = alliance_counts(ctx, factions)
+            ctx["good_count"] = good
+            ctx["evil_count"] = evil
     entry: dict[str, Any] = {
         "id": sid,
         "display_name": manifest.get("display_name", folder_id),
         "map_asset": manifest.get("map_asset", folder_id),
-        "context": manifest.get("context"),
+        "context": ctx,
     }
     image = timeline_image_filename(manifest)
     if image is not None:
@@ -180,7 +224,17 @@ def list_setups() -> list[dict]:
         ctx = m.get("context")
         if not isinstance(ctx, dict) or not ctx:
             continue
-        entry = scenario_menu_entry(m, setup_id)
+        factions: dict[str, Any] = {}
+        factions_path = d / "factions.json"
+        if factions_path.is_file():
+            try:
+                with open(factions_path, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    factions = loaded
+            except (json.JSONDecodeError, OSError):
+                factions = {}
+        entry = scenario_menu_entry(m, setup_id, factions)
         rows.append((menu_order_sort_value(m), str(entry["id"]), entry))
     rows.sort(key=lambda t: (t[0], t[1]))
     return [t[2] for t in rows]

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { SetupInfo } from '../services/api';
 import {
   AGES,
@@ -12,12 +12,24 @@ import './ScenarioTimeline.css';
 
 const TICKS = scaleTickFractions();
 
-function scenarioMeta(scenario: SetupInfo): string {
-  const parts: string[] = [];
-  if (scenario.context?.map) parts.push(scenario.context.map);
-  const count = scenario.context?.faction_count ?? scenario.context?.factions?.length;
-  if (count != null) parts.push(`${count} ${count === 1 ? 'faction' : 'factions'}`);
-  return parts.join(' · ');
+function ScenarioMetaLine({ scenario, showYear }: { scenario: SetupInfo; showYear: boolean }) {
+  const ctx = scenario.context;
+  const count = ctx?.faction_count ?? ctx?.factions?.length;
+  const parts: ReactNode[] = [];
+  const add = (key: string, node: ReactNode) => {
+    if (parts.length > 0) parts.push(<span key={`${key}-sep`}> · </span>);
+    parts.push(<span key={key}>{node}</span>);
+  };
+  if (showYear && ctx?.year) add('year', ctx.year);
+  if (count != null) {
+    add('count', <span className="chronicle__option-count">{count} {count === 1 ? 'faction' : 'factions'}</span>);
+  }
+  if (ctx?.good_count != null && ctx?.evil_count != null) {
+    add('sides', `${ctx.good_count}vs${ctx.evil_count}`);
+  }
+  if (ctx?.map) add('map', ctx.map);
+  if (parts.length === 0) return null;
+  return <span className="chronicle__option-meta">{parts}</span>;
 }
 
 function Frame({ image, age }: { image: string | null; age: string }) {
@@ -231,9 +243,7 @@ function ScenarioChoice({
       onClick={() => onSelect(scenario.id)}
     >
       <span className="chronicle__option-name">{scenario.display_name}</span>
-      <span className="chronicle__option-meta">
-        {[showYear ? scenario.context?.year : null, scenarioMeta(scenario)].filter(Boolean).join(' · ')}
-      </span>
+      <ScenarioMetaLine scenario={scenario} showYear={showYear} />
       {Array.isArray(factions) && factions.length > 0 && (
         <span className="chronicle__option-factions">{factions.join(', ')}</span>
       )}

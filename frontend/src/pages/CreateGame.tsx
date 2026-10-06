@@ -15,6 +15,7 @@ export default function CreateGame() {
   const [setupsError, setSetupsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [step, setStep] = useState<'scenario' | 'settings'>('scenario');
 
   // Backend returns only is_active + context scenarios; frontend filter matches that contract
   const scenariosWithContext = setups.filter(
@@ -73,83 +74,107 @@ export default function CreateGame() {
     }
   };
 
+  const selectedScenario = scenariosWithContext.find((s) => s.id === selectedSetupId) ?? null;
+
   return (
     <div className="create-game-page">
       <h1 className="create-game-page__title">Create game</h1>
-      <form className="create-game-form" onSubmit={handleSubmit}>
-        {error && <p className="create-game-form__error">{error}</p>}
-        <div className="create-game-form__field create-game-form__field--scenario">
-          <span className="create-game-form__field-label">Scenario</span>
-          {loadingSetups ? (
-            <p className="create-game-form__hint">Loading scenarios…</p>
-          ) : setupsError ? (
-            <p className="create-game-form__error create-game-form__hint" role="alert">
-              {setupsError}
-            </p>
-          ) : scenariosWithContext.length === 0 ? (
-            <p className="create-game-form__hint">No scenarios available.</p>
-          ) : (
-            <ScenarioTimeline
-              scenarios={scenariosWithContext}
-              selectedId={selectedSetupId}
-              onSelect={setSelectedSetupId}
-            />
+      {step === 'scenario' ? (
+        <div className="create-game-form">
+          <div className="create-game-form__field create-game-form__field--scenario">
+            <span className="create-game-form__field-label">Scenario</span>
+            {loadingSetups ? (
+              <p className="create-game-form__hint">Loading scenarios…</p>
+            ) : setupsError ? (
+              <p className="create-game-form__error create-game-form__hint" role="alert">
+                {setupsError}
+              </p>
+            ) : scenariosWithContext.length === 0 ? (
+              <p className="create-game-form__hint">No scenarios available.</p>
+            ) : (
+              <ScenarioTimeline
+                scenarios={scenariosWithContext}
+                selectedId={selectedSetupId}
+                onSelect={setSelectedSetupId}
+              />
+            )}
+          </div>
+          {scenariosWithContext.length > 0 && (
+            <button
+              type="button"
+              className="create-game-form__submit primary create-game-form__continue"
+              disabled={loadingSetups || selectedSetupId == null}
+              onClick={() => setStep('settings')}
+            >
+              Continue
+            </button>
           )}
         </div>
-        <div className="create-game-form__setup">
-        <label className="create-game-form__label">
-          Name
-          <input
-            type="text"
-            className="create-game-form__input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="My game"
-          />
-        </label>
-        <div className="create-game-form__field">
-          <span className="create-game-form__field-label">Mode</span>
-          <div className="create-game-form__picker" role="group" aria-label="Single or multiplayer">
-            <button
-              type="button"
-              className={`create-game-form__picker-option ${!isMultiplayer ? 'create-game-form__picker-option--active' : ''}`}
-              onClick={() => setIsMultiplayer(false)}
-            >
-              Single Player
-            </button>
-            <button
-              type="button"
-              className={`create-game-form__picker-option ${isMultiplayer ? 'create-game-form__picker-option--active' : ''}`}
-              onClick={() => setIsMultiplayer(true)}
-            >
-              Multiplayer
-            </button>
+      ) : (
+        <form className="create-game-form create-game-form--settings" onSubmit={handleSubmit}>
+          <button type="button" className="page-menu-btn" onClick={() => setStep('scenario')}>
+            Back
+          </button>
+          {selectedScenario && (
+            <p className="create-game-form__chosen">
+              {selectedScenario.display_name}
+              {selectedScenario.context?.year ? ` · ${selectedScenario.context.year}` : ''}
+            </p>
+          )}
+          {error && <p className="create-game-form__error">{error}</p>}
+          <label className="create-game-form__label">
+            Name
+            <input
+              type="text"
+              className="create-game-form__input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="My game"
+            />
+          </label>
+          <div className="create-game-form__field">
+            <span className="create-game-form__field-label">Mode</span>
+            <div className="create-game-form__picker" role="group" aria-label="Single or multiplayer">
+              <button
+                type="button"
+                className={`create-game-form__picker-option ${!isMultiplayer ? 'create-game-form__picker-option--active' : ''}`}
+                onClick={() => setIsMultiplayer(false)}
+              >
+                Single Player
+              </button>
+              <button
+                type="button"
+                className={`create-game-form__picker-option ${isMultiplayer ? 'create-game-form__picker-option--active' : ''}`}
+                onClick={() => setIsMultiplayer(true)}
+              >
+                Multiplayer
+              </button>
+            </div>
           </div>
-        </div>
-        <div className="create-game-form__field">
-          <span className="create-game-form__field-label">Heroes</span>
-          <div className="create-game-form__picker" role="group" aria-label="Heroes on or off">
-            <button
-              type="button"
-              className={`create-game-form__picker-option ${heroesEnabled ? 'create-game-form__picker-option--active' : ''}`}
-              onClick={() => setHeroesEnabled(true)}
-            >
-              On
-            </button>
-            <button
-              type="button"
-              className={`create-game-form__picker-option ${!heroesEnabled ? 'create-game-form__picker-option--active' : ''}`}
-              onClick={() => setHeroesEnabled(false)}
-            >
-              Off
-            </button>
+          <div className="create-game-form__field">
+            <span className="create-game-form__field-label">Heroes</span>
+            <div className="create-game-form__picker" role="group" aria-label="Heroes on or off">
+              <button
+                type="button"
+                className={`create-game-form__picker-option ${heroesEnabled ? 'create-game-form__picker-option--active' : ''}`}
+                onClick={() => setHeroesEnabled(true)}
+              >
+                On
+              </button>
+              <button
+                type="button"
+                className={`create-game-form__picker-option ${!heroesEnabled ? 'create-game-form__picker-option--active' : ''}`}
+                onClick={() => setHeroesEnabled(false)}
+              >
+                Off
+              </button>
+            </div>
           </div>
-        </div>
-        <button type="submit" className="create-game-form__submit primary" disabled={loading || loadingSetups}>
-          {loading ? 'Creating…' : 'Create game'}
-        </button>
-        </div>
-      </form>
+          <button type="submit" className="create-game-form__submit primary" disabled={loading || loadingSetups || selectedSetupId == null}>
+            {loading ? 'Creating…' : 'Create game'}
+          </button>
+        </form>
+      )}
       <Link to="/" className="page-menu-btn create-game-page__menu-anchor">Menu</Link>
     </div>
   );

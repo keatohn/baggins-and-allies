@@ -795,6 +795,8 @@ export interface SetupInfo {
     map?: string;
     faction_count?: number;
     factions?: string[];
+    good_count?: number;
+    evil_count?: number;
   };
 }
 

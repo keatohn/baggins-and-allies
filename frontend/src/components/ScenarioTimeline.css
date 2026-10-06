@@ -329,8 +329,19 @@ button.chronicle__option--active {
 .chronicle__option-meta,
 .chronicle__option-factions {
   font-family: var(--font-parchment), Georgia, serif;
-  font-size: 0.78rem;
   color: var(--ink-faded);
+}
+
+.chronicle__option-meta {
+  font-size: 0.92rem;
+}
+
+.chronicle__option-count {
+  color: var(--ink);
+}
+
+.chronicle__option-factions {
+  font-size: 0.78rem;
 }
 
 .chronicle__option--active .chronicle__option-meta,

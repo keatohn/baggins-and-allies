@@ -226,7 +226,13 @@ def list_setups_menu_from_db(db: Session) -> list[dict[str, Any]]:
         ctx = m.get("context")
         if not isinstance(ctx, dict) or not ctx:
             continue
-        entry = scenario_menu_entry(m, row.id)
+        try:
+            factions = json.loads(row.factions_json)
+        except json.JSONDecodeError:
+            factions = {}
+        if not isinstance(factions, dict):
+            factions = {}
+        entry = scenario_menu_entry(m, row.id, factions)
         rows.append((menu_order_sort_value(m), str(entry["id"]), entry))
     rows.sort(key=lambda t: (t[0], t[1]))
     return [t[2] for t in rows]

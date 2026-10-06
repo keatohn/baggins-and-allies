@@ -1,6 +1,6 @@
 """Create-game timeline image filenames on scenario menu rows."""
 
-from backend.engine.definitions import scenario_menu_entry, timeline_image_filename
+from backend.engine.definitions import alliance_counts, scenario_menu_entry, timeline_image_filename
 
 
 def test_timeline_image_filename_accepts_scenario_assets():
@@ -30,6 +30,21 @@ def test_scenario_menu_entry_includes_timeline_image():
     )
     assert entry["timeline_image"] == "alliance.png"
     assert entry["id"] == "wotla_1.0"
+
+
+def test_alliance_counts_good_versus_evil_from_context_names():
+    good, evil = alliance_counts(
+        {"factions": ["Free Peoples", "Isengard", "Rohan", "Mordor", "Gondor"]},
+        {
+            "freepeoples": {"display_name": "Free Peoples", "alliance": "good"},
+            "isengard": {"display_name": "Isengard", "alliance": "evil"},
+            "rohan": {"display_name": "Rohan", "alliance": "good"},
+            "mordor": {"display_name": "Mordor", "alliance": "evil"},
+            "gondor": {"display_name": "Gondor", "alliance": "good"},
+            "neutral": {"display_name": "Neutral", "alliance": "neutral"},
+        },
+    )
+    assert (good, evil) == (3, 2)
 
 
 def test_scenario_menu_entry_omits_invalid_timeline_image():

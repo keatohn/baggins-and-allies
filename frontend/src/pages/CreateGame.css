@@ -41,12 +41,22 @@
   max-width: 920px;
 }
 
-.create-game-form__setup {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  width: min(100%, 360px);
+.create-game-form--settings {
+  max-width: 360px;
   margin-inline: auto;
+}
+
+.create-game-form__continue {
+  align-self: center;
+  min-width: 12rem;
+}
+
+.create-game-form__chosen {
+  font-family: 'Cinzel', serif;
+  font-size: 1.05rem;
+  color: var(--ink);
+  margin: 0;
+  text-align: center;
 }
 
 .create-game-form__error {
