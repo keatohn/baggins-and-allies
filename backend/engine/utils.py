@@ -226,6 +226,7 @@ def initialize_game_state(
     prefire_penalty: bool | None = None,
     heroes_enabled: bool | None = None,
     special_rules: list | None = None,
+    shadow_of_war: bool | None = None,
 ) -> GameState:
     """
     Create an initial game state with all factions and territories set up.
@@ -349,6 +350,7 @@ def initialize_game_state(
         stronghold_repair_cost=stronghold_repair_cost_val,
         prefire_penalty=prefire_penalty_val,
         heroes_enabled=heroes_enabled_val,
+        shadow_of_war=bool(shadow_of_war),
         special_rules=parsed_special_rules,
         faction_territories_at_turn_start=faction_territories_at_turn_start,
         turn_order=turn_order,

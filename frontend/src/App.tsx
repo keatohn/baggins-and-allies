@@ -632,6 +632,10 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   // Backend state (use initialState from navigation when we just created this game)
   const [definitions, setDefinitions] = useState<Definitions | null>(null);
   const [backendState, setBackendState] = useState<ApiGameState | null>(initialStateProp ?? null);
+  const shadowedTerritories = useMemo(
+    () => new Set(backendState?.shadowed_territories ?? []),
+    [backendState?.shadowed_territories],
+  );
   const [territorySignals, setTerritorySignals] = useState<TerritorySignalMap>({});
   const [signalPresets, setSignalPresets] = useState<SignalPreset[]>([]);
   const [signalBusy, setSignalBusy] = useState(false);
@@ -4180,6 +4184,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               setupId={gameSetupId}
               territoryDefenderCasualtyOrder={backendState?.territory_defender_casualty_order ?? {}}
               heroesEnabled={backendState?.heroes_enabled !== false}
+              shadowedTerritories={shadowedTerritories}
               embedded
             />
           </div>
@@ -4195,6 +4200,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               selectedUnit={selectedUnit}
               territoryData={currentTerritoryData}
               territoryUnits={currentTerritoryUnits}
+              shadowedTerritories={shadowedTerritories}
               territoryUnitsFull={territoryUnitsFull}
               unitDefs={unitDefs}
               unitStats={unitStats}
@@ -4355,6 +4361,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               selectedTerritory={selectedTerritory}
               territoryData={currentTerritoryData}
               territoryUnits={currentTerritoryUnits}
+              shadowedTerritories={shadowedTerritories}
               territoryUnitStacksWithMovement={territoryUnitStacksWithMovement}
               unitDefs={unitDefs}
               factionData={factionData}

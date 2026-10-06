@@ -28,6 +28,8 @@ interface CombatSimulatorPanelProps {
   territoryDefenderCasualtyOrder?: Record<string, string>;
   /** When false, units with `hero_id` are omitted from attacker and defender pickers. Default true. */
   heroesEnabled?: boolean;
+  /** Territories whose defender stacks must not be copied into the simulator. */
+  shadowedTerritories?: ReadonlySet<string>;
   onClose?: () => void;
   embedded?: boolean;
 }
@@ -748,6 +750,7 @@ export default function CombatSimulatorPanel({
   setupId = null,
   territoryDefenderCasualtyOrder = {},
   heroesEnabled = true,
+  shadowedTerritories,
   onClose,
   embedded,
 }: CombatSimulatorPanelProps) {
@@ -756,6 +759,8 @@ export default function CombatSimulatorPanel({
   territoryUnitsRef.current = territoryUnits;
   const territoryDataRef = useRef(territoryData);
   territoryDataRef.current = territoryData;
+  const shadowedTerritoriesRef = useRef(shadowedTerritories);
+  shadowedTerritoriesRef.current = shadowedTerritories;
 
   const allFactions = useMemo(() => {
     if (!definitions?.factions) return [];
@@ -864,7 +869,8 @@ export default function CombatSimulatorPanel({
     const filtered = allTerritoryList.filter((t) => {
       const stacks = territoryUnits[t.id];
       const hasUnits = stacks && stacks.length > 0 && stacks.some((s) => s.count > 0);
-      if (!hasUnits) return false;
+      const hidden = shadowedTerritories?.has(t.id) === true;
+      if (!hasUnits && !hidden) return false;
       if (combatDomain === 'land') {
         const owner = territoryData[t.id]?.owner;
         if (owner && owner !== 'neutral' && factionData[owner]?.alliance === attackerAlliance && attackerAlliance !== '') return false;
@@ -872,13 +878,15 @@ export default function CombatSimulatorPanel({
       }
       if (combatDomain === 'river') {
         if (!t.isRiver) return false;
+        if (hidden) return true;
         return riverZoneHasEnemyBoats(t.id, attackerFaction, territoryUnits, definitions, unitDefs, factionData);
       }
       if (!t.isSea) return false;
+      if (hidden) return true;
       return seaZoneHasEnemyShips(t.id, attackerFaction, territoryUnits, definitions, unitDefs, factionData);
     });
     return filtered.sort((a, b) => a.name.localeCompare(b.name));
-  }, [attackerFaction, allTerritoryList, territoryUnits, territoryData, factionData, combatDomain, definitions, unitDefs]);
+  }, [attackerFaction, allTerritoryList, territoryUnits, territoryData, factionData, combatDomain, definitions, unitDefs, shadowedTerritories]);
 
   /** Dropdown: terrain types (alphabetically) first, then specific territories. */
   const territoryDropdownOptions = useMemo(
@@ -947,6 +955,11 @@ export default function CombatSimulatorPanel({
   useEffect(() => {
     if (!territoryId || territoryId.startsWith(TERRAIN_PREFIX)) {
       seededDefenderTerritoryIdRef.current = null;
+      setDefenderTerritoryCounts({});
+      return;
+    }
+    if (shadowedTerritoriesRef.current?.has(territoryId)) {
+      seededDefenderTerritoryIdRef.current = territoryId;
       setDefenderTerritoryCounts({});
       return;
     }

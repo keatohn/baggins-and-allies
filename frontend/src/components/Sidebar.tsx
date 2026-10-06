@@ -143,6 +143,8 @@ interface SidebarProps {
   aerialUnitsMustMove?: { territory_id: string; unit_id: string; instance_id: string }[];
   /** Defender casualty order per territory (from backend). Shown when selected territory is owned by current faction. */
   territoryDefenderCasualtyOrder?: Record<string, string>;
+  /** Territories whose defensive casualty priority stays hidden. */
+  shadowedTerritories?: ReadonlySet<string>;
   /** Set defender casualty order for a territory (owner only). */
   onSetTerritoryDefenderCasualtyOrder?: (territoryId: string, casualtyOrder: 'best_unit' | 'best_defense') => void;
   /** When !canAct and phase is combat: which battle is currently in progress (territory_id; optional sea_zone_id for sea raids). */
@@ -504,6 +506,7 @@ function Sidebar({
   onCancelQueuedCampPlacement,
   aerialUnitsMustMove = [],
   territoryDefenderCasualtyOrder = {},
+  shadowedTerritories,
   onSetTerritoryDefenderCasualtyOrder,
   activeCombatTerritoryId = null,
   activeCombatSeaZoneId = null,
@@ -1461,6 +1464,7 @@ function Sidebar({
             {/* Bottom row: casualty priority, signal flags, original owner */}
             {selectedTerritory && territory && (
               <div className="territory-panel-footer-row">
+                {shadowedTerritories?.has(selectedTerritory) ? null : (
                 <div className="defender-casualty-order">
                   <span className="defender-casualty-order-label">Defensive Casualty Priority</span>
                   {territory.owner === gameState.current_faction && canAct && onSetTerritoryDefenderCasualtyOrder ? (
@@ -1493,6 +1497,7 @@ function Sidebar({
                     </div>
                   )}
                 </div>
+                )}
                 <div className="territory-panel-footer-signals">
                   {(canPlaceSignal || territorySignals[selectedTerritory]) && (
                     <TerritorySignalControls

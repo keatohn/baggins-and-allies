@@ -148,6 +148,10 @@ export interface ApiGameState {
   camp_cost?: number;
   /** Unique/hero units (`hero_id` on the unit def). Missing defaults true (older games). */
   heroes_enabled?: boolean;
+  /** Create-game option. Missing or false leaves the board fully visible. */
+  shadow_of_war?: boolean;
+  /** Territory ids whose armies this viewer cannot see. Omitted when the mode is off. */
+  shadowed_territories?: string[];
   /** Power cost per stronghold HP repaired (from setup manifest). */
   stronghold_repair_cost?: number;
   /**
@@ -926,13 +930,20 @@ export const api = {
   // Games (create, list, join)
   getSetups: () =>
     fetchJson<{ setups: SetupInfo[] }>('/setups'),
-  createGame: (name: string, isMultiplayer: boolean, setupId?: string, heroesEnabled: boolean = true) =>
+  createGame: (
+    name: string,
+    isMultiplayer: boolean,
+    setupId?: string,
+    heroesEnabled: boolean = true,
+    shadowOfWar: boolean = false,
+  ) =>
     fetchJson<{ game_id: string; game_code: string | null; name: string; state?: ApiGameState; turn_order?: string[] }>('/games/create', {
       method: 'POST',
       body: JSON.stringify({
         name,
         is_multiplayer: isMultiplayer,
         heroes_enabled: heroesEnabled,
+        shadow_of_war: shadowOfWar,
         ...(setupId != null && { setup_id: setupId }),
       }),
     }),

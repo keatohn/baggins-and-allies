@@ -9,6 +9,7 @@ export default function CreateGame() {
   const [name, setName] = useState('');
   const [isMultiplayer, setIsMultiplayer] = useState(false);
   const [heroesEnabled, setHeroesEnabled] = useState(true);
+  const [shadowOfWar, setShadowOfWar] = useState(false);
   const [setups, setSetups] = useState<SetupInfo[]>([]);
   const [selectedSetupId, setSelectedSetupId] = useState<string | null>(null);
   const [loadingSetups, setLoadingSetups] = useState(true);
@@ -59,6 +60,7 @@ export default function CreateGame() {
         isMultiplayer,
         selectedSetupId ?? undefined,
         heroesEnabled,
+        shadowOfWar,
       );
       const initialState = res.state != null
         ? { ...res.state, turn_order: res.turn_order ?? res.state.turn_order }
@@ -165,6 +167,25 @@ export default function CreateGame() {
                 type="button"
                 className={`create-game-form__picker-option ${!heroesEnabled ? 'create-game-form__picker-option--active' : ''}`}
                 onClick={() => setHeroesEnabled(false)}
+              >
+                Off
+              </button>
+            </div>
+          </div>
+          <div className="create-game-form__field">
+            <span className="create-game-form__field-label">Shadow of War</span>
+            <div className="create-game-form__picker" role="group" aria-label="Shadow of War on or off">
+              <button
+                type="button"
+                className={`create-game-form__picker-option ${shadowOfWar ? 'create-game-form__picker-option--active' : ''}`}
+                onClick={() => setShadowOfWar(true)}
+              >
+                On
+              </button>
+              <button
+                type="button"
+                className={`create-game-form__picker-option ${!shadowOfWar ? 'create-game-form__picker-option--active' : ''}`}
+                onClick={() => setShadowOfWar(false)}
               >
                 Off
               </button>

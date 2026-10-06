@@ -92,6 +92,13 @@ from backend.engine.definitions import (
     TerritoryDefinition,
     parse_prefire_penalty_from_manifest,
 )
+from backend.engine.shadow import (
+    apply_shadow_view,
+    choose_viewer_alliance,
+    filter_charge_routes,
+    filter_events_for_sight,
+    visible_territory_ids,
+)
 from backend.engine.special_rules import (
     fading_territory_index,
     parse_starting_message,
@@ -341,6 +348,8 @@ class CreateGameRequest(BaseModel):
     ai_factions: list[str] | None = None
     """Hero-tagged units. Default True. When False they cannot be purchased and are omitted from starting placement."""
     heroes_enabled: bool = True
+    """When True, each alliance sees armies only on its land and one territory beyond. Default off."""
+    shadow_of_war: bool = False
 
 
 class JoinGameRequest(BaseModel):
@@ -1122,6 +1131,51 @@ def state_for_response(state: GameState, game_id: str | None = None, db: Session
     return out
 
 
+def shadow_viewer_alliance(game_id: str, player: Player | None, db: Session, state: GameState) -> str | None:
+    """Alliance whose sight limits this response. None leaves the board unredacted."""
+    if not getattr(state, "shadow_of_war", False) or player is None:
+        return None
+    alliances = _viewer_signal_alliances(game_id, player, db)
+    try:
+        _, _, fd, _, _ = get_game_definitions(game_id, db)
+    except Exception:
+        fd = {}
+    return choose_viewer_alliance(alliances, _faction_alliance(fd, state.current_faction))
+
+
+def _shadow_defs(game_id: str, db: Session):
+    try:
+        _, td, fd, _, _ = get_game_definitions(game_id, db)
+    except Exception:
+        td, fd = {}, {}
+    return td, fd
+
+
+def state_for_viewer(state: GameState, game_id: str, db: Session, player: Player | None) -> dict[str, Any]:
+    out = state_for_response(state, game_id, db)
+    alliance = shadow_viewer_alliance(game_id, player, db, state)
+    if alliance is None:
+        return out
+    td, fd = _shadow_defs(game_id, db)
+    apply_shadow_view(out, state, td, fd, alliance)
+    return out
+
+
+def events_for_viewer(events: list, state: GameState, game_id: str, db: Session, player: Player | None) -> list:
+    dicts = []
+    for event in events:
+        if hasattr(event, "to_dict"):
+            dicts.append(event.to_dict())
+        elif isinstance(event, dict):
+            dicts.append(event)
+    alliance = shadow_viewer_alliance(game_id, player, db, state)
+    if alliance is None:
+        return dicts
+    td, fd = _shadow_defs(game_id, db)
+    visible = visible_territory_ids(state, td, alliance, fd)
+    return filter_events_for_sight(dicts, visible)
+
+
 # ===== API Endpoints =====
 
 @app.get("/")
@@ -1527,6 +1581,7 @@ def create_game(
         stronghold_repair_cost=stronghold_repair_cost,
         prefire_penalty=parse_prefire_penalty_from_manifest(setup.get("prefire_penalty")),
         heroes_enabled=bool(request.heroes_enabled),
+        shadow_of_war=bool(request.shadow_of_war),
         special_rules=setup.get("special_rules"),
     )
     state.map_asset = setup["map_asset"]
@@ -1582,7 +1637,7 @@ def create_game(
     db.commit()
     games[game_id] = state
     game_defs[game_id] = (ud, td, fd, cd, port_d)
-    state_dict = state_for_response(state, game_id, db)
+    state_dict = state_for_viewer(state, game_id, db, player)
     turn_order = state_dict.get("turn_order") if isinstance(state_dict.get("turn_order"), list) else None
     return {
         "game_id": game_id,
@@ -2035,7 +2090,7 @@ def get_game_state(
     state = get_game(game_id, db)
     ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
     can_act = _player_can_act(game_id, player, db) if player else False
-    state_dict = state_for_response(state, game_id, db)
+    state_dict = state_for_viewer(state, game_id, db, player)
     turn_order = state_dict.get("turn_order") if isinstance(state_dict.get("turn_order"), list) else None
     pending_camps = state_dict.get("pending_camps") if isinstance(state_dict.get("pending_camps"), list) else getattr(state, "pending_camps", [])
     definitions = {
@@ -2067,7 +2122,7 @@ def get_game_state(
                 setup_id = config.get("setup_id") if isinstance(config.get("setup_id"), str) else None
                 el = config.get("event_log")
                 if isinstance(el, list):
-                    event_log = el
+                    event_log = events_for_viewer(el, state, game_id, db, player)
         except (TypeError, json.JSONDecodeError):
             pass
     return {
@@ -2905,10 +2960,19 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
 
 
 @app.get("/games/{game_id}/available-actions")
-def get_available_actions(game_id: str, db: Session = Depends(get_db)):
+def get_available_actions(
+    game_id: str,
+    db: Session = Depends(get_db),
+    player: Player | None = Depends(get_current_player_optional),
+):
     """Get available actions for current faction in current phase."""
     state = get_game(game_id, db)
-    return _build_available_actions(state, game_id, db)
+    actions = _build_available_actions(state, game_id, db)
+    alliance = shadow_viewer_alliance(game_id, player, db, state)
+    if alliance is not None:
+        td, fd = _shadow_defs(game_id, db)
+        filter_charge_routes(actions, visible_territory_ids(state, td, alliance, fd))
+    return actions
 
 
 @app.post("/games/{game_id}/purchase")
@@ -2929,8 +2993,8 @@ def do_purchase(
     new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db, events)
     return {
-        "state": state_for_response(new_state, game_id, db),
-        "events": [e.to_dict() for e in events],
+        "state": state_for_viewer(new_state, game_id, db, player),
+        "events": events_for_viewer(events, new_state, game_id, db, player),
         "can_act": _player_can_act(game_id, player, db),
     }
 
@@ -2952,8 +3016,8 @@ def do_purchase_camp(
     new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db, events)
     return {
-        "state": state_for_response(new_state, game_id, db),
-        "events": [e.to_dict() for e in events],
+        "state": state_for_viewer(new_state, game_id, db, player),
+        "events": events_for_viewer(events, new_state, game_id, db, player),
         "can_act": _player_can_act(game_id, player, db),
     }
 
@@ -2976,8 +3040,8 @@ def do_repair_stronghold(
     new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db, events)
     return {
-        "state": state_for_response(new_state, game_id, db),
-        "events": [e.to_dict() for e in events],
+        "state": state_for_viewer(new_state, game_id, db, player),
+        "events": events_for_viewer(events, new_state, game_id, db, player),
         "can_act": _player_can_act(game_id, player, db),
     }
 
@@ -3057,7 +3121,7 @@ def do_move(
             return {
                 "need_offload_sea_choice": True,
                 "valid_offload_sea_zones": valid_offload,
-                "state": state_for_response(state, game_id, db),
+                "state": state_for_viewer(state, game_id, db, player),
                 "can_act": _player_can_act(game_id, player, db),
             }
         if len(valid_offload) > 1 and request.offload_sea_zone_id:
@@ -3118,8 +3182,8 @@ def do_move(
             state_after_sail.pending_moves = list(state_after_sail.pending_moves) + [offload_pending]
             save_game(game_id, state_after_sail, db, events_sail)
             return {
-                "state": state_for_response(state_after_sail, game_id, db),
-                "events": [e.to_dict() for e in events_sail],
+                "state": state_for_viewer(state_after_sail, game_id, db, player),
+                "events": events_for_viewer(events_sail, state_after_sail, game_id, db, player),
                 "can_act": _player_can_act(game_id, player, db),
             }
         # Boat already in a valid adjacent sea zone; single offload move
@@ -3141,8 +3205,8 @@ def do_move(
     new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db, events)
     return {
-        "state": state_for_response(new_state, game_id, db),
-        "events": [e.to_dict() for e in events],
+        "state": state_for_viewer(new_state, game_id, db, player),
+        "events": events_for_viewer(events, new_state, game_id, db, player),
         "can_act": _player_can_act(game_id, player, db),
     }
 
@@ -3165,8 +3229,8 @@ def do_cancel_move(
     new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db, events)
     return {
-        "state": state_for_response(new_state, game_id, db),
-        "events": [e.to_dict() for e in events],
+        "state": state_for_viewer(new_state, game_id, db, player),
+        "events": events_for_viewer(events, new_state, game_id, db, player),
         "can_act": _player_can_act(game_id, player, db),
     }
 
@@ -3189,8 +3253,8 @@ def do_cancel_mobilization(
     new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db, events)
     return {
-        "state": state_for_response(new_state, game_id, db),
-        "events": [e.to_dict() for e in events],
+        "state": state_for_viewer(new_state, game_id, db, player),
+        "events": events_for_viewer(events, new_state, game_id, db, player),
         "can_act": _player_can_act(game_id, player, db),
     }
 
@@ -3213,8 +3277,8 @@ def do_place_camp(
     new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db, events)
     return {
-        "state": state_for_response(new_state, game_id, db),
-        "events": [e.to_dict() for e in events],
+        "state": state_for_viewer(new_state, game_id, db, player),
+        "events": events_for_viewer(events, new_state, game_id, db, player),
         "can_act": _player_can_act(game_id, player, db),
     }
 
@@ -3237,8 +3301,8 @@ def do_queue_camp_placement(
     new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db, events)
     return {
-        "state": state_for_response(new_state, game_id, db),
-        "events": [e.to_dict() for e in events],
+        "state": state_for_viewer(new_state, game_id, db, player),
+        "events": events_for_viewer(events, new_state, game_id, db, player),
         "can_act": _player_can_act(game_id, player, db),
     }
 
@@ -3261,8 +3325,8 @@ def do_cancel_camp_placement(
     new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db, events)
     return {
-        "state": state_for_response(new_state, game_id, db),
-        "events": [e.to_dict() for e in events],
+        "state": state_for_viewer(new_state, game_id, db, player),
+        "events": events_for_viewer(events, new_state, game_id, db, player),
         "can_act": _player_can_act(game_id, player, db),
     }
 
@@ -3717,8 +3781,8 @@ def do_initiate_combat(
     new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db, events)
     response: dict[str, Any] = {
-        "state": state_for_response(new_state, game_id, db),
-        "events": [e.to_dict() for e in events],
+        "state": state_for_viewer(new_state, game_id, db, player),
+        "events": events_for_viewer(events, new_state, game_id, db, player),
         "dice_rolls": payload["dice_rolls"],
         "can_act": _player_can_act(game_id, player, db),
     }
@@ -3840,8 +3904,8 @@ def do_continue_combat(
     new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db, events)
     response: dict[str, Any] = {
-        "state": state_for_response(new_state, game_id, db),
-        "events": [e.to_dict() for e in events],
+        "state": state_for_viewer(new_state, game_id, db, player),
+        "events": events_for_viewer(events, new_state, game_id, db, player),
         "dice_rolls": dice_rolls,
         "can_act": _player_can_act(game_id, player, db),
     }
@@ -3869,8 +3933,8 @@ def do_retreat(
     new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db, events)
     return {
-        "state": state_for_response(new_state, game_id, db),
-        "events": [e.to_dict() for e in events],
+        "state": state_for_viewer(new_state, game_id, db, player),
+        "events": events_for_viewer(events, new_state, game_id, db, player),
         "can_act": _player_can_act(game_id, player, db),
     }
 
@@ -3897,8 +3961,8 @@ def do_set_territory_defender_casualty_order(
     new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db, events)
     return {
-        "state": state_for_response(new_state, game_id, db),
-        "events": [e.to_dict() for e in events],
+        "state": state_for_viewer(new_state, game_id, db, player),
+        "events": events_for_viewer(events, new_state, game_id, db, player),
         "can_act": _player_can_act(game_id, player, db),
     }
 
@@ -4047,8 +4111,8 @@ def do_mobilize(
     new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db, events)
     return {
-        "state": state_for_response(new_state, game_id, db),
-        "events": [e.to_dict() for e in events],
+        "state": state_for_viewer(new_state, game_id, db, player),
+        "events": events_for_viewer(events, new_state, game_id, db, player),
         "can_act": _player_can_act(game_id, player, db),
     }
 
@@ -4072,8 +4136,8 @@ def do_end_phase(
     new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db, events)
     return {
-        "state": state_for_response(new_state, game_id, db),
-        "events": [e.to_dict() for e in events],
+        "state": state_for_viewer(new_state, game_id, db, player),
+        "events": events_for_viewer(events, new_state, game_id, db, player),
         "can_act": _player_can_act(game_id, player, db),
     }
 
@@ -4098,8 +4162,8 @@ def do_end_turn(
     new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db, events)
     return {
-        "state": state_for_response(new_state, game_id, db),
-        "events": [e.to_dict() for e in events],
+        "state": state_for_viewer(new_state, game_id, db, player),
+        "events": events_for_viewer(events, new_state, game_id, db, player),
         "can_act": _player_can_act(game_id, player, db),
     }
 
@@ -4121,8 +4185,8 @@ def do_skip_turn(
     new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db, events)
     return {
-        "state": state_for_response(new_state, game_id, db),
-        "events": [e.to_dict() for e in events],
+        "state": state_for_viewer(new_state, game_id, db, player),
+        "events": events_for_viewer(events, new_state, game_id, db, player),
         "can_act": _player_can_act(game_id, player, db),
     }
 
@@ -4411,16 +4475,16 @@ def do_ai_step(
                     )
                     save_game(game_id, new_state, db, events)
                     return {
-                        "state": state_for_response(new_state, game_id, db),
-                        "events": [e.to_dict() for e in events],
+                        "state": state_for_viewer(new_state, game_id, db, player),
+                        "events": events_for_viewer(events, new_state, game_id, db, player),
                         "action_type": fallback_action.type,
                     }
         raise HTTPException(status_code=400, detail=validation.error or "AI action invalid")
     new_state, events = apply_action(state, action, ud, td, fd, cd, port_d)
     save_game(game_id, new_state, db, events)
     return {
-        "state": state_for_response(new_state, game_id, db),
-        "events": [e.to_dict() for e in events],
+        "state": state_for_viewer(new_state, game_id, db, player),
+        "events": events_for_viewer(events, new_state, game_id, db, player),
         "action_type": action.type,
     }
 

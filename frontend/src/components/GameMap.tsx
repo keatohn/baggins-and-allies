@@ -404,6 +404,8 @@ interface GameMapProps {
     ownable?: boolean;
   }>;
   territoryUnits: Record<string, { unit_id: string; count: number; instances?: string[] }[]>;
+  /** Territories whose unit stacks stay hidden. Borders, owner color, and markers still draw. */
+  shadowedTerritories?: ReadonlySet<string>;
   /** Full unit list per territory (for sea zones: boats + loaded_onto to show passenger count per boat). */
   territoryUnitsFull?: Record<string, { instance_id: string; unit_id: string; loaded_onto?: string | null }[]>;
   unitDefs: Record<string, { name: string; icon: string; faction?: string; archetype?: string; tags?: string[]; home_territory_ids?: string[]; cost?: number; transport_capacity?: number; hero_id?: string }>;
@@ -715,6 +717,7 @@ function DroppableTerritory({
   isHighlighted,
   isValidDrop,
   highlightMuted = false,
+  shadowed = false,
   onClick,
 }: {
   territoryId: string;
@@ -728,6 +731,7 @@ function DroppableTerritory({
   isValidDrop: boolean;
   /** Weaker outline — other valid mobilization zones while a destination is pending confirm. */
   highlightMuted?: boolean;
+  shadowed?: boolean;
   onClick: (e: React.MouseEvent) => void;
 }) {
   const tid = typeof territoryId === 'string' ? territoryId : (territoryId != null && typeof territoryId === 'object' && 'id' in (territoryId as object) ? String((territoryId as { id: string }).id) : (territoryId != null && typeof territoryId === 'object' && 'territoryId' in (territoryId as object) ? String((territoryId as { territoryId: string }).territoryId) : String(territoryId ?? '')));
@@ -759,6 +763,17 @@ function DroppableTerritory({
         className={`${pathClass} territory-path-fill`}
         onClick={onClick}
       />
+      {shadowed ? (
+        <path
+          d={pathData.d}
+          transform={pathData.transform}
+          fill="#8a8a8a"
+          fillOpacity={0.72}
+          stroke="none"
+          pointerEvents="none"
+          className="territory-path-shadow"
+        />
+      ) : null}
       <path
         d={pathData.d}
         transform={pathData.transform}
@@ -818,6 +833,7 @@ function GameMap({
   selectedUnit,
   territoryData,
   territoryUnits,
+  shadowedTerritories,
   territoryUnitsFull = {},
   unitDefs,
   unitStats: _unitStats,
@@ -3739,6 +3755,7 @@ function GameMap({
                               isHighlighted={mobilizationStrong || isExternallyHighlighted || isCampPlacementTarget || isTapMoveTarget}
                               isValidDrop={isValidDrop || mobilizationStrong || isExternallyHighlighted}
                               highlightMuted={mobilizationMuted}
+                              shadowed={shadowedTerritories?.has(territoryId) === true}
                               onClick={(e) => handleTerritoryClick(territoryId, e)}
                             />
                           );
@@ -4556,6 +4573,7 @@ function GameMap({
 
                     <div className="unit-layer">
                       {Object.entries(territoryUnits).map(([territoryId, units]) => {
+                        if (shadowedTerritories?.has(territoryId)) return null;
                         if (units.length === 0) return null;
                         const unitPos = territoryPositions[territoryId]?.unit ?? territoryCentroids[territoryId];
                         const markerPos = territoryPositions[territoryId]?.marker ?? territoryCentroids[territoryId];
