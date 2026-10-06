@@ -1,0 +1,34 @@
+{
+  "numenor_camp": {
+    "id": "numenor_camp",
+    "territory_id": "numenor"
+  },
+  "barad_dur_camp": {
+    "id": "barad_dur_camp",
+    "territory_id": "barad_dur"
+  },
+  "the_black_gate_camp": {
+    "id": "the_black_gate_camp",
+    "territory_id": "the_black_gate"
+  },
+  "ost_in_edhil_camp": {
+    "id": "ost_in_edhil_camp",
+    "territory_id": "ost_in_edhil"
+  },
+  "mithlond_camp": {
+    "id": "mithlond_camp",
+    "territory_id": "mithlond"
+  },
+  "amon_lanc_camp": {
+    "id": "amon_lanc_camp",
+    "territory_id": "amon_lanc"
+  },
+  "khazad_dum_camp": {
+    "id": "khazad_dum_camp",
+    "territory_id": "khazad_dum"
+  },
+  "imladris_camp": {
+    "id": "imladris_camp",
+    "territory_id": "imladris"
+  }
+}

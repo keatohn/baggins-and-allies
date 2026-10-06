@@ -1,0 +1,30 @@
+{
+  "id": "wosate_1.0",
+  "display_name": "War of Sauron and the Elves",
+  "is_active": true,
+  "map_asset": "wosate_map_1.0",
+  "context": {
+    "year": "SA 1697",
+    "map": "Eriador and Rhovanion",
+    "faction_count": 4,
+    "factions": [
+      "Númenor",
+      "Sauron",
+      "Noldor",
+      "Khazad-dûm"
+    ]
+  },
+  "victory_criteria": {
+    "strongholds": {
+      "good": 6,
+      "evil": 4
+    }
+  },
+  "camp_cost": 10,
+  "stronghold_repair_cost": 2,
+  "prefire_penalty": false,
+  "lobby_music": [
+    "fellowship.m4a"
+  ],
+  "menu_order": 5
+}

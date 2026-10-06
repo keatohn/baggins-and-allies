@@ -912,7 +912,15 @@ export function UnitsPanel({
   );
 }
 
+function powerFromProduces(produces: unknown): number {
+  if (!produces || typeof produces !== 'object' || Array.isArray(produces)) return 0;
+  const raw = (produces as Record<string, unknown>).power;
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export function TerritoriesPanel({
+
   territories,
   mapAsset,
   onChange,
@@ -964,8 +972,23 @@ export function TerritoriesPanel({
             <MultilineIdList value={t.ford_adjacent} onApply={(ids) => patch({ ford_adjacent: ids })} />,
           )}
           {fieldRow(
-            'Produces (JSON)',
-            <JsonObjectField value={t.produces ?? {}} onApply={(o) => patch({ produces: o })} />,
+            'Power production',
+            <input
+              type="number"
+              min={0}
+              step={1}
+              className="admin-form__input admin-form__input--narrow"
+              value={String(powerFromProduces(t.produces))}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                const power = Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0;
+                const prev =
+                  t.produces && typeof t.produces === 'object' && !Array.isArray(t.produces)
+                    ? (t.produces as Record<string, unknown>)
+                    : {};
+                patch({ produces: { ...prev, power } });
+              }}
+            />,
           )}
           {fieldRow(
             'Stronghold',

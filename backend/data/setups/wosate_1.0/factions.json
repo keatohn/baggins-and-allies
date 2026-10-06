@@ -1,0 +1,54 @@
+{
+  "sauron": {
+    "id": "sauron",
+    "display_name": "Sauron",
+    "alliance": "evil",
+    "capital": "barad_dur",
+    "color": "#8b2500",
+    "icon": "mordor.png",
+    "music": [
+      "mordor.m4a"
+    ]
+  },
+  "noldor": {
+    "id": "noldor",
+    "display_name": "Noldor",
+    "alliance": "good",
+    "capital": "mithlond",
+    "color": "#4a7c9b",
+    "icon": "elves.png",
+    "music": [
+      "rivendell.m4a"
+    ]
+  },
+  "khazad_dum": {
+    "id": "khazad_dum",
+    "display_name": "Khazad-dûm",
+    "alliance": "good",
+    "capital": "khazad_dum",
+    "color": "#9c6b2e",
+    "icon": "erebor.png",
+    "music": [
+      "khazad_dum.m4a"
+    ]
+  },
+  "numenor": {
+    "id": "numenor",
+    "display_name": "Númenor",
+    "alliance": "good",
+    "capital": "numenor",
+    "color": "#265399",
+    "icon": "gondor.png",
+    "music": [
+      "gondor.m4a"
+    ]
+  },
+  "neutral": {
+    "id": "neutral",
+    "display_name": "Neutral",
+    "alliance": "neutral",
+    "capital": "",
+    "color": "#888888",
+    "icon": "neutral.png"
+  }
+}

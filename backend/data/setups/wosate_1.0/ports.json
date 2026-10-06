@@ -1,0 +1,14 @@
+{
+  "numenor_port": {
+    "id": "numenor_port",
+    "territory_id": "numenor"
+  },
+  "mithlond_port": {
+    "id": "mithlond_port",
+    "territory_id": "mithlond"
+  },
+  "lond_daer_port": {
+    "id": "lond_daer_port",
+    "territory_id": "lond_daer"
+  }
+}
