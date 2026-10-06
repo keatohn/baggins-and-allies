@@ -36,11 +36,20 @@ type FactionId = string;
 type UnitId = string;
 
 /** Specials that can affect battle rolls and have display_code. Excludes charging, aerial, home. Stealth on defender never shown. */
+type CombatDomain = 'land' | 'sea' | 'river';
+
 function isNavalUnit(definitions: Definitions | null, unitId: string): boolean {
   if (!definitions?.units) return false;
   const u = definitions.units[unitId] as { archetype?: string; tags?: string[] } | undefined;
   if (!u) return false;
   return u.archetype === 'naval' || (u.tags || []).includes('naval');
+}
+
+function isRiverUnit(definitions: Definitions | null, unitId: string): boolean {
+  if (!definitions?.units) return false;
+  const u = definitions.units[unitId] as { archetype?: string; tags?: string[] } | undefined;
+  if (!u) return false;
+  return u.archetype === 'river' || (u.tags || []).includes('river');
 }
 
 function isAerialUnit(definitions: Definitions | null, unitId: string): boolean {
@@ -50,25 +59,27 @@ function isAerialUnit(definitions: Definitions | null, unitId: string): boolean 
   return u.archetype === 'aerial' || (u.tags || []).includes('aerial');
 }
 
-/** Land combat: land + aerial. Sea combat: naval + aerial. */
+/** Land: land + aerial. Sea: naval + aerial. River: rowboats + aerial. Ships and rowboats never share a battle. */
 function unitAllowedForCombatType(
   definitions: Definitions | null,
   unitId: string,
-  isLand: boolean
+  domain: CombatDomain
 ): boolean {
   if (isAerialUnit(definitions, unitId)) return true;
-  if (isLand) return !isNavalUnit(definitions, unitId);
-  return isNavalUnit(definitions, unitId);
+  if (domain === 'land') return !isNavalUnit(definitions, unitId) && !isRiverUnit(definitions, unitId);
+  if (domain === 'sea') return isNavalUnit(definitions, unitId);
+  return isRiverUnit(definitions, unitId);
 }
 
-/** For adding defenders: land = land + aerial; sea = naval only (no aerial on sea defense). */
+/** Defenders: land = land + aerial; sea = naval only; river = rowboats and aerial. */
 function unitAllowedForDefenseInCombatType(
   definitions: Definitions | null,
   unitId: string,
-  isLandCombat: boolean
+  domain: CombatDomain
 ): boolean {
-  if (isLandCombat) return unitAllowedForCombatType(definitions, unitId, true);
-  return isNavalUnit(definitions, unitId) && !isAerialUnit(definitions, unitId);
+  if (domain === 'land') return unitAllowedForCombatType(definitions, unitId, 'land');
+  if (domain === 'sea') return isNavalUnit(definitions, unitId) && !isAerialUnit(definitions, unitId);
+  return isRiverUnit(definitions, unitId) || isAerialUnit(definitions, unitId);
 }
 
 function getUnitMovement(definitions: Definitions | null, unitId: string): number {
@@ -425,6 +436,24 @@ function factionHasPurchasableNavalForSeaDefense(definitions: Definitions | null
   return false;
 }
 
+/** River combat — attackers may be rowboats or aerial. */
+function factionHasPurchasableRiverOrAerialForRiverAttack(definitions: Definitions | null, factionId: string): boolean {
+  if (!definitions?.units) return false;
+  for (const uid of Object.keys(definitions.units)) {
+    const u = definitions.units[uid];
+    const faction = (u as { faction?: string }).faction ?? 'neutral';
+    if (faction !== factionId) continue;
+    if (!isUnitPurchasableInDefs(u)) continue;
+    if (isRiverUnit(definitions, uid) || isAerialUnit(definitions, uid)) return true;
+  }
+  return false;
+}
+
+/** River combat — defenders may be rowboats or aerial. */
+function factionHasPurchasableRiverOrAerialForRiverDefense(definitions: Definitions | null, factionId: string): boolean {
+  return factionHasPurchasableRiverOrAerialForRiverAttack(definitions, factionId);
+}
+
 function seaZoneHasEnemyShips(
   territoryId: string,
   attackerFaction: string,
@@ -439,6 +468,31 @@ function seaZoneHasEnemyShips(
   return stacks.some((s) => {
     if ((s.count ?? 0) <= 0) return false;
     if (!isNavalUnit(definitions, s.unit_id) || isAerialUnit(definitions, s.unit_id)) return false;
+    const unitFaction =
+      (definitions?.units?.[s.unit_id] as { faction?: string } | undefined)?.faction ??
+      unitDefs[s.unit_id]?.faction ??
+      '';
+    if (!unitFaction || unitFaction === attackerFaction) return false;
+    const unitAlliance = factionData[unitFaction]?.alliance ?? '';
+    if (!attackerAlliance) return true;
+    return unitAlliance !== attackerAlliance;
+  });
+}
+
+function riverZoneHasEnemyBoats(
+  territoryId: string,
+  attackerFaction: string,
+  territoryUnits: TerritoryUnitsMap,
+  definitions: Definitions | null,
+  unitDefs: Record<string, UnitDefForSim>,
+  factionData: Record<string, { alliance?: string; icon?: string; color?: string }>,
+): boolean {
+  const stacks = territoryUnits[territoryId] ?? [];
+  if (stacks.length === 0) return false;
+  const attackerAlliance = factionData[attackerFaction]?.alliance ?? '';
+  return stacks.some((s) => {
+    if ((s.count ?? 0) <= 0) return false;
+    if (!isRiverUnit(definitions, s.unit_id) || isAerialUnit(definitions, s.unit_id)) return false;
     const unitFaction =
       (definitions?.units?.[s.unit_id] as { faction?: string } | undefined)?.faction ??
       unitDefs[s.unit_id]?.faction ??
@@ -718,6 +772,7 @@ export default function CombatSimulatorPanel({
       id,
       name: (t as { display_name?: string }).display_name ?? id,
       isSea: (t as { terrain_type?: string }).terrain_type?.toLowerCase() === 'sea',
+      isRiver: (t as { terrain_type?: string }).terrain_type?.toLowerCase() === 'river',
     }));
     return list.sort((a, b) => a.name.localeCompare(b.name));
   }, [definitions?.territories]);
@@ -736,7 +791,8 @@ export default function CombatSimulatorPanel({
     return map;
   }, [definitions?.units]);
 
-  const [isLandCombat, setIsLandCombat] = useState(true);
+  const [combatDomain, setCombatDomain] = useState<CombatDomain>('land');
+  const isLandCombat = combatDomain === 'land';
   const [attackerFaction, setAttackerFaction] = useState<FactionId>('');
   const [attackingTerritoryId, setAttackingTerritoryId] = useState<string>('');
   const [territoryId, setTerritoryId] = useState<string>('');
@@ -749,14 +805,19 @@ export default function CombatSimulatorPanel({
       const tt = (t as { terrain_type?: string }).terrain_type?.toLowerCase() ?? '';
       if (tt) types.add(tt);
     });
+    if (combatDomain === 'river') types.add('river');
     return Array.from(types)
-      .filter((t) => (isLandCombat ? t !== 'sea' : t === 'sea'))
+      .filter((t) => {
+        if (combatDomain === 'sea') return t === 'sea';
+        if (combatDomain === 'river') return t === 'river';
+        return t !== 'sea' && t !== 'river';
+      })
       .sort((a, b) => a.localeCompare(b))
       .map((t) => ({
         id: `${TERRAIN_PREFIX}${t}`,
         name: t.charAt(0).toUpperCase() + t.slice(1),
       }));
-  }, [definitions?.territories, isLandCombat]);
+  }, [definitions?.territories, combatDomain]);
   const [attackerCounts, setAttackerCounts] = useState<Record<UnitId, number>>({});
   const [casualtyOrderAttacker, setCasualtyOrderAttacker] = useState<'best_unit' | 'best_attack'>('best_unit');
   const [casualtyOrderDefender, setCasualtyOrderDefender] = useState<'best_unit' | 'best_defense'>('best_unit');
@@ -789,7 +850,12 @@ export default function CombatSimulatorPanel({
       factionsNoNeutral.filter((f) => factionHasPurchasableNavalOrAerialForSeaAttack(definitions, f.id)),
     [factionsNoNeutral, definitions]
   );
-  const factions = isLandCombat ? factionsNoNeutral : factionsSeaOnly;
+  const factionsRiverOnly = useMemo(
+    () =>
+      factionsNoNeutral.filter((f) => factionHasPurchasableRiverOrAerialForRiverAttack(definitions, f.id)),
+    [factionsNoNeutral, definitions]
+  );
+  const factions = combatDomain === 'land' ? factionsNoNeutral : combatDomain === 'sea' ? factionsSeaOnly : factionsRiverOnly;
 
   /** Territories: non-empty, not owned by ally of attacker (or neutral/unowned), and land/sea filter. Include neutral territories that have units. */
   const territoryOptions = useMemo(() => {
@@ -799,16 +865,20 @@ export default function CombatSimulatorPanel({
       const stacks = territoryUnits[t.id];
       const hasUnits = stacks && stacks.length > 0 && stacks.some((s) => s.count > 0);
       if (!hasUnits) return false;
-      if (isLandCombat) {
+      if (combatDomain === 'land') {
         const owner = territoryData[t.id]?.owner;
         if (owner && owner !== 'neutral' && factionData[owner]?.alliance === attackerAlliance && attackerAlliance !== '') return false;
-        return !t.isSea;
+        return !t.isSea && !t.isRiver;
+      }
+      if (combatDomain === 'river') {
+        if (!t.isRiver) return false;
+        return riverZoneHasEnemyBoats(t.id, attackerFaction, territoryUnits, definitions, unitDefs, factionData);
       }
       if (!t.isSea) return false;
       return seaZoneHasEnemyShips(t.id, attackerFaction, territoryUnits, definitions, unitDefs, factionData);
     });
     return filtered.sort((a, b) => a.name.localeCompare(b.name));
-  }, [attackerFaction, allTerritoryList, territoryUnits, territoryData, factionData, isLandCombat, definitions, unitDefs]);
+  }, [attackerFaction, allTerritoryList, territoryUnits, territoryData, factionData, combatDomain, definitions, unitDefs]);
 
   /** Dropdown: terrain types (alphabetically) first, then specific territories. */
   const territoryDropdownOptions = useMemo(
@@ -821,7 +891,7 @@ export default function CombatSimulatorPanel({
     () =>
       attackerUnitsAll.filter((u) => {
         if (!simAllowsHeroUnit(definitions, u.id, heroesEnabled)) return false;
-        if (!unitAllowedForCombatType(definitions, u.id, isLandCombat)) return false;
+        if (!unitAllowedForCombatType(definitions, u.id, combatDomain)) return false;
         if (getUnitMovement(definitions, u.id) <= 0) return false;
         if (!isLandCombat) {
           const raw = definitions?.units?.[u.id];
@@ -829,24 +899,22 @@ export default function CombatSimulatorPanel({
         }
         return true;
       }).slice().sort((a, b) => compareUnitIdsByBattleOrder(definitions, unitDefs, a.id, b.id)),
-    [attackerUnitsAll, definitions, isLandCombat, unitDefs, heroesEnabled]
+    [attackerUnitsAll, definitions, combatDomain, isLandCombat, unitDefs, heroesEnabled]
   );
 
   const attackingTerritoryOptions = useMemo(() => {
     if (!attackerFaction) return [];
-    const isSeaTerritory = (tid: string) =>
-      /^sea_zone_?\d+$/i.test(tid) ||
-      territoryData?.[tid]?.terrain === 'sea' ||
-      getTerrainTypeFromTerritoryId(definitions, tid) === 'sea';
+    const domainOf = (tid: string): CombatDomain => {
+      const terrain = territoryData?.[tid]?.terrain ?? getTerrainTypeFromTerritoryId(definitions, tid);
+      if (terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid)) return 'sea';
+      if (terrain === 'river') return 'river';
+      return 'land';
+    };
     const entries = Object.entries(territoryUnits ?? {});
     const out = entries
       .filter(([tid, stacks]) => {
         if (!stacks?.length) return false;
-        if (isLandCombat) {
-          if (isSeaTerritory(tid)) return false;
-        } else if (!isSeaTerritory(tid)) {
-          return false;
-        }
+        if (domainOf(tid) !== combatDomain) return false;
         return stacks.some((s) => {
           const f = (definitions?.units?.[s.unit_id] as { faction?: string } | undefined)?.faction ?? unitDefs[s.unit_id]?.faction;
           return s.count > 0 && f === attackerFaction;
@@ -855,17 +923,17 @@ export default function CombatSimulatorPanel({
       .map(([tid]) => ({ id: tid, name: (definitions?.territories?.[tid] as { display_name?: string } | undefined)?.display_name ?? tid }));
     out.sort((a, b) => a.name.localeCompare(b.name));
     return out;
-  }, [attackerFaction, territoryUnits, territoryData, isLandCombat, definitions, unitDefs]);
+  }, [attackerFaction, territoryUnits, territoryData, combatDomain, definitions, unitDefs]);
 
   const defenderStacks = territoryId ? (territoryUnits[territoryId] ?? []).filter((s) => s.count > 0) : [];
   const defenderStacksFiltered = useMemo(
     () =>
       defenderStacks.filter(
         (s) =>
-          unitAllowedForCombatType(definitions, s.unit_id, isLandCombat) &&
+          unitAllowedForCombatType(definitions, s.unit_id, combatDomain) &&
           simAllowsHeroUnit(definitions, s.unit_id, heroesEnabled),
       ),
-    [defenderStacks, definitions, isLandCombat, heroesEnabled]
+    [defenderStacks, definitions, combatDomain, heroesEnabled]
   );
 
   const defenderStacksFilteredRef = useRef(defenderStacksFiltered);
@@ -903,7 +971,7 @@ export default function CombatSimulatorPanel({
       setTerritoryId('');
       setAddedDefenderStacks([]);
     }
-  }, [isLandCombat]); // eslint-disable-line react-hooks/exhaustive-deps -- only run when combat type toggles
+  }, [combatDomain]); // eslint-disable-line react-hooks/exhaustive-deps -- only run when combat type toggles
 
   useEffect(() => {
     if (!isLandCombat) setIsSeaRaid(false);
@@ -926,7 +994,7 @@ export default function CombatSimulatorPanel({
       attackerSeedKeyRef.current = '';
       return;
     }
-    const seedKey = `${attackerFaction}\0${attackingTerritoryId}\0${isLandCombat}`;
+    const seedKey = `${attackerFaction}\0${attackingTerritoryId}\0${combatDomain}`;
     const stacks = territoryUnitsRef.current?.[attackingTerritoryId] ?? [];
     const computeNext = (): Record<string, number> => {
       const next: Record<string, number> = {};
@@ -935,7 +1003,7 @@ export default function CombatSimulatorPanel({
         const f = (raw as { faction?: string } | undefined)?.faction ?? unitDefs[s.unit_id]?.faction;
         if (f !== attackerFaction) return;
         if (!simAllowsHeroUnit(definitions, s.unit_id, heroesEnabled)) return;
-        if (!unitAllowedForCombatType(definitions, s.unit_id, isLandCombat)) return;
+        if (!unitAllowedForCombatType(definitions, s.unit_id, combatDomain)) return;
         if (getUnitMovement(definitions, s.unit_id) <= 0) return;
         if (!isLandCombat && !isUnitPurchasableInDefs(raw)) return;
         next[s.unit_id] = (next[s.unit_id] ?? 0) + s.count;
@@ -956,7 +1024,7 @@ export default function CombatSimulatorPanel({
       const next = computeNext();
       return Object.keys(next).length > 0 ? next : prev;
     });
-  }, [attackerFaction, attackingTerritoryId, isLandCombat, definitions, unitDefs, heroesEnabled]);
+  }, [attackerFaction, attackingTerritoryId, combatDomain, isLandCombat, definitions, unitDefs, heroesEnabled]);
 
   const isTerrainSelection = territoryId.startsWith(TERRAIN_PREFIX);
   const defenderOrderForEffect =
@@ -1099,7 +1167,7 @@ export default function CombatSimulatorPanel({
       const raw = definitions?.units?.[s.unit_id];
       const unitFaction = (raw as { faction?: string } | undefined)?.faction ?? unitDefs[s.unit_id]?.faction;
       if (unitFaction !== attackerFaction) return;
-      if (!unitAllowedForCombatType(definitions, s.unit_id, isLandCombat)) return;
+      if (!unitAllowedForCombatType(definitions, s.unit_id, combatDomain)) return;
       if (getUnitMovement(definitions, s.unit_id) <= 0) return;
       if (!isLandCombat && !isUnitPurchasableInDefs(raw)) return;
       refreshedAttackerCounts[s.unit_id] = (refreshedAttackerCounts[s.unit_id] ?? 0) + s.count;
@@ -1110,7 +1178,7 @@ export default function CombatSimulatorPanel({
     if (!territoryId.startsWith(TERRAIN_PREFIX)) {
       const freshDefenderStacks = (territoryUnitsRef.current?.[territoryId] ?? [])
         .filter((s) => s.count > 0)
-        .filter((s) => unitAllowedForCombatType(definitions, s.unit_id, isLandCombat));
+        .filter((s) => unitAllowedForCombatType(definitions, s.unit_id, combatDomain));
       const freshDefenderCounts: Record<string, number> = {};
       freshDefenderStacks.forEach((s) => {
         freshDefenderCounts[s.unit_id] = (freshDefenderCounts[s.unit_id] ?? 0) + s.count;
@@ -1384,7 +1452,7 @@ export default function CombatSimulatorPanel({
       nextAddedDefenderStacks = newDefenderStacks.filter((s) => s.count > 0);
     } else {
       const stacksRaw = (territoryUnits?.[newDefenderTerritoryId] ?? []).filter((s) => s.count > 0);
-      const filteredForNew = stacksRaw.filter((s) => unitAllowedForCombatType(definitions, s.unit_id, isLandCombat));
+      const filteredForNew = stacksRaw.filter((s) => unitAllowedForCombatType(definitions, s.unit_id, combatDomain));
       const onHexIds = new Set(filteredForNew.map((s) => s.unit_id));
 
       seededDefenderTerritoryIdRef.current = newDefenderTerritoryId;
@@ -1448,9 +1516,10 @@ export default function CombatSimulatorPanel({
               (factionData[id]?.alliance ?? (definitions.factions?.[id] as { alliance?: string } | undefined)?.alliance) !== attackerAlliance
           )
           : allIds;
-        // Sea: only factions that have purchasable naval types (defense is ships only)
-        if (!isLandCombat) {
+        if (combatDomain === 'sea') {
           factionIds = factionIds.filter((id) => factionHasPurchasableNavalForSeaDefense(definitions, id));
+        } else if (combatDomain === 'river') {
+          factionIds = factionIds.filter((id) => factionHasPurchasableRiverOrAerialForRiverDefense(definitions, id));
         }
       }
     } else {
@@ -1466,7 +1535,7 @@ export default function CombatSimulatorPanel({
       if (!factionIds.includes(faction)) continue;
       if (!simAllowsHeroUnit(definitions, uid, heroesEnabled)) continue;
       if (!isLandCombat && !isUnitPurchasableInDefs(u)) continue;
-      if (!unitAllowedForDefenseInCombatType(definitions, uid, isLandCombat)) continue;
+      if (!unitAllowedForDefenseInCombatType(definitions, uid, combatDomain)) continue;
       const f = definitions.factions?.[faction] as { display_name?: string } | undefined;
       units.push({
         id: uid,
@@ -1489,7 +1558,7 @@ export default function CombatSimulatorPanel({
       return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
     });
     return units;
-  }, [definitions, factionData, defenderLogoFaction, isLandCombat, territoryId, attackerFaction, unitDefs, heroesEnabled]);
+  }, [definitions, factionData, defenderLogoFaction, combatDomain, isLandCombat, territoryId, attackerFaction, unitDefs, heroesEnabled]);
 
   /** Exclude unit types already on the defender shelf (territory rows with count > 0, or added) so we only offer units not yet listed. */
   const addDefenderUnitOptionsFiltered = useMemo(() => {
@@ -1530,20 +1599,16 @@ export default function CombatSimulatorPanel({
       )}
 
       <div className="combat-sim-pill-row">
-        <button
-          type="button"
-          className={`combat-sim-pill ${isLandCombat ? 'combat-sim-pill--active' : ''}`}
-          onClick={() => setIsLandCombat(true)}
-        >
-          Land
-        </button>
-        <button
-          type="button"
-          className={`combat-sim-pill ${!isLandCombat ? 'combat-sim-pill--active' : ''}`}
-          onClick={() => setIsLandCombat(false)}
-        >
-          Sea
-        </button>
+        {(['land', 'sea', 'river'] as const).map((domain) => (
+          <button
+            key={domain}
+            type="button"
+            className={`combat-sim-pill ${combatDomain === domain ? 'combat-sim-pill--active' : ''}`}
+            onClick={() => setCombatDomain(domain)}
+          >
+            {domain === 'land' ? 'Land' : domain === 'sea' ? 'Sea' : 'River'}
+          </button>
+        ))}
       </div>
 
       <div className="combat-sim-dropdowns-row">

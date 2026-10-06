@@ -709,6 +709,7 @@ function DroppableTerritory({
   pathData,
   color,
   isSeaZone,
+  waterKind,
   isSelected,
   isHighlighted,
   isValidDrop,
@@ -719,6 +720,8 @@ function DroppableTerritory({
   pathData: TerritoryPathData;
   color: string;
   isSeaZone: boolean;
+  /** Sea and river share the water stroke. River uses a lighter blue fill. */
+  waterKind?: 'sea' | 'river';
   isSelected: boolean;
   isHighlighted: boolean;
   isValidDrop: boolean;
@@ -749,7 +752,7 @@ function DroppableTerritory({
         id={`territory-${tid}`}
         d={pathData.d}
         transform={pathData.transform}
-        fill={isSeaZone ? 'url(#sea-wave-pattern)' : safeColor}
+        fill={waterKind === 'river' ? 'url(#river-wave-pattern)' : waterKind === 'sea' ? 'url(#sea-wave-pattern)' : safeColor}
         stroke="none"
         style={pathStyle}
         className={`${pathClass} territory-path-fill`}
@@ -3659,10 +3662,13 @@ function GameMap({
                           const territory = territoryData[territoryId] ?? territoryData[stateKey];
                           const owner = territory?.owner;
                           const isNonOwnable = territory && (territory.ownable === false);
-                          const isSeaZone = territory?.terrain === 'sea' || territory?.terrain === 'river' || /^sea_zone_?\d+$/i.test(territoryId);
+                          const isRiverZone = territory?.terrain === 'river';
+                          const isSeaZone = territory?.terrain === 'sea' || isRiverZone || /^sea_zone_?\d+$/i.test(territoryId);
                           // Definitions may load after game state (e.g. create-game nav + getGame without embedded defs);
                           // missing faction palette must not yield undefined — glow/filter code calls .replace on color.
-                          const color = isSeaZone
+                          const color = isRiverZone
+                            ? '#3a6fa3'
+                            : isSeaZone
                             ? '#2d4258'
                             : owner
                               ? (factionData[owner]?.color ?? '#d4c4a8')
@@ -3727,6 +3733,7 @@ function GameMap({
                               pathData={pathData}
                               color={color}
                               isSeaZone={!!isSeaZone}
+                              waterKind={isRiverZone ? 'river' : isSeaZone ? 'sea' : undefined}
                               isSelected={isSelected}
                               isHighlighted={mobilizationStrong || isExternallyHighlighted || isCampPlacementTarget || isTapMoveTarget}
                               isValidDrop={isValidDrop || mobilizationStrong || isExternallyHighlighted}
@@ -3760,6 +3767,13 @@ function GameMap({
                           <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(160,195,220,0.32)" strokeWidth="2.25" strokeLinecap="round" />
                           {/* Darker troughs for depth */}
                           <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(15,30,45,0.52)" strokeWidth="2.75" strokeLinecap="round" />
+                        </pattern>
+                        {/* River: same waves, lighter and bluer than sea so the two waters read apart. */}
+                        <pattern id="river-wave-pattern" x="0" y="0" width="120" height="60" patternUnits="userSpaceOnUse">
+                          <rect width="120" height="60" fill="#3a6fa3" />
+                          <path d="M0 20 Q30 12 60 20 T120 20 M0 45 Q30 37 60 45 T120 45" fill="none" stroke="rgba(186,220,255,0.55)" strokeWidth="3.5" strokeLinecap="round" />
+                          <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(210,232,255,0.4)" strokeWidth="2.25" strokeLinecap="round" />
+                          <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(18,48,92,0.4)" strokeWidth="2.75" strokeLinecap="round" />
                         </pattern>
                         <marker id="arrowhead-combat" markerWidth="5" markerHeight="5" refX="3.5" refY="2.5" orient="auto">
                           <polygon points="0,0 5,2.5 0,5" fill="#c62828" />
