@@ -17,6 +17,8 @@ interface UnitPurchaseInfo {
   maxAffordable?: number;
   /** True if this unit is naval (mobilizes to sea zone). Used to show in Sea tab. */
   isNaval?: boolean;
+  /** True if this unit is a river craft. Shown with naval units; uses river capacity. */
+  isRiver?: boolean;
   /** True if siegework archetype; shown in Siege tab (after Sea). Excludes naval. */
   isSiegework?: boolean;
   /** Human-readable special names (from setup specials defs), shown below numeric stats. */
@@ -55,6 +57,8 @@ interface PurchaseModalProps {
   mobilizationCampLandCapacity?: number;
   /** Sea mobilization capacity (port sea zones). Naval units in cart cannot exceed this. */
   mobilizationSeaCapacity?: number;
+  /** River mobilization capacity (turn-start bank power). River units in cart cannot exceed this. */
+  mobilizationRiverCapacity?: number;
   /** Units already purchased this turn (from backend). */
   purchasedUnitsCount?: number;
   /** Power cost per camp (0 or undefined = camps not purchasable). */
@@ -161,6 +165,7 @@ function PurchaseModal({
   mobilizationLandCapacity,
   mobilizationCampLandCapacity,
   mobilizationSeaCapacity,
+  mobilizationRiverCapacity,
   purchasedUnitsCount: _purchasedUnitsCount = 0,
   campCost = 10,
   strongholdRepairCost = 0,
@@ -169,25 +174,29 @@ function PurchaseModal({
   onPurchase,
   onClose,
 }: PurchaseModalProps) {
-  const nonNavalUnits = useMemo(() => availableUnits.filter(u => !u.isNaval), [availableUnits]);
-  const allNavalUnits = useMemo(() => availableUnits.filter(u => u.isNaval), [availableUnits]);
+  const nonNavalUnits = useMemo(
+    () => availableUnits.filter(u => !u.isNaval && !u.isRiver),
+    [availableUnits],
+  );
+  const allNavalUnits = useMemo(() => availableUnits.filter(u => u.isNaval && !u.isRiver), [availableUnits]);
+  const allRiverUnits = useMemo(() => availableUnits.filter(u => u.isRiver), [availableUnits]);
   const landTabUnits = useMemo(
     () => availableUnits
-      .filter(u => !u.isNaval && !u.isSiegework && !isHeroPurchaseUnit(u))
+      .filter(u => !u.isNaval && !u.isRiver && !u.isSiegework && !isHeroPurchaseUnit(u))
       .slice()
       .sort(compareUnitsForPurchase),
     [availableUnits]
   );
   const siegeUnits = useMemo(
     () => availableUnits
-      .filter(u => !u.isNaval && u.isSiegework && !isHeroPurchaseUnit(u))
+      .filter(u => !u.isNaval && !u.isRiver && u.isSiegework && !isHeroPurchaseUnit(u))
       .slice()
       .sort(compareUnitsForPurchase),
     [availableUnits]
   );
   const seaTabUnits = useMemo(
     () => availableUnits
-      .filter(u => u.isNaval && !isHeroPurchaseUnit(u))
+      .filter(u => (u.isNaval || u.isRiver) && !isHeroPurchaseUnit(u))
       .slice()
       .sort(compareUnitsForPurchase),
     [availableUnits]
@@ -215,6 +224,10 @@ function PurchaseModal({
   const seaInCart = useMemo(
     () => allNavalUnits.reduce((s, u) => s + (quantities[u.id] || 0), 0),
     [allNavalUnits, quantities]
+  );
+  const riverInCart = useMemo(
+    () => allRiverUnits.reduce((s, u) => s + (quantities[u.id] || 0), 0),
+    [allRiverUnits, quantities]
   );
 
   // Display land denominator: camp capacity + home slots from unit types currently in cart (1 per home territory per type), capped by backend total
@@ -341,11 +354,15 @@ function PurchaseModal({
           const totalInCart = Object.values(tryState).reduce((s, q) => s + q, 0);
           if (mobilizationCapacity != null && totalInCart > mobilizationCapacity) return prev;
 
-          if (unit.isNaval && mobilizationSeaCapacity != null) {
+          if (unit.isRiver && mobilizationRiverCapacity != null) {
+            const newRiverInCart = allRiverUnits.reduce((s, u) => s + (tryState[u.id] || 0), 0);
+            if (newRiverInCart > mobilizationRiverCapacity) return prev;
+          }
+          if (unit.isNaval && !unit.isRiver && mobilizationSeaCapacity != null) {
             const newSeaInCart = allNavalUnits.reduce((s, u) => s + (tryState[u.id] || 0), 0);
             if (newSeaInCart > mobilizationSeaCapacity) return prev;
           }
-          if (!unit.isNaval && (mobilizationLandCapacity != null || mobilizationCampLandCapacity != null)) {
+          if (!unit.isNaval && !unit.isRiver && (mobilizationLandCapacity != null || mobilizationCampLandCapacity != null)) {
             const newLandInCart = nonNavalUnits.reduce((s, u) => s + (tryState[u.id] || 0), 0);
             const campCap = mobilizationCampLandCapacity ?? mobilizationLandCapacity ?? 0;
             const homeSlots = nonNavalUnits
@@ -372,10 +389,12 @@ function PurchaseModal({
       repairCostTotal,
       mobilizationCapacity,
       mobilizationSeaCapacity,
+      mobilizationRiverCapacity,
       mobilizationLandCapacity,
       mobilizationCampLandCapacity,
       nonNavalUnits,
       allNavalUnits,
+      allRiverUnits,
     ],
   );
 
@@ -451,6 +470,7 @@ function PurchaseModal({
     if (mobilizationCapacity != null && totalUnits > mobilizationCapacity) return;
     if (landInCart > displayLandDenominator) return;
     if (mobilizationSeaCapacity != null && seaInCart > mobilizationSeaCapacity) return;
+    if (mobilizationRiverCapacity != null && riverInCart > mobilizationRiverCapacity) return;
     const campsToSubmit = maxCamps != null && maxCamps > 0 ? Math.min(campQuantity, maxCamps) : campQuantity;
     const repairs: { territory_id: string; hp_to_add: number }[] = [];
     for (const s of repairableStrongholds) {
@@ -546,7 +566,7 @@ function PurchaseModal({
           })}
         </div>
 
-        {(activeTab === 'land' || activeTab === 'sea' || activeTab === 'siege' || activeTab === 'hero') && (mobilizationCapacity != null || mobilizationLandCapacity != null || mobilizationCampLandCapacity != null || mobilizationSeaCapacity != null) && (
+        {(activeTab === 'land' || activeTab === 'sea' || activeTab === 'siege' || activeTab === 'hero') && (mobilizationCapacity != null || mobilizationLandCapacity != null || mobilizationCampLandCapacity != null || mobilizationSeaCapacity != null || mobilizationRiverCapacity != null) && (
           <p className="mobilization-capacity">
             {(mobilizationLandCapacity != null || mobilizationCampLandCapacity != null) && (mobilizationSeaCapacity == null || allNavalUnits.length === 0) ? (
               <>Land: <strong>{landInCart}/{displayLandDenominator}</strong></>
@@ -554,6 +574,9 @@ function PurchaseModal({
               <>Land: <strong>{landInCart}/{displayLandDenominator}</strong> | Sea: <strong>{seaInCart}/{mobilizationSeaCapacity}</strong></>
             ) : (
               <>Mobilization Capacity: <strong>{totalUnits}/{mobilizationCapacity ?? 0}</strong></>
+            )}
+            {allRiverUnits.length > 0 && mobilizationRiverCapacity != null && (
+              <> | River: <strong>{riverInCart}/{mobilizationRiverCapacity}</strong></>
             )}
           </p>
         )}

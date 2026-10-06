@@ -18,7 +18,7 @@ from collections import Counter, defaultdict
 from typing import TYPE_CHECKING
 
 from backend.engine.combat_sim import SimOptions, run_simulation
-from backend.engine.movement import _is_sea_zone, get_reachable_territories_for_unit
+from backend.engine.movement import _is_water_zone, get_reachable_territories_for_unit
 from backend.engine.queries import _is_naval_unit
 from backend.engine.state import Unit
 from backend.engine.utils import get_unit_faction
@@ -354,7 +354,7 @@ def defender_marginal_hold_metrics(
     Nones if territory not simmable.
     """
     tdef = td.get(to_tid)
-    if not tdef or _is_sea_zone(tdef):
+    if not tdef or _is_water_zone(tdef):
         return (None, None, None)
 
     if by_faction_cache is not None and to_tid not in by_faction_cache:
@@ -408,7 +408,7 @@ def defender_hold_probability_after_hypothetical_departure(
     reinforcement scoring, so we do not march away from a hex that collapses without those units.
     """
     tdef = td.get(from_tid)
-    if not tdef or _is_sea_zone(tdef):
+    if not tdef or _is_water_zone(tdef):
         return None
     if by_faction_cache is not None and from_tid not in by_faction_cache:
         by_faction_cache[from_tid] = enemy_units_reaching_by_faction(
@@ -449,7 +449,7 @@ def defender_hold_probability_sim(
     Uses coalition garrison when the territory owner is an allied faction (same alliance id).
     """
     tdef = td.get(territory_id)
-    if not tdef or _is_sea_zone(tdef):
+    if not tdef or _is_water_zone(tdef):
         return None
     bf = enemy_units_reaching_by_faction(
         territory_id, state, faction_id, fd, td, ud
@@ -583,7 +583,7 @@ def marginal_hold_delta_add_land_unit(
     Returns 0 if not simmable, naval unit, or sea territory.
     """
     tdef = td.get(territory_id)
-    if not tdef or _is_sea_zone(tdef):
+    if not tdef or _is_water_zone(tdef):
         return 0.0
     if _is_naval_unit(ud.get(extra_unit_id)):
         return 0.0
@@ -652,7 +652,7 @@ def purchase_defense_interest_territories(
         if getattr(terr, "owner", None) != faction_id:
             continue
         tdef = td.get(tid)
-        if not tdef or _is_sea_zone(tdef):
+        if not tdef or _is_water_zone(tdef):
             continue
         if count_enemies_that_can_reach_territory_combat_move(
             tid, state, faction_id, fd, td, ud
@@ -695,7 +695,7 @@ def defense_expected_loss_by_territory(
         if owner != faction_id and not _same_alliance_non_empty(owner, faction_id, fd):
             continue
         tdef = td.get(tid)
-        if not tdef or _is_sea_zone(tdef):
+        if not tdef or _is_water_zone(tdef):
             continue
         if count_enemies_that_can_reach_territory_combat_move(
             tid, state, faction_id, fd, td, ud

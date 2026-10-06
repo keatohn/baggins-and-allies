@@ -257,6 +257,8 @@ export interface AvailableActionsResponse {
   mobilization_camp_land_capacity?: number;
   /** Sea mobilization capacity (port-adjacent sea zones). Naval units purchased cannot exceed this. */
   mobilization_sea_capacity?: number;
+  /** River mobilization capacity (sum of turn-start river-bank power, each bank once). */
+  mobilization_river_capacity?: number;
   /** Units already purchased this turn (purchase phase). */
   purchased_units_count?: number;
   /** Power cost to purchase one camp (0 = camps not purchasable). */
@@ -327,6 +329,8 @@ export interface ApiMobilizeOptions {
   territories?: string[];
   /** Sea zone IDs where faction can mobilize naval units (adjacent to an owned port). */
   sea_zones?: string[];
+  /** River zone IDs where faction can mobilize river units (bordering a turn-start owned bank). */
+  river_zones?: string[];
   available_strongholds?: string[];
   pending_units: ApiUnitStack[];
   capacity?: {
@@ -340,6 +344,7 @@ export interface ApiMobilizeOptions {
       home_unit_capacity?: Record<string, number>;
     }[];
     sea_zones?: { sea_zone_id: string; power: number }[];
+    river_zones?: { river_zone_id: string; power: number }[];
   };
   total_capacity?: number;
 }

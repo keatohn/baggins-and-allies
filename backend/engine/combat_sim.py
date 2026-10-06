@@ -69,7 +69,7 @@ from backend.engine.combat import (
     siegework_dice_round_applies,
 )
 from backend.engine.definitions import TerritoryDefinition, UnitDefinition
-from backend.engine.movement import _is_sea_zone
+from backend.engine.movement import _is_sea_zone, _is_water_zone
 from backend.engine.state import Unit
 from backend.engine.utils import (
     archer_prefire_eligible,
@@ -215,7 +215,7 @@ def run_one_battle(
     all_def_casualties: dict[str, int] = defaultdict(int)
 
     territory_def = territory_defs.get(territory_id)
-    is_sea = _is_sea_zone(territory_def)
+    is_sea = _is_water_zone(territory_def)
     # Naval hit assignment only for battles in a sea *zone* (ships + aerial). Sea raids
     # are land combat; is_sea_raid does not affect this flag.
     is_naval_attacker = is_sea

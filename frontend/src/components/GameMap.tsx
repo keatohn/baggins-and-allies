@@ -128,7 +128,9 @@ function isSeaTerrainId(
   tid: string,
   territoryData: Record<string, { terrain?: string } | undefined>,
 ): boolean {
-  return territoryData[tid]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid);
+  return territoryData[tid]?.terrain === 'sea'
+    || territoryData[tid]?.terrain === 'river'
+    || /^sea_zone_?\d+$/i.test(tid);
 }
 
 /** Match backend pending_move_is_same_phase_load_into_sea (move_type may be omitted on legacy JSON). */
@@ -174,7 +176,7 @@ function isNonCombatNavalOffloadLand(
   );
   const t = territoryData[landKey] ?? territoryData[rawLandId];
   if (!t) return false;
-  if (t.terrain === 'sea' || /^sea_zone_?\d+$/i.test(landKey)) return false;
+  if (t.terrain === 'sea' || t.terrain === 'river' || /^sea_zone_?\d+$/i.test(landKey)) return false;
   const cfAlliance = factionData[currentFaction]?.alliance;
   const effO = t.owner;
   const isNeutral = effO == null || effO === '';
@@ -289,7 +291,7 @@ function filterLandUnitSeaLoadDestinations(
   if (navalUnitIds.has(unitId)) return;
   const isAerial = unitIsAerial(unitId, unitDefs);
   if (phase !== 'combat_move' && phase !== 'non_combat_move') return;
-  const isSeaT = (tid: string) => territoryData[tid]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid);
+  const isSeaT = (tid: string) => isSeaTerrainId(tid, territoryData);
   // Aerial units cannot end movement in a sea hex during non-combat (they may still fly to sea in combat for naval battles).
   if (isAerial && phase === 'non_combat_move') {
     for (const tid of [...validTargets]) {
@@ -329,8 +331,7 @@ function navalDragSeaNoPassengers(
   navalUnitIds: Set<string> | undefined,
 ): boolean {
   if (!navalUnitIds?.has(unitId)) return false;
-  const t = territoryData[fromTerritory];
-  const seaOrigin = t?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(fromTerritory);
+  const seaOrigin = isSeaTerrainId(fromTerritory, territoryData);
   if (!seaOrigin) return false;
   if (gamePhase !== 'combat_move' && gamePhase !== 'non_combat_move') return false;
   const onBoat = navalDrag?.passengerCount ?? 0;
@@ -424,8 +425,12 @@ interface GameMapProps {
   validMobilizeTerritories?: string[];
   /** Sea zone IDs valid for naval mobilization (adjacent to owned port). */
   validMobilizeSeaZones?: string[];
+  /** River zone IDs valid for river-unit mobilization (bordering a turn-start owned bank). */
+  validMobilizeRiverZones?: string[];
   /** Set of unit IDs that are naval (mobilize to sea zone, not territory). */
   navalUnitIds?: Set<string>;
+  /** Set of unit IDs that are river craft (mobilize to a river zone). */
+  riverUnitIds?: Set<string>;
   /** Per-territory/sea-zone remaining mobilization capacity (power minus pending). Used to only highlight destinations that have room. */
   remainingMobilizationCapacity?: Record<string, number>;
   /** Per-territory, per-unit remaining home slots (1 per home territory per unit type). Enables deploy to home without camp. */
@@ -825,7 +830,9 @@ function GameMap({
   hasMobilizationSelected,
   validMobilizeTerritories = [],
   validMobilizeSeaZones = [],
-  navalUnitIds = new Set<string>(),
+  validMobilizeRiverZones = [],
+  navalUnitIds: seaHullIds = new Set<string>(),
+  riverUnitIds = new Set<string>(),
   remainingMobilizationCapacity = {},
   remainingHomeSlots = {},
   onMobilizationDrop,
@@ -855,6 +862,10 @@ function GameMap({
   seaZoneIdsEligibleForNavalTrayStackClick = EMPTY_ELIGIBLE_SEA_ZONES_FOR_TRAY,
   territorySignals = {},
 }: GameMapProps) {
+  const navalUnitIds = useMemo(
+    () => new Set([...seaHullIds, ...riverUnitIds]),
+    [seaHullIds, riverUnitIds],
+  );
   /** Unique territory colors for SVG glow filters (Safari doesn't render CSS drop-shadow on SVG). */
   const uniqueGlowColors = useMemo(() => {
     const s = new Set<string>(['#2d4258', '#d4c4a8', '#7a7a7a']);
@@ -1576,7 +1587,7 @@ function GameMap({
       if (move.move_type === 'load') moveGroups[key].isLoad = true;
     });
 
-    const isSea = (tid: string) => territoryData[tid]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid);
+    const isSea = (tid: string) => isSeaTerrainId(tid, territoryData);
 
     return Object.values(moveGroups).map(group => {
       const fromCentroid = territoryCentroids[group.from];
@@ -1791,7 +1802,7 @@ function GameMap({
     };
 
     if ((gameState.phase === 'combat_move' || gameState.phase === 'non_combat_move') && navalUnitIds?.has(unitId)) {
-      const isSeaT = (tid: string) => territoryData[tid]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid);
+      const isSeaT = (tid: string) => isSeaTerrainId(tid, territoryData);
       const emptySeaNaval = navalDragSeaNoPassengers(
         fromTerritory,
         unitId,
@@ -1976,8 +1987,7 @@ function GameMap({
         navalUnitIds,
       )
     ) {
-      const isSeaTerritoryId = (tid: string) =>
-        territoryData[tid]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid);
+      const isSeaTerritoryId = (tid: string) => isSeaTerrainId(tid, territoryData);
       const allowedSeaFromApi = new Set<string>();
       for (const m of matches) {
         for (const d of m.destinations ?? []) {
@@ -2192,8 +2202,7 @@ function GameMap({
       if (onSeaZoneStackClick && navalUnitIds.has(start.unitId)) {
         const tid = start.territoryId;
         const full = territoryUnitsFull?.[tid];
-        const isSea =
-          territoryData[tid]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid);
+        const isSea = isSeaTerrainId(tid, territoryData);
         if (isSea && full?.length && navalUnitIds.size) {
           const boatCount = full.filter((u) => navalUnitIds.has(u.unit_id)).length;
           if (boatCount > 1) {
@@ -2223,7 +2232,7 @@ function GameMap({
       if (unitFaction !== gameState.current_faction) return;
       const unitFactionColor = factionFromId && factionData[factionFromId] ? factionData[factionFromId].color : (defFaction && factionData[defFaction] ? factionData[defFaction].color : undefined);
       const instanceIdsForUnit = (territoryUnitsFull?.[start.territoryId] || []).filter(u => u.unit_id === start.unitId).map(u => u.instance_id);
-      const isSeaTap = territoryData[start.territoryId]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(start.territoryId);
+      const isSeaTap = isSeaTerrainId(start.territoryId, territoryData);
       let navalDrag: { passengerCount: number; instanceIds?: string[] } | undefined;
       if (navalUnitIds.has(start.unitId) && isSeaTap && territoryUnitsFull?.[start.territoryId]?.length) {
         const full = territoryUnitsFull[start.territoryId];
@@ -2405,10 +2414,15 @@ function GameMap({
     if ((data as { type?: string }).type === 'mobilization-unit') {
       setActiveUnit(null);
       const unitId = (data as { unitId?: string }).unitId;
-      const isNaval = unitId ? navalUnitIds.has(unitId) : false;
-      const validDestinations = isNaval ? validMobilizeSeaZones : validMobilizeTerritories;
+      const isRiverHull = unitId ? riverUnitIds.has(unitId) : false;
+      const isSeaHull = unitId ? seaHullIds.has(unitId) : false;
+      const validDestinations = isRiverHull
+        ? validMobilizeRiverZones
+        : isSeaHull
+          ? validMobilizeSeaZones
+          : validMobilizeTerritories;
       const withRoom = validDestinations.filter((id: string) => {
-        if (isNaval) return (remainingMobilizationCapacity[id] ?? 0) > 0;
+        if (isRiverHull || isSeaHull) return (remainingMobilizationCapacity[id] ?? 0) > 0;
         const campRoom = (remainingMobilizationCapacity[id] ?? 0) > 0;
         const homeRoom = unitId ? (remainingHomeSlots[id]?.[unitId] ?? 0) > 0 : false;
         return campRoom || homeRoom;
@@ -2438,7 +2452,7 @@ function GameMap({
       passengerCount: passengerCount ?? 0,
       ...(fromNavalTray ? { fromNavalTray: true } : {}),
     });
-    const isSeaFrom = territoryData[territoryId]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(territoryId);
+    const isSeaFrom = isSeaTerrainId(territoryId, territoryData);
     const navalDrag =
       navalUnitIds.has(unitId) && isSeaFrom
         ? { passengerCount: passengerCount ?? 0, instanceIds }
@@ -2449,7 +2463,10 @@ function GameMap({
     computeBulkAllMoveData,
     validMobilizeTerritories,
     validMobilizeSeaZones,
+    validMobilizeRiverZones,
     navalUnitIds,
+    riverUnitIds,
+    seaHullIds,
     unitDefs,
     remainingMobilizationCapacity,
     remainingHomeSlots,
@@ -2710,7 +2727,7 @@ function GameMap({
         const destToStash = resolvedId.trim();
         if (destToStash) _onDropDestination?.(destToStash);
         storeTarget = backendDestId || storeTarget; // prefer canonical id so confirm sends backend-canonical value (e.g. sea_zone_11)
-        const isSeaT = (tid: string) => territoryData[tid]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid);
+        const isSeaT = (tid: string) => isSeaTerrainId(tid, territoryData);
         // Offload / sea raid (naval, drop on land): find all sea zones adjacent to the land that the boat can reach (current zone or any destination). Include hostile zones so user can choose. Only show zone picker when multiple options.
         let effectiveToTerritory = storeTarget;
         let seaRaidSeaZoneOptions: string[] | undefined;
@@ -3623,8 +3640,8 @@ function GameMap({
                         .sort(([idA], [idB]) => {
                           const defA = territoryData[idA] ?? territoryData[resolveTerritoryDropId(idA)];
                           const defB = territoryData[idB] ?? territoryData[resolveTerritoryDropId(idB)];
-                          const seaA = defA?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(String(idA));
-                          const seaB = defB?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(String(idB));
+                          const seaA = defA?.terrain === 'sea' || defA?.terrain === 'river' || /^sea_zone_?\d+$/i.test(String(idA));
+                          const seaB = defB?.terrain === 'sea' || defB?.terrain === 'river' || /^sea_zone_?\d+$/i.test(String(idB));
                           if (seaA === seaB) return 0;
                           return seaA ? 1 : -1;
                         })
@@ -3642,7 +3659,7 @@ function GameMap({
                           const territory = territoryData[territoryId] ?? territoryData[stateKey];
                           const owner = territory?.owner;
                           const isNonOwnable = territory && (territory.ownable === false);
-                          const isSeaZone = territory?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(territoryId);
+                          const isSeaZone = territory?.terrain === 'sea' || territory?.terrain === 'river' || /^sea_zone_?\d+$/i.test(territoryId);
                           // Definitions may load after game state (e.g. create-game nav + getGame without embedded defs);
                           // missing faction palette must not yield undefined — glow/filter code calls .replace on color.
                           const color = isSeaZone
@@ -3688,7 +3705,12 @@ function GameMap({
                             (validMobilizeSeaZones.includes(territoryId) || validMobilizeSeaZones.includes(stateKey)) &&
                             hasMobilizationRoom &&
                             (activeDragId != null ? isValidDrop : (hasMobilizationSelected || (mobilizationTray?.purchases?.length ?? 0) > 0));
-                          const isMobilizationZone = isValidMobilizationTarget || isValidMobilizationTargetSea;
+                          const isValidMobilizationTargetRiver =
+                            isMobilizePhase &&
+                            (validMobilizeRiverZones.includes(territoryId) || validMobilizeRiverZones.includes(stateKey)) &&
+                            hasMobilizationRoom &&
+                            (activeDragId != null ? isValidDrop : (hasMobilizationSelected || (mobilizationTray?.purchases?.length ?? 0) > 0));
+                          const isMobilizationZone = isValidMobilizationTarget || isValidMobilizationTargetSea || isValidMobilizationTargetRiver;
                           const thisCanon = resolveTerritoryDropId(territoryId) || territoryId;
                           const mobilizationMuted =
                             mobilizationDestinationClickCanon != null &&
@@ -4547,7 +4569,7 @@ function GameMap({
                         const powerBadgeOffsetY = useSeparateUnitSpot ? 0 : (hasPowerBadge ? (hasStrongholdMarker ? 26 : 52) : (hasStrongholdMarker ? 0 : 6));
 
                         const NEUTRAL_UNIT_BORDER = '#888888';
-                        const isSeaZone = territory?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(territoryId);
+                        const isSeaZone = territory?.terrain === 'sea' || territory?.terrain === 'river' || /^sea_zone_?\d+$/i.test(territoryId);
                         const fullUnits = territoryUnitsFull?.[territoryId];
 
                         // Sea zone with full unit data: ships (+ passengers on those rows). Non-naval surface units (e.g. aerial after naval battle) render in a second row — do not return null when boats are gone.

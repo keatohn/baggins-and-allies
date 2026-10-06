@@ -14,12 +14,18 @@ from backend.engine.definitions import (
     UnitDefinition,
     TerritoryDefinition,
     FactionDefinition,
+    controlling_faction_id,
+    faction_acts_as,
     is_transportable,
 )
 from backend.engine.utils import effective_territory_owner, faction_owns_capital
 from backend.engine.special_rules import territory_current_power
 from backend.engine.movement import (
+    _is_river_unit,
+    _is_river_zone,
     _is_sea_zone,
+    _is_transport_boat_for_zone,
+    _is_water_zone,
     _sea_zone_has_hostile_enemy_boats,
     are_sea_zones_directly_adjacent,
     empty_sea_zone_valid_for_combat_move_sail_then_load_raid,
@@ -40,6 +46,7 @@ from backend.engine.movement import (
     resolve_unit_for_move_declaration,
     sea_zone_ids_match,
     sort_sea_zone_ids_numerically,
+    water_transport_relation,
 )
 from backend.engine.utils import (
     effective_territory_owner,
@@ -154,6 +161,180 @@ def _total_pending_mobilization_to_port(
     for pm in getattr(state, "pending_mobilizations", []):
         if pm.destination in dests:
             total += sum(u.get("count", 0) for u in pm.units)
+    return total
+
+
+def _purchase_kind(unit_def: UnitDefinition | None) -> str:
+    """'naval', 'river', or 'land'. River craft are not ships and do not spend sea capacity."""
+    if _is_naval_unit(unit_def):
+        return "naval"
+    if _is_river_unit(unit_def):
+        return "river"
+    return "land"
+
+
+def _territories_owned_at_turn_start(state: GameState, faction_id: str) -> set[str]:
+    raw = getattr(state, "faction_territories_at_turn_start", None) or {}
+    return set(raw.get(faction_id) or [])
+
+
+def river_banks_for_zone(
+    state: GameState,
+    faction_id: str,
+    zone_id: str,
+    territory_defs: dict[str, TerritoryDefinition],
+) -> list[str]:
+    """
+    Land territories this faction owns that border the river zone and were owned at turn start.
+    An allied bank does not count. A bank captured this turn does not count.
+    """
+    zdef = territory_defs.get(zone_id)
+    if not _is_river_zone(zdef):
+        return []
+    owned_at_start = _territories_owned_at_turn_start(state, faction_id)
+    banks: list[str] = []
+    for adj_id in getattr(zdef, "adjacent", []) or []:
+        if adj_id not in owned_at_start:
+            continue
+        terr = state.territories.get(adj_id)
+        if not terr or terr.owner != faction_id:
+            continue
+        adj_def = territory_defs.get(adj_id)
+        if not adj_def or _is_water_zone(adj_def):
+            continue
+        banks.append(adj_id)
+    return banks
+
+
+def _pending_mobilization_counts_by_kind(
+    state: GameState,
+    unit_defs: dict[str, UnitDefinition],
+) -> tuple[dict[str, int], dict[str, int]]:
+    """destination -> count, split into land (not naval, not river) and river craft."""
+    land: dict[str, int] = {}
+    river: dict[str, int] = {}
+    for pm in getattr(state, "pending_mobilizations", []) or []:
+        dest = getattr(pm, "destination", None) or ""
+        for item in getattr(pm, "units", None) or []:
+            n = int(item.get("count", 0) or 0)
+            if n <= 0:
+                continue
+            kind = _purchase_kind(unit_defs.get(item.get("unit_id")))
+            if kind == "river":
+                river[dest] = river.get(dest, 0) + n
+            elif kind == "land":
+                land[dest] = land.get(dest, 0) + n
+    return land, river
+
+
+def _boats_fit_on_banks(
+    demands: list[tuple[str, int]],
+    remaining: dict[str, int],
+    zone_banks: dict[str, list[str]],
+) -> bool:
+    """True if each river zone's boats can be charged to its adjacent banks without exceeding power."""
+    rem = dict(remaining)
+
+    def rec(i: int) -> bool:
+        if i >= len(demands):
+            return True
+        zone_id, count = demands[i]
+        banks = zone_banks.get(zone_id) or []
+
+        def distribute(bank_index: int, left: int) -> bool:
+            if left == 0:
+                return rec(i + 1)
+            if bank_index >= len(banks):
+                return False
+            bank_id = banks[bank_index]
+            max_take = min(left, rem.get(bank_id, 0))
+            for take in range(max_take, -1, -1):
+                rem[bank_id] = rem.get(bank_id, 0) - take
+                if distribute(bank_index + 1, left - take):
+                    return True
+                rem[bank_id] = rem.get(bank_id, 0) + take
+            return False
+
+        return distribute(0, count)
+
+    return rec(0)
+
+
+def river_mobilization_fits(
+    state: GameState,
+    faction_id: str,
+    territory_defs: dict[str, TerritoryDefinition],
+    unit_defs: dict[str, UnitDefinition],
+    extra_land: dict[str, int] | None = None,
+    extra_river: dict[str, int] | None = None,
+) -> tuple[bool, str]:
+    """
+    Each turn-start-owned river bank has a pool equal to its power.
+    Land mobilized on that bank and rowboats mobilized into adjacent river zones share the pool.
+    A boat on a segment bordered by several of your banks can draw from their combined remaining power.
+    """
+    land, river = _pending_mobilization_counts_by_kind(state, unit_defs)
+    for dest, n in (extra_land or {}).items():
+        land[dest] = land.get(dest, 0) + int(n)
+    for dest, n in (extra_river or {}).items():
+        river[dest] = river.get(dest, 0) + int(n)
+
+    banks: dict[str, int] = {}
+    zone_banks: dict[str, list[str]] = {}
+    for zone_id, zdef in territory_defs.items():
+        if not _is_river_zone(zdef):
+            continue
+        bs = river_banks_for_zone(state, faction_id, zone_id, territory_defs)
+        zone_banks[zone_id] = bs
+        for bank_id in bs:
+            if bank_id in banks:
+                continue
+            bdef = territory_defs.get(bank_id)
+            banks[bank_id] = territory_current_power(state, bank_id, bdef) if bdef else 0
+
+    for bank_id, power in banks.items():
+        if land.get(bank_id, 0) > power:
+            return False, (
+                f"Cannot mobilize that many units at {bank_id}: "
+                f"river bank capacity is {power}"
+            )
+
+    remaining = {bank_id: power - land.get(bank_id, 0) for bank_id, power in banks.items()}
+    demands = [(zone_id, n) for zone_id, n in river.items() if n > 0]
+    for zone_id, n in demands:
+        if not zone_banks.get(zone_id):
+            return False, (
+                f"River units can only mobilize to a river zone that borders a territory you owned "
+                f"at the start of your turn; {zone_id} is not valid"
+            )
+        if n > sum(remaining.get(b, 0) for b in zone_banks[zone_id]):
+            return False, (
+                f"Cannot mobilize {n} river units to {zone_id}: bordering territories do not have "
+                f"enough power left"
+            )
+    if not _boats_fit_on_banks(demands, remaining, zone_banks):
+        return False, "Not enough river mobilization capacity on the bordering territories"
+    return True, ""
+
+
+def river_mobilization_capacity_total(
+    state: GameState,
+    faction_id: str,
+    territory_defs: dict[str, TerritoryDefinition],
+) -> int:
+    """Sum of power of your turn-start river banks, each bank once."""
+    seen: set[str] = set()
+    total = 0
+    for zone_id, zdef in territory_defs.items():
+        if not _is_river_zone(zdef):
+            continue
+        for bank_id in river_banks_for_zone(state, faction_id, zone_id, territory_defs):
+            if bank_id in seen:
+                continue
+            seen.add(bank_id)
+            bdef = territory_defs.get(bank_id)
+            if bdef:
+                total += territory_current_power(state, bank_id, bdef)
     return total
 
 
@@ -305,12 +486,12 @@ def _is_naval_unit(unit_def: UnitDefinition | None) -> bool:
 
 def participates_in_sea_hex_naval_combat(unit, unit_def: UnitDefinition | None) -> bool:
     """
-    Combat in a sea territory: naval surface units (not cargo) and aerial units that are not embarked
+    Combat in a sea or river territory: hulls (not cargo) and aerial units that are not embarked
     roll and appear as combatants. Matches initiate_combat roster rules.
     """
     if getattr(unit, "loaded_onto", None):
         return False
-    if _is_naval_unit(unit_def):
+    if _is_naval_unit(unit_def) or _is_river_unit(unit_def):
         return True
     return is_aerial_unit(unit_def)
 
@@ -326,7 +507,7 @@ def _land_combat_unit_side_for_queries(
     uo = get_unit_faction(unit, unit_defs)
     if uo is None:
         return None
-    if uo == attacker_faction:
+    if faction_acts_as(faction_defs, uo, attacker_faction):
         return "attacker"
     ua = getattr(faction_defs.get(uo), "alliance", None)
     if ua != attacker_alliance:
@@ -354,21 +535,19 @@ def validate_move_as_sea_offload_if_applicable(
     """
     origin_def = territory_defs.get(origin)
     dest_def = territory_defs.get(destination)
-    if (
-        not origin_def
-        or not dest_def
-        or not _is_sea_zone(origin_def)
-        or _is_sea_zone(dest_def)
-    ):
+    if water_transport_relation(origin_def, dest_def) != "offload":
         return None
+
+    def _is_zone_craft(ud: UnitDefinition | None) -> bool:
+        return _is_transport_boat_for_zone(ud, origin_def)
 
     land_offload: list = []
     naval_in_move: list = []
     for u in units_in_stack:
         ud = unit_defs.get(u.unit_id)
-        if _is_naval_unit(ud):
+        if _is_zone_craft(ud):
             naval_in_move.append(u)
-        elif is_land_unit(ud) and not _is_naval_unit(ud):
+        elif is_land_unit(ud) and not _is_zone_craft(ud):
             # Passengers ashore/offload: land, non-naval. Do not require is_transportable here —
             # load validation already enforced that; treating only transportable caused "orphan"
             # units (in stack but neither naval nor land_offload) and the bogus reachability error.
@@ -417,8 +596,8 @@ def validate_move_as_sea_offload_if_applicable(
     naval_in_territory = [
         u
         for u in (origin_territory.units if origin_territory else [])
-        if get_unit_faction(u, unit_defs) == faction_id
-        and _is_naval_unit(unit_defs.get(u.unit_id))
+        if faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), faction_id)
+        and _is_transport_boat_for_zone(unit_defs.get(u.unit_id), origin_def)
     ]
     boat_ids_in_move = {n.instance_id for n in naval_in_move}
     boat_ids_in_sea = {n.instance_id for n in naval_in_territory}
@@ -629,26 +808,34 @@ def _validate_purchase(
     )
     sea_capacity = sum(z.get("power", 0) for z in capacity_info.get("sea_zones", []))
 
-    def _land_naval_counts(unit_stacks: list) -> tuple[int, int]:
-        land, naval = 0, 0
+    def _kind_counts(unit_stacks: list) -> tuple[int, int, int]:
+        land, naval, river = 0, 0, 0
         for stack in unit_stacks:
             ud = unit_defs.get(stack.unit_id)
             n = getattr(stack, "count", 0)
-            if _is_naval_unit(ud):
+            kind = _purchase_kind(ud)
+            if kind == "naval":
                 naval += n
+            elif kind == "river":
+                river += n
             else:
                 land += n
-        return land, naval
+        return land, naval, river
 
     already_stacks = state.faction_purchased_units.get(faction_id, [])
-    already_land, already_naval = _land_naval_counts(already_stacks)
+    already_land, already_naval, already_river = _kind_counts(already_stacks)
 
-    this_land, this_naval = 0, 0
+    this_land, this_naval, this_river = 0, 0, 0
     for unit_id, count in purchases.items():
-        if _is_naval_unit(unit_defs.get(unit_id)):
+        kind = _purchase_kind(unit_defs.get(unit_id))
+        if kind == "naval":
             this_naval += count
+        elif kind == "river":
+            this_river += count
         else:
             this_land += count
+
+    river_capacity = river_mobilization_capacity_total(state, faction_id, territory_defs)
 
     if already_land + this_land > land_capacity:
         return ValidationResult(
@@ -661,6 +848,12 @@ def _validate_purchase(
             False,
             f"Cannot purchase that many naval units: sea mobilization capacity is {sea_capacity} "
             f"(already purchased: {already_naval} naval, this purchase: {this_naval} naval)"
+        )
+    if already_river + this_river > river_capacity:
+        return ValidationResult(
+            False,
+            f"Cannot purchase that many river units: river mobilization capacity is {river_capacity} "
+            f"(already purchased: {already_river} river, this purchase: {this_river} river)"
         )
 
     return ValidationResult(True)
@@ -712,18 +905,11 @@ def _validate_move(
     # Build list of units and which can reach destination
     origin_def_chk = territory_defs.get(origin)
     dest_def_chk = territory_defs.get(destination)
-    sea_to_land_ctx = (
-        origin_def_chk
-        and dest_def_chk
-        and _is_sea_zone(origin_def_chk)
-        and not _is_sea_zone(dest_def_chk)
-    )
-    sea_to_sea_ctx = (
-        origin_def_chk
-        and dest_def_chk
-        and _is_sea_zone(origin_def_chk)
-        and _is_sea_zone(dest_def_chk)
-    )
+    _move_rel = water_transport_relation(origin_def_chk, dest_def_chk)
+    if _move_rel == "cross":
+        return ValidationResult(False, "Ships cannot enter river zones, and river units cannot enter sea zones")
+    sea_to_land_ctx = _move_rel == "offload"
+    sea_to_sea_ctx = _move_rel == "sail"
     units_in_stack = []
     for instance_id in unit_instance_ids:
         if sea_to_land_ctx:
@@ -818,10 +1004,12 @@ def _validate_move(
             state.phase == "combat_move"
             and origin_def_chk
             and dest_def_chk
-            and _is_sea_zone(origin_def_chk)
-            and _is_sea_zone(dest_def_chk)
+            and water_transport_relation(origin_def_chk, dest_def_chk) == "sail"
             and units_in_stack
-            and all(_is_naval_unit(unit_defs.get(u.unit_id)) for u in units_in_stack)
+            and all(
+                _is_transport_boat_for_zone(unit_defs.get(u.unit_id), origin_def_chk)
+                for u in units_in_stack
+            )
         ):
             avoid_forced = bool(action.payload.get("avoid_forced_naval_combat"))
             forced_ids = set(
@@ -830,7 +1018,9 @@ def _validate_move(
                 )
             )
             moving_naval = {
-                u.instance_id for u in units_in_stack if _is_naval_unit(unit_defs.get(u.unit_id))
+                u.instance_id
+                for u in units_in_stack
+                if _is_transport_boat_for_zone(unit_defs.get(u.unit_id), origin_def_chk)
             }
             if avoid_forced:
                 if origin == destination:
@@ -882,8 +1072,7 @@ def _validate_move(
         if (
             odef is not None
             and ddef is not None
-            and not _is_sea_zone(odef)
-            and _is_sea_zone(ddef)
+            and water_transport_relation(odef, ddef) == "load"
             and units_in_stack
         ):
             all_transportable_land = all(
@@ -933,8 +1122,8 @@ def _validate_move(
         if (
             odef is not None
             and ddef is not None
-            and not _is_sea_zone(odef)
-            and not _is_sea_zone(ddef)
+            and not _is_water_zone(odef)
+            and not _is_water_zone(ddef)
             and units_in_stack
         ):
             ford_cost = land_move_ford_escort_cost_for_instances(
@@ -973,13 +1162,13 @@ def _validate_move(
 
     # Not all units can reach: allow only if valid sea transport (driver + passengers, or load: land-only to sea with boats there)
     path = get_shortest_path(origin, destination, territory_defs)
-    path_includes_sea = path and any(
-        _is_sea_zone(territory_defs.get(tid)) for tid in path
+    path_includes_water = path and any(
+        _is_water_zone(territory_defs.get(tid)) for tid in path
     )
-    dest_is_sea = _is_sea_zone(territory_defs.get(destination))
+    dest_is_water = _is_water_zone(territory_defs.get(destination))
     origin_def = territory_defs.get(origin)
-    origin_is_land = origin_def and not _is_sea_zone(origin_def)
-    if not path_includes_sea and not dest_is_sea:
+    origin_is_land = origin_def and not _is_water_zone(origin_def)
+    if not path_includes_water and not dest_is_water:
         return ValidationResult(
             False,
             f"Unit(s) cannot reach {destination} from {origin} (and this is not a sea transport move)"
@@ -994,8 +1183,7 @@ def _validate_move(
     if (
         sail_land_raw
         and move_type_payload == "sail"
-        and _is_sea_zone(territory_defs.get(origin))
-        and _is_sea_zone(territory_defs.get(destination))
+        and water_transport_relation(territory_defs.get(origin), territory_defs.get(destination)) == "sail"
     ):
         vr = validate_sail_move_for_offload_sea_raid(
             state,
@@ -1018,7 +1206,7 @@ def _validate_move(
     if (
         move_type_payload == "load"
         and origin_is_land
-        and dest_is_sea
+        and dest_is_water
     ):
         for u in units_in_stack:
             ud = unit_defs.get(u.unit_id)
@@ -1047,11 +1235,10 @@ def _validate_move(
             if not boat_unit:
                 return ValidationResult(False, f"Boat {load_onto_boat_id} not found in {destination}")
             boat_ud = unit_defs.get(boat_unit.unit_id)
-            if not boat_ud or (
-                getattr(boat_ud, "archetype", "") != "naval" and "naval" not in getattr(boat_ud, "tags", [])
-            ):
-                return ValidationResult(False, f"Unit {load_onto_boat_id} is not a naval unit")
-            if get_unit_faction(boat_unit, unit_defs) != faction_id:
+            dest_def_boat = territory_defs.get(destination)
+            if not _is_transport_boat_for_zone(boat_ud, dest_def_boat):
+                return ValidationResult(False, f"Unit {load_onto_boat_id} cannot carry units in {destination}")
+            if not faction_acts_as(faction_defs, get_unit_faction(boat_unit, unit_defs), faction_id):
                 return ValidationResult(
                     False,
                     f"Boat {load_onto_boat_id} does not belong to faction {faction_id}",
@@ -1078,7 +1265,7 @@ def _validate_move(
         return ValidationResult(True)
 
     # Load: land -> adjacent sea; stack can be all land units; boats already in sea zone provide capacity
-    if origin_is_land and dest_is_sea and not drivers and passengers:
+    if origin_is_land and dest_is_water and not drivers and passengers:
         for u in passengers:
             ud = unit_defs.get(u.unit_id)
             if not is_land_unit(ud):
@@ -1100,9 +1287,9 @@ def _validate_move(
             if not boat_unit:
                 return ValidationResult(False, f"Boat {load_onto_boat_id} not found in {destination}")
             boat_ud = unit_defs.get(boat_unit.unit_id)
-            if not boat_ud or (getattr(boat_ud, "archetype", "") != "naval" and "naval" not in getattr(boat_ud, "tags", [])):
-                return ValidationResult(False, f"Unit {load_onto_boat_id} is not a naval unit")
-            if get_unit_faction(boat_unit, unit_defs) != faction_id:
+            if not _is_transport_boat_for_zone(boat_ud, territory_defs.get(destination)):
+                return ValidationResult(False, f"Unit {load_onto_boat_id} cannot carry units in {destination}")
+            if not faction_acts_as(faction_defs, get_unit_faction(boat_unit, unit_defs), faction_id):
                 return ValidationResult(False, f"Boat {load_onto_boat_id} does not belong to faction {faction_id}")
             slots = remaining_load_slots_on_boat(
                 slot_state, destination, load_onto_boat_id, faction_id, unit_defs, territory_defs, state.phase
@@ -1134,10 +1321,11 @@ def _validate_move(
             return ValidationResult(False, f"Unit {u.instance_id} cannot be carried (only land units can be passengers)")
         if not is_transportable(ud):
             return ValidationResult(False, f"Unit {u.instance_id} cannot be transported (no transportable tag)")
+    dest_zone_def = territory_defs.get(destination)
     naval_capacity = sum(
         getattr(unit_defs.get(u.unit_id), "transport_capacity", 0) or 0
         for u in drivers
-        if (getattr(unit_defs.get(u.unit_id), "archetype", "") == "naval" or "naval" in getattr(unit_defs.get(u.unit_id), "tags", []))
+        if _is_transport_boat_for_zone(unit_defs.get(u.unit_id), dest_zone_def)
     )
     if len(passengers) > naval_capacity:
         return ValidationResult(
@@ -1168,7 +1356,7 @@ def _validate_initiate_combat(
         return ValidationResult(False, f"Territory {territory_id} does not exist")
 
     territory_def = territory_defs.get(territory_id)
-    combat_territory_is_sea = _is_sea_zone(territory_def)
+    combat_territory_is_water = _is_water_zone(territory_def)
     attacker_faction = action.faction
     attacker_alliance = faction_defs.get(attacker_faction, FactionDefinition(
         "", "", "", "", "")).alliance
@@ -1177,9 +1365,9 @@ def _validate_initiate_combat(
         # Sea raid: attackers in sea zone, target is land territory
         sea_zone = state.territories.get(sea_zone_id)
         sea_def = territory_defs.get(sea_zone_id)
-        if not sea_zone or not sea_def or not _is_sea_zone(sea_def):
-            return ValidationResult(False, f"Sea zone {sea_zone_id} is not a valid sea zone")
-        if combat_territory_is_sea:
+        if not sea_zone or not sea_def or not _is_water_zone(sea_def):
+            return ValidationResult(False, f"Sea zone {sea_zone_id} is not a valid sea or river zone")
+        if combat_territory_is_water:
             return ValidationResult(False, "Sea raid target must be land territory")
         sea_raid_from = getattr(state, "territory_sea_raid_from", None) or {}
         if sea_raid_from.get(territory_id) != sea_zone_id:
@@ -1192,13 +1380,13 @@ def _validate_initiate_combat(
         raid_attackers: dict[str, Unit] = {}
         for u in sea_zone.units:
             ud = unit_defs.get(u.unit_id)
-            if get_unit_faction(u, unit_defs) != attacker_faction:
+            if not faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), attacker_faction):
                 continue
-            if not is_land_unit(ud) or _is_naval_unit(ud):
+            if not is_land_unit(ud) or _is_naval_unit(ud) or _is_river_unit(ud):
                 continue
             raid_attackers[u.instance_id] = u
         for u in territory.units:
-            if _is_naval_unit(unit_defs.get(u.unit_id)):
+            if _is_naval_unit(unit_defs.get(u.unit_id)) or _is_river_unit(unit_defs.get(u.unit_id)):
                 continue
             if _land_combat_unit_side_for_queries(
                 u, attacker_faction, attacker_alliance, unit_defs, faction_defs
@@ -1219,13 +1407,13 @@ def _validate_initiate_combat(
         # Allow empty defenders (conquer without battle)
         return ValidationResult(True)
 
-    if not combat_territory_is_sea:
+    if not combat_territory_is_water:
         for unit in territory.units:
             unit_faction = get_unit_faction(unit, unit_defs)
-            if unit_faction != action.faction:
+            if not faction_acts_as(faction_defs, unit_faction, action.faction):
                 continue
             ud = unit_defs.get(unit.unit_id)
-            if _is_naval_unit(ud) and not is_aerial_unit(ud):
+            if (_is_naval_unit(ud) or _is_river_unit(ud)) and not is_aerial_unit(ud):
                 return ValidationResult(
                     False,
                     "Naval units cannot attack or fight on land. For a sea raid, initiate combat with sea_zone_id (attackers in that sea zone)."
@@ -1236,7 +1424,7 @@ def _validate_initiate_combat(
     defender_units = []
     for unit in territory.units:
         unit_faction = get_unit_faction(unit, unit_defs)
-        if unit_faction == attacker_faction:
+        if faction_acts_as(faction_defs, unit_faction, attacker_faction):
             attacker_units.append(unit)
         elif unit_faction is not None:
             unit_alliance = faction_defs.get(unit_faction, FactionDefinition(
@@ -1284,18 +1472,12 @@ def _validate_mobilize(
     if not dest_territory or not dest_def:
         return ValidationResult(False, f"Territory {destination} does not exist")
 
-    # Determine if this batch is naval (all naval) or land (all land); mixed batches validated per unit in reducer
-    all_naval = True
-    all_land = True
-    for item in units_to_mobilize:
-        ud = unit_defs.get(item.get("unit_id"))
-        is_naval = ud and (getattr(ud, "archetype", "") == "naval" or "naval" in getattr(ud, "tags", []))
-        if is_naval:
-            all_land = False
-        else:
-            all_naval = False
+    kinds = {_purchase_kind(unit_defs.get(item.get("unit_id"))) for item in units_to_mobilize}
+    if len(kinds) != 1:
+        return ValidationResult(False, "Do not mix naval, river, and land units in one mobilization")
+    batch_kind = next(iter(kinds))
 
-    if all_naval:
+    if batch_kind == "naval":
         # Naval: destination must be a sea zone adjacent to an owned port
         if not _sea_zone_adjacent_to_owned_port(state, destination, faction_id, port_defs, territory_defs):
             return ValidationResult(
@@ -1304,6 +1486,23 @@ def _validate_mobilize(
             )
         # Shared capacity: each port territory P adjacent to this sea zone has pool P.power; count land to P + naval to P's adjacent sea zones
         power_production = None  # validated per-port below
+    elif batch_kind == "river":
+        if not _is_river_zone(dest_def) or not river_banks_for_zone(state, faction_id, destination, territory_defs):
+            return ValidationResult(
+                False,
+                f"River units can only mobilize to a river zone that borders a territory you owned "
+                f"at the start of your turn; {destination} is not valid",
+            )
+        this_count = sum(item.get("count", 0) for item in units_to_mobilize)
+        fits, err = river_mobilization_fits(
+            state,
+            faction_id,
+            territory_defs,
+            unit_defs,
+            extra_river={destination: this_count},
+        )
+        if not fits:
+            return ValidationResult(False, err)
     else:
         # Land: camp or home territory for that unit (home works at port capitals e.g. Corsair → Umbar). Not generic port land deployment.
         has_camp = _territory_has_standing_camp(state, destination, camp_defs)
@@ -1400,16 +1599,6 @@ def _validate_mobilize(
                     f"At most 1 {unit_id} can be mobilized to home territory {destination} per phase (already {already_pending} pending)",
                 )
 
-    # If mixed batch, we still validate capacity here; per-unit naval/land rules enforced in reducer
-    for item in units_to_mobilize:
-        unit_id = item.get("unit_id")
-        ud = unit_defs.get(unit_id)
-        is_naval = ud and (getattr(ud, "archetype", "") == "naval" or "naval" in getattr(ud, "tags", []))
-        if is_naval and not all_naval:
-            return ValidationResult(False, "Do not mix naval and land units in one mobilization")
-        if not is_naval and not all_land:
-            return ValidationResult(False, "Do not mix naval and land units in one mobilization")
-
     # Check purchased units are available
     purchased = state.faction_purchased_units.get(faction_id, [])
     purchased_counts = {stack.unit_id: stack.count for stack in purchased}
@@ -1427,7 +1616,7 @@ def _validate_mobilize(
 
     # Total mobilized to this destination (pending + this action) cannot exceed capacity
     this_action_count = sum(item.get("count", 0) for item in units_to_mobilize)
-    if all_naval:
+    if batch_kind == "naval":
         # Naval to sea zone: shared pool with each port adjacent to this sea zone
         sea_def = territory_defs.get(destination)
         if sea_def and _is_sea_zone(sea_def):
@@ -1445,6 +1634,16 @@ def _validate_mobilize(
                         f"Cannot mobilize {this_action_count} naval to {destination}: "
                         f"port {adj_id} shared pool would exceed capacity ({total_for_port + this_action_count} > {port_power_val})",
                     )
+    elif batch_kind == "land":
+        fits, err = river_mobilization_fits(
+            state,
+            faction_id,
+            territory_defs,
+            unit_defs,
+            extra_land={destination: this_action_count},
+        )
+        if not fits:
+            return ValidationResult(False, err)
     # Land capacity (camp / port / home-only) fully validated in the land branch above.
 
     return ValidationResult(True)
@@ -1812,6 +2011,7 @@ def get_movable_units(
     state: GameState,
     faction_id: str,
     unit_defs: dict[str, UnitDefinition] | None = None,
+    faction_defs: dict[str, FactionDefinition] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Get all units for a faction that can still move (remaining_movement > 0).
@@ -1826,7 +2026,7 @@ def get_movable_units(
             belongs = unit.instance_id.startswith(faction_id + "_")
             if not belongs and unit_defs:
                 unit_faction = get_unit_faction(unit, unit_defs)
-                belongs = unit_faction == faction_id
+                belongs = faction_acts_as(faction_defs, unit_faction, faction_id)
             if not belongs:
                 continue
 
@@ -1997,6 +2197,21 @@ def get_mobilization_territories(
     return result
 
 
+def get_mobilization_river_zones(
+    state: GameState,
+    faction_id: str,
+    territory_defs: dict[str, TerritoryDefinition],
+) -> list[str]:
+    """River zones where this faction can mobilize rowboats (borders a turn-start-owned territory)."""
+    result = []
+    for tid, tdef in territory_defs.items():
+        if not _is_river_zone(tdef):
+            continue
+        if river_banks_for_zone(state, faction_id, tid, territory_defs):
+            result.append(tid)
+    return result
+
+
 def get_mobilization_sea_zones(
     state: GameState,
     faction_id: str,
@@ -2109,11 +2324,27 @@ def get_mobilization_capacity(
         if power > 0:
             sea_zones.append({"sea_zone_id": tid, "power": power})
 
+    river_zones = []
+    for tid, tdef in territory_defs.items():
+        if not _is_river_zone(tdef):
+            continue
+        banks = river_banks_for_zone(state, faction_id, tid, territory_defs)
+        if not banks:
+            continue
+        power = 0
+        for bank_id in banks:
+            bdef = territory_defs.get(bank_id)
+            if bdef:
+                power += territory_current_power(state, bank_id, bdef)
+        if power > 0:
+            river_zones.append({"river_zone_id": tid, "power": power})
+
     return {
         "total_capacity": total,
         "territories": territories,
         "port_territories": port_territories,
         "sea_zones": sea_zones,
+        "river_zones": river_zones,
     }
 
 
@@ -2219,7 +2450,7 @@ def get_contested_territories(
             ud = unit_defs.get(unit.unit_id)
             if is_sea and not participates_in_sea_hex_naval_combat(unit, ud):
                 continue
-            if unit_faction == faction_id:
+            if faction_acts_as(faction_defs, unit_faction, faction_id):
                 attacker_units.append(unit)
             elif unit_faction is not None:
                 unit_alliance = faction_defs.get(unit_faction, FactionDefinition(
@@ -2287,18 +2518,27 @@ def get_valid_offload_sea_zones(
     (using the moving stack's naval units). Used when user drags sea -> land; boat
     sails to one of these zones, then passengers offload to land.
     """
-    adjacent_seas = set(get_sea_zones_adjacent_to_land(to_land_territory, territory_defs))
-    if not adjacent_seas:
-        return []
     from_terr = state.territories.get(from_territory)
     if not from_terr:
         return []
     units_in_stack = [u for u in from_terr.units if u.instance_id in unit_instance_ids]
-    drivers = [
-        u for u in units_in_stack
-        if _is_naval_unit(unit_defs.get(u.unit_id))
-    ]
+    sea_drivers = [u for u in units_in_stack if _is_naval_unit(unit_defs.get(u.unit_id))]
+    river_drivers = [u for u in units_in_stack if _is_river_unit(unit_defs.get(u.unit_id))]
+    if sea_drivers and river_drivers:
+        return []
+    drivers = sea_drivers or river_drivers
     if not drivers:
+        return []
+    if sea_drivers:
+        adjacent_seas = set(get_sea_zones_adjacent_to_land(to_land_territory, territory_defs))
+    else:
+        land_def = territory_defs.get(to_land_territory)
+        adjacent_seas = set()
+        if land_def and not _is_water_zone(land_def):
+            for tid in getattr(land_def, "adjacent", []) or []:
+                if _is_river_zone(territory_defs.get(tid)):
+                    adjacent_seas.add(tid)
+    if not adjacent_seas:
         return []
     # Sea zones reachable by sail (BFS over sea only; ignores combat_move "must attack" so empty seas count for offload)
     reachable_sea = get_sea_zones_reachable_by_sail(
@@ -2331,7 +2571,7 @@ def validate_sail_move_for_offload_sea_raid(
         state, str(sail_land_territory_id or "").strip(), territory_defs
     )
     land_def = territory_defs.get(sail_land)
-    if not land_def or _is_sea_zone(land_def):
+    if not land_def or _is_water_zone(land_def):
         return ValidationResult(False, f"Invalid offload/raid land territory: {sail_land}")
     valid_zones = get_valid_offload_sea_zones(
         origin,
@@ -2348,13 +2588,18 @@ def validate_sail_move_for_offload_sea_raid(
             False,
             f"Cannot sail to {destination} to raid/offload onto {sail_land}. Valid sea zones: {valid_zones}",
         )
-    naval_drivers = [u for u in units_in_stack if _is_naval_unit(unit_defs.get(u.unit_id))]
+    sea_drivers = [u for u in units_in_stack if _is_naval_unit(unit_defs.get(u.unit_id))]
+    river_drivers = [u for u in units_in_stack if _is_river_unit(unit_defs.get(u.unit_id))]
+    if sea_drivers and river_drivers:
+        return ValidationResult(False, "Ships and river units cannot sail in the same move")
+    naval_drivers = sea_drivers or river_drivers
     if not naval_drivers:
         return ValidationResult(
             False,
             "Sail for sea raid/offload requires at least one naval unit in the move",
         )
-    passengers = [u for u in units_in_stack if not _is_naval_unit(unit_defs.get(u.unit_id))]
+    driver_ids = {u.instance_id for u in naval_drivers}
+    passengers = [u for u in units_in_stack if u.instance_id not in driver_ids]
     for u in passengers:
         ud = unit_defs.get(u.unit_id)
         if not is_land_unit(ud):
@@ -2397,7 +2642,7 @@ def get_sea_raid_targets(
     result = []
     for sea_zone_id, territory in state.territories.items():
         tdef = territory_defs.get(sea_zone_id)
-        if not tdef or getattr(tdef, "terrain_type", "").lower() != "sea":
+        if not tdef or not _is_water_zone(tdef):
             continue
         my_naval = []
         my_land = []
@@ -2405,8 +2650,11 @@ def get_sea_raid_targets(
         for unit in territory.units:
             uf = get_unit_faction(unit, unit_defs)
             if uf == faction_id:
-                if _is_naval_unit(unit_defs.get(unit.unit_id)):
+                ud = unit_defs.get(unit.unit_id)
+                if _is_transport_boat_for_zone(ud, tdef):
                     my_naval.append(unit)
+                elif _is_naval_unit(ud) or _is_river_unit(ud):
+                    continue
                 else:
                     my_land.append(unit)
             elif uf is not None:
@@ -2420,10 +2668,10 @@ def get_sea_raid_targets(
         adj_lands = set()
         for adj_id in getattr(tdef, "adjacent", []) or []:
             adj_def = territory_defs.get(adj_id)
-            if adj_def and getattr(adj_def, "terrain_type", "").lower() != "sea":
+            if adj_def and not _is_water_zone(adj_def):
                 adj_lands.add(adj_id)
         for tid, land_def in territory_defs.items():
-            if getattr(land_def, "terrain_type", "").lower() == "sea":
+            if _is_water_zone(land_def):
                 continue
             if sea_zone_id in (getattr(land_def, "adjacent", []) or []):
                 adj_lands.add(tid)
@@ -2574,13 +2822,15 @@ def get_faction_stats(
         strongholds_count = 0
         power_per_turn = 0
         for tid, ts in state.territories.items():
-            if ts.owner != faction_id:
+            owner = ts.owner
+            if controlling_faction_id(faction_defs, owner) != faction_id:
                 continue
             territories_count += 1
             tdef = territory_defs.get(tid)
             if tdef and getattr(tdef, "is_stronghold", False):
                 strongholds_count += 1
-            if tdef:
+            # Subfaction land is controlled here, but it does not pay power until a subfaction rule says so.
+            if owner == faction_id and tdef:
                 power_per_turn += territory_current_power(state, tid, tdef)
         power = state.faction_resources.get(faction_id, {}).get("power", 0)
         factions[faction_id] = {
@@ -2598,7 +2848,7 @@ def get_faction_stats(
             ud = unit_defs.get(unit.unit_id)
             if not ud:
                 continue
-            fid = getattr(ud, "faction", None)
+            fid = controlling_faction_id(faction_defs, getattr(ud, "faction", None))
             if fid not in factions:
                 continue
             factions[fid]["units"] += 1

@@ -16,7 +16,7 @@ from backend.engine.queries import (
     valid_camp_placement_territory_ids,
 )
 from backend.engine.utils import faction_owns_capital
-from backend.engine.queries import _is_naval_unit
+from backend.engine.queries import _is_naval_unit, _is_river_unit
 
 from backend.ai.context import AIContext
 from backend.ai.defense_sim import (
@@ -440,8 +440,21 @@ def decide_mobilization(ctx: AIContext):
     sea_zones = capacity.get("sea_zones", [])
 
     # Split purchased into land and naval
-    land_stacks = [(p["unit_id"], p["count"]) for p in purchased if not _is_naval_unit(ud.get(p["unit_id"]))]
-    naval_stacks = [(p["unit_id"], p["count"]) for p in purchased if _is_naval_unit(ud.get(p["unit_id"]))]
+    land_stacks = [
+        (p["unit_id"], p["count"])
+        for p in purchased
+        if not _is_naval_unit(ud.get(p["unit_id"])) and not _is_river_unit(ud.get(p["unit_id"]))
+    ]
+    naval_stacks = [
+        (p["unit_id"], p["count"])
+        for p in purchased
+        if _is_naval_unit(ud.get(p["unit_id"]))
+    ]
+    river_stacks = [
+        (p["unit_id"], p["count"])
+        for p in purchased
+        if _is_river_unit(ud.get(p["unit_id"]))
+    ]
 
     # Try land: (1) camp/port destinations with power; (2) home destinations (1 unit type, count 1)
     if land_stacks:
@@ -576,6 +589,37 @@ def decide_mobilization(ctx: AIContext):
             zid, z_info, rem = best_naval[0]
             unit_stacks = []
             for unit_id, count in naval_stacks:
+                if rem <= 0:
+                    break
+                take = min(count, rem)
+                if take <= 0:
+                    continue
+                unit_stacks.append({"unit_id": unit_id, "count": take})
+                rem -= take
+            if unit_stacks:
+                return mobilize_units(faction_id, zid, unit_stacks)
+
+    river_zones = capacity.get("river_zones", [])
+    if river_stacks and river_zones:
+        pending_river: dict[str, int] = {}
+        for pm in getattr(state, "pending_mobilizations", []) or []:
+            dest = getattr(pm, "destination", "") or ""
+            for item in getattr(pm, "units", None) or []:
+                if _is_river_unit(ud.get(item.get("unit_id"))):
+                    pending_river[dest] = pending_river.get(dest, 0) + int(item.get("count", 0) or 0)
+        river_cands = []
+        for z_info in river_zones:
+            zid = z_info.get("river_zone_id")
+            if not zid:
+                continue
+            rem = int(z_info.get("power", 0) or 0) - pending_river.get(zid, 0)
+            if rem <= 0:
+                continue
+            river_cands.append((zid, rem))
+        if river_cands:
+            zid, rem = max(river_cands, key=lambda item: item[1])
+            unit_stacks = []
+            for unit_id, count in river_stacks:
                 if rem <= 0:
                     break
                 take = min(count, rem)

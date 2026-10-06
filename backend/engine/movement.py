@@ -8,7 +8,7 @@ from collections import deque
 from collections.abc import Iterable
 from typing import Any
 from backend.engine.state import GameState, TerritoryState, Unit
-from backend.engine.definitions import UnitDefinition, TerritoryDefinition, FactionDefinition, is_transportable
+from backend.engine.definitions import UnitDefinition, TerritoryDefinition, FactionDefinition, faction_acts_as, is_transportable
 from backend.engine.utils import (
     effective_territory_owner,
     get_unit_faction,
@@ -18,31 +18,107 @@ from backend.engine.utils import (
 )
 
 
+def _water_domain(territory_def: TerritoryDefinition | None) -> str | None:
+    """'sea' or 'river' for water territories land units cannot enter on their own. Otherwise None."""
+    if not territory_def:
+        return None
+    tt = (getattr(territory_def, "terrain_type", "") or "").lower()
+    if tt in ("sea", "river"):
+        return tt
+    return None
+
+
 def _is_sea_zone(territory_def: TerritoryDefinition | None) -> bool:
     """True if this territory is a sea zone (land units cannot enter)."""
-    if not territory_def:
+    return _water_domain(territory_def) == "sea"
+
+
+def _is_river_zone(territory_def: TerritoryDefinition | None) -> bool:
+    """True if this territory is a river zone (land units cannot enter; rowboats can)."""
+    return _water_domain(territory_def) == "river"
+
+
+def _is_water_zone(territory_def: TerritoryDefinition | None) -> bool:
+    """Sea or river. Land units never enter; hull must match the domain."""
+    return _water_domain(territory_def) is not None
+
+
+def _is_aerial_unit_def(unit_def: UnitDefinition | None) -> bool:
+    if not unit_def:
         return False
-    return getattr(territory_def, "terrain_type", "").lower() == "sea"
+    arch = getattr(unit_def, "archetype", "") or ""
+    tags = getattr(unit_def, "tags", []) or []
+    return arch == "aerial" or "aerial" in tags
+
+
+def _hull_domain(unit_def: UnitDefinition | None) -> str | None:
+    """
+    'sea' for naval craft, 'river' for river craft. Aerial is not a hull (it can enter both).
+    A unit that is both naval and river is not expected; river is checked first only when
+    archetype/tag is river and not naval. Naval and river are mutually exclusive hulls.
+    """
+    if not unit_def or _is_aerial_unit_def(unit_def):
+        return None
+    arch = getattr(unit_def, "archetype", "") or ""
+    tags = getattr(unit_def, "tags", []) or []
+    if arch == "river" or "river" in tags:
+        return "river"
+    if arch == "naval" or "naval" in tags:
+        return "sea"
+    return None
+
+
+def _is_river_unit(unit_def: UnitDefinition | None) -> bool:
+    """True if this unit is a river craft (archetype or tag 'river') and not aerial."""
+    return _hull_domain(unit_def) == "river"
+
+
+def _is_water_craft(unit_def: UnitDefinition | None) -> bool:
+    """Naval or river hull. Cannot enter land or the other water domain."""
+    return _hull_domain(unit_def) in ("sea", "river")
+
+
+def _craft_can_enter(unit_def: UnitDefinition | None, territory_def: TerritoryDefinition | None) -> bool:
+    """True if this unit may enter this water territory. Aerial may enter either domain."""
+    domain = _water_domain(territory_def)
+    if domain is None or not unit_def:
+        return False
+    if _is_aerial_unit_def(unit_def):
+        return True
+    return _hull_domain(unit_def) == domain
+
+
+def water_transport_relation(
+    from_def: TerritoryDefinition | None,
+    to_def: TerritoryDefinition | None,
+) -> str | None:
+    """
+    'load' land→water, 'offload' water→land, 'sail' water→same-domain water, 'cross' sea↔river.
+    None when both ends are land.
+    """
+    fd = _water_domain(from_def)
+    td = _water_domain(to_def)
+    if fd and td:
+        return "sail" if fd == td else "cross"
+    if td and not fd:
+        return "load"
+    if fd and not td:
+        return "offload"
+    return None
 
 
 def _can_unit_enter_sea(unit_def: UnitDefinition | None) -> bool:
     """True if this unit can enter sea zones (naval or aerial). Aerial can fly over sea; naval can sail."""
     if not unit_def:
         return False
-    arch = getattr(unit_def, "archetype", "") or ""
-    tags = getattr(unit_def, "tags", []) or []
-    return arch == "naval" or "naval" in tags or arch == "aerial" or "aerial" in tags
+    if _is_aerial_unit_def(unit_def):
+        return True
+    return _hull_domain(unit_def) == "sea"
 
 
 def _is_naval_only(unit_def: UnitDefinition | None) -> bool:
     """True if this unit is naval and cannot enter land (ships). Aerial can enter both land and sea."""
-    if not unit_def:
-        return False
-    arch = getattr(unit_def, "archetype", "") or ""
-    tags = getattr(unit_def, "tags", []) or []
-    is_naval = arch == "naval" or "naval" in tags
-    is_aerial = arch == "aerial" or "aerial" in tags
-    return is_naval and not is_aerial
+    return _hull_domain(unit_def) == "sea"
 
 
 def canonical_sea_zone_id(tid: str) -> str:
@@ -116,18 +192,25 @@ def pending_move_is_same_phase_load_into_sea(
     to_key = resolve_territory_key_in_state(state, to_raw, territory_defs)
     from_def = territory_defs.get(from_key) or territory_defs.get(from_raw)
     to_def = territory_defs.get(to_key) or territory_defs.get(to_raw)
-    return bool(
-        from_def
-        and to_def
-        and not _is_sea_zone(from_def)
-        and _is_sea_zone(to_def)
-    )
+    return water_transport_relation(from_def, to_def) == "load"
 
 
 def _is_naval_transport_boat(ud: UnitDefinition | None) -> bool:
     if not ud:
         return False
-    return getattr(ud, "archetype", "") == "naval" or "naval" in (getattr(ud, "tags", []) or [])
+    return _hull_domain(ud) == "sea"
+
+
+def _is_transport_boat_for_zone(
+    ud: UnitDefinition | None,
+    zone_def: TerritoryDefinition | None,
+) -> bool:
+    """True if this hull can carry passengers in this water zone (naval in sea, river in river)."""
+    if not ud or not zone_def:
+        return False
+    hull = _hull_domain(ud)
+    domain = _water_domain(zone_def)
+    return hull is not None and hull == domain
 
 
 def remaining_load_slots_on_boat(
@@ -151,7 +234,8 @@ def remaining_load_slots_on_boat(
     if not boat_unit:
         return 0
     bud = unit_defs.get(boat_unit.unit_id)
-    if not _is_naval_transport_boat(bud) or get_unit_faction(boat_unit, unit_defs) != faction_id:
+    zone_def = territory_defs.get(to_key)
+    if not _is_transport_boat_for_zone(bud, zone_def) or get_unit_faction(boat_unit, unit_defs) != faction_id:
         return 0
     cap = getattr(bud, "transport_capacity", 0) or 0
     onboard = sum(1 for u in to_t.units if getattr(u, "loaded_onto", None) == boat_instance_id)
@@ -190,7 +274,7 @@ def remaining_sea_load_passenger_slots(
         if getattr(boat, "loaded_onto", None):
             continue
         bud = unit_defs.get(boat.unit_id)
-        if get_unit_faction(boat, unit_defs) != faction_id or not _is_naval_transport_boat(bud):
+        if get_unit_faction(boat, unit_defs) != faction_id or not _is_transport_boat_for_zone(bud, territory_defs.get(to_key)):
             continue
         cap = getattr(bud, "transport_capacity", 0) or 0
         onboard = sum(1 for u in to_t.units if getattr(u, "loaded_onto", None) == boat.instance_id)
@@ -266,7 +350,7 @@ def get_forced_naval_combat_instance_ids(
     for tid, terr in state.territories.items():
         tkey = resolve_territory_key_in_state(state, tid, territory_defs)
         tdef = territory_defs.get(tkey) or territory_defs.get(tid)
-        if not tdef or not _is_sea_zone(tdef):
+        if not tdef or not _is_water_zone(tdef):
             continue
         if any(u.instance_id in intruder_set for u in terr.units):
             seas_with_intruder.add(tkey)
@@ -282,7 +366,7 @@ def get_forced_naval_combat_instance_ids(
             if u.instance_id in avoided:
                 continue
             ud = unit_defs.get(u.unit_id)
-            if not _is_naval_only(ud):
+            if not _is_transport_boat_for_zone(ud, territory_defs.get(sea_id)):
                 continue
             if get_unit_faction(u, unit_defs) != faction_id:
                 continue
@@ -374,7 +458,10 @@ def empty_sea_zone_valid_for_combat_move_sail_then_load_raid(
     if phase != "combat_move":
         return False
     bud = unit_defs.get(boat_unit.unit_id)
-    if not _is_naval_only(bud):
+    origin_def = territory_defs.get(
+        resolve_territory_key_in_state(state, boat_current_sea_zone_id, territory_defs)
+    )
+    if not _is_transport_boat_for_zone(bud, origin_def):
         return False
     if remaining_load_slots_on_boat(
         state,
@@ -389,7 +476,7 @@ def empty_sea_zone_valid_for_combat_move_sail_then_load_raid(
     sea_def = territory_defs.get(
         resolve_territory_key_in_state(state, destination_sea_zone_id, territory_defs)
     )
-    if not sea_def or not _is_sea_zone(sea_def):
+    if not sea_def or _water_domain(sea_def) != _water_domain(origin_def):
         return False
     if _sea_zone_has_hostile_enemy_boats(
         state, destination_sea_zone_id, faction_id, unit_defs, faction_defs, territory_defs
@@ -411,7 +498,7 @@ def empty_sea_zone_valid_for_combat_move_sail_then_load_raid(
     has_raid = False
     for adj_land in getattr(sea_def, "adjacent", []) or []:
         ld = territory_defs.get(adj_land)
-        if not ld or _is_sea_zone(ld):
+        if not ld or _is_water_zone(ld):
             continue
         adj_terr = state.territories.get(adj_land)
         if not adj_terr:
@@ -469,7 +556,7 @@ def expand_sea_offload_instance_ids(
     to_def = territory_defs.get(resolved_to) or territory_defs.get(str(to_id or "").strip())
     # From must be sea. Allow both sea→land (offload) and sea→sea (sail) so pending loads merge
     # into the same stack (passengers still on land until pending applies).
-    if not from_def or not to_def or not _is_sea_zone(from_def):
+    if not from_def or not to_def or not _is_water_zone(from_def):
         return ids
 
     terr = state.territories.get(resolved_from)
@@ -482,7 +569,7 @@ def expand_sea_offload_instance_ids(
         if not u:
             continue
         ud = unit_defs.get(u.unit_id)
-        if _is_naval_only(ud) and get_unit_faction(u, unit_defs) == faction_id:
+        if _is_transport_boat_for_zone(ud, from_def) and faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), faction_id):
             boat_ids_in_request.append(iid)
 
     # Need at least one friendly naval driver in the request to know which boat(s) we're offloading from.
@@ -540,7 +627,7 @@ def resolve_unit_for_move_declaration(
         if u:
             return u
     from_def = territory_defs.get(from_id)
-    if not from_def or not _is_sea_zone(from_def):
+    if not from_def or not _is_water_zone(from_def):
         return None
     for pm in getattr(state, "pending_moves", []) or []:
         if not pending_move_is_same_phase_load_into_sea(
@@ -685,7 +772,7 @@ def direct_ford_only_land_pair(
     tb = territory_defs.get(b)
     if not ta or not tb:
         return False
-    if _is_sea_zone(ta) or _is_sea_zone(tb):
+    if _is_water_zone(ta) or _is_water_zone(tb):
         return False
     adj_a = set(getattr(ta, "adjacent", []) or [])
     adj_b = set(getattr(tb, "adjacent", []) or [])
@@ -1084,7 +1171,7 @@ def get_reachable_territories_for_unit(
     current_faction_def = faction_defs.get(cf)
 
     forced_naval_ids: set[str] = set()
-    if phase == "combat_move" and _is_naval_only(unit_def):
+    if phase == "combat_move" and _is_water_craft(unit_def):
         forced_naval_ids = set(
             get_forced_naval_combat_instance_ids(
                 state, cf, unit_defs, territory_defs, faction_defs
@@ -1156,19 +1243,20 @@ def get_reachable_territories_for_unit(
             new_fu = ford_used + (1 if is_ford_budget_step else 0)
             new_distance = distance + 1
             adj_def = territory_defs.get(adjacent_id)
-            if _is_sea_zone(adj_def) and not _can_unit_enter_sea(unit_def):
-                # Land unit can load into adjacent sea zone (cost 1); add to reachable but do not expand from sea
-                if new_distance <= max_move and adjacent_id not in reachable:
+            if _is_water_zone(adj_def) and not _craft_can_enter(unit_def, adj_def):
+                # Land may load into adjacent water (cost 1). Do not expand from the water hex.
+                # Water craft of the other hull (ship vs rowboat) cannot enter and are not a load.
+                if not _is_water_craft(unit_def) and new_distance <= max_move and adjacent_id not in reachable:
                     reachable[adjacent_id] = new_distance
                 continue
-            if not _is_sea_zone(adj_def) and _is_naval_only(unit_def):
+            if _is_water_craft(unit_def) and not _craft_can_enter(unit_def, adj_def):
                 continue
             adjacent_territory = state.territories.get(adjacent_id)
             if not adjacent_territory:
                 continue
 
-            # Naval movement: sea zones with enemy boats are hostile — valid destination (attack) but do not sail through
-            if _is_naval_only(unit_def) and _is_sea_zone(adj_def):
+            # Water craft: hostile boats are a valid destination (attack) but do not sail through
+            if _is_water_craft(unit_def) and _craft_can_enter(unit_def, adj_def):
                 has_enemy_boats = False
                 for u in adjacent_territory.units:
                     uf = get_unit_faction(u, unit_defs)
@@ -1297,12 +1385,13 @@ def get_reachable_territories_for_unit(
 
         # Apply phase-specific filters
         territory_def_for_filter = territory_defs.get(territory_id)
-        is_sea = territory_def_for_filter and _is_sea_zone(territory_def_for_filter)
+        is_water = territory_def_for_filter and _is_water_zone(territory_def_for_filter)
+        craft_here = bool(is_water and _craft_can_enter(unit_def, territory_def_for_filter))
         if phase == "combat_move":
-            # Combat move: enemy territory; neutral with enemies (attack); empty neutral ownable (conquer); adjacent sea zone (load).
+            # Combat move: enemy territory; neutral with enemies (attack); empty neutral ownable (conquer); adjacent water (load).
             # Aerial: can only move into territories that have units to attack. No empty destinations.
-            # Naval: sea zones with enemy units (naval combat); also allow empty reachable sea zones so sail+offload/sea raid works.
-            if is_sea and _is_naval_only(unit_def):
+            # Water craft: zones with enemy units; also empty reachable zones so sail+offload/raid works.
+            if craft_here and _is_water_craft(unit_def):
                 if is_enemy_territory and not is_allied_territory and len(territory.units) > 0:
                     filtered_reachable[territory_id] = dist
                 elif is_neutral and neutral_has_enemies:
@@ -1327,7 +1416,7 @@ def get_reachable_territories_for_unit(
                     )
                 ):
                     filtered_reachable[territory_id] = dist
-            elif is_sea and not _can_unit_enter_sea(unit_def) and dist == 1:
+            elif is_water and not _craft_can_enter(unit_def, territory_def_for_filter) and dist == 1:
                 # Land unit loading into adjacent sea zone (transportable only; hide when no slots left)
                 if (
                     is_land_unit(unit_def)
@@ -1339,7 +1428,7 @@ def get_reachable_territories_for_unit(
                     > 0
                 ):
                     filtered_reachable[territory_id] = dist
-            elif is_sea and is_aerial:
+            elif is_water and is_aerial:
                 # Aerial vs ships: must keep enough movement to reach friendly land after (same check as land attacks).
                 if len(territory.units) == 0:
                     pass
@@ -1388,11 +1477,12 @@ def get_reachable_territories_for_unit(
         elif phase == "non_combat_move":
             # Non-combat move: friendly or allied; empty unownable (pass-through); adjacent sea zone (load).
             territory_def_ncm = territory_defs.get(territory_id)
-            is_sea_ncm = territory_def_ncm and _is_sea_zone(territory_def_ncm)
-            if is_sea_ncm and _is_naval_only(unit_def):
-                # Naval: sail to any reachable sea zone
+            is_water_ncm = territory_def_ncm and _is_water_zone(territory_def_ncm)
+            craft_ncm = bool(is_water_ncm and _craft_can_enter(unit_def, territory_def_ncm))
+            if craft_ncm and _is_water_craft(unit_def):
+                # Water craft: sail to any reachable zone of this hull's domain
                 filtered_reachable[territory_id] = dist
-            elif is_sea_ncm and not _can_unit_enter_sea(unit_def) and dist == 1:
+            elif is_water_ncm and not _craft_can_enter(unit_def, territory_def_ncm) and dist == 1:
                 if (
                     is_land_unit(unit_def)
                     and is_transportable(unit_def)
@@ -1416,17 +1506,16 @@ def get_reachable_territories_for_unit(
             # Other phases: include all reachable
             filtered_reachable[territory_id] = dist
 
-    # Combat move: for naval-only units, add land territories adjacent to *any* reachable sea zone as sea-raid targets
-    # (use reachable, not filtered_reachable: sea zones may not be in filtered_reachable for naval, but they are in reachable)
-    if phase == "combat_move" and _is_naval_only(unit_def):
+    # Combat move: for water craft, add land territories adjacent to *any* reachable water zone as raid targets
+    if phase == "combat_move" and _is_water_craft(unit_def):
         sea_raid_land: dict[str, int] = {}
         for sea_id, dist in list(reachable.items()):
             sea_def = territory_defs.get(sea_id)
-            if not sea_def or not _is_sea_zone(sea_def):
+            if not sea_def or not _craft_can_enter(unit_def, sea_def):
                 continue
             for adj_id in sea_def.adjacent:
                 adj_def = territory_defs.get(adj_id)
-                if not adj_def or _is_sea_zone(adj_def):
+                if not adj_def or _is_water_zone(adj_def):
                     continue
                 adj_territory = state.territories.get(adj_id)
                 if not adj_territory:
@@ -1506,7 +1595,7 @@ def get_charge_reachable_over_moves(
         terr = state.territories.get(tid)
         if not terr:
             continue
-        is_sea = _is_sea_zone(tdef)
+        is_sea = _is_water_zone(tdef)
         if is_sea:
             continue
         is_neutral = terr.owner is None
@@ -1539,7 +1628,7 @@ def get_charge_reachable_over_moves(
             continue
         for adj_id in getattr(tdef, "adjacent", []) or []:
             adj_def = territory_defs.get(adj_id)
-            if not adj_def or _is_sea_zone(adj_def):
+            if not adj_def or _is_water_zone(adj_def):
                 continue
             if adj_id in visited:
                 continue
@@ -1586,11 +1675,11 @@ def get_charge_max_gain_over_moves(
         terr = state.territories.get(tid)
         if not terr:
             continue
-        if _is_sea_zone(tdef):
+        if _is_water_zone(tdef):
             continue
         for adj_id in getattr(tdef, "adjacent", []) or []:
             adj_def = territory_defs.get(adj_id)
-            if not adj_def or _is_sea_zone(adj_def):
+            if not adj_def or _is_water_zone(adj_def):
                 continue
             adj_terr = state.territories.get(adj_id)
             if not adj_terr:
@@ -1651,11 +1740,13 @@ def get_sea_zones_reachable_by_sail(
     """
     if not drivers:
         return set()
+    origin_domain = _water_domain(territory_defs.get(from_territory))
+    if origin_domain is None:
+        return set()
     max_steps = max(getattr(u, "remaining_movement", 0) for u in drivers)
     current_faction = getattr(state, "current_faction", None)
     result: set[str] = set()
-    if _is_sea_zone(territory_defs.get(from_territory)):
-        result.add(from_territory)
+    result.add(from_territory)
     queue: deque[tuple[str, int]] = deque([(from_territory, 0)])
     visited = {from_territory}
     while queue:
@@ -1665,7 +1756,7 @@ def get_sea_zones_reachable_by_sail(
             continue
         for adj_id in getattr(tdef, "adjacent", []) or []:
             adj_def = territory_defs.get(adj_id)
-            if not adj_def or not _is_sea_zone(adj_def):
+            if _water_domain(adj_def) != origin_domain:
                 continue
             new_steps = steps + 1
             if new_steps > max_steps:
@@ -1750,7 +1841,7 @@ def are_sea_zones_directly_adjacent(
         return False
     da = territory_defs.get(sea_a)
     db = territory_defs.get(sea_b)
-    if not da or not db or not _is_sea_zone(da) or not _is_sea_zone(db):
+    if not da or not db or _water_domain(da) is None or _water_domain(da) != _water_domain(db):
         return False
     return sea_b in _adjacent_ids(da, False) or sea_a in _adjacent_ids(db, False)
 
@@ -1766,7 +1857,7 @@ def sea_land_adjacent_for_offload(
     """
     sea_def = territory_defs.get(sea_id)
     land_def = territory_defs.get(land_id)
-    if not sea_def or not land_def or not _is_sea_zone(sea_def) or _is_sea_zone(land_def):
+    if not sea_def or not land_def or not _is_water_zone(sea_def) or _is_water_zone(land_def):
         return False
     return land_id in _adjacent_ids(sea_def, False) or sea_id in _adjacent_ids(land_def, False)
 

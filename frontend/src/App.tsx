@@ -88,6 +88,25 @@ function battleDisplayedMatchesActiveCombat(
   return effSea === acSea;
 }
 
+function isWaterTerritoryId(
+  tid: string,
+  territoryData: Record<string, { terrain?: string } | undefined>,
+): boolean {
+  const terrain = territoryData[tid]?.terrain;
+  return terrain === 'sea' || terrain === 'river' || /^sea_zone_?\d+$/i.test(tid);
+}
+
+function unitIsWaterHull(
+  unitId: string,
+  unitDefs: Record<string, { archetype?: string; tags?: string[] } | undefined>,
+): boolean {
+  const d = unitDefs[unitId];
+  if (!d) return false;
+  const arch = d.archetype ?? '';
+  const tags = d.tags ?? [];
+  return arch === 'naval' || arch === 'river' || tags.includes('naval') || tags.includes('river');
+}
+
 function unitIsAerial(
   unitId: string,
   unitDefs: Record<string, { archetype?: string; tags?: string[] } | undefined>,
@@ -104,12 +123,12 @@ function pendingMoveIsSeaLoadForTray(
 ): boolean {
   if (m.phase !== gamePhase) return false;
   const to = String(m.to_territory ?? '').trim();
-  const toSea = territoryData[to]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(to);
+  const toSea = isWaterTerritoryId(to, territoryData);
   if (!toSea) return false;
   if (m.move_type === 'load') return true;
   if (m.move_type != null && m.move_type !== '') return false;
   const from = String(m.from_territory ?? '').trim();
-  const fromSea = territoryData[from]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(from);
+  const fromSea = isWaterTerritoryId(from, territoryData);
   return !fromSea;
 }
 
@@ -124,21 +143,15 @@ function shouldSendAvoidForcedNavalCombat(
   forcedNavalIds: string[] | undefined,
 ): boolean {
   if (phase !== 'combat_move' || !forcedNavalIds?.length || !territories) return false;
-  const fromSea =
-    Boolean(fromTerr) &&
-    (territoryData[fromTerr]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(fromTerr));
-  const toSea =
-    Boolean(toTerr) &&
-    (territoryData[toTerr]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(toTerr));
+  const fromSea = Boolean(fromTerr) && isWaterTerritoryId(fromTerr, territoryData);
+  const toSea = Boolean(toTerr) && isWaterTerritoryId(toTerr, territoryData);
   if (!fromSea || !toSea || fromTerr === toTerr) return false;
   const forced = new Set(forcedNavalIds);
   const fromUnits = territories[fromTerr]?.units ?? [];
   const navalInMove = unitInstanceIds.filter((id) => {
     const u = fromUnits.find((x) => x.instance_id === id);
     if (!u || !unitDefs) return false;
-    const ud = unitDefs[u.unit_id];
-    if (!ud) return false;
-    return ud.archetype === 'naval' || Boolean(ud.tags?.includes('naval'));
+    return unitIsWaterHull(u.unit_id, unitDefs);
   });
   return navalInMove.length > 0 && navalInMove.every((id) => forced.has(id));
 }
@@ -435,8 +448,8 @@ function computeInitialLoadAllocation(
     if (m.move_type === 'load') return true;
     if (m.move_type != null && m.move_type !== '') return false;
     const f = String(m.from_territory ?? '').trim();
-    const fromSea = territoryData[f]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(f);
-    const toS = territoryData[t]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(t);
+    const fromSea = isWaterTerritoryId(f, territoryData);
+    const toS = isWaterTerritoryId(t, territoryData);
     return !fromSea && toS;
   };
   let unassignedPending = 0;
@@ -1359,6 +1372,23 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     return set;
   }, [definitions?.units]);
 
+  const riverUnitIds = useMemo(() => {
+    const units = definitions?.units;
+    if (!units || typeof units !== 'object') return new Set<string>();
+    const set = new Set<string>();
+    for (const [id, u] of Object.entries(units)) {
+      const arch = (u as { archetype?: string }).archetype;
+      const tags = (u as { tags?: string[] }).tags;
+      if (arch === 'river' || (Array.isArray(tags) && tags.includes('river'))) set.add(id);
+    }
+    return set;
+  }, [definitions?.units]);
+
+  const waterCraftUnitIds = useMemo(
+    () => new Set([...navalUnitIds, ...riverUnitIds]),
+    [navalUnitIds, riverUnitIds],
+  );
+
   /** Siegework archetype units get their own Purchase modal tab (after Sea). */
   const siegeworkUnitIds = useMemo(() => {
     const units = definitions?.units;
@@ -1393,6 +1423,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       const ud = unitDefs[u.unit_id] as { home_territory_ids?: string[] } | undefined;
       const homeTerritoryCount = ud?.home_territory_ids?.length ?? 0;
       const isNaval = navalUnitIds.has(u.unit_id);
+      const isRiver = !isNaval && riverUnitIds.has(u.unit_id);
       const heroIdRaw = u.hero_id ?? def?.hero_id;
       const heroId = typeof heroIdRaw === 'string' && heroIdRaw.trim() ? heroIdRaw.trim() : undefined;
       return {
@@ -1408,12 +1439,13 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         heroId,
         maxAffordable: u.max_affordable,
         isNaval,
-        isSiegework: !isNaval && siegeworkUnitIds.has(u.unit_id),
+        isRiver,
+        isSiegework: !isNaval && !isRiver && siegeworkUnitIds.has(u.unit_id),
         specialLabels,
         homeTerritoryCount,
       };
     }).filter((u) => heroesOn || !u.heroId);
-  }, [availableActions, unitDefs, navalUnitIds, siegeworkUnitIds, definitions?.units, definitions?.specials, backendState?.heroes_enabled]);
+  }, [availableActions, unitDefs, navalUnitIds, riverUnitIds, siegeworkUnitIds, definitions?.units, definitions?.specials, backendState?.heroes_enabled]);
 
   // Mobilizable purchases
   const mobilizablePurchases = useMemo(() => {
@@ -1883,8 +1915,18 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         out[s.sea_zone_id] = s.power ?? 0;
       }
     }
+    const riverZones = availableActions?.mobilize_options?.capacity?.river_zones;
+    if (Array.isArray(riverZones)) {
+      for (const z of riverZones) {
+        out[z.river_zone_id] = z.power ?? 0;
+      }
+    }
     return out;
-  }, [availableActions?.mobilize_options?.capacity?.territories, availableActions?.mobilize_options?.capacity?.sea_zones]);
+  }, [
+    availableActions?.mobilize_options?.capacity?.territories,
+    availableActions?.mobilize_options?.capacity?.sea_zones,
+    availableActions?.mobilize_options?.capacity?.river_zones,
+  ]);
 
   // Land: owned territories with a camp. Naval: sea zones adjacent to an owned port.
   const validMobilizeTerritories = useMemo(
@@ -1895,7 +1937,13 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     () => availableActions?.mobilize_options?.sea_zones ?? [],
     [availableActions]
   );
+  const validMobilizeRiverZones = useMemo(
+    () => availableActions?.mobilize_options?.river_zones ?? [],
+    [availableActions]
+  );
   const hasPort = (validMobilizeSeaZones?.length ?? 0) > 0;
+  const hasRiverMobilization = (validMobilizeRiverZones?.length ?? 0) > 0
+    || (availableActions?.mobilization_river_capacity ?? 0) > 0;
 
   // Remaining capacity per territory (power minus units already pending to that destination)
   const remainingMobilizationCapacity = useMemo(() => {
@@ -1965,14 +2013,20 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     if (purchases.length <= 1) return [];
 
     const hasNaval = purchases.some(p => navalUnitIds.has(p.unitId));
-    const hasLand = purchases.some(p => !navalUnitIds.has(p.unitId));
-    if (hasNaval && hasLand) return [];
+    const hasRiver = purchases.some(p => riverUnitIds.has(p.unitId));
+    const hasLand = purchases.some(p => !navalUnitIds.has(p.unitId) && !riverUnitIds.has(p.unitId));
+    const kinds = [hasNaval, hasRiver, hasLand].filter(Boolean).length;
+    if (kinds !== 1) return [];
 
     const totalCount = purchases.reduce((s, p) => s + p.count, 0);
-    const candidateZones = hasNaval ? validMobilizeSeaZones : validMobilizeTerritories;
+    const candidateZones = hasNaval
+      ? validMobilizeSeaZones
+      : hasRiver
+        ? validMobilizeRiverZones
+        : validMobilizeTerritories;
     if (candidateZones.length === 0) return [];
 
-    if (hasNaval) {
+    if (hasNaval || hasRiver) {
       // Naval mobilization goes to sea zones; no home-slot fallback.
       return candidateZones.filter(destId => (remainingMobilizationCapacity[destId] ?? 0) >= totalCount);
     }
@@ -1987,7 +2041,9 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   }, [
     mobilizablePurchases,
     navalUnitIds,
+    riverUnitIds,
     validMobilizeSeaZones,
+    validMobilizeRiverZones,
     validMobilizeTerritories,
     remainingMobilizationCapacity,
     remainingHomeSlots,
@@ -1998,9 +2054,9 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   // sequential fill the backend uses at phase end (sorted boats, fill each up to remaining slots).
   const navalTrayData = useMemo(() => {
     const seaZoneId = selectedSeaZoneForNavalTray;
-    if (!seaZoneId || !navalUnitIds.size || !backendState) return null;
+    if (!seaZoneId || !waterCraftUnitIds.size || !backendState) return null;
     const fullUnits = territoryUnitsFull[seaZoneId] ?? [];
-    const boats = fullUnits.filter((u) => navalUnitIds.has(u.unit_id));
+    const boats = fullUnits.filter((u) => waterCraftUnitIds.has(u.unit_id));
     const canonSea = canonicalSeaZoneId(seaZoneId);
     const loadMovesToZone = (backendState.pending_moves ?? []).filter((m) => {
       if (m.phase !== gameState.phase) return false;
@@ -2009,10 +2065,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       if (m.move_type === 'load') return true;
       if (m.move_type != null && m.move_type !== '') return false;
       const from = String(m.from_territory ?? '').trim();
-      const fromSea =
-        currentTerritoryData[from]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(from);
-      const toSea =
-        currentTerritoryData[to]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(to);
+      const fromSea = isWaterTerritoryId(from, currentTerritoryData);
+      const toSea = isWaterTerritoryId(to, currentTerritoryData);
       return !fromSea && toSea;
     });
     const sortedLoadMoves = [...loadMovesToZone].sort((a, b) => {
@@ -2099,7 +2153,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   }, [
     selectedSeaZoneForNavalTray,
     territoryUnitsFull,
-    navalUnitIds,
+    waterCraftUnitIds,
     unitDefs,
     currentTerritoryData,
     gameState.current_faction,
@@ -2120,14 +2174,14 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       if (!to) continue;
       const canon = canonicalSeaZoneId(to);
       const full = territoryUnitsFull[to] ?? territoryUnitsFull[canon] ?? [];
-      const boats = full.filter((u) => navalUnitIds.has(u.unit_id));
+      const boats = full.filter((u) => waterCraftUnitIds.has(u.unit_id));
       if (boats.length >= 2) {
         out.add(to);
         out.add(canon);
       }
     }
     return out;
-  }, [backendState?.pending_moves, gameState.phase, currentTerritoryData, territoryUnitsFull, navalUnitIds]);
+  }, [backendState?.pending_moves, gameState.phase, currentTerritoryData, territoryUnitsFull, waterCraftUnitIds]);
 
   // Pending load: instance IDs we're loading (when load into 2+ boats, for tray allocation)
   const pendingLoadPassengerInstanceIds = useMemo(() => {
@@ -2255,7 +2309,11 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       return;
     }
     if (gameState.phase === 'mobilize' && selectedMobilizationUnit && territoryId) {
-      const validDestinations = navalUnitIds.has(selectedMobilizationUnit) ? validMobilizeSeaZones : validMobilizeTerritories;
+      const validDestinations = riverUnitIds.has(selectedMobilizationUnit)
+        ? validMobilizeRiverZones
+        : navalUnitIds.has(selectedMobilizationUnit)
+          ? validMobilizeSeaZones
+          : validMobilizeTerritories;
       if (validDestinations.includes(territoryId)) {
         const purchase = mobilizablePurchases.find(p => p.unitId === selectedMobilizationUnit);
         if (purchase) {
@@ -2283,7 +2341,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     setSelectedTerritory(territoryId);
     // Naval tray opens only when boat stack is clicked (via onSeaZoneStackClick), not on territory click
     setSelectedSeaZoneForNavalTray(null);
-  }, [gameState.phase, selectedCampIndex, validCampTerritories, selectedMobilizationUnit, mobilizablePurchases, validMobilizeTerritories, validMobilizeSeaZones, navalUnitIds, remainingMobilizationCapacity, remainingHomeSlots, addLogEntry, refreshState]);
+  }, [gameState.phase, selectedCampIndex, validCampTerritories, selectedMobilizationUnit, mobilizablePurchases, validMobilizeTerritories, validMobilizeSeaZones, validMobilizeRiverZones, navalUnitIds, riverUnitIds, remainingMobilizationCapacity, remainingHomeSlots, addLogEntry, refreshState]);
 
   /** Click on boat stack in a sea zone (movement phases): open naval tray for that sea zone. */
   const handleSeaZoneStackClick = useCallback((territoryId: string) => {
@@ -2296,11 +2354,10 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     const to = typeof pendingMoveConfirm?.toTerritory === 'string' ? pendingMoveConfirm.toTerritory.trim() : '';
     if (!to || !pendingMoveConfirm) return;
     const toCanon = canonicalSeaZoneId(to);
-    const terrain = currentTerritoryData[to]?.terrain ?? currentTerritoryData[toCanon]?.terrain;
-    const isSea = terrain === 'sea' || /^sea_zone_?\d+$/i.test(to);
+    const isSea = isWaterTerritoryId(to, currentTerritoryData) || isWaterTerritoryId(toCanon, currentTerritoryData);
     if (!isSea) return;
-    const fromTerrain = currentTerritoryData[typeof pendingMoveConfirm.fromTerritory === 'string' ? pendingMoveConfirm.fromTerritory : '']?.terrain;
-    const fromSea = fromTerrain === 'sea' || /^sea_zone_?\d+$/i.test(String(pendingMoveConfirm.fromTerritory ?? ''));
+    const fromId = typeof pendingMoveConfirm.fromTerritory === 'string' ? pendingMoveConfirm.fromTerritory : '';
+    const fromSea = isWaterTerritoryId(fromId, currentTerritoryData);
     const uid = pendingMoveConfirm.unitId;
     const ud = uid ? unitDefs[uid] : undefined;
     const isAerial =
@@ -2308,13 +2365,13 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     const isLoad = !fromSea && isSea && !isAerial;
     if (!isLoad) return;
     const boatsInZone = (territoryUnitsFull[to] ?? territoryUnitsFull[toCanon] ?? []).filter((u) =>
-      navalUnitIds.has(u.unit_id),
+      waterCraftUnitIds.has(u.unit_id),
     );
     if (boatsInZone.length >= 2) {
       const traySeaId = territoryUnitsFull[to] ? to : toCanon;
       setSelectedSeaZoneForNavalTray(traySeaId);
     }
-  }, [pendingMoveConfirm?.toTerritory, pendingMoveConfirm?.fromTerritory, pendingMoveConfirm?.unitId, pendingMoveConfirm, currentTerritoryData, territoryUnitsFull, navalUnitIds, unitDefs]);
+  }, [pendingMoveConfirm?.toTerritory, pendingMoveConfirm?.fromTerritory, pendingMoveConfirm?.unitId, pendingMoveConfirm, currentTerritoryData, territoryUnitsFull, waterCraftUnitIds, unitDefs]);
 
   /** Drop camp on territory → set pending; user confirms or cancels in sidebar (like unit mobilization). */
   const handleCampDrop = useCallback((campIndex: number, territoryId: string) => {
@@ -2662,8 +2719,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       if (!prev) return null;
       const fromStr = typeof prev.fromTerritory === 'string' ? prev.fromTerritory.trim() : '';
       const fromSea =
-        Boolean(fromStr) &&
-        (currentTerritoryData[fromStr]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(fromStr));
+        Boolean(fromStr) && isWaterTerritoryId(fromStr, currentTerritoryData);
       if (fromSea) {
         return {
           ...prev,
@@ -2698,7 +2754,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     const toId = (v: unknown): string =>
       typeof v === 'string' ? v : (v != null && typeof v === 'object' && 'id' in (v as object) ? String((v as { id: string }).id) : (v != null && typeof v === 'object' && 'territoryId' in (v as object) ? String((v as { territoryId: string }).territoryId) : String(v ?? '')));
     const fromStr = toId(fromTerritory);
-    const fromSea = currentTerritoryData[fromStr]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(fromStr);
+    const fromSea = isWaterTerritoryId(fromStr, currentTerritoryData);
 
     // Destination = drop location. Same source as panel display; toId() handles string or { id/territoryId }.
     const stateTo = toId(pendingMoveConfirm.toTerritory).trim();
@@ -2713,8 +2769,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         : '';
     const toLand =
       storedTo !== '' &&
-      currentTerritoryData[storedTo]?.terrain !== 'sea' &&
-      !/^sea_zone_?\d+$/i.test(storedTo);
+      !isWaterTerritoryId(storedTo, currentTerritoryData);
 
     let unitInstances: string[];
     /** Sea raid/offload: one "move" = boat + passengers; maxCount is 1 but instanceIds lists every piece. */
@@ -2795,10 +2850,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       : undefined;
     // Use ref so we always have the latest allocation (drag updates can be one tick behind the confirm click)
     let loadAllocation = loadAllocationRef.current ?? pendingMoveConfirm.loadAllocation;
-    const toSea = Boolean(
-      destination &&
-      (currentTerritoryData[destination]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(destination)),
-    );
+    const toSea = Boolean(destination && isWaterTerritoryId(destination, currentTerritoryData));
     if (
       toSea &&
       !fromSea &&
@@ -2928,10 +2980,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       // Sea→land direct (no intermediate sail in this request): server requires offload_sea_zone_id when
       // multiple sea hexes border the land, or it returns need_offload_sea_choice — a second picker after
       // the client already chose a zone. Always send the staging sea (chosen > single option > current).
-      const landRaidTargetOk =
-        valid(storedTo) &&
-        currentTerritoryData[storedTo]?.terrain !== 'sea' &&
-        !/^sea_zone_?\d+$/i.test(storedTo);
+      const landRaidTargetOk = valid(storedTo) && !isWaterTerritoryId(storedTo, currentTerritoryData);
       let offloadSeaZoneIdForRaid: string | undefined;
       if ((isSeaRaid || isOffload) && landRaidTargetOk && destination === storedTo.trim()) {
         const s = (
@@ -3614,7 +3663,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     const isNavalUnitId = (unitId: string) => {
       const def = definitions?.units?.[unitId] as { archetype?: string; tags?: string[] } | undefined;
       if (!def) return false;
-      return (def.archetype ?? '') === 'naval' || (def.tags ?? []).includes('naval');
+      return (def.archetype ?? '') === 'naval' || (def.archetype ?? '') === 'river'
+        || (def.tags ?? []).includes('naval') || (def.tags ?? []).includes('river');
     };
 
     const isAerialUnitId = (unitId: string) => {
@@ -3679,6 +3729,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       };
       if (
         currentTerritoryData[effectiveCombat.territory]?.terrain === 'sea'
+        || currentTerritoryData[effectiveCombat.territory]?.terrain === 'river'
         && isNavalUnitId(unit.unit_id)
         && backendTerritory?.units?.length
       ) {
@@ -3712,7 +3763,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         }
       } else {
         // Land or same-hex combat. Sea hex: naval + aerial (not embarked); matches backend roster.
-        const isNavalHexCombat = currentTerritoryData[effectiveCombat.territory]?.terrain === 'sea';
+        const isNavalHexCombat = isWaterTerritoryId(effectiveCombat.territory, currentTerritoryData);
         for (const unit of backendTerritory.units ?? []) {
           if (isNavalHexCombat) {
             if (!unitParticipatesInSeaHexCombat(unit)) continue;
@@ -3736,7 +3787,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           units?: { instance_id: string; unit_id: string; remaining_health: number; remaining_movement?: number; loaded_onto?: string | null }[];
         };
         if (!ter?.units) continue;
-        const terrSea = currentTerritoryData[tid]?.terrain === 'sea';
+        const terrSea = isWaterTerritoryId(tid, currentTerritoryData);
         for (const unit of ter.units) {
           if (terrSea) {
             if (!unitParticipatesInSeaHexCombat(unit)) continue;
@@ -4167,7 +4218,9 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               hasMobilizationSelected={selectedMobilizationUnit !== null}
               validMobilizeTerritories={validMobilizeTerritories}
               validMobilizeSeaZones={validMobilizeSeaZones}
+              validMobilizeRiverZones={validMobilizeRiverZones}
               navalUnitIds={navalUnitIds}
+              riverUnitIds={riverUnitIds}
               remainingMobilizationCapacity={remainingMobilizationCapacity}
               remainingHomeSlots={remainingHomeSlots}
               onMobilizationDrop={canAct ? handleMobilizationDrop : undefined}
@@ -4242,9 +4295,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
                   typeof pendingMoveConfirm.toTerritory === 'string' ? pendingMoveConfirm.toTerritory.trim() : '';
                 const pmFrom =
                   typeof pendingMoveConfirm.fromTerritory === 'string' ? pendingMoveConfirm.fromTerritory.trim() : '';
-                const fromSea =
-                  Boolean(pmFrom) &&
-                  (currentTerritoryData[pmFrom]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(pmFrom));
+                const fromSea = Boolean(pmFrom) && isWaterTerritoryId(pmFrom, currentTerritoryData);
                 const traySea = navalTrayData?.seaZoneId;
                 const aligns =
                   !traySea ||
@@ -4387,7 +4438,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         factionColor={factionData[gameState.current_faction]?.color}
         availableResources={currentResources}
         availableUnits={availableUnits}
-        hasPort={hasPort}
+        hasPort={hasPort || hasRiverMobilization}
         currentPurchases={gameState.pending_purchases}
         currentCamps={pendingCampCount}
         maxCamps={maxCampsPurchasable}
@@ -4395,6 +4446,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         mobilizationLandCapacity={availableActions?.mobilization_land_capacity}
         mobilizationCampLandCapacity={availableActions?.mobilization_camp_land_capacity}
         mobilizationSeaCapacity={availableActions?.mobilization_sea_capacity}
+        mobilizationRiverCapacity={availableActions?.mobilization_river_capacity}
         purchasedUnitsCount={availableActions?.purchased_units_count ?? 0}
         campCost={availableActions?.camp_cost}
         strongholdRepairCost={strongholdRepairCostPerHp}

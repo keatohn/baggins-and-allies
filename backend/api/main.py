@@ -131,9 +131,11 @@ from backend.engine.queries import (
     get_unit_move_targets,
     get_aerial_units_must_move,
     get_mobilization_territories,
+    get_mobilization_river_zones,
     get_mobilization_sea_zones,
     get_mobilization_capacity,
     get_contested_territories,
+    river_mobilization_capacity_total,
     get_sea_raid_targets,
     get_retreat_options,
     get_purchased_units,
@@ -163,8 +165,11 @@ def _combat_territory_stronghold_hp(territory, tdef) -> int | None:
     return int(cur) if cur is not None else base
 from backend.engine.movement import (
     _is_sea_zone,
+    _is_river_unit,
+    _is_water_zone,
     get_forced_naval_combat_instance_ids,
     resolve_territory_key_in_state,
+    water_transport_relation,
 )
 from backend.engine.queries import _is_naval_unit, get_valid_offload_sea_zones, participates_in_sea_hex_naval_combat
 from backend.engine.combat_sim import run_simulation, SimOptions
@@ -1007,7 +1012,7 @@ def _get_combat_modifiers_and_specials(
         key=lambda u: u.instance_id,
     )
     territory_def = td.get(combat.territory_id)
-    if territory_def and _is_sea_zone(territory_def):
+    if territory_def and _is_water_zone(territory_def):
         attackers = [
             u for u in attackers
             if participates_in_sea_hex_naval_combat(u, ud.get(u.unit_id))
@@ -1021,7 +1026,7 @@ def _get_combat_modifiers_and_specials(
     archer_prefire_applicable = bool(
         first_round is not None and getattr(first_round, "is_archer_prefire", False)
     )
-    territory_is_sea = _is_sea_zone(territory_def) if territory_def else False
+    territory_is_sea = _is_water_zone(territory_def) if territory_def else False
     defender_stronghold_hp_for_ram: int | None = None
     if not territory_is_sea and territory_def:
         base_hp = getattr(territory_def, "stronghold_base_health", 0) or 0
@@ -2720,9 +2725,10 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
             actions["mobilization_land_capacity"] = land_cap
             actions["mobilization_camp_land_capacity"] = camp_land_only
             actions["mobilization_sea_capacity"] = port_cap
-            # Expose sea_zones so frontend can show Sea tab in purchase modal (faction has a port)
+            actions["mobilization_river_capacity"] = river_mobilization_capacity_total(state, faction, td)
             sea_zone_list = [z["sea_zone_id"] for z in capacity_info.get("sea_zones", [])]
-            actions["mobilize_options"] = {"sea_zones": sea_zone_list}
+            river_zone_list = [z["river_zone_id"] for z in capacity_info.get("river_zones", [])]
+            actions["mobilize_options"] = {"sea_zones": sea_zone_list, "river_zones": river_zone_list}
             already_purchased = sum(
                 s.count for s in (state.faction_purchased_units or {}).get(faction, [])
             )
@@ -2755,12 +2761,12 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                 for pm in pending_combat:
                     from_id = getattr(pm, "from_territory", "")
                     to_id = getattr(pm, "to_territory", "")
-                    if not _is_sea_zone(td.get(from_id)):
+                    if not _is_water_zone(td.get(from_id)):
                         continue
-                    to_land = not _is_sea_zone(td.get(to_id))
+                    to_land = not _is_water_zone(td.get(to_id))
                     to_territory = state.territories.get(to_id) if to_id else None
                     to_enemy_sea = (
-                        _is_sea_zone(td.get(to_id))
+                        water_transport_relation(td.get(from_id), td.get(to_id)) == "sail"
                         and to_territory
                         and any(
                             get_unit_faction(u, ud) != current_faction
@@ -2790,7 +2796,7 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                 for tid, terr in state_after_combat_moves.territories.items():
                     tkey = resolve_territory_key_in_state(state_after_combat_moves, tid, td)
                     tdef = td.get(tkey) or td.get(tid)
-                    if not tdef or not _is_sea_zone(tdef):
+                    if not tdef or not _is_water_zone(tdef):
                         continue
                     if any(u.instance_id in forced_naval_ids for u in terr.units):
                         standoff_seas.add(tkey)
@@ -2854,11 +2860,13 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
         elif phase == "mobilization":
             mobilize_territories = get_mobilization_territories(state, faction, td, cd, port_d, ud)
             mobilize_sea_zones = get_mobilization_sea_zones(state, faction, td, port_d)
+            mobilize_river_zones = get_mobilization_river_zones(state, faction, td)
             mobilize_capacity = get_mobilization_capacity(state, faction, td, cd, port_d, ud)
             purchased = get_purchased_units(state, faction)
             actions["mobilize_options"] = {
                 "territories": mobilize_territories,
                 "sea_zones": mobilize_sea_zones,
+                "river_zones": mobilize_river_zones,
                 "capacity": mobilize_capacity,
                 "pending_units": purchased,
             }
@@ -2986,8 +2994,14 @@ def do_move(
     ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
     from_territory = resolve_territory_key_in_state(state, from_territory, td)
     to_territory = resolve_territory_key_in_state(state, to_territory, td)
-    from_sea = _is_sea_zone(td.get(from_territory))
-    to_sea = _is_sea_zone(td.get(to_territory))
+    move_rel = water_transport_relation(td.get(from_territory), td.get(to_territory))
+    if move_rel == "cross":
+        raise HTTPException(
+            status_code=400,
+            detail="Ships cannot enter river zones, and river units cannot enter sea zones",
+        )
+    from_sea = move_rel in ("offload", "sail")
+    to_sea = move_rel in ("load", "sail")
     from_terr = state.territories.get(from_territory)
     req_ids = [str(x).strip() for x in (request.unit_instance_ids or []) if x is not None and str(x).strip()]
     moving_units: list = []
@@ -3442,13 +3456,14 @@ def _generate_initiate_combat_payload(
 
     if sea_zone_id:
         sea_zone = state.territories.get(sea_zone_id)
-        if not sea_zone or not _is_sea_zone(td.get(sea_zone_id)):
-            raise ValueError(f"Invalid sea zone: {sea_zone_id}")
+        if not sea_zone or not _is_water_zone(td.get(sea_zone_id)):
+            raise ValueError(f"Invalid sea or river zone: {sea_zone_id}")
         attackers_from_sea = sorted(
             [
                 u for u in sea_zone.units
                 if ud.get(u.unit_id) and ud[u.unit_id].faction == attacker_faction
                 and not combat_is_naval_unit(ud.get(u.unit_id))
+                and not _is_river_unit(ud.get(u.unit_id))
             ],
             key=lambda u: u.instance_id,
         )
@@ -3460,6 +3475,7 @@ def _generate_initiate_combat_payload(
                     u for u in territory.units
                     if ud.get(u.unit_id) and ud[u.unit_id].faction == attacker_faction
                     and not combat_is_naval_unit(ud.get(u.unit_id))
+                and not _is_river_unit(ud.get(u.unit_id))
                 ],
                 key=lambda u: u.instance_id,
             )
@@ -3475,7 +3491,7 @@ def _generate_initiate_combat_payload(
         if not attackers:
             raise ValueError("Sea raid requires at least one land unit")
     else:
-        is_sea_zone_combat = _is_sea_zone(td.get(territory_id))
+        is_sea_zone_combat = _is_water_zone(td.get(territory_id))
         attackers = sorted(
             [
                 u for u in territory.units
@@ -3657,7 +3673,7 @@ def do_initiate_combat(
 
     if request.sea_zone_id:
         sea_zone = state.territories.get(request.sea_zone_id)
-        if not sea_zone or not _is_sea_zone(td.get(request.sea_zone_id)):
+        if not sea_zone or not _is_water_zone(td.get(request.sea_zone_id)):
             raise HTTPException(status_code=400, detail="Invalid sea zone for sea raid")
         sea_raid_from = getattr(state, "territory_sea_raid_from", None) or {}
         if sea_raid_from.get(request.territory_id) != request.sea_zone_id:
@@ -4135,7 +4151,7 @@ def _get_active_combat_units(
         and unit_defs is not None
     ):
         tdef = territory_defs.get(combat.territory_id)
-        if tdef and _is_sea_zone(tdef):
+        if tdef and _is_water_zone(tdef):
             attackers = [
                 u for u in attackers
                 if participates_in_sea_hex_naval_combat(u, unit_defs.get(u.unit_id))

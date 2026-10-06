@@ -303,6 +303,14 @@ function destinationSeaHasHostileEnemyNaval(
   return false;
 }
 
+function isWaterTid(
+  tid: string,
+  territoryData: Record<string, { terrain?: string } | undefined>,
+): boolean {
+  const terrain = territoryData[tid]?.terrain;
+  return terrain === 'sea' || terrain === 'river' || /^sea_zone_?\d+$/i.test(tid);
+}
+
 /** Aerial land→sea in combat is always attacking enemy naval, never embark (transportable land units still "Load" in combat for sea raids). */
 function unitIsAerial(
   unitId: string,
@@ -318,15 +326,14 @@ function plannedCombatMoveTypeLabel(
   territoryData: Record<string, { terrain?: string } | undefined>,
   unitDefs: Record<string, { archetype?: string; tags?: string[] } | undefined>,
 ): string | null {
-  const fromSea =
-    territoryData[move.from]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(move.from);
-  const toSea = territoryData[move.to]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(move.to);
+  const fromSea = isWaterTid(move.from, territoryData);
+  const toSea = isWaterTid(move.to, territoryData);
   if (fromSea && !toSea) {
     if (unitIsAerial(move.unitType, unitDefs)) {
       const mtEarly = (move.move_type ?? '').trim();
       return mtEarly === 'aerial' ? 'Attack' : 'Move';
     }
-    return 'Sea Raid';
+    return territoryData[move.from]?.terrain === 'river' ? 'Raid' : 'Sea Raid';
   }
   const mt = (move.move_type ?? '').trim();
   if (!mt) return null;
@@ -342,9 +349,8 @@ function plannedNonCombatMoveTypeLabel(
   territoryData: Record<string, { terrain?: string } | undefined>,
   unitDefs: Record<string, { archetype?: string; tags?: string[] } | undefined>,
 ): string | null {
-  const fromSea =
-    territoryData[move.from]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(move.from);
-  const toSea = territoryData[move.to]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(move.to);
+  const fromSea = isWaterTid(move.from, territoryData);
+  const toSea = isWaterTid(move.to, territoryData);
   if (fromSea && !toSea && unitIsAerial(move.unitType, unitDefs)) {
     return 'Move';
   }
@@ -540,10 +546,7 @@ function Sidebar({
   /** Naval battle in a sea zone must resolve before a sea raid that stages from that same zone. */
   const { sortedDeclaredBattles, isSeaRaidBlockedByPendingNaval } = useMemo(() => {
     const battles = gameState.declared_battles || [];
-    const isSea = (tid: string) => {
-      const t = territoryData[tid];
-      return t?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid);
-    };
+    const isSea = (tid: string) => isWaterTid(tid, territoryData);
     const navalSeaZones = new Set<string>();
     for (const b of battles) {
       if (!b.sea_zone_id && isSea(b.territory)) {
@@ -999,8 +1002,8 @@ function Sidebar({
                       {moves.map(move => {
                         const unitDef = unitDefs[move.unitType];
                         const fromName = territoryData[move.from]?.name || move.from;
-                        const fromSea = territoryData[move.from]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(move.from);
-                        const toSea = territoryData[move.to]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(move.to);
+                        const fromSea = isWaterTid(move.from, territoryData);
+                        const toSea = isWaterTid(move.to, territoryData);
                         const isSeaRaidMove = fromSea && !toSea;
                         const paxOnlyCombat =
                           isSeaRaidMove && move.move_type !== 'load'
@@ -1069,8 +1072,8 @@ function Sidebar({
                       {moves.map(move => {
                         const unitDef = unitDefs[move.unitType];
                         const fromName = territoryData[move.from]?.name || move.from;
-                        const fromSeaNcm = territoryData[move.from]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(move.from);
-                        const toSeaNcm = territoryData[move.to]?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(move.to);
+                        const fromSeaNcm = isWaterTid(move.from, territoryData);
+                        const toSeaNcm = isWaterTid(move.to, territoryData);
                         const isOffloadPending = fromSeaNcm && !toSeaNcm && move.move_type !== 'load';
                         const paxOnlyNcm = isOffloadPending
                           ? passengerCountForSeaToLandPendingMove(move, unitDefs, gameState)

@@ -28,6 +28,7 @@ from backend.engine.queries import (
     get_unit_move_targets,
     get_unit_faction,
     _is_naval_unit,
+    _is_river_unit,
     filter_unit_instances_that_can_reach,
     validate_action,
 )
@@ -362,7 +363,9 @@ def _prune_empty_open_space_move(
         return unit_ids[:1]
 
     def _land_movable(u) -> bool:
-        return not _is_naval_unit(ud.get(getattr(u, "unit_id", "")))
+        return not _is_naval_unit(ud.get(getattr(u, "unit_id", ""))) and not _is_river_unit(
+            ud.get(getattr(u, "unit_id", ""))
+        )
 
     land_units = [u for u in units_here if _land_movable(u)]
     if not land_units:

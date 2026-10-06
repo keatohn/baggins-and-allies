@@ -244,6 +244,19 @@ def _is_naval_unit(unit_def: UnitDefinition | None) -> bool:
     return arch == "naval" or "naval" in tags
 
 
+def _is_water_hull(unit_def: UnitDefinition | None) -> bool:
+    """Ship or rowboat. Both can be hit in water-hex combat; passengers cannot."""
+    if _is_naval_unit(unit_def):
+        return True
+    if not unit_def:
+        return False
+    arch = getattr(unit_def, "archetype", "") or ""
+    tags = getattr(unit_def, "tags", []) or []
+    if arch == "aerial" or "aerial" in tags:
+        return False
+    return arch == "river" or "river" in tags
+
+
 # Tags that do NOT count as specials (match frontend getUnitSpecials: exclude land, mounted).
 # All other tags (forest, mountain, fearless, terror, aerial, etc.) count as specials for casualty order.
 TAGS_NOT_SPECIALS = frozenset({"land", "mounted"})
@@ -900,7 +913,7 @@ def _apply_hits(
         num_specials = len(specials_list) if isinstance(
             specials_list, list) else 0
         cargo_key = _cargo_sort_key(unit, units) if (
-            is_naval_combat and _is_naval_unit(unit_def)) else (0, 0, ())
+            is_naval_combat and _is_water_hull(unit_def)) else (0, 0, ())
         if use_stat_before_cost:
             cost_stat = (-unit.remaining_health, stat_for_casualty_order, total_cost, cargo_key,
                          num_specials, unit.remaining_movement, unit.instance_id or '')
@@ -911,7 +924,7 @@ def _apply_hits(
 
     # Naval combat: only naval and aerial units can take hits (passengers are not targets)
     if is_naval_combat:
-        eligible = [u for u in units if _is_naval_unit(unit_defs.get(
+        eligible = [u for u in units if _is_water_hull(unit_defs.get(
             u.unit_id)) or is_aerial_unit(unit_defs.get(u.unit_id))]
     else:
         eligible = units
