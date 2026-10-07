@@ -14,6 +14,7 @@ from backend.engine.movement import (
     instance_allowed_in_new_move_from_territory,
     is_friendly_territory_for_landing,
 )
+from backend.engine.definitions import faction_acts_as
 from backend.engine.queries import (
     get_movable_units,
     get_unit_move_targets,
@@ -123,13 +124,13 @@ def _count_adjacent_enemies(territory_id: str, state, faction_id: str, fd, td, u
     return count
 
 
-def _count_our_land_units(state, territory_id: str, faction_id: str, ud) -> int:
+def _count_our_land_units(state, territory_id: str, faction_id: str, ud, faction_defs=None) -> int:
     terr = state.territories.get(territory_id)
     if not terr:
         return 0
     n = 0
     for u in getattr(terr, "units", []) or []:
-        if get_unit_faction(u, ud) != faction_id:
+        if not faction_acts_as(faction_defs, get_unit_faction(u, ud), faction_id):
             continue
         if _is_naval_unit(ud.get(u.unit_id)):
             continue
@@ -174,7 +175,7 @@ def _elite_into_undermanned_threat_penalty(
         for u in getattr(terr_f, "units", []) or []:
             if u.instance_id not in ids_set:
                 continue
-            if get_unit_faction(u, ud) != faction_id:
+            if not faction_acts_as(fd, get_unit_faction(u, ud), faction_id):
                 continue
             if _is_naval_unit(ud.get(u.unit_id)):
                 continue
@@ -226,7 +227,7 @@ def _threatened_high_value_territories(
         eff = effective_defensive_reinforce_pressure(
             tid, state, faction_id, fd, td, ud
         )
-        if _count_our_land_units(state, tid, faction_id, ud) < eff:
+        if _count_our_land_units(state, tid, faction_id, ud, fd) < eff:
             out.add(tid)
     return out
 
@@ -340,6 +341,7 @@ def _n_land_movers(
     unit_ids: list[str],
     faction_id: str,
     ud,
+    faction_defs=None,
 ) -> int:
     terr = state.territories.get(from_tid)
     if not terr:
@@ -349,7 +351,7 @@ def _n_land_movers(
     for u in getattr(terr, "units", []) or []:
         if u.instance_id not in want:
             continue
-        if get_unit_faction(u, ud) != faction_id:
+        if not faction_acts_as(faction_defs, get_unit_faction(u, ud), faction_id):
             continue
         if _is_naval_unit(ud.get(u.unit_id)):
             continue
@@ -415,7 +417,7 @@ def decide_non_combat_move(ctx: AIContext) -> Action | None:
     td = ctx.territory_defs
     fd = ctx.faction_defs
 
-    movable = get_movable_units(state, faction_id, ud)
+    movable = get_movable_units(state, faction_id, ud, fd)
     pending_unit_ids = set()
     for pm in (state.pending_moves or []):
         if getattr(pm, "phase", None) == "non_combat_move":
@@ -597,7 +599,7 @@ def decide_non_combat_move(ctx: AIContext) -> Action | None:
                 )
                 if not legitimate_rear:
                     step *= math.sqrt(float(max(1, _n_land_movers(
-                        state, from_tid, unit_ids, faction_id, ud
+                        state, from_tid, unit_ids, faction_id, ud, fd
                     ))))
             score += step
         # Do not shuffle mobile units to the rear when the origin is not threatened (wastes next-turn attack reach).

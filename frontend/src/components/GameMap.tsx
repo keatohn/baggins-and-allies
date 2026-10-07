@@ -443,6 +443,14 @@ interface GameMapProps {
   remainingMobilizationCapacity?: Record<string, number>;
   /** Per-territory, per-unit remaining home slots (1 per home territory per unit type). Enables deploy to home without camp. */
   remainingHomeSlots?: Record<string, Record<string, number>>;
+  /** Subfaction units place on their own lists. room is how many can still go to that destination. */
+  mobilizeUnitDestinations?: Record<string, {
+    territories: string[];
+    sea_zones: string[];
+    river_zones: string[];
+    unlimited: boolean;
+    room: Record<string, number>;
+  }>;
   onMobilizationDrop?: (territoryId: string, unitId: string, unitName: string, unitIcon: string, count: number) => void;
   onMobilizationAllDrop?: (
     territoryId: string,
@@ -833,6 +841,16 @@ function DraggableAllStacksButton({
   );
 }
 
+function unitCommandedByCurrent(
+  unitFaction: string | undefined,
+  currentFaction: string | undefined,
+  factionData: Record<string, { parent?: string } | undefined>,
+): boolean {
+  if (!unitFaction || !currentFaction) return false;
+  if (unitFaction === currentFaction) return true;
+  return factionData[unitFaction]?.parent === currentFaction;
+}
+
 function GameMap({
   gameState,
   selectedTerritory,
@@ -862,6 +880,7 @@ function GameMap({
   riverUnitIds = new Set<string>(),
   remainingMobilizationCapacity = {},
   remainingHomeSlots = {},
+  mobilizeUnitDestinations = {},
   onMobilizationDrop,
   onMobilizationAllDrop,
   onCampDrop,
@@ -2528,14 +2547,18 @@ function GameMap({
     if ((data as { type?: string }).type === 'mobilization-unit') {
       setActiveUnit(null);
       const unitId = (data as { unitId?: string }).unitId;
+      const spec = unitId ? mobilizeUnitDestinations[unitId] : undefined;
       const isRiverHull = unitId ? riverUnitIds.has(unitId) : false;
       const isSeaHull = unitId ? seaHullIds.has(unitId) : false;
-      const validDestinations = isRiverHull
-        ? validMobilizeRiverZones
-        : isSeaHull
-          ? validMobilizeSeaZones
-          : validMobilizeTerritories;
+      const validDestinations = spec
+        ? (isRiverHull ? spec.river_zones : isSeaHull ? spec.sea_zones : spec.territories)
+        : isRiverHull
+          ? validMobilizeRiverZones
+          : isSeaHull
+            ? validMobilizeSeaZones
+            : validMobilizeTerritories;
       const withRoom = validDestinations.filter((id: string) => {
+        if (spec) return (spec.room[id] ?? 0) > 0;
         if (isRiverHull || isSeaHull) return (remainingMobilizationCapacity[id] ?? 0) > 0;
         const campRoom = (remainingMobilizationCapacity[id] ?? 0) > 0;
         const homeRoom = unitId ? (remainingHomeSlots[id]?.[unitId] ?? 0) > 0 : false;
@@ -2584,6 +2607,7 @@ function GameMap({
     unitDefs,
     remainingMobilizationCapacity,
     remainingHomeSlots,
+    mobilizeUnitDestinations,
     mobilizationTray?.pendingCamps,
     mobilizationTray?.purchases,
     mobilizationTray?.factionColor,
@@ -3797,10 +3821,23 @@ function GameMap({
                           const hasMobilizationRoom =
                             capLand > 0 ||
                             (selectedLandUnitId ? (homeForTerr[selectedLandUnitId] ?? 0) > 0 : Object.values(homeForTerr).some((n: number) => n > 0));
+                          const draggedMobUnitId =
+                            activeDragId &&
+                            activeDragId.startsWith('mobilize-') &&
+                            !activeDragId.startsWith('mobilize-camp-') &&
+                            activeDragId !== 'mobilize-all'
+                              ? activeDragId.slice('mobilize-'.length)
+                              : undefined;
+                          const mobUnitId = draggedMobUnitId || mobilizationTray?.selectedUnitId || undefined;
+                          const mobSpec = mobUnitId ? mobilizeUnitDestinations[mobUnitId] : undefined;
+                          const inMobList = (ids: string[] | undefined) =>
+                            Boolean(ids && (ids.includes(territoryId) || ids.includes(stateKey)));
+                          const specRoom =
+                            (mobSpec?.room?.[territoryId] ?? mobSpec?.room?.[stateKey] ?? 0) > 0;
                           const isValidMobilizationTarget =
                             isMobilizePhase &&
-                            (validMobilizeTerritories.includes(territoryId) || validMobilizeTerritories.includes(stateKey)) &&
-                            hasMobilizationRoom &&
+                            inMobList(mobSpec ? mobSpec.territories : validMobilizeTerritories) &&
+                            (mobSpec ? specRoom : hasMobilizationRoom) &&
                             (activeDragId != null ? isValidDrop : (hasMobilizationSelected || hasUnitsToMobilize));
                           const pendingSidebarDest = (mobilizationPendingDestination ?? '').trim();
                           const matchesPendingSidebarDest =
@@ -3819,13 +3856,13 @@ function GameMap({
                               territoryMatchesValidDrop(territoryId));
                           const isValidMobilizationTargetSea =
                             isMobilizePhase &&
-                            (validMobilizeSeaZones.includes(territoryId) || validMobilizeSeaZones.includes(stateKey)) &&
-                            hasMobilizationRoom &&
+                            inMobList(mobSpec ? mobSpec.sea_zones : validMobilizeSeaZones) &&
+                            (mobSpec ? specRoom : hasMobilizationRoom) &&
                             (activeDragId != null ? isValidDrop : (hasMobilizationSelected || (mobilizationTray?.purchases?.length ?? 0) > 0));
                           const isValidMobilizationTargetRiver =
                             isMobilizePhase &&
-                            (validMobilizeRiverZones.includes(territoryId) || validMobilizeRiverZones.includes(stateKey)) &&
-                            hasMobilizationRoom &&
+                            inMobList(mobSpec ? mobSpec.river_zones : validMobilizeRiverZones) &&
+                            (mobSpec ? specRoom : hasMobilizationRoom) &&
                             (activeDragId != null ? isValidDrop : (hasMobilizationSelected || (mobilizationTray?.purchases?.length ?? 0) > 0));
                           const isMobilizationZone = isValidMobilizationTarget || isValidMobilizationTargetSea || isValidMobilizationTargetRiver;
                           const thisCanon = resolveTerritoryDropId(territoryId) || territoryId;
@@ -4819,7 +4856,7 @@ function GameMap({
                                       const unitFactionColor = colorFromId ?? colorFromDef ?? NEUTRAL_UNIT_BORDER;
                                       const unitFaction = factionFromId ?? defFaction ?? parts[0];
                                       const canDrag =
-                                        canAct && isMovementPhase && unitFaction === gameState.current_faction;
+                                        canAct && isMovementPhase && unitCommandedByCurrent(unitFaction, gameState.current_faction, factionData);
                                       return (
                                         <span
                                           key={`${territoryId}-${unit_id}`}
@@ -4874,7 +4911,7 @@ function GameMap({
                                     const unitFactionColor = colorFromId ?? colorFromDef ?? NEUTRAL_UNIT_BORDER;
                                     const unitFaction = factionFromId ?? defFaction ?? parts[0];
                                     const canDrag =
-                                      canAct && isMovementPhase && unitFaction === gameState.current_faction;
+                                      canAct && isMovementPhase && unitCommandedByCurrent(unitFaction, gameState.current_faction, factionData);
                                     return (
                                       <span
                                         key={`${territoryId}-${unit_id}-sea-surface`}
@@ -4957,7 +4994,7 @@ function GameMap({
                                 // Draggable during movement phase if this unit belongs to the current faction (regardless of territory owner)
                                 const unitFaction = factionFromId ?? defFaction ?? parts[0];
                                 const canDrag =
-                                  canAct && isMovementPhase && unitFaction === gameState.current_faction;
+                                  canAct && isMovementPhase && unitCommandedByCurrent(unitFaction, gameState.current_faction, factionData);
                                 const instanceIdsForUnit = (territoryUnitsFull?.[territoryId] || []).filter(u => u.unit_id === unit_id).map(u => u.instance_id);
                                 const showNavalMustAttackStacked =
                                   gameState.phase === 'combat_move' &&

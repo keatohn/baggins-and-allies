@@ -9,6 +9,7 @@ interface UnitPurchase {
   name: string;
   icon: string;
   count: number;
+  subfaction?: boolean;
 }
 
 interface PendingCamp {
@@ -178,6 +179,10 @@ function MobilizationTray({
 
   const hasItems = purchases.length > 0 || pendingCamps.length > 0;
 
+  const parentPurchases = purchases.filter((purchase) => !purchase.subfaction);
+  const subfactionPurchases = purchases.filter((purchase) => purchase.subfaction);
+  const showDivider = subfactionPurchases.length > 0;
+
   return (
     <div className="mobilization-tray" style={{ borderColor: factionColor }}>
       {!hasItems && (
@@ -196,7 +201,7 @@ function MobilizationTray({
         </div>
       )}
       <div className="tray-units">
-        {purchases.map(purchase => (
+        {parentPurchases.map(purchase => (
           <DraggablePurchaseStack
             key={purchase.unitId}
             purchase={purchase}
@@ -217,6 +222,20 @@ function MobilizationTray({
             onSelect={() => {
               onSelectUnit(null);
               onSelectCamp(selectedCampIndex === campIndex ? null : campIndex);
+            }}
+            factionColor={factionColor}
+            activeDragId={activeDragId}
+          />
+        ))}
+        {showDivider && <div className="tray-divider" aria-hidden="true" />}
+        {subfactionPurchases.map(purchase => (
+          <DraggablePurchaseStack
+            key={purchase.unitId}
+            purchase={purchase}
+            isSelected={selectedUnitId === purchase.unitId}
+            onSelect={() => {
+              onSelectCamp(null);
+              onSelectUnit(selectedUnitId === purchase.unitId ? null : purchase.unitId);
             }}
             factionColor={factionColor}
             activeDragId={activeDragId}

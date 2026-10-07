@@ -149,7 +149,9 @@ from backend.engine.queries import (
     get_retreat_options,
     get_purchased_units,
     get_faction_stats,
+    _validate_end_phase,
 )
+from backend.engine.subfaction_rules import unit_destination_spec
 from backend.engine.utils import (
     initialize_game_state,
     generate_dice_rolls_for_units,
@@ -1591,6 +1593,7 @@ def create_game(
         shadow_of_war=bool(request.shadow_of_war),
         rings_of_power=bool(request.rings_of_power) and mode_declared(setup.get("special_rules")),
         special_rules=setup.get("special_rules"),
+        subfaction_rules=setup.get("subfaction_rules"),
     )
     state.map_asset = setup["map_asset"]
     # Ensure turn_order is never empty for new games (ticker and faction order)
@@ -2785,7 +2788,7 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
             "can_end_phase": True,
         }
         if phase == "purchase":
-            purchasable = get_purchasable_units(state, faction, ud)
+            purchasable = get_purchasable_units(state, faction, ud, fd)
             actions["purchasable_units"] = purchasable
             capacity_info = get_mobilization_capacity(state, faction, td, cd, port_d, ud)
             actions["mobilization_capacity"] = capacity_info.get("total_capacity", 0)
@@ -2810,7 +2813,7 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
             actions["stronghold_repair_cost"] = getattr(state, "stronghold_repair_cost", 0)
         elif phase in ("combat_move", "non_combat_move"):
             slot_check_state = get_state_after_pending_moves(state, phase, ud, td, fd)
-            movable = get_movable_units(state, faction, ud)
+            movable = get_movable_units(state, faction, ud, fd)
             actions["moveable_units"] = []
             for unit_info in movable:
                 targets, charge_routes = get_unit_move_targets(
@@ -2936,6 +2939,13 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
             mobilize_river_zones = get_mobilization_river_zones(state, faction, td)
             mobilize_capacity = get_mobilization_capacity(state, faction, td, cd, port_d, ud)
             purchased = get_purchased_units(state, faction)
+            unit_destinations = {}
+            for stack in purchased:
+                spec = unit_destination_spec(
+                    state, faction, ud.get(stack.get("unit_id")), fd, td, cd, port_d,
+                )
+                if spec:
+                    unit_destinations[stack["unit_id"]] = spec
             actions["mobilize_options"] = {
                 "territories": mobilize_territories,
                 "sea_zones": mobilize_sea_zones,
@@ -2943,9 +2953,14 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                 "capacity": mobilize_capacity,
                 "pending_units": purchased,
             }
+            if unit_destinations:
+                actions["mobilize_options"]["unit_destinations"] = unit_destinations
             # Expose pending_camps so frontend can show placement UI even if main state was missing it
             actions["pending_camps"] = getattr(state, "pending_camps", [])
-            actions["can_end_turn"] = True
+            actions["can_end_phase"] = _validate_end_phase(
+                state, faction_defs=fd, unit_defs=ud, territory_defs=td, camp_defs=cd, port_defs=port_d,
+            ).valid
+            actions["can_end_turn"] = actions["can_end_phase"]
         return actions
     except Exception as e:
         fallback = {

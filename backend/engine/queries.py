@@ -48,6 +48,13 @@ from backend.engine.movement import (
     sort_sea_zone_ids_numerically,
     water_transport_relation,
 )
+from backend.engine.subfaction_rules import (
+    parent_may_purchase_unit,
+    pool_territory_ids,
+    purchase_capacity_error,
+    subfaction_mobilization_error,
+    unit_destination_spec,
+)
 from backend.engine.utils import (
     effective_territory_owner,
     get_unit_faction,
@@ -465,8 +472,20 @@ def validate_action(
             unit_defs=unit_defs,
             territory_defs=territory_defs,
             camp_defs=camp_defs,
+            port_defs=port_defs,
         )
-    elif action_type in ["end_turn", "continue_combat", "skip_turn"]:
+    elif action_type == "end_turn":
+        if state.phase == "mobilization":
+            return _validate_end_phase(
+                state,
+                faction_defs=faction_defs,
+                unit_defs=unit_defs,
+                territory_defs=territory_defs,
+                camp_defs=camp_defs,
+                port_defs=port_defs,
+            )
+        return ValidationResult(True)
+    elif action_type in ["continue_combat", "skip_turn"]:
         return ValidationResult(True)
 
     if (action_type == SET_TERRITORY_DEFENDER_CASUALTY_ORDER or
@@ -778,7 +797,7 @@ def _validate_purchase(
         if not unit_def.purchasable:
             return ValidationResult(False, f"Unit {unit_id} is not purchasable")
 
-        if unit_def.faction != faction_id:
+        if not parent_may_purchase_unit(state, faction_id, unit_def, faction_defs):
             return ValidationResult(False, f"Unit {unit_id} belongs to {unit_def.faction}, not {faction_id}")
 
         for resource, amount in unit_def.cost.items():
@@ -808,53 +827,22 @@ def _validate_purchase(
     )
     sea_capacity = sum(z.get("power", 0) for z in capacity_info.get("sea_zones", []))
 
-    def _kind_counts(unit_stacks: list) -> tuple[int, int, int]:
-        land, naval, river = 0, 0, 0
-        for stack in unit_stacks:
-            ud = unit_defs.get(stack.unit_id)
-            n = getattr(stack, "count", 0)
-            kind = _purchase_kind(ud)
-            if kind == "naval":
-                naval += n
-            elif kind == "river":
-                river += n
-            else:
-                land += n
-        return land, naval, river
-
-    already_stacks = state.faction_purchased_units.get(faction_id, [])
-    already_land, already_naval, already_river = _kind_counts(already_stacks)
-
-    this_land, this_naval, this_river = 0, 0, 0
-    for unit_id, count in purchases.items():
-        kind = _purchase_kind(unit_defs.get(unit_id))
-        if kind == "naval":
-            this_naval += count
-        elif kind == "river":
-            this_river += count
-        else:
-            this_land += count
-
     river_capacity = river_mobilization_capacity_total(state, faction_id, territory_defs)
-
-    if already_land + this_land > land_capacity:
-        return ValidationResult(
-            False,
-            f"Cannot purchase that many land units: land mobilization capacity is {land_capacity} "
-            f"(already purchased: {already_land} land, this purchase: {this_land} land)"
-        )
-    if already_naval + this_naval > sea_capacity:
-        return ValidationResult(
-            False,
-            f"Cannot purchase that many naval units: sea mobilization capacity is {sea_capacity} "
-            f"(already purchased: {already_naval} naval, this purchase: {this_naval} naval)"
-        )
-    if already_river + this_river > river_capacity:
-        return ValidationResult(
-            False,
-            f"Cannot purchase that many river units: river mobilization capacity is {river_capacity} "
-            f"(already purchased: {already_river} river, this purchase: {this_river} river)"
-        )
+    cap_err = purchase_capacity_error(
+        state,
+        faction_id,
+        unit_defs,
+        faction_defs,
+        territory_defs,
+        camp_defs,
+        port_defs,
+        {uid: int(c or 0) for uid, c in purchases.items()},
+        land_capacity,
+        sea_capacity,
+        river_capacity,
+    )
+    if cap_err:
+        return ValidationResult(False, cap_err)
 
     return ValidationResult(True)
 
@@ -898,6 +886,7 @@ def _validate_move(
         unit_defs,
         territory_defs,
         action.faction,
+        faction_defs,
     )
     if not unit_instance_ids:
         return ValidationResult(False, "No units specified to move")
@@ -1477,7 +1466,13 @@ def _validate_mobilize(
         return ValidationResult(False, "Do not mix naval, river, and land units in one mobilization")
     batch_kind = next(iter(kinds))
 
-    if batch_kind == "naval":
+    sub_mobilization = subfaction_mobilization_error(
+        state, faction_id, destination, units_to_mobilize, unit_defs, territory_defs,
+        camp_defs, port_defs, faction_defs,
+    )
+    if sub_mobilization:
+        return ValidationResult(False, sub_mobilization)
+    if sub_mobilization is None and batch_kind == "naval":
         # Naval: destination must be a sea zone adjacent to an owned port
         if not _sea_zone_adjacent_to_owned_port(state, destination, faction_id, port_defs, territory_defs):
             return ValidationResult(
@@ -1486,7 +1481,7 @@ def _validate_mobilize(
             )
         # Shared capacity: each port territory P adjacent to this sea zone has pool P.power; count land to P + naval to P's adjacent sea zones
         power_production = None  # validated per-port below
-    elif batch_kind == "river":
+    elif sub_mobilization is None and batch_kind == "river":
         if not _is_river_zone(dest_def) or not river_banks_for_zone(state, faction_id, destination, territory_defs):
             return ValidationResult(
                 False,
@@ -1503,7 +1498,7 @@ def _validate_mobilize(
         )
         if not fits:
             return ValidationResult(False, err)
-    else:
+    elif sub_mobilization is None:
         # Land: camp or home territory for that unit (home works at port capitals e.g. Corsair → Umbar). Not generic port land deployment.
         has_camp = _territory_has_standing_camp(state, destination, camp_defs)
         is_home_for = {}  # unit_id -> True if this territory is home for that unit type
@@ -1616,7 +1611,7 @@ def _validate_mobilize(
 
     # Total mobilized to this destination (pending + this action) cannot exceed capacity
     this_action_count = sum(item.get("count", 0) for item in units_to_mobilize)
-    if batch_kind == "naval":
+    if sub_mobilization is None and batch_kind == "naval":
         # Naval to sea zone: shared pool with each port adjacent to this sea zone
         sea_def = territory_defs.get(destination)
         if sea_def and _is_sea_zone(sea_def):
@@ -1634,7 +1629,7 @@ def _validate_mobilize(
                         f"Cannot mobilize {this_action_count} naval to {destination}: "
                         f"port {adj_id} shared pool would exceed capacity ({total_for_port + this_action_count} > {port_power_val})",
                     )
-    elif batch_kind == "land":
+    elif sub_mobilization is None and batch_kind == "land":
         fits, err = river_mobilization_fits(
             state,
             faction_id,
@@ -1860,12 +1855,125 @@ def _validate_set_territory_defender_casualty_order(
     return ValidationResult(True)
 
 
+def mobilization_block_reason(
+    state: GameState,
+    faction_id: str,
+    unit_defs: dict[str, UnitDefinition] | None,
+    territory_defs: dict[str, TerritoryDefinition] | None,
+    camp_defs: dict | None,
+    port_defs: dict | None,
+    faction_defs: dict | None,
+) -> str | None:
+    """
+    Why mobilization cannot end, or None when it can.
+    Unplaced units block the phase only while one of them still has a legal destination.
+    A lost capital makes placement impossible, so the phase can end and those units are dropped.
+    """
+    unit_defs = unit_defs or {}
+    territory_defs = territory_defs or {}
+    stacks = [
+        s for s in (state.faction_purchased_units.get(faction_id) or [])
+        if int(getattr(s, "count", 0) or 0) > 0
+    ]
+    if not stacks or not faction_defs or not faction_owns_capital(state, faction_id, faction_defs):
+        return None
+    pending: dict[str, int] = {}
+    pending_unit: dict[tuple[str, str], int] = {}
+    for pm in getattr(state, "pending_mobilizations", []) or []:
+        dest = getattr(pm, "destination", "") or ""
+        for item in getattr(pm, "units", None) or []:
+            n = int(item.get("count", 0) or 0)
+            uid = item.get("unit_id") or ""
+            pending[dest] = pending.get(dest, 0) + n
+            pending_unit[(dest, uid)] = pending_unit.get((dest, uid), 0) + n
+    if _purchased_units_have_a_destination(
+        state, faction_id, stacks, unit_defs, territory_defs, camp_defs, port_defs, faction_defs,
+        pending, pending_unit,
+    ):
+        return "Deploy all purchased and granted units before ending mobilization"
+    return None
+
+
+def _purchased_units_have_a_destination(
+    state: GameState,
+    faction_id: str,
+    stacks: list,
+    unit_defs: dict[str, UnitDefinition],
+    territory_defs: dict[str, TerritoryDefinition],
+    camp_defs: dict | None,
+    port_defs: dict | None,
+    faction_defs: dict,
+    pending: dict[str, int],
+    pending_unit: dict[tuple[str, str], int],
+) -> bool:
+    capacity = get_mobilization_capacity(
+        state, faction_id, territory_defs, camp_defs, port_defs, unit_defs,
+    )
+    parent_power: dict[str, int] = {}
+    parent_home: dict[tuple[str, str], int] = {}
+    for bucket in (capacity.get("territories") or [], capacity.get("port_territories") or []):
+        for row in bucket:
+            tid = row.get("territory_id")
+            if not tid:
+                continue
+            parent_power[tid] = int(row.get("power", 0) or 0)
+            for uid, n in (row.get("home_unit_capacity") or {}).items():
+                parent_home[(tid, uid)] = int(n or 0)
+    for row in capacity.get("sea_zones") or []:
+        parent_power[row.get("sea_zone_id")] = int(row.get("power", 0) or 0)
+    for row in capacity.get("river_zones") or []:
+        parent_power[row.get("river_zone_id")] = int(row.get("power", 0) or 0)
+    parent_land = set(get_mobilization_territories(
+        state, faction_id, territory_defs, camp_defs, port_defs, unit_defs,
+    ))
+    parent_sea = set(get_mobilization_sea_zones(state, faction_id, territory_defs, port_defs))
+    parent_river = set(get_mobilization_river_zones(state, faction_id, territory_defs))
+
+    for stack in stacks:
+        unit_id = stack.unit_id
+        unit_def = unit_defs.get(unit_id)
+        kind = _purchase_kind(unit_def)
+        spec = unit_destination_spec(
+            state, faction_id, unit_def, faction_defs, territory_defs, camp_defs, port_defs,
+        )
+        if spec is not None:
+            if kind == "naval":
+                ids = spec.get("sea_zones") or []
+            elif kind == "river":
+                ids = spec.get("river_zones") or []
+            else:
+                ids = spec.get("territories") or []
+            if spec.get("unlimited") and ids:
+                return True
+            for tid in ids:
+                cap = int((spec.get("capacity") or {}).get(tid, 0) or 0)
+                if cap - pending.get(tid, 0) > 0:
+                    return True
+                home = int((spec.get("home") or {}).get(tid, 0) or 0)
+                if home and pending_unit.get((tid, unit_id), 0) < home:
+                    return True
+            continue
+        if kind == "naval":
+            ids = parent_sea
+        elif kind == "river":
+            ids = parent_river
+        else:
+            ids = parent_land
+        for tid in ids:
+            if parent_power.get(tid, 0) - pending.get(tid, 0) > 0:
+                return True
+            if parent_home.get((tid, unit_id), 0) > pending_unit.get((tid, unit_id), 0):
+                return True
+    return False
+
+
 def _validate_end_phase(
     state: GameState,
     faction_defs: dict | None = None,
     unit_defs: dict | None = None,
     territory_defs: dict | None = None,
     camp_defs: dict | None = None,
+    port_defs: dict | None = None,
 ) -> ValidationResult:
     """Validate end_phase: combat phase cannot end while contested battles remain; mobilization: all camps placed or queued."""
     if state.phase == "combat_move" and unit_defs and territory_defs and faction_defs:
@@ -1899,6 +2007,12 @@ def _validate_end_phase(
         return ValidationResult(True)
     if state.phase != "mobilization":
         return ValidationResult(True)
+    faction_id = state.current_faction or ""
+    blocked = mobilization_block_reason(
+        state, faction_id, unit_defs, territory_defs, camp_defs, port_defs, faction_defs,
+    )
+    if blocked:
+        return ValidationResult(False, blocked)
     pending = getattr(state, "pending_camps", [])
     queued_indices = {p.camp_index for p in getattr(state, "pending_camp_placements", [])}
     faction_id = state.current_faction or ""
@@ -2108,6 +2222,7 @@ def get_purchasable_units(
     state: GameState,
     faction_id: str,
     unit_defs: dict[str, UnitDefinition],
+    faction_defs: dict[str, FactionDefinition] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Get all unit types the faction can purchase with current resources.
@@ -2119,7 +2234,7 @@ def get_purchasable_units(
     result = []
 
     for unit_id, unit_def in unit_defs.items():
-        if unit_def.faction != faction_id:
+        if not parent_may_purchase_unit(state, faction_id, unit_def, faction_defs):
             continue
         if not unit_def.purchasable:
             continue
@@ -2649,7 +2764,7 @@ def get_sea_raid_targets(
         enemy_units = False
         for unit in territory.units:
             uf = get_unit_faction(unit, unit_defs)
-            if uf == faction_id:
+            if faction_acts_as(faction_defs, uf, faction_id):
                 ud = unit_defs.get(unit.unit_id)
                 if _is_transport_boat_for_zone(ud, tdef):
                     my_naval.append(unit)
@@ -2821,6 +2936,7 @@ def get_faction_stats(
         territories_count = 0
         strongholds_count = 0
         power_per_turn = 0
+        pool_ids = set(pool_territory_ids(state, faction_id, faction_defs))
         for tid, ts in state.territories.items():
             owner = ts.owner
             if controlling_faction_id(faction_defs, owner) != faction_id:
@@ -2829,8 +2945,8 @@ def get_faction_stats(
             tdef = territory_defs.get(tid)
             if tdef and getattr(tdef, "is_stronghold", False):
                 strongholds_count += 1
-            # Subfaction land is controlled here, but it does not pay power until a subfaction rule says so.
-            if owner == faction_id and tdef:
+            # Subfaction land is controlled here. It pays only when its economy rule is pool and the capital is held.
+            if tdef and (owner == faction_id or tid in pool_ids):
                 power_per_turn += territory_current_power(state, tid, tdef)
         power = state.faction_resources.get(faction_id, {}).get("power", 0)
         factions[faction_id] = {

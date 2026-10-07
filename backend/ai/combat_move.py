@@ -18,6 +18,7 @@ from collections import Counter
 from collections.abc import Callable
 
 from backend.engine.actions import Action, move_units, end_phase
+from backend.engine.definitions import faction_acts_as
 from backend.engine.movement import (
     _is_sea_zone,
     get_charge_max_gain_over_moves,
@@ -267,6 +268,7 @@ def _pending_cavalry_count_to_territory(
     faction_id: str,
     ud,
     territory_defs,
+    faction_defs=None,
 ) -> int:
     """
     Cavalry already queued in combat_move pending into to_key (same phase, same destination).
@@ -290,7 +292,7 @@ def _pending_cavalry_count_to_territory(
         by_id = {u.instance_id: u for u in getattr(terr, "units", []) or []}
         for iid in getattr(pm, "unit_instance_ids", []) or []:
             u = by_id.get(iid)
-            if not u or get_unit_faction(u, ud) != faction_id:
+            if not u or not faction_acts_as(faction_defs, get_unit_faction(u, ud), faction_id):
                 continue
             if _is_naval_unit(ud.get(u.unit_id)):
                 continue
@@ -455,13 +457,13 @@ def _units_to_stacks(units: list, ud) -> list[dict]:
     return [{"unit_id": uid, "count": c} for uid, c in counts.items()]
 
 
-def _committed_attacker_stacks(state, territory_id: str, faction_id: str, ud) -> list[dict]:
-    """Our units at this territory (for attack sim)."""
+def _committed_attacker_stacks(state, territory_id: str, faction_id: str, ud, faction_defs=None) -> list[dict]:
+    """Our units at this territory (for attack sim), including subfactions we command."""
     terr = state.territories.get(territory_id)
     if not terr:
         return []
     our = [u for u in (getattr(terr, "units", []) or [])
-           if get_unit_faction(u, ud) == faction_id]
+           if faction_acts_as(faction_defs, get_unit_faction(u, ud), faction_id)]
     return _units_to_stacks(our, ud)
 
 
@@ -763,7 +765,7 @@ def decide_combat_move(ctx: AIContext):
 
     state_after = get_state_after_pending_moves(
         state, "combat_move", ud, td, fd)
-    movable = get_movable_units(state, faction_id, ud)
+    movable = get_movable_units(state, faction_id, ud, fd)
     pending_unit_ids = set()
     for pm in (state.pending_moves or []):
         if getattr(pm, "phase", None) == "combat_move":
@@ -880,7 +882,7 @@ def decide_combat_move(ctx: AIContext):
     committed_win_rate: dict[str, float] = {}
     committed_net: dict[str, float] = {}
     for to_tid in attack_targets:
-        att = _committed_attacker_stacks(state_after, to_tid, faction_id, ud)
+        att = _committed_attacker_stacks(state_after, to_tid, faction_id, ud, fd)
         def_stacks = _defender_stacks(state_after, to_tid, faction_id, fd, ud)
         if not def_stacks:
             committed_win_rate[to_tid] = 1.0
@@ -923,8 +925,8 @@ def decide_combat_move(ctx: AIContext):
         for tid in attack_targets
     )
 
-    blobs = get_faction_territory_blobs(state, faction_id, td)
-    tid_to_blob = territory_to_blob_index(state, faction_id, td)
+    blobs = get_faction_territory_blobs(state, faction_id, td, fd)
+    tid_to_blob = territory_to_blob_index(state, faction_id, td, fd)
     strategic = ctx.strategic
     base_holes = empty_exposed_holes_map(
         state_after, faction_id, fd, td, ud
@@ -954,7 +956,7 @@ def decide_combat_move(ctx: AIContext):
         if threat_relief:
             move_early = _stacks_for_unit_ids(state, from_tid, unit_ids, ud)
             committed_att_early = _committed_attacker_stacks(
-                state_after, to_tid, faction_id, ud
+                state_after, to_tid, faction_id, ud, fd
             )
             combined_early = merge_combat_move_attacker_stacks(
                 committed_att_early, move_early
@@ -1079,7 +1081,7 @@ def decide_combat_move(ctx: AIContext):
             if to_key not in pending_open_from_here:
                 score += COMBAT_MOVE_OPEN_SPACE_NEW_DIRECTION_BONUS
             pending_cav_here = _pending_cavalry_count_to_territory(
-                state, to_key, faction_id, ud, td
+                state, to_key, faction_id, ud, td, fd
             )
             pruned_ids = _prune_empty_open_space_move(
                 unit_ids,
@@ -1157,7 +1159,7 @@ def decide_combat_move(ctx: AIContext):
             candidates.append(((from_tid, to_tid, pruned_ids), score))
             continue
         committed_att = _committed_attacker_stacks(
-            state_after, to_tid, faction_id, ud)
+            state_after, to_tid, faction_id, ud, fd)
         # Merge committed + this move
         combined: dict[str, int] = {}
         for s in committed_att + move_stacks:

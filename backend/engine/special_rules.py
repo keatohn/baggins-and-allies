@@ -176,3 +176,7 @@ def attach_manifest_rules(result: dict[str, Any], manifest: dict[str, Any]) -> N
     rules = parse_special_rules(manifest.get("special_rules"))
     if rules:
         result["special_rules"] = rules
+    from backend.engine.subfaction_rules import parse_subfaction_rules
+    subfaction_rules = parse_subfaction_rules(manifest.get("subfaction_rules"))
+    if subfaction_rules:
+        result["subfaction_rules"] = subfaction_rules

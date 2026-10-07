@@ -227,6 +227,7 @@ def initialize_game_state(
     heroes_enabled: bool | None = None,
     special_rules: list | None = None,
     shadow_of_war: bool | None = None,
+    subfaction_rules: dict | None = None,
     rings_of_power: bool | None = None,
 ) -> GameState:
     """
@@ -274,6 +275,12 @@ def initialize_game_state(
                 territories[capital].original_owner = faction_id  # Set original owner
 
     parsed_special_rules = parse_special_rules(special_rules)
+    from backend.engine.subfaction_rules import (
+        child_ids,
+        parse_subfaction_rules,
+        snapshot_subfaction_territories,
+    )
+    parsed_subfaction_rules = parse_subfaction_rules(subfaction_rules)
 
     # Calculate starting resources from owned territories (turn 1 production, before any fade)
     faction_resources: dict[str, dict[str, int]] = {
@@ -301,6 +308,36 @@ def initialize_game_state(
             if resource_id not in faction_resources[owner]:
                 faction_resources[owner][resource_id] = 0
             faction_resources[owner][resource_id] += amount
+
+    # economy "pool": subfaction land pays the parent at the start, while the parent holds its capital.
+    for parent_id in list(faction_resources):
+        parent_def = faction_defs.get(parent_id)
+        capital = getattr(parent_def, "capital", None) if parent_def else None
+        capital_state = territories.get(capital) if capital else None
+        if not capital_state or capital_state.owner != parent_id:
+            continue
+        for child in child_ids(faction_defs, parent_id):
+            if (parsed_subfaction_rules.get(child) or {}).get("economy") != "pool":
+                continue
+            for territory_id, territory_state in territories.items():
+                if territory_state.owner != child:
+                    continue
+                territory_def = territory_defs.get(territory_id)
+                if not territory_def:
+                    continue
+                for resource_id, amount in territory_def.produces.items():
+                    if resource_id == "power":
+                        try:
+                            amount = effective_territory_power(
+                                int(amount or 0), 1, parsed_special_rules, territory_id,
+                            )
+                        except (TypeError, ValueError):
+                            amount = 0
+                    if not amount:
+                        continue
+                    faction_resources[parent_id][resource_id] = (
+                        faction_resources[parent_id].get(resource_id, 0) + amount
+                    )
 
     # All camps start standing; mobilization = owned territories with a standing camp
     camps_standing = list(camp_defs.keys()) if camp_defs else []
@@ -354,10 +391,12 @@ def initialize_game_state(
         shadow_of_war=bool(shadow_of_war),
         rings_of_power=bool(rings_of_power) and heroes_enabled_val,
         special_rules=parsed_special_rules,
+        subfaction_rules=parsed_subfaction_rules,
         faction_territories_at_turn_start=faction_territories_at_turn_start,
         turn_order=turn_order,
         starting_territory_owners=starting_territory_owners,
     )
+    snapshot_subfaction_territories(state, first_faction, faction_defs)
     if state.rings_of_power:
         from backend.engine.rings import spawn_rings, sync_ring_movement
         state.rings = spawn_rings(parsed_special_rules)

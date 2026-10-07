@@ -87,12 +87,26 @@ export function previewStatsFromBundle(bundle: AdminSetupBundle | null): AdminSt
   for (const [id, raw] of Object.entries(factions)) {
     const f = asRecord(raw);
     const iconFile = asString(f.icon) || `${id}.png`;
+    const parentIcon = `/assets/factions/${iconFile}`;
     factionData[id] = {
       name: asString(f.display_name) || id,
-      icon: `/assets/factions/${iconFile}`,
+      icon: parentIcon,
       color: asString(f.color) || '#888888',
       alliance: asString(f.alliance),
     };
+    const subs = Array.isArray(f.subfactions) ? f.subfactions : [];
+    for (const rawSub of subs) {
+      const sub = asRecord(rawSub);
+      const sid = asString(sub.id);
+      if (!sid) continue;
+      const subIconFile = asString(sub.icon);
+      factionData[sid] = {
+        name: asString(sub.display_name) || sid,
+        icon: subIconFile ? `/assets/factions/${subIconFile}` : parentIcon,
+        color: asString(sub.color) || '#888888',
+        alliance: asString(f.alliance),
+      };
+    }
   }
 
   const turnOrderRaw = Array.isArray(starting.turn_order)

@@ -678,6 +678,26 @@ export function ManifestPanel({
         </>,
       )}
       {fieldRow(
+        'Subfaction rules (JSON)',
+        <>
+          <JsonObjectField
+            value={manifest.subfaction_rules ?? {}}
+            onApply={(o) => {
+              if (!o || typeof o !== 'object' || Array.isArray(o) || Object.keys(o as object).length === 0) {
+                const next = { ...manifest };
+                delete next.subfaction_rules;
+                onManifestChange(next);
+                return;
+              }
+              onManifestChange({ ...manifest, subfaction_rules: o });
+            }}
+          />
+          <p className="admin-form__micro">
+            Optional. Keys are subfaction ids. economy is "none" or "pool". recruitment is omitted, or an object with mode "fixed" or "per_territory", unit_id, and count. purchasable_by_parent lets the parent buy that subfaction's units. mobilization is "any_home" (only that subfaction's land, no capacity; a sea zone next to that land counts, port or not) or "camps" (parent and subfaction camps and ports, with the usual limits). A lost parent capital stops pooled production, grants, and subfaction mobilization. Grants count territories the subfaction owned at the start of the parent's turn. capture is "liberate_else_parent" (credit the parent, then restore an allied original owner) or "unit_faction" (the subfaction keeps land taken only by its own units; a stack mixed with the parent stays with the parent). movement is "with_parent" or "home_only" (those units may only move to that subfaction's original territories).
+          </p>
+        </>,
+      )}
+      {fieldRow(
         'Fading territories',
         <FadingTerritoryFields
           manifest={manifest}
@@ -1012,11 +1032,13 @@ function AddUnitDialog({
 
 export function UnitsPanel({
   units,
+  factionIds,
   setupId,
   setups,
   onChange,
 }: {
   units: Record<string, Record<string, unknown>>;
+  factionIds: string[];
   setupId: string;
   setups: AdminSetupListItem[];
   onChange: (next: Record<string, Record<string, unknown>>) => void;
@@ -1052,7 +1074,19 @@ export function UnitsPanel({
           )}
           {fieldRow(
             'Faction',
-            <input type="text" className="admin-form__input" value={String(u.faction ?? '')} onChange={(e) => patch({ faction: e.target.value })} />,
+            <select
+              className="admin-form__input"
+              value={String(u.faction ?? '')}
+              onChange={(e) => patch({ faction: e.target.value })}
+            >
+              <option value="">Select faction</option>
+              {factionIds.map((fid) => (
+                <option key={fid} value={fid}>{fid}</option>
+              ))}
+              {typeof u.faction === 'string' && u.faction && !factionIds.includes(u.faction) ? (
+                <option value={u.faction}>{u.faction}</option>
+              ) : null}
+            </select>,
           )}
           {fieldRow(
             'Hero id',
@@ -1170,7 +1204,6 @@ function powerFromProduces(produces: unknown): number {
 }
 
 export function TerritoriesPanel({
-
   territories,
   mapAsset,
   onChange,
@@ -1301,6 +1334,78 @@ function FactionColorField({ value, onApply }: { value: unknown; onApply: (c: st
   );
 }
 
+function SubfactionsField({
+  value,
+  onChange,
+}: {
+  value: unknown;
+  onChange: (next: Record<string, unknown>[]) => void;
+}) {
+  const rows: Record<string, unknown>[] = Array.isArray(value)
+    ? value.filter((row): row is Record<string, unknown> => !!row && typeof row === 'object' && !Array.isArray(row))
+    : [];
+
+  const patchRow = (index: number, patch: Record<string, unknown>) => {
+    onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  };
+
+  return (
+    <div className="admin-subfactions">
+      <h3 className="admin-form__subtitle">Subfactions</h3>
+      <p className="admin-form__micro">
+        Controlled on this faction&apos;s turn. They do not appear in the turn order. Leave the icon empty to use this faction&apos;s icon.
+      </p>
+      {rows.map((row, i) => (
+        <div key={i} className="admin-subfaction">
+          {fieldRow(
+            'Subfaction id',
+            <input
+              type="text"
+              className="admin-form__input"
+              value={String(row.id ?? '')}
+              onChange={(e) => patchRow(i, { id: e.target.value.trim() })}
+            />,
+          )}
+          {fieldRow(
+            'Display name',
+            <input
+              type="text"
+              className="admin-form__input"
+              value={String(row.display_name ?? '')}
+              onChange={(e) => patchRow(i, { display_name: e.target.value })}
+            />,
+          )}
+          {fieldRow(
+            'Color',
+            <FactionColorField value={row.color} onApply={(color) => patchRow(i, { color })} />,
+          )}
+          {fieldRow(
+            'Icon filename',
+            <AssetPngField
+              value={row.icon}
+              files={FACTION_ICON_PNG}
+              dir="factions"
+              noneLabel="None (uses faction icon)"
+              ariaLabel="Subfaction icon"
+              onApply={(icon) => patchRow(i, { icon })}
+            />,
+          )}
+          <button type="button" className="admin-page__btn" onClick={() => onChange(rows.filter((_, j) => j !== i))}>
+            Remove subfaction
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        className="admin-page__btn"
+        onClick={() => onChange([...rows, { id: '', display_name: '', color: '#888888' }])}
+      >
+        Add subfaction
+      </button>
+    </div>
+  );
+}
+
 export function FactionsPanel({
   factions,
   onChange,
@@ -1346,6 +1451,10 @@ export function FactionsPanel({
               onApply={(m) => patch({ music: m })}
             />,
           )}
+          <SubfactionsField
+            value={f.subfactions}
+            onChange={(subfactions) => patch({ subfactions })}
+          />
         </div>
       )}
     />
@@ -1499,13 +1608,14 @@ export function StartingSetupPanel({
       </button>
 
       <h3 className="admin-form__subtitle">Territory owners</h3>
+      <p className="admin-form__micro">Faction id or subfaction id. A subfaction colors the territory with its own color.</p>
       {territoryIds.map((tid) => (
         <div key={tid} className="admin-form__row">
           <label className="admin-form__label">{tid}</label>
           <input
             type="text"
             className="admin-form__input"
-            placeholder="faction id"
+            placeholder="faction or subfaction id"
             value={owners[tid] ?? ''}
             onChange={(e) => {
               const next = { ...owners };

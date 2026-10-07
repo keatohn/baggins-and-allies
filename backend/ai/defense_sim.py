@@ -21,6 +21,7 @@ from backend.engine.combat_sim import SimOptions, run_simulation
 from backend.engine.movement import _is_water_zone, get_reachable_territories_for_unit
 from backend.engine.queries import _is_naval_unit
 from backend.engine.state import Unit
+from backend.engine.definitions import faction_acts_as
 from backend.engine.utils import get_unit_faction
 
 from backend.ai.garrison import move_attacks_enemy_stack_that_threatens_origin
@@ -55,13 +56,13 @@ def _units_to_stacks(units: list, ud: dict[str, "UnitDefinition"]) -> list[dict]
     return [{"unit_id": uid, "count": c} for uid, c in counts.items()]
 
 
-def _our_land_defender_units(state, territory_id: str, faction_id: str, ud) -> list:
+def _our_land_defender_units(state, territory_id: str, faction_id: str, ud, faction_defs=None) -> list:
     terr = state.territories.get(territory_id)
     if not terr:
         return []
     out = []
     for u in getattr(terr, "units", []) or []:
-        if get_unit_faction(u, ud) != faction_id:
+        if not faction_acts_as(faction_defs, get_unit_faction(u, ud), faction_id):
             continue
         if _is_naval_unit(ud.get(u.unit_id)):
             continue
@@ -133,7 +134,7 @@ def _land_defenders_for_hold_sim(
     owner = getattr(terr, "owner", None) if terr else None
     if owner and owner != faction_id and _same_alliance_non_empty(owner, faction_id, fd):
         return _coalition_land_defender_units(state, territory_id, faction_id, fd, ud)
-    return _our_land_defender_units(state, territory_id, faction_id, ud)
+    return _our_land_defender_units(state, territory_id, faction_id, ud, fd)
 
 
 def _sim_options_for_territory(tdef) -> SimOptions:
@@ -327,7 +328,7 @@ def defender_stacks_after_hypothetical_move(
             for u in getattr(from_terr, "units", []) or []:
                 if getattr(u, "instance_id", "") not in ids_set:
                     continue
-                if get_unit_faction(u, ud) != faction_id:
+                if not faction_acts_as(fd, get_unit_faction(u, ud), faction_id):
                     continue
                 if _is_naval_unit(ud.get(u.unit_id)):
                     continue
@@ -425,7 +426,7 @@ def defender_hold_probability_after_hypothetical_departure(
     remaining = [
         u
         for u in _coalition_land_defender_units(state, from_tid, faction_id, fd, ud)
-        if get_unit_faction(u, ud) != faction_id
+        if not faction_acts_as(fd, get_unit_faction(u, ud), faction_id)
         or getattr(u, "instance_id", "") not in ids_set
     ]
     def_stacks = _units_to_stacks(remaining, ud)
@@ -599,7 +600,7 @@ def marginal_hold_delta_add_land_unit(
         )
     )
     live = _units_to_stacks(
-        _our_land_defender_units(state, territory_id, faction_id, ud), ud
+        _our_land_defender_units(state, territory_id, faction_id, ud, fd), ud
     )
     def_before = merge_combat_move_attacker_stacks(
         live, phantom_defender_stacks or []

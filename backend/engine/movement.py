@@ -535,6 +535,7 @@ def expand_sea_offload_instance_ids(
     unit_defs: dict[str, UnitDefinition],
     territory_defs: dict[str, TerritoryDefinition],
     faction_id: str,
+    faction_defs: dict[str, FactionDefinition] | None = None,
 ) -> list[str]:
     """
     From a sea hex: the client often sends only boat IDs (dragging the ship token). Append:
@@ -1556,6 +1557,11 @@ def get_reachable_territories_for_unit(
 
     # Source territory is never a valid move destination (cannot move from X to X)
     filtered_reachable.pop(start, None)
+
+    from backend.engine.subfaction_rules import restrict_home_only_destinations
+    filtered_reachable = restrict_home_only_destinations(
+        state, unit_defs.get(unit.unit_id), filtered_reachable, faction_defs
+    )
 
     # Restrict charge_routes to only destinations that are in filtered_reachable
     charge_routes_filtered = {

@@ -3,7 +3,7 @@ Decide one action for the current phase. Dispatches to phase-specific policies.
 Returns an Action (or end_phase / end_turn / skip_turn when appropriate).
 """
 
-from backend.engine.actions import Action, continue_combat, end_phase
+from backend.engine.actions import Action, continue_combat, end_phase, mobilize_units
 
 from backend.ai.context import AIContext
 from backend.ai.strategic_context import build_strategic_turn_context
@@ -72,9 +72,65 @@ def decide(ctx: AIContext) -> Action | None:
 
     if phase == "mobilization":
         action = decide_mobilization(ctx)
+        if action is not None and action.type == "end_phase" and ctx.available_actions.get("can_end_phase") is False:
+            fallback = _fallback_mobilize(ctx)
+            if fallback is not None:
+                return fallback
         if action is not None:
             return action
-        return end_phase(ctx.faction_id)
+        if ctx.available_actions.get("can_end_phase", True):
+            return end_phase(ctx.faction_id)
+        return None
 
     # Fallback: end phase to avoid getting stuck
     return end_phase(ctx.faction_id)
+
+
+def _fallback_mobilize(ctx: AIContext) -> Action | None:
+    """Place one remaining stack when the policy tried to end with units still deployable."""
+    from backend.engine.queries import _purchase_kind
+
+    options = (ctx.available_actions or {}).get("mobilize_options") or {}
+    specs = options.get("unit_destinations") or {}
+    purchased = ctx.state.faction_purchased_units.get(ctx.faction_id) or []
+    for stack in purchased:
+        count = int(getattr(stack, "count", 0) or 0)
+        if count <= 0:
+            continue
+        spec = specs.get(stack.unit_id)
+        if spec:
+            if spec.get("unlimited"):
+                dests = (
+                    list(spec.get("territories") or [])
+                    + list(spec.get("sea_zones") or [])
+                    + list(spec.get("river_zones") or [])
+                )
+                if dests:
+                    return mobilize_units(
+                        ctx.faction_id, dests[0], [{"unit_id": stack.unit_id, "count": count}],
+                    )
+            for tid, power in (spec.get("capacity") or {}).items():
+                room = int(power or 0)
+                if room > 0:
+                    return mobilize_units(
+                        ctx.faction_id, tid, [{"unit_id": stack.unit_id, "count": min(count, room)}],
+                    )
+            home = spec.get("home") or {}
+            if home:
+                tid = next(iter(home))
+                return mobilize_units(
+                    ctx.faction_id, tid, [{"unit_id": stack.unit_id, "count": 1}],
+                )
+            continue
+        kind = _purchase_kind(ctx.unit_defs.get(stack.unit_id))
+        if kind == "naval":
+            dests = options.get("sea_zones") or []
+        elif kind == "river":
+            dests = options.get("river_zones") or []
+        else:
+            dests = options.get("territories") or []
+        if dests:
+            return mobilize_units(
+                ctx.faction_id, dests[0], [{"unit_id": stack.unit_id, "count": 1}],
+            )
+    return None

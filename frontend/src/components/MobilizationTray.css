@@ -34,6 +34,15 @@
   flex-wrap: wrap;
   gap: 1rem;
   justify-content: center;
+  align-items: center;
+}
+
+.tray-divider {
+  flex: 0 0 1px;
+  width: 1px;
+  align-self: stretch;
+  margin: 0.7rem 0.15rem;
+  background: var(--ink-faded);
 }
 
 .purchase-stack {

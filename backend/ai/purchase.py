@@ -18,6 +18,7 @@ When no home slot remains, they use the same interest-territory sim as other lan
 """
 
 from backend.engine.actions import purchase_units, end_phase
+from backend.engine.definitions import faction_acts_as
 from backend.engine.queries import (
     get_purchasable_units,
     get_mobilization_capacity,
@@ -258,7 +259,7 @@ def _attack_targets_have_cavalry(state, faction_id: str, fd, td, ud) -> bool:
         state.current_faction = faction_id
         for tid, terr in (state.territories or {}).items():
             for u in getattr(terr, "units", []) or []:
-                if get_unit_faction(u, ud) != faction_id:
+                if not faction_acts_as(fd, get_unit_faction(u, ud), faction_id):
                     continue
                 uid = getattr(u, "unit_id", "")
                 dummy = _make_dummy_unit_with_full_movement(uid, ud)
@@ -307,12 +308,12 @@ def _unique_at_cap(state, ud, unit_id: str, batch_counts: dict[str, int]) -> boo
     return existing + batch_family >= 1
 
 
-def _active_siegework_count(state, faction_id: str, ud) -> int:
+def _active_siegework_count(state, faction_id: str, ud, faction_defs=None) -> int:
     """Count of siegework units on map + in our faction_purchased_units."""
     n = 0
     for t in (state.territories or {}).values():
         for u in getattr(t, "units", []) or []:
-            if get_unit_faction(u, ud) != faction_id:
+            if not faction_acts_as(faction_defs, get_unit_faction(u, ud), faction_id):
                 continue
             if _is_siegework_unit(ud, getattr(u, "unit_id", "")):
                 n += 1
@@ -411,7 +412,7 @@ def decide_purchase(ctx: AIContext):
     if not faction_owns_capital(state, faction_id, ctx.faction_defs):
         return end_phase(faction_id)
 
-    purchasable = get_purchasable_units(state, faction_id, ud)
+    purchasable = get_purchasable_units(state, faction_id, ud, ctx.faction_defs)
     if not purchasable:
         return end_phase(faction_id)
 
@@ -490,7 +491,7 @@ def decide_purchase(ctx: AIContext):
             state, faction_id, td, ctx.faction_defs, ud, cd, port_d
         )
     active_counts, active_total = _active_unit_counts(state, faction_id, ud)
-    active_siegework = _active_siegework_count(state, faction_id, ud)
+    active_siegework = _active_siegework_count(state, faction_id, ud, ctx.faction_defs)
 
     interest_territories = purchase_defense_interest_territories(
         state,

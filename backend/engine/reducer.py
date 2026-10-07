@@ -120,6 +120,17 @@ from backend.engine.queries import (
     validate_move_as_sea_offload_if_applicable,
     validate_sail_move_for_offload_sea_raid,
     valid_camp_placement_territory_ids,
+    mobilization_block_reason,
+)
+from backend.engine.subfaction_rules import (
+    apply_subfaction_grants,
+    capture_owner_for_units,
+    child_ids,
+    parent_may_purchase_unit,
+    pool_territory_ids,
+    purchase_capacity_error,
+    snapshot_subfaction_territories,
+    subfaction_mobilization_error,
 )
 from backend.engine.utils import (
     unitstack_to_units,
@@ -430,13 +441,14 @@ def _faction_unit_count(
     state: GameState,
     faction_id: str,
     unit_defs: dict[str, UnitDefinition],
+    faction_defs: dict[str, FactionDefinition] | None = None,
 ) -> int:
-    """Count active units belonging to this faction anywhere on the map (by unit def faction)."""
+    """Count active units this faction commands anywhere on the map (including its subfactions)."""
     n = 0
     for _tid, ts in state.territories.items():
         for unit in ts.units:
             ud = unit_defs.get(unit.unit_id)
-            if ud and getattr(ud, "faction", None) == faction_id:
+            if ud and faction_acts_as(faction_defs, getattr(ud, "faction", None), faction_id):
                 n += 1
     return n
 
@@ -612,12 +624,12 @@ def apply_action(
 
     elif action_type == "end_phase":
         new_state, evts = _handle_end_phase(
-            new_state, unit_defs, territory_defs, faction_defs, camp_defs)
+            new_state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
         events.extend(evts)
 
     elif action_type == "end_turn":
         new_state, evts = _handle_end_turn(
-            new_state, territory_defs, faction_defs, camp_defs, unit_defs)
+            new_state, territory_defs, faction_defs, camp_defs, unit_defs, port_defs=port_defs)
         events.extend(evts)
 
     elif action_type == "skip_turn":
@@ -681,7 +693,7 @@ def _handle_purchase_units(
         if not unit_def.purchasable:
             raise ValueError(f"Unit {unit_id} is not purchasable")
 
-        if unit_def.faction != faction_id:
+        if not parent_may_purchase_unit(state, faction_id, unit_def, faction_defs):
             raise ValueError(f"Faction {faction_id} cannot purchase {unit_id}")
 
         # Accumulate cost
@@ -712,41 +724,21 @@ def _handle_purchase_units(
     )
     sea_cap = sum(z.get("power", 0) for z in capacity_info.get("sea_zones", []))
     river_cap = river_mobilization_capacity_total(state, faction_id, territory_defs)
-    already_stacks = state.faction_purchased_units.get(faction_id, [])
-
-    def _sum_kind(stacks_or_items, kind: str, from_purchases: bool = False) -> int:
-        total = 0
-        if from_purchases:
-            for uid, c in stacks_or_items:
-                if _purchase_kind(unit_defs.get(uid)) == kind:
-                    total += c
-        else:
-            for s in stacks_or_items:
-                if _purchase_kind(unit_defs.get(s.unit_id)) == kind:
-                    total += s.count
-        return total
-
-    already_land = _sum_kind(already_stacks, "land")
-    already_naval = _sum_kind(already_stacks, "naval")
-    already_river = _sum_kind(already_stacks, "river")
-    this_land = _sum_kind(list(purchases.items()), "land", True)
-    this_naval = _sum_kind(list(purchases.items()), "naval", True)
-    this_river = _sum_kind(list(purchases.items()), "river", True)
-    if already_land + this_land > land_cap:
-        raise ValueError(
-            f"Cannot purchase that many land units: land mobilization capacity is {land_cap} "
-            f"(already purchased: {already_land} land, this purchase: {this_land} land)"
-        )
-    if already_naval + this_naval > sea_cap:
-        raise ValueError(
-            f"Cannot purchase that many naval units: sea mobilization capacity is {sea_cap} "
-            f"(already purchased: {already_naval} naval, this purchase: {this_naval} naval)"
-        )
-    if already_river + this_river > river_cap:
-        raise ValueError(
-            f"Cannot purchase that many river units: river mobilization capacity is {river_cap} "
-            f"(already purchased: {already_river} river, this purchase: {this_river} river)"
-        )
+    cap_err = purchase_capacity_error(
+        state,
+        faction_id,
+        unit_defs,
+        faction_defs,
+        territory_defs,
+        camp_defs,
+        port_defs,
+        {uid: int(c or 0) for uid, c in purchases.items()},
+        land_cap,
+        sea_cap,
+        river_cap,
+    )
+    if cap_err:
+        raise ValueError(cap_err)
 
     # Deduct resources and emit events
     for resource_id, amount in total_cost.items():
@@ -1103,6 +1095,7 @@ def _handle_move_units(
         unit_defs,
         territory_defs,
         faction_id,
+        faction_defs,
     )
     if len(unit_instance_ids) == 0:
         raise ValueError("No units specified to move")
@@ -1733,6 +1726,7 @@ def _apply_pending_moves(
                 unit_defs,
                 territory_defs,
                 expand_faction_id,
+                faction_defs,
             )
 
         # Non-combat: never apply a move into enemy territory or ownable neutral (defensive guard)
@@ -1770,7 +1764,8 @@ def _apply_pending_moves(
             first_unit = units_by_id.get(unit_instance_ids[0])
             faction_id = get_unit_faction(first_unit, unit_defs) if first_unit else None
             if faction_id:
-                moving_faction_def = faction_defs.get(faction_id)
+                acting = state.current_faction or faction_id
+                moving_faction_def = faction_defs.get(acting)
                 moving_alliance = moving_faction_def.alliance if moving_faction_def else ""
                 # Use charge_through from payload, or infer from shortest path only for cavalry charges
                 territories_to_capture = list(charge_through)
@@ -1800,17 +1795,20 @@ def _apply_pending_moves(
                     if not t or not tdef or not getattr(tdef, "ownable", True):
                         continue
                     owner = t.owner
-                    if owner == faction_id:
+                    if owner == acting or faction_acts_as(faction_defs, owner, acting):
                         continue  # friendly: never conquer
                     if owner and moving_faction_def:
                         owner_def = faction_defs.get(owner)
                         if owner_def and owner_def.alliance == moving_alliance:
                             continue  # allied: never conquer
                     # unowned or enemy (empty already validated earlier for charge path)
+                    capture_owner = capture_owner_for_units(
+                        state, moving_units, acting, unit_defs, faction_defs
+                    )
                     if owner is None:
-                        state.pending_captures[tid] = faction_id
+                        state.pending_captures[tid] = capture_owner
                     elif len(t.units) == 0:
-                        state.pending_captures[tid] = faction_id
+                        state.pending_captures[tid] = capture_owner
 
         # Calculate the movement cost (distance) to destination.
         # When charging through territories, use the actual path: from_id -> charge_through[0] -> ... -> to_id.
@@ -2174,20 +2172,27 @@ def _apply_pending_moves(
                 # Empty unowned (neutral): moving in captures it. If neutral had defenders, combat will decide.
                 other_units = [u for u in to_territory.units if u.instance_id not in unit_instance_ids]
                 if not other_units:
-                    state.pending_captures[to_id] = faction_id
-            elif to_owner != faction_id:
+                    state.pending_captures[to_id] = capture_owner_for_units(
+                        state, moving_units, state.current_faction or faction_id, unit_defs, faction_defs
+                    )
+            elif to_owner != (state.current_faction or faction_id) and not faction_acts_as(
+                faction_defs, to_owner, state.current_faction or faction_id
+            ):
                 # Enemy-owned: capture only if no enemy units left after our units moved in
-                moving_faction_def = faction_defs.get(faction_id)
+                acting = state.current_faction or faction_id
+                moving_faction_def = faction_defs.get(acting)
                 moving_alliance = moving_faction_def.alliance if moving_faction_def else ""
                 owner_def = faction_defs.get(to_owner)
                 owner_alliance = owner_def.alliance if owner_def else ""
                 if moving_alliance != owner_alliance:
                     enemy_units = [
                         u for u in to_territory.units
-                        if get_unit_faction(u, unit_defs) != faction_id
+                        if not faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), acting)
                     ]
                     if not enemy_units:
-                        state.pending_captures[to_id] = faction_id
+                        state.pending_captures[to_id] = capture_owner_for_units(
+                            state, moving_units, acting, unit_defs, faction_defs
+                        )
 
         event_faction = state.current_faction or faction_id or ""
         ids_for_log = ids_to_move if ids_to_move else list(unit_instance_ids)
@@ -2316,7 +2321,14 @@ def _handle_mobilize_units(
         raise ValueError("Do not mix naval, river, and land units in one mobilization")
     batch_kind = next(iter(kinds))
 
-    if batch_kind == "naval":
+    sub_mobilization = subfaction_mobilization_error(
+        state, faction_id, destination_id, units_to_mobilize, unit_defs, territory_defs,
+        camp_defs, port_defs, faction_defs,
+    )
+    if sub_mobilization:
+        raise ValueError(sub_mobilization)
+
+    if sub_mobilization is None and batch_kind == "naval":
         if not _sea_zone_adjacent_to_owned_port(state, destination_id, faction_id, port_defs, territory_defs):
             raise ValueError(
                 f"Naval units can only mobilize to a sea zone adjacent to a port you own; {destination_id} is not valid"
@@ -2338,7 +2350,7 @@ def _handle_mobilize_units(
                         f"Cannot mobilize {total_mobilizing} naval to {destination_id}: "
                         f"port {adj_id} shared pool would exceed capacity ({total_for_port + total_mobilizing} > {port_power_val})"
                     )
-    elif batch_kind == "river":
+    elif sub_mobilization is None and batch_kind == "river":
         total_mobilizing = sum(u.get("count", 0) for u in units_to_mobilize)
         if not river_banks_for_zone(state, faction_id, destination_id, territory_defs):
             raise ValueError(
@@ -2354,7 +2366,7 @@ def _handle_mobilize_units(
         )
         if not fits:
             raise ValueError(err)
-    else:
+    elif sub_mobilization is None:
         if dest_territory.owner != faction_id:
             raise ValueError(f"Cannot mobilize to {destination_id}: not owned by {faction_id}")
         has_camp = _territory_has_standing_camp(state, destination_id, camp_defs)
@@ -2442,7 +2454,7 @@ def _handle_mobilize_units(
                     f"At most 1 {unit_id} can be mobilized to home territory {destination_id} per phase (already {already_pending} pending)"
                 )
 
-    if batch_kind == "land":
+    if sub_mobilization is None and batch_kind == "land":
         total_land = sum(u.get("count", 0) for u in units_to_mobilize)
         fits, err = river_mobilization_fits(
             state,
@@ -2642,15 +2654,22 @@ def _handle_initiate_combat(
                     sea_zone.units.remove(u)
                     setattr(u, "loaded_onto", None)
                     territory.units.append(u)
-            state.pending_captures[territory_id] = attacker_faction
-            landed_ids = [u.instance_id for u in territory.units if faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), attacker_faction)]
+            landed = [
+                u for u in territory.units
+                if faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), attacker_faction)
+            ]
+            capture_owner = capture_owner_for_units(
+                state, landed, attacker_faction, unit_defs, faction_defs
+            )
+            state.pending_captures[territory_id] = capture_owner
+            landed_ids = [u.instance_id for u in landed]
             events.append(combat_started(territory_id, attacker_faction, landed_ids, territory.owner or "neutral", []))
             events.append(combat_ended(
                 territory_id, "attacker", attacker_faction, territory.owner,
                 landed_ids, [], 0,
                 outcome="conquer",
                 liberated_for=_liberation_beneficiary_if_allied_original(
-                    territory_id, territory, attacker_faction, faction_defs, state,
+                    territory_id, territory, capture_owner, faction_defs, state,
                 ),
             ))
             return state, events
@@ -4614,6 +4633,8 @@ def _resolve_combat_end(
         # result lists survivors, infer unit types from instance ids so pending_captures still applies.
         if not has_living_ground_attacker and round_result.surviving_attacker_ids:
             fids = list(faction_defs.keys())
+            for parent_id in list(faction_defs.keys()):
+                fids.extend(child_ids(faction_defs, parent_id))
             for iid in round_result.surviving_attacker_ids:
                 uid = _unit_id_from_instance_id_pattern(iid, fids)
                 if uid and can_conquer_territory_as_attacker(unit_defs.get(uid)):
@@ -4626,7 +4647,21 @@ def _resolve_combat_end(
             and getattr(territory_def, "ownable", True)
         )
         if did_conquer:
-            state.pending_captures[territory_id] = attacker_faction
+            capture_units = [
+                u for u in surviving_attacker_units
+                if can_conquer_territory_as_attacker(unit_defs.get(u.unit_id))
+            ]
+            if not capture_units and round_result.surviving_attacker_ids:
+                fids = list(faction_defs.keys())
+                for parent_id in list(faction_defs.keys()):
+                    fids.extend(child_ids(faction_defs, parent_id))
+                for iid in round_result.surviving_attacker_ids:
+                    uid = _unit_id_from_instance_id_pattern(iid, fids)
+                    if uid:
+                        capture_units.append(type("_CaptureUnit", (), {"unit_id": uid})())
+            state.pending_captures[territory_id] = capture_owner_for_units(
+                state, capture_units, attacker_faction, unit_defs, faction_defs
+            )
         else:
             state.pending_captures.pop(territory_id, None)
 
@@ -4730,6 +4765,7 @@ def _handle_end_phase(
     territory_defs: dict[str, TerritoryDefinition],
     faction_defs: dict[str, FactionDefinition],
     camp_defs: dict[str, CampDefinition] | None = None,
+    port_defs: dict | None = None,
 ) -> tuple[GameState, list[GameEvent]]:
     """
     End the current phase and advance to the next.
@@ -4907,7 +4943,7 @@ def _handle_end_phase(
         events.extend(mobilize_events)
         events.append(phase_changed(old_phase, "turn_end", state.current_faction))
         state, turn_events = _handle_end_turn(
-            state, territory_defs, faction_defs, camp_defs or {}, unit_defs
+            state, territory_defs, faction_defs, camp_defs or {}, unit_defs, port_defs=port_defs,
         )
         events.extend(turn_events)
         return state, events
@@ -4924,6 +4960,9 @@ def _handle_end_phase(
     # been missed by the end-of-non_combat_move reset in edge cases or loaded state).
     if state.phase == "combat_move":
         _reset_unit_stats_for_faction(state, state.current_faction, unit_defs, faction_defs)
+
+    if state.phase == "mobilization":
+        apply_subfaction_grants(state, state.current_faction, faction_defs, unit_defs)
 
     # Emit phase changed event
     events.append(phase_changed(old_phase, state.phase, state.current_faction))
@@ -5023,7 +5062,9 @@ def _handle_skip_turn(
     state.combat_move_naval_idle_sail_instance_ids = []
     state.avoided_forced_naval_combat_instance_ids = []
     state.naval_mobilization_intruder_instance_ids = []
-    return _handle_end_turn(state, territory_defs, faction_defs, camp_defs, unit_defs)
+    return _handle_end_turn(
+        state, territory_defs, faction_defs, camp_defs, unit_defs, force=True,
+    )
 
 
 def _handle_end_turn(
@@ -5032,6 +5073,8 @@ def _handle_end_turn(
     faction_defs: dict[str, FactionDefinition],
     camp_defs: dict[str, CampDefinition] | None = None,
     unit_defs: dict[str, UnitDefinition] | None = None,
+    port_defs: dict | None = None,
+    force: bool = False,
 ) -> tuple[GameState, list[GameEvent]]:
     """
     End the current turn and advance to the next faction.
@@ -5045,7 +5088,14 @@ def _handle_end_turn(
     events: list[GameEvent] = []
     old_faction = state.current_faction
 
-    # Clear purchased units for this faction (they must be mobilized before end of turn)
+    if not force and state.phase == "mobilization":
+        blocked = mobilization_block_reason(
+            state, old_faction, unit_defs, territory_defs, camp_defs, port_defs, faction_defs,
+        )
+        if blocked:
+            raise ValueError(blocked)
+
+    # Units still in the pool had no legal destination (or this is a forfeit).
     state.faction_purchased_units[state.current_faction] = []
 
     # Income for the ending faction from territories they own now (requires capital)
@@ -5077,6 +5127,29 @@ def _handle_end_turn(
                 pending_income[resource_id] += amount
                 contributed = True
 
+            if contributed:
+                contributing_territories.append(territory_id)
+
+        for territory_id in pool_territory_ids(state, old_faction, faction_defs):
+            if territory_id in contributing_territories:
+                continue
+            territory_def = territory_defs.get(territory_id)
+            if not territory_def:
+                continue
+            contributed = False
+            for resource_id, amount in territory_def.produces.items():
+                if resource_id == "power":
+                    amount = territory_current_power(state, territory_id, territory_def)
+                try:
+                    amount = int(amount or 0)
+                except (TypeError, ValueError):
+                    continue
+                if amount <= 0:
+                    continue
+                if resource_id not in pending_income:
+                    pending_income[resource_id] = 0
+                pending_income[resource_id] += amount
+                contributed = True
             if contributed:
                 contributing_territories.append(territory_id)
 
@@ -5134,7 +5207,7 @@ def _handle_end_turn(
         new_faction = state.current_faction
 
         # Skip this faction if they have no capital and no units anywhere (no purchase/mobilize, nothing to move/attack)
-        if not faction_owns_capital(state, new_faction, faction_defs) and _faction_unit_count(state, new_faction, unit_defs) == 0:
+        if not faction_owns_capital(state, new_faction, faction_defs) and _faction_unit_count(state, new_faction, unit_defs, faction_defs) == 0:
             events.append(turn_skipped(new_faction))
             skipped += 1
             next_idx = (next_idx + 1) % len(faction_ids)
@@ -5155,6 +5228,7 @@ def _handle_end_turn(
         state.faction_territories_at_turn_start[new_faction] = [
             tid for tid, ts in state.territories.items() if ts.owner == new_faction
         ]
+        snapshot_subfaction_territories(state, new_faction, faction_defs)
         state.pending_camps = []
         state.mobilization_camps = [
             tid for tid, ts in state.territories.items()

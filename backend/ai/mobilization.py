@@ -176,7 +176,7 @@ def _score_land_destination(
             territory_id, state, faction_id, fd, td, ud
         )
         our_here = count_our_land_units_on_territory(
-            state, territory_id, faction_id, ud
+            state, territory_id, faction_id, ud, fd
         )
         hp: float | None = None
         cache = defense_hold_cache if defense_hold_cache is not None else None
@@ -381,7 +381,7 @@ def decide_mobilization(ctx: AIContext):
     mobilization_hold_prob_cache: dict[tuple, float | None] = {}
 
     territory_to_stronghold_dist: dict[str, int] = {}
-    blobs = get_faction_territory_blobs(state, faction_id, td)
+    blobs = get_faction_territory_blobs(state, faction_id, td, ctx.faction_defs)
     for blob in blobs:
         nearest = blob_nearest_enemy_stronghold(
             blob, state, faction_id, ctx.faction_defs, td

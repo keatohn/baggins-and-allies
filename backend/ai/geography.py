@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from backend.engine.movement import get_reachable_territories_for_unit
 from backend.engine.state import Unit
+from backend.engine.definitions import faction_acts_as
 from backend.engine.utils import get_unit_faction
 
 from backend.ai.formulas import territory_expected_gain_components, territory_reinforce_base_score
@@ -81,6 +82,7 @@ def get_faction_territory_blobs(
     state: "GameState",
     faction_id: str,
     td: dict[str, "TerritoryDefinition"],
+    faction_defs: dict | None = None,
 ) -> list[set[str]]:
     """
     Connected components (blobs) of territories we own. Two territories are in the same blob
@@ -90,7 +92,7 @@ def get_faction_territory_blobs(
     our_territories = {
         tid
         for tid, terr in (state.territories or {}).items()
-        if getattr(terr, "owner", None) == faction_id
+        if faction_acts_as(faction_defs, getattr(terr, "owner", None), faction_id)
     }
     blobs: list[set[str]] = []
     remaining = set(our_territories)
@@ -465,8 +467,9 @@ def count_our_land_units_on_territory(
     territory_id: str,
     faction_id: str,
     unit_defs: dict[str, "UnitDefinition"],
+    faction_defs: dict | None = None,
 ) -> int:
-    """Our land units (non-naval) on this territory."""
+    """Our land units (non-naval) on this territory, including subfactions we command."""
     from backend.engine.queries import _is_naval_unit
 
     terr = state.territories.get(territory_id)
@@ -474,7 +477,7 @@ def count_our_land_units_on_territory(
         return 0
     n = 0
     for u in getattr(terr, "units", []) or []:
-        if get_unit_faction(u, unit_defs) != faction_id:
+        if not faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), faction_id):
             continue
         if _is_naval_unit(unit_defs.get(u.unit_id)):
             continue
@@ -503,7 +506,7 @@ def frontline_hex_next_turn_outnumbered(
     if threat <= 0:
         return False
     ours = count_our_land_units_on_territory(
-        state, territory_id, faction_id, unit_defs
+        state, territory_id, faction_id, unit_defs, fd
     )
     return ours <= threat
 
@@ -570,9 +573,10 @@ def territory_to_blob_index(
     state: "GameState",
     faction_id: str,
     td: dict[str, "TerritoryDefinition"],
+    faction_defs: dict | None = None,
 ) -> dict[str, int]:
     """Map each of our territory IDs to its blob index (0, 1, ...). Non-owned not in map."""
-    blobs = get_faction_territory_blobs(state, faction_id, td)
+    blobs = get_faction_territory_blobs(state, faction_id, td, faction_defs)
     out: dict[str, int] = {}
     for i, blob in enumerate(blobs):
         for tid in blob:

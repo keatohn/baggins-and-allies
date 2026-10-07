@@ -7,6 +7,7 @@ the destination that themselves could reach the origin (threat relief).
 """
 
 from backend.engine.movement import get_reachable_territories_for_unit
+from backend.engine.definitions import faction_acts_as
 from backend.engine.queries import _is_naval_unit, get_unit_faction
 from backend.engine.state import Unit
 
@@ -102,7 +103,7 @@ def prune_move_unit_ids_for_garrison_floor(
     land_ids = []
     by_iid = {}
     for u in getattr(terr, "units", []) or []:
-        if get_unit_faction(u, ud) != faction_id:
+        if not faction_acts_as(fd, get_unit_faction(u, ud), faction_id):
             continue
         if _is_naval_unit(ud.get(u.unit_id)):
             continue

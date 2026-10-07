@@ -971,6 +971,20 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         alliance: faction.alliance,
         capital: faction.capital ?? '',
       };
+      for (const sub of faction.subfactions ?? []) {
+        if (!sub?.id) continue;
+        const subIcon = typeof sub.icon === 'string' && sub.icon.trim()
+          ? `/assets/factions/${sub.icon.trim()}`
+          : parentIcon;
+        data[sub.id] = {
+          name: sub.display_name,
+          icon: subIcon,
+          color: sub.color,
+          alliance: faction.alliance,
+          capital: '',
+          parent: id,
+        };
+      }
     }
     return data;
   }, [definitions]);
@@ -1471,13 +1485,17 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     const purchases = backendState.faction_purchased_units?.[backendState.current_faction] || [];
     return purchases
       .filter(p => p.count > 0)
-      .map(p => ({
-        unitId: p.unit_id,
-        name: definitions.units[p.unit_id]?.display_name || p.unit_id,
-        icon: unitDefs[p.unit_id]?.icon || `/assets/units/${p.unit_id}.png`,
-        count: p.count,
-      }));
-  }, [backendState, definitions, unitDefs]);
+      .map(p => {
+        const unitFaction = definitions.units[p.unit_id]?.faction;
+        return {
+          unitId: p.unit_id,
+          name: definitions.units[p.unit_id]?.display_name || p.unit_id,
+          icon: unitDefs[p.unit_id]?.icon || `/assets/units/${p.unit_id}.png`,
+          count: p.count,
+          subfaction: Boolean(unitFaction && factionData[unitFaction]?.parent),
+        };
+      });
+  }, [backendState, definitions, unitDefs, factionData]);
 
   // Unplaced camps (purchased this turn); must be placed during mobilization.
   // Exclude: already placed (placed_territory_id set) or queued (in pending_camp_placements).
@@ -2023,6 +2041,55 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     backendState?.pending_mobilizations,
   ]);
 
+  const mobilizeUnitDestinations = useMemo(() => {
+    const raw = availableActions?.mobilize_options?.unit_destinations ?? {};
+    const pending = backendState?.pending_mobilizations ?? [];
+    const used: Record<string, number> = {};
+    const usedByUnit: Record<string, Record<string, number>> = {};
+    for (const pm of pending) {
+      const dest = pm.destination ?? '';
+      if (!dest) continue;
+      for (const u of pm.units ?? []) {
+        const n = u.count ?? 0;
+        used[dest] = (used[dest] ?? 0) + n;
+        const uid = u.unit_id ?? '';
+        if (!uid) continue;
+        if (!usedByUnit[dest]) usedByUnit[dest] = {};
+        usedByUnit[dest][uid] = (usedByUnit[dest][uid] ?? 0) + n;
+      }
+    }
+    const out: Record<string, {
+      territories: string[];
+      sea_zones: string[];
+      river_zones: string[];
+      unlimited: boolean;
+      room: Record<string, number>;
+    }> = {};
+    for (const [unitId, spec] of Object.entries(raw)) {
+      const territories = spec.territories ?? [];
+      const seaZones = spec.sea_zones ?? [];
+      const riverZones = spec.river_zones ?? [];
+      const room: Record<string, number> = {};
+      for (const id of [...territories, ...seaZones, ...riverZones]) {
+        if (spec.unlimited) {
+          room[id] = 999;
+        } else {
+          const cap = Math.max(0, (spec.capacity?.[id] ?? 0) - (used[id] ?? 0));
+          const home = Math.max(0, (spec.home?.[id] ?? 0) - (usedByUnit[id]?.[unitId] ?? 0));
+          room[id] = Math.max(cap, home);
+        }
+      }
+      out[unitId] = {
+        territories,
+        sea_zones: seaZones,
+        river_zones: riverZones,
+        unlimited: Boolean(spec.unlimited),
+        room,
+      };
+    }
+    return out;
+  }, [availableActions?.mobilize_options?.unit_destinations, backendState?.pending_mobilizations]);
+
   // Bulk "All" mobilization: show only when there exists a single destination
   // that can accept every remaining purchase stack in the tray.
   const mobilizationAllValidZones = useMemo(() => {
@@ -2326,21 +2393,30 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       return;
     }
     if (gameState.phase === 'mobilize' && selectedMobilizationUnit && territoryId) {
-      const validDestinations = riverUnitIds.has(selectedMobilizationUnit)
-        ? validMobilizeRiverZones
-        : navalUnitIds.has(selectedMobilizationUnit)
-          ? validMobilizeSeaZones
-          : validMobilizeTerritories;
+      const spec = mobilizeUnitDestinations[selectedMobilizationUnit];
+      const validDestinations = spec
+        ? (riverUnitIds.has(selectedMobilizationUnit)
+          ? spec.river_zones
+          : navalUnitIds.has(selectedMobilizationUnit)
+            ? spec.sea_zones
+            : spec.territories)
+        : riverUnitIds.has(selectedMobilizationUnit)
+          ? validMobilizeRiverZones
+          : navalUnitIds.has(selectedMobilizationUnit)
+            ? validMobilizeSeaZones
+            : validMobilizeTerritories;
       if (validDestinations.includes(territoryId)) {
         const purchase = mobilizablePurchases.find(p => p.unitId === selectedMobilizationUnit);
         if (purchase) {
           const campRemaining = remainingMobilizationCapacity[territoryId] ?? 0;
           const homeRemaining = remainingHomeSlots[territoryId]?.[selectedMobilizationUnit] ?? 0;
-          const maxCount = campRemaining > 0
-            ? Math.min(purchase.count, campRemaining)
-            : homeRemaining > 0
-              ? Math.min(purchase.count, 1)
-              : 0;
+          const maxCount = spec
+            ? Math.min(purchase.count, spec.room[territoryId] ?? 0)
+            : campRemaining > 0
+              ? Math.min(purchase.count, campRemaining)
+              : homeRemaining > 0
+                ? Math.min(purchase.count, 1)
+                : 0;
           if (maxCount <= 0) return;
           setPendingMobilization({
             unitId: selectedMobilizationUnit,
@@ -2358,7 +2434,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     setSelectedTerritory(territoryId);
     // Naval tray opens only when boat stack is clicked (via onSeaZoneStackClick), not on territory click
     setSelectedSeaZoneForNavalTray(null);
-  }, [gameState.phase, selectedCampIndex, validCampTerritories, selectedMobilizationUnit, mobilizablePurchases, validMobilizeTerritories, validMobilizeSeaZones, validMobilizeRiverZones, navalUnitIds, riverUnitIds, remainingMobilizationCapacity, remainingHomeSlots, addLogEntry, refreshState]);
+  }, [gameState.phase, selectedCampIndex, validCampTerritories, selectedMobilizationUnit, mobilizablePurchases, validMobilizeTerritories, validMobilizeSeaZones, validMobilizeRiverZones, navalUnitIds, riverUnitIds, remainingMobilizationCapacity, remainingHomeSlots, mobilizeUnitDestinations, addLogEntry, refreshState]);
 
   /** Click on boat stack in a sea zone (movement phases): open naval tray for that sea zone. */
   const handleSeaZoneStackClick = useCallback((territoryId: string) => {
@@ -2561,14 +2637,18 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
 
   const endPhaseDisabled =
     (gameState.phase === 'combat' && gameState.declared_battles.length > 0) ||
-    (gameState.phase === 'mobilize' && mobilizablePurchases.length > 0) ||
+    (gameState.phase === 'mobilize' && availableActions?.can_end_phase === false) ||
     (gameState.phase === 'non_combat_move' && availableActions?.can_end_phase === false) ||
     (gameState.phase === 'combat_move' && availableActions?.can_end_phase === false);
   const endPhaseDisabledReason =
     gameState.phase === 'combat'
       ? 'Resolve all battles before ending combat phase'
       : gameState.phase === 'mobilize'
-        ? (mobilizablePurchases.length > 0 ? 'Deploy all purchased units before ending mobilization phase' : unplacedCamps.length > 0 ? 'Place all camps first (or click End phase to sync)' : undefined)
+        ? (availableActions?.can_end_phase === false && mobilizablePurchases.length > 0
+            ? 'Deploy all purchased and granted units before ending mobilization phase'
+            : unplacedCamps.length > 0
+              ? 'Place all camps first (or click End phase to sync)'
+              : 'Deploy all purchased and granted units before ending mobilization phase')
         : gameState.phase === 'non_combat_move' && aerialMustMove.length > 0
           ? 'Move all aerial units to friendly territory before ending phase'
           : gameState.phase === 'combat_move' && availableActions?.can_end_phase === false
@@ -2640,10 +2720,14 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       return;
     }
 
-    // Prevent ending mobilization if purchases exist but aren't mobilized
-    const hasUnmobilizedPurchases = mobilizablePurchases.length > 0;
-    if (gameState.phase === 'mobilize' && hasUnmobilizedPurchases) {
-      addLogEntry('Cannot end mobilization - units still need to be deployed!', 'error');
+    // Prevent ending mobilization while purchased or granted units can still be placed.
+    if (gameState.phase === 'mobilize' && availableActions?.can_end_phase === false) {
+      addLogEntry(
+        mobilizablePurchases.length > 0
+          ? 'Cannot end mobilization - units still need to be deployed!'
+          : 'Place all camps before ending mobilization.',
+        'error',
+      );
       return;
     }
 
@@ -2670,7 +2754,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       // Refetch so we sync pending_camps / units; may unstick mobilization if state was missing camps
       await refreshState();
     }
-  }, [backendState?.pending_moves, gameState.phase, gameState.declared_battles, hasPurchaseCart, pendingEndPhaseConfirm, mobilizablePurchases, aerialMustMove, addLogEntry, addBackendEvents, refreshState, commitPurchaseDraftToServer, GAME_ID]);
+  }, [backendState?.pending_moves, gameState.phase, gameState.declared_battles, hasPurchaseCart, pendingEndPhaseConfirm, mobilizablePurchases, availableActions?.can_end_phase, aerialMustMove, addLogEntry, addBackendEvents, refreshState, commitPurchaseDraftToServer, GAME_ID]);
 
   const handleConfirmEndPhase = useCallback(() => {
     setPendingEndPhaseConfirm(null);
@@ -3508,13 +3592,16 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   const handleMobilizationDrop = useCallback((territoryId: string, unitId: string, unitName: string, unitIcon: string, count: number) => {
     const purchase = mobilizablePurchases.find(p => p.unitId === unitId);
     if (!purchase) return;
+    const spec = mobilizeUnitDestinations[unitId];
     const campRemaining = remainingMobilizationCapacity[territoryId] ?? 0;
     const homeRemaining = remainingHomeSlots[territoryId]?.[unitId] ?? 0;
-    const maxCount = campRemaining > 0
-      ? Math.min(purchase.count, campRemaining)
-      : homeRemaining > 0
-        ? Math.min(purchase.count, homeRemaining)
-        : 0;
+    const maxCount = spec
+      ? Math.min(purchase.count, spec.room[territoryId] ?? 0)
+      : campRemaining > 0
+        ? Math.min(purchase.count, campRemaining)
+        : homeRemaining > 0
+          ? Math.min(purchase.count, homeRemaining)
+          : 0;
     if (maxCount <= 0) return;
     setPendingMobilization({
       unitId,
@@ -3524,7 +3611,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       maxCount,
       count: Math.min(count, maxCount),
     });
-  }, [mobilizablePurchases, remainingMobilizationCapacity, remainingHomeSlots]);
+  }, [mobilizablePurchases, remainingMobilizationCapacity, remainingHomeSlots, mobilizeUnitDestinations]);
 
   const handleMobilizationAllDrop = useCallback(
     (
@@ -4273,6 +4360,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               riverUnitIds={riverUnitIds}
               remainingMobilizationCapacity={remainingMobilizationCapacity}
               remainingHomeSlots={remainingHomeSlots}
+              mobilizeUnitDestinations={mobilizeUnitDestinations}
               onMobilizationDrop={canAct ? handleMobilizationDrop : undefined}
               onMobilizationAllDrop={canAct ? handleMobilizationAllDrop : undefined}
               mobilizationTray={

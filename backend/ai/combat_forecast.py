@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from backend.engine.reducer import get_state_after_combat_moves_scenario
 from backend.engine.state import GameState, PendingMove
+from backend.engine.definitions import faction_acts_as
 from backend.engine.utils import get_unit_faction, is_land_unit
 
 from backend.ai.geography import exposed_empty_conquest_reinforce_need
@@ -33,13 +34,15 @@ def our_land_unit_count_on_territory(
     territory_id: str,
     faction_id: str,
     unit_defs: dict,
+    faction_defs=None,
 ) -> int:
     terr = state.territories.get(territory_id)
-    if not terr or getattr(terr, "owner", None) != faction_id:
+    owner = getattr(terr, "owner", None) if terr else None
+    if not terr or not faction_acts_as(faction_defs, owner, faction_id):
         return 0
     n = 0
     for u in getattr(terr, "units", []) or []:
-        if get_unit_faction(u, unit_defs) != faction_id:
+        if not faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), faction_id):
             continue
         ud = unit_defs.get(u.unit_id)
         if ud and is_land_unit(ud):
@@ -59,10 +62,10 @@ def empty_exposed_holes_map(
     """
     out: dict[str, float] = {}
     for tid in forecast_state.territories or {}:
-        if our_land_unit_count_on_territory(forecast_state, tid, faction_id, unit_defs) > 0:
+        if our_land_unit_count_on_territory(forecast_state, tid, faction_id, unit_defs, fd) > 0:
             continue
         terr = forecast_state.territories.get(tid)
-        if getattr(terr, "owner", None) != faction_id:
+        if not faction_acts_as(fd, getattr(terr, "owner", None), faction_id):
             continue
         need = exposed_empty_conquest_reinforce_need(
             tid, forecast_state, faction_id, fd, td, unit_defs

@@ -13,6 +13,11 @@ from backend.engine.definitions import parse_prefire_penalty_from_manifest
 from backend.engine.special_rules import parse_special_rules
 
 
+def _parse_saved_subfaction_rules(raw: Any) -> dict[str, dict[str, Any]]:
+    from backend.engine.subfaction_rules import parse_subfaction_rules
+    return parse_subfaction_rules(raw)
+
+
 def _ensure_str_list(value: Any) -> list[str]:
     """Ensure value is a list of strings (for camps_standing, mobilization_camps from DB)."""
     if value is None:
@@ -731,6 +736,12 @@ class GameState:
     rings: list["Ring"] = field(default_factory=list)
     # Snapshot of manifest special_rules (fading territory, etc.). Empty on older games.
     special_rules: list[dict[str, Any]] = field(default_factory=list)
+    # Snapshot of manifest subfaction_rules, keyed by subfaction id.
+    subfaction_rules: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Territories each subfaction owned when its parent's turn started. Recruitment uses this.
+    subfaction_territories_at_turn_start: dict[str, list[str]] = field(default_factory=dict)
+    # True after this turn's grants have been added to the mobilization pool.
+    subfaction_grants_applied: bool = False
     # Faction territories at start of their turn (set when turn starts). Used for camp placement options.
     faction_territories_at_turn_start: dict[str, list[str]] = field(default_factory=dict)
     # Purchased camps this turn: list of {territory_options: [tid, ...], placed_territory_id: None | str}
@@ -809,6 +820,11 @@ class GameState:
             "rings_of_power": bool(getattr(self, "rings_of_power", False)),
             "rings": [ring.to_dict() for ring in (getattr(self, "rings", None) or [])],
             "special_rules": list(getattr(self, "special_rules", None) or []),
+            "subfaction_rules": dict(getattr(self, "subfaction_rules", None) or {}),
+            "subfaction_territories_at_turn_start": dict(
+                getattr(self, "subfaction_territories_at_turn_start", None) or {}
+            ),
+            "subfaction_grants_applied": bool(getattr(self, "subfaction_grants_applied", False)),
             "faction_territories_at_turn_start": self.faction_territories_at_turn_start,
             "pending_camps": self.pending_camps,
             "pending_camp_placements": [p.to_dict() for p in self.pending_camp_placements],
@@ -922,6 +938,11 @@ class GameState:
             rings_of_power=bool(data.get("rings_of_power")),
             rings=[Ring.from_dict(row) for row in (data.get("rings") or []) if isinstance(row, dict)],
             special_rules=parse_special_rules(data.get("special_rules")),
+            subfaction_rules=_parse_saved_subfaction_rules(data.get("subfaction_rules")),
+            subfaction_territories_at_turn_start=_ensure_faction_territories_at_turn_start(
+                data.get("subfaction_territories_at_turn_start")
+            ),
+            subfaction_grants_applied=bool(data.get("subfaction_grants_applied")),
             faction_territories_at_turn_start=_ensure_faction_territories_at_turn_start(
                 data.get("faction_territories_at_turn_start")
             ),

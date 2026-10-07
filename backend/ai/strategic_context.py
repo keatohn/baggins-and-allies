@@ -127,8 +127,8 @@ def build_strategic_turn_context(ctx: AIContext) -> StrategicTurnContext:
     cd = ctx.camp_defs
     port_d = ctx.port_defs
 
-    blobs = get_faction_territory_blobs(state, faction_id, td)
-    territory_blob = territory_to_blob_index(state, faction_id, td)
+    blobs = get_faction_territory_blobs(state, faction_id, td, fd)
+    territory_blob = territory_to_blob_index(state, faction_id, td, fd)
 
     our_land = {
         tid

@@ -369,6 +369,15 @@ export interface ApiMobilizeOptions {
     sea_zones?: { sea_zone_id: string; power: number }[];
     river_zones?: { river_zone_id: string; power: number }[];
   };
+  /** Per subfaction unit type: where that unit may mobilize. Parent units use the lists above. */
+  unit_destinations?: Record<string, {
+    territories?: string[];
+    sea_zones?: string[];
+    river_zones?: string[];
+    unlimited?: boolean;
+    capacity?: Record<string, number>;
+    home?: Record<string, number>;
+  }>;
   total_capacity?: number;
 }
 
@@ -437,6 +446,14 @@ export interface ApiTerritoryDefinition {
   image?: string | null;
 }
 
+export interface ApiSubfactionDefinition {
+  id: string;
+  display_name: string;
+  color: string;
+  /** Filename in assets/factions. Omitted = use the parent faction's icon. */
+  icon?: string | null;
+}
+
 export interface ApiFactionDefinition {
   id: string;
   display_name: string;
@@ -446,6 +463,7 @@ export interface ApiFactionDefinition {
   icon?: string;
   /** Turn music in assets/audio/music; stem(s) with .mp3/.ogg fallbacks. One file or ordered list (playlist cycles until turn changes). Omitted = use faction id. */
   music?: string | string[];
+  subfactions?: ApiSubfactionDefinition[];
 }
 
 export interface SimulateCombatPercentileOutcome {

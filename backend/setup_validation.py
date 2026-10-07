@@ -165,6 +165,46 @@ def validate_setup_documents(
         cap = _faction_capital_territory_id(f.get("capital"))
         if cap is not None and cap not in territory_ids:
             errors.append(f'faction "{fid}" capital "{cap}" is not a known territory')
+        subs = f.get("subfactions")
+        if subs is None:
+            continue
+        if not isinstance(subs, list):
+            errors.append(f'faction "{fid}" subfactions must be a list')
+            continue
+        for i, sub in enumerate(subs):
+            prefix = f'faction "{fid}" subfactions[{i}]'
+            if not isinstance(sub, dict):
+                errors.append(f"{prefix} must be an object")
+                continue
+            sid = sub.get("id")
+            if not isinstance(sid, str) or not sid.strip():
+                errors.append(f"{prefix}.id must be a non-empty string")
+                continue
+            sid = sid.strip()
+            if sid in faction_ids:
+                errors.append(f'{prefix}.id "{sid}" collides with a faction id')
+            elif sid in subfaction_ids:
+                errors.append(f'{prefix}.id "{sid}" is already used by another subfaction')
+            else:
+                subfaction_ids.add(sid)
+                subfaction_parents[sid] = fid
+            name = sub.get("display_name")
+            if not isinstance(name, str) or not name.strip():
+                errors.append(f"{prefix}.display_name must be a non-empty string")
+            color = sub.get("color")
+            if not isinstance(color, str) or not color.strip():
+                errors.append(f"{prefix}.color must be a non-empty string")
+            icon = sub.get("icon")
+            if icon is not None and not isinstance(icon, str):
+                errors.append(f"{prefix}.icon must be a string when set")
+
+    owner_ids = faction_ids | subfaction_ids
+    for uid, u in units.items():
+        if uid == "" or not isinstance(u, dict):
+            continue
+        fac = u.get("faction")
+        if isinstance(fac, str) and fac.strip() and fac not in owner_ids:
+            errors.append(f'unit "{uid}" faction must be a known faction id')
 
     for cid, c in camps.items():
         if not isinstance(c, dict):
@@ -188,7 +228,13 @@ def validate_setup_documents(
     else:
         for f in turn_order:
             if not isinstance(f, str) or f not in faction_ids:
-                errors.append(f'starting_setup.turn_order contains unknown faction "{f}"')
+                if isinstance(f, str) and f in subfaction_ids:
+                    errors.append(
+                        f'starting_setup.turn_order contains subfaction "{f}" '
+                        f'(controlled by "{subfaction_parents.get(f, "")}")'
+                    )
+                else:
+                    errors.append(f'starting_setup.turn_order contains unknown faction "{f}"')
 
     owners = starting_setup.get("territory_owners")
     if owners is not None:
@@ -198,7 +244,7 @@ def validate_setup_documents(
             for ter, fac in owners.items():
                 if ter not in territory_ids:
                     errors.append(f'starting_setup.territory_owners: unknown territory "{ter}"')
-                if not isinstance(fac, str) or fac not in faction_ids:
+                if not isinstance(fac, str) or fac not in owner_ids:
                     errors.append(f'starting_setup.territory_owners["{ter}"] must be a known faction')
 
     su = starting_setup.get("starting_units")
@@ -221,6 +267,20 @@ def validate_setup_documents(
                         errors.append(
                             f'starting_setup.starting_units["{ter}"][{i}]: unknown unit_id "{uk}"'
                         )
+
+    rules = manifest.get("subfaction_rules")
+    if rules is not None:
+        if not isinstance(rules, dict):
+            errors.append("manifest.subfaction_rules must be an object")
+        else:
+            for sid, rule in rules.items():
+                if sid not in subfaction_ids:
+                    errors.append(f'manifest.subfaction_rules references unknown subfaction "{sid}"')
+                elif not isinstance(rule, dict):
+                    errors.append(f'manifest.subfaction_rules["{sid}"] must be an object')
+                else:
+                    from backend.engine.subfaction_rules import subfaction_rule_errors
+                    errors.extend(subfaction_rule_errors(sid, rule, units))
 
     ctx = manifest.get("context")
     if manifest.get("is_active") is True:

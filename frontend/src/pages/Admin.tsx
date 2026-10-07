@@ -36,6 +36,22 @@ const TAB_KEYS = [
 
 type TabKey = (typeof TAB_KEYS)[number];
 
+function factionAndSubfactionIds(factions: AdminSetupBundle['factions'] | undefined): string[] {
+  const ids: string[] = [];
+  const raw = factions && typeof factions === 'object' ? factions : {};
+  for (const [fid, faction] of Object.entries(raw)) {
+    ids.push(fid);
+    const subs = (faction as { subfactions?: unknown }).subfactions;
+    if (!Array.isArray(subs)) continue;
+    for (const sub of subs) {
+      if (!sub || typeof sub !== 'object') continue;
+      const sid = (sub as { id?: unknown }).id;
+      if (typeof sid === 'string' && sid.trim()) ids.push(sid.trim());
+    }
+  }
+  return ids;
+}
+
 const TAB_LABELS: Record<TabKey, string> = {
   manifest: 'Manifest',
   units: 'Units',
@@ -618,6 +634,7 @@ export default function Admin() {
         return (
           <UnitsPanel
             units={(bundle.units as DictEntityMap) ?? {}}
+            factionIds={factionAndSubfactionIds(bundle.factions)}
             setupId={selectedId}
             setups={setups}
             onChange={(next) => setBundle((b) => (b ? { ...b, units: next as typeof b.units } : null))}

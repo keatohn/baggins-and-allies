@@ -156,6 +156,8 @@ def compute_starting_strength(
         if isinstance(tid, str) and isinstance(owner, str) and owner
     }
     rules = manifest.get("special_rules")
+    from backend.engine.subfaction_rules import parse_subfaction_rules
+    subfaction_rules = parse_subfaction_rules(manifest.get("subfaction_rules"))
     turn_order = [
         fid
         for fid in (starting.get("turn_order") or [])
@@ -194,7 +196,7 @@ def compute_starting_strength(
 
     accs = {fid: _Acc() for fid in faction_ids}
     for fid in faction_ids:
-        _add_economy(accs[fid], fid, territories, owners, factions, rules, cfg)
+        _add_economy(accs[fid], fid, territories, owners, factions, rules, cfg, subfaction_rules)
     for stack in stacks:
         faction = _controlled_faction(stack.unit.faction, factions)
         if not faction or faction.alliance in ("", "neutral"):
@@ -289,6 +291,7 @@ def _add_economy(
     factions: dict[str, _Faction],
     rules: Any,
     cfg: BalanceConfig,
+    subfaction_rules: dict | None = None,
 ) -> None:
     schedule: list[int] = []
     for turn in range(1, cfg.horizon_rounds + 1):
@@ -309,9 +312,11 @@ def _add_economy(
                 acc.territories += 1
                 if terr.is_stronghold:
                     acc.strongholds += 1
-            # Subfaction land is counted above. It does not add power until a subfaction rule says so.
+            # Subfaction land is counted above. Pooled economy adds its power to the parent.
             if owner != faction_id:
-                continue
+                child_rule = (subfaction_rules or {}).get(owner) or {}
+                if child_rule.get("economy") != "pool":
+                    continue
             produced += effective_territory_power(terr.power, turn, rules, tid)
         schedule.append(produced)
     acc.power_production = schedule[0] if schedule else 0
