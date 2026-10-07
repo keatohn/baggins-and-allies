@@ -496,6 +496,19 @@ def test_real_setups_produce_a_finite_split():
         assert report["parameters"]["summary"]
 
 
+def test_optional_rings_add_production_only_when_on():
+    bundle = import_setup_folder_to_dicts(Path(SETUPS_DIR) / "woteas_1.0")
+    assert bundle is not None
+    on = _by_id(compute_starting_strength(bundle)["factions"])
+    off_report = compute_starting_strength(bundle, rings=False)
+    off = _by_id(off_report["factions"])
+    assert off_report["rings_of_power"] == {"mode": "optional", "on": False}
+    # Matches the in-game stats: Narya, Nenya, Vilya, the Six and the Nine sit in Noldor land; Durin's Ring in Khazad-dum.
+    assert on["noldor"]["power_production"] - off["noldor"]["power_production"] == 17
+    assert on["khazad_dum"]["power_production"] - off["khazad_dum"]["power_production"] == 2
+    assert on["sauron"]["power_production"] == off["sauron"]["power_production"]
+
+
 def test_admin_balance_endpoint_returns_the_report():
     from fastapi.testclient import TestClient
 

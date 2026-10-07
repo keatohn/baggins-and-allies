@@ -333,6 +333,12 @@ export default function Admin() {
     () => previewStatsFromBundle(bundle, { rings: statsWithRings }),
     [bundle, statsWithRings],
   );
+  const ringsToggle = statsPreview?.ringsMode === 'optional' ? (
+    <label>
+      <input type="checkbox" checked={statsWithRings} onChange={(e) => setStatsWithRings(e.target.checked)} />
+      Rings of Power
+    </label>
+  ) : undefined;
   const asymmetryError = Boolean(saveError?.includes('territory graph asymmetry'));
 
   const useJson = jsonTab[activeTab] === true;
@@ -1031,16 +1037,7 @@ export default function Admin() {
           factionData={statsPreview.factionData}
           turnOrder={statsPreview.turnOrder}
           ringsByFaction={statsPreview.ringsByFaction}
-          toolbar={statsPreview.ringsMode === 'optional' ? (
-            <label>
-              <input
-                type="checkbox"
-                checked={statsWithRings}
-                onChange={(e) => setStatsWithRings(e.target.checked)}
-              />
-              Rings of Power
-            </label>
-          ) : undefined}
+          toolbar={ringsToggle}
           onClose={() => setGameStatsOpen(false)}
         />
       )}
@@ -1048,6 +1045,8 @@ export default function Admin() {
         <BalanceModal
           bundle={bundle}
           factionData={statsPreview.factionData}
+          withRings={statsWithRings}
+          ringsToggle={ringsToggle}
           onClose={() => setBalanceOpen(false)}
         />
       )}

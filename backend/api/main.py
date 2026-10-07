@@ -1461,10 +1461,11 @@ class AdminCreateSetupBody(BaseModel):
 @app.post("/admin/balance")
 def admin_balance(
     body: AdminSetupPayload,
+    rings: bool | None = None,
     _admin: Player = Depends(get_current_admin),
 ):
     """Starting-strength report for the setup currently open in the admin editor."""
-    return compute_starting_strength(body.model_dump())
+    return compute_starting_strength(body.model_dump(), rings=rings)
 
 
 @app.get("/admin/setups")

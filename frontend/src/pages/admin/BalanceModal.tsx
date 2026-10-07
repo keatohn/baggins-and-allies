@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { api } from '../../services/api';
 import type { AdminSetupBundle, AdminSetupSavePayload, BalanceSide, StartingStrengthReport } from '../../services/api';
 import type { StatsFactionData } from '../../components/StatsModals';
@@ -34,10 +35,15 @@ function shareLabel(row: BalanceSide): string {
 export function BalanceModal({
   bundle,
   factionData,
+  withRings,
+  ringsToggle,
   onClose,
 }: {
   bundle: AdminSetupBundle;
   factionData: StatsFactionData;
+  withRings: boolean;
+  /** Shown when the Rings of Power rule is optional. */
+  ringsToggle?: ReactNode;
   onClose: () => void;
 }) {
   const [report, setReport] = useState<StartingStrengthReport | null>(null);
@@ -62,7 +68,7 @@ export function BalanceModal({
       specials: bundle.specials,
     };
     api
-      .adminBalance(payload)
+      .adminBalance(payload, withRings)
       .then((next) => {
         if (!cancelled) setReport(next);
       })
@@ -72,7 +78,7 @@ export function BalanceModal({
     return () => {
       cancelled = true;
     };
-  }, [bundle]);
+  }, [bundle, withRings]);
 
   const alliances = report?.alliances ?? [];
   const good = alliances.find((row) => row.id === 'good');
@@ -96,9 +102,12 @@ export function BalanceModal({
             </h2>
             <p className="admin-form__micro">{setupName}</p>
           </div>
-          <button type="button" className="admin-page__btn" onClick={onClose}>
-            Close
-          </button>
+          <div className="balance-modal__actions">
+            {ringsToggle}
+            <button type="button" className="admin-page__btn" onClick={onClose}>
+              Close
+            </button>
+          </div>
         </div>
 
         {error ? <p className="admin-page__error">{error}</p> : null}
@@ -294,7 +303,10 @@ export function BalanceModal({
                   </ul>
                 </dd>
                 <dt>PP</dt>
-                <dd>Power produced per turn from owned land.</dd>
+                <dd>
+                  Power produced per turn from owned land
+                  {report.rings_of_power?.on ? ', plus Rings of Power held at the start' : ''}.
+                </dd>
                 <dt>Econ</dt>
                 <dd>
                   That production over the next {report.parameters.horizon_rounds} rounds, discounted by {report.parameters.discount}{' '}

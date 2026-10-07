@@ -382,6 +382,20 @@
   gap: 1rem;
 }
 
+.balance-modal__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.balance-modal__actions label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
 .balance-modal__header .admin-modal__title {
   margin-bottom: 0.15rem;
 }

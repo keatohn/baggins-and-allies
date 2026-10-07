@@ -141,8 +141,12 @@ def compute_starting_strength(
     bundle: dict[str, Any] | None,
     *,
     config: BalanceConfig | None = None,
+    rings: bool | None = None,
 ) -> dict[str, Any]:
-    """Balance report for one setup bundle (the admin JSON shape)."""
+    """Balance report for one setup bundle (the admin JSON shape).
+
+    ``rings`` turns an optional Rings of Power rule off when False. A required rule is always on.
+    """
     cfg = config or BalanceConfig()
     bundle = bundle if isinstance(bundle, dict) else {}
     manifest = _as_dict(bundle.get("manifest"))
@@ -194,9 +198,20 @@ def compute_starting_strength(
             ),
         }
 
+    rings_mode, ring_rows = _rings_rule(rules)
+    rings_on = rings_mode == "always" or (rings_mode == "optional" and rings is not False)
+    ring_power = (
+        _ring_power(ring_rows, _as_dict(bundle.get("units")), stacks, owners, factions, subfaction_rules)
+        if rings_on
+        else {}
+    )
+
     accs = {fid: _Acc() for fid in faction_ids}
     for fid in faction_ids:
-        _add_economy(accs[fid], fid, territories, owners, factions, rules, cfg, subfaction_rules)
+        _add_economy(
+            accs[fid], fid, territories, owners, factions, rules, cfg, subfaction_rules,
+            ring_power=ring_power.get(fid, 0),
+        )
     for stack in stacks:
         faction = _controlled_faction(stack.unit.faction, factions)
         if not faction or faction.alliance in ("", "neutral"):
@@ -235,7 +250,54 @@ def compute_starting_strength(
         "neutral": neutral,
         "largest_discounts": discounts,
         "readings": _readings(alliance_rows, cfg.horizon_rounds),
+        "rings_of_power": {"mode": rings_mode, "on": rings_on},
     }
+
+
+def _rings_rule(rules: Any) -> tuple[str, list[dict[str, Any]]]:
+    """("none" | "always" | "optional", ring rows) from the manifest special rules."""
+    for rule in rules if isinstance(rules, list) else []:
+        if isinstance(rule, dict) and rule.get("type") == "rings_of_power":
+            rows = [r for r in rule.get("rings") or [] if isinstance(r, dict)]
+            return ("optional" if rule.get("is_optional") is True else "always"), rows
+    return "none", []
+
+
+def _ring_power(
+    ring_rows: list[dict[str, Any]],
+    raw_units: dict[str, Any],
+    stacks: list[_Stack],
+    owners: dict[str, str],
+    factions: dict[str, _Faction],
+    subfaction_rules: dict | None,
+) -> dict[str, int]:
+    """Starting ring income per playable faction, credited the way the engine credits it."""
+    out: dict[str, int] = {}
+    for ring in ring_rows:
+        power = _nonneg_int(ring.get("power")) or 0
+        tid = ring.get("territory_id")
+        if power <= 0 or not isinstance(tid, str):
+            continue
+        holder = ""
+        bearer = ring.get("bearer_hero_id")
+        if isinstance(bearer, str) and bearer.strip():
+            for stack in stacks:
+                hero = _as_dict(raw_units.get(stack.unit.id)).get("hero_id")
+                if stack.territory_id == tid and isinstance(hero, str) and hero.strip() == bearer.strip():
+                    holder = stack.unit.faction
+                    break
+        holder = holder or owners.get(tid, "")
+        faction = factions.get(holder)
+        if faction is None:
+            continue
+        if faction.is_subfaction:
+            parent = factions.get(faction.parent)
+            pooled = ((subfaction_rules or {}).get(holder) or {}).get("economy") == "pool"
+            if parent is None or not pooled or owners.get(parent.capital) != parent.id:
+                continue
+            faction = parent
+        out[faction.id] = out.get(faction.id, 0) + power
+    return out
 
 
 def _parameters(cfg: BalanceConfig) -> dict[str, Any]:
@@ -292,10 +354,11 @@ def _add_economy(
     rules: Any,
     cfg: BalanceConfig,
     subfaction_rules: dict | None = None,
+    ring_power: int = 0,
 ) -> None:
     schedule: list[int] = []
     for turn in range(1, cfg.horizon_rounds + 1):
-        produced = 0
+        produced = ring_power
         for tid, owner in owners.items():
             owner_faction = factions.get(owner)
             controlled = owner == faction_id or (

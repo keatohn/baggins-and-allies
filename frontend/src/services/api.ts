@@ -737,6 +737,7 @@ export interface StartingStrengthReport {
   };
   largest_discounts: BalanceDiscount[];
   readings: string[];
+  rings_of_power?: { mode: 'none' | 'always' | 'optional'; on: boolean };
 }
 
 export type AudioGainsMap = Record<string, number>;
@@ -935,8 +936,8 @@ export const api = {
     setMenuMusicFiles(r.menu_music);
     return r;
   },
-  adminBalance: (body: AdminSetupSavePayload) =>
-    fetchJson<StartingStrengthReport>('/admin/balance', {
+  adminBalance: (body: AdminSetupSavePayload, rings = true) =>
+    fetchJson<StartingStrengthReport>(`/admin/balance?rings=${rings}`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
