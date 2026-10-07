@@ -480,7 +480,6 @@
 
 .stats-modal-body {
   overflow-x: auto;
-  min-width: min-content;
 }
 
 /* Help: taller scroll area than default stats/specials */
@@ -678,29 +677,48 @@
   text-align: right;
 }
 
-/* Game stats: size to the faction names and ring icons; number columns stay on one line */
+/* Game stats: fixed columns + tabular nums so thead aligns with every row */
 .stats-modal .header-stats-table.header-stats-table--game {
-  table-layout: auto;
-  width: max-content;
+  table-layout: fixed;
+  width: 100%;
   font-variant-numeric: tabular-nums;
 }
 
 .stats-modal .header-stats-table.header-stats-table--game thead th:first-child,
 .stats-modal .header-stats-table.header-stats-table--game tbody td:first-child {
-  white-space: nowrap;
-  width: auto;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .stats-modal .header-stats-table.header-stats-table--game th.stats-col-num,
 .stats-modal .header-stats-table.header-stats-table--game td.stats-col-num {
-  min-width: 2.4rem;
+  min-width: 0;
   white-space: nowrap;
   vertical-align: middle;
   text-align: right;
 }
 
-/* Desktop / tablet: tight padding before column S; faction column grows with ring icons */
+/* Phone: roomier faction column + default 0.5rem/1rem cell padding from generic table rules */
+@media (max-width: 767px) {
+  .stats-modal .header-stats-table.header-stats-table--game col.stats-game-col-faction {
+    width: 38%;
+  }
+
+  .stats-modal .header-stats-table.header-stats-table--game col.stats-game-col-num {
+    width: 10.333333%;
+  }
+}
+
+/* Desktop / tablet: tight faction col; kill 1rem right padding gap before column S */
 @media (min-width: 768px) {
+  .stats-modal .header-stats-table.header-stats-table--game col.stats-game-col-faction {
+    width: 20%;
+  }
+
+  .stats-modal .header-stats-table.header-stats-table--game col.stats-game-col-num {
+    width: 13.333333%;
+  }
+
   .stats-modal .header-stats-table.header-stats-table--game thead th:first-child,
   .stats-modal .header-stats-table.header-stats-table--game tbody td:first-child {
     padding: 0.5rem 0.35rem 0.5rem 0.45rem;
@@ -1256,18 +1274,16 @@
   min-width: 0;
 }
 
-/* Game stats grows with faction names and ring icons, then scrolls inside the viewport */
+/* Game stats (≥768px: flex lock sets real width; these stay in sync) */
 .stats-modal {
-  width: max-content;
-  min-width: min-content;
-  max-width: min(920px, 98vw);
+  max-width: min(680px, 98vw);
 }
 
 /* Tablet / desktop */
 @media (min-width: 768px) {
   .stats-modal {
-    width: max-content;
-    max-width: min(920px, 96vw);
+    width: auto;
+    max-width: min(680px, 96vw);
   }
 
   .unit-stats-modal {
@@ -1291,7 +1307,7 @@
   }
 
   .stats-modal {
-    max-width: min(920px, 95vw);
+    max-width: min(720px, 95vw);
   }
 
   .unit-stats-modal {

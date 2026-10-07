@@ -112,7 +112,6 @@ export function TerritoryGraphPane({
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
   const dragRef = useRef<{ x: number; y: number; tx: number; ty: number; id: number } | null>(null);
   const didDragRef = useRef(false);
-  const fittedRef = useRef(false);
   const [pngFailed, setPngFailed] = useState(false);
   const [editing, setEditing] = useState(false);
   const [edgeField, setEdgeField] = useState<TerritoryEdgeField>('adjacent');
@@ -169,7 +168,6 @@ export function TerritoryGraphPane({
         setPaths(nextPaths);
         setViewBox(vb);
         setCentroids(computePathCentroids(nextPaths, vb, mapBase));
-        fittedRef.current = false;
         setLoading(false);
       })
       .catch((e) => {
@@ -234,19 +232,29 @@ export function TerritoryGraphPane({
   }, [territories]);
 
   useEffect(() => {
-    if (loading || err || fittedRef.current) return;
+    if (loading || err) return;
     const el = wrapRef.current;
     if (!el) return;
-    const r = el.getBoundingClientRect();
-    if (r.width < 2 || r.height < 2) return;
-    const s = Math.min(r.width / viewBox.width, r.height / viewBox.height);
-    fittedRef.current = true;
-    setTransform({
-      scale: s,
-      x: (r.width - viewBox.width * s) / 2,
-      y: (r.height - viewBox.height * s) / 2,
-    });
-  }, [loading, err, viewBox.width, viewBox.height, paths]);
+    let lastW = -1;
+    let lastH = -1;
+    const fit = () => {
+      const r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) return;
+      if (Math.abs(r.width - lastW) < 1 && Math.abs(r.height - lastH) < 1) return;
+      lastW = r.width;
+      lastH = r.height;
+      const s = Math.min(r.width / viewBox.width, r.height / viewBox.height);
+      setTransform({
+        scale: s,
+        x: (r.width - viewBox.width * s) / 2,
+        y: (r.height - viewBox.height * s) / 2,
+      });
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loading, err, viewBox.width, viewBox.height]);
 
   const landEdges = useMemo(() => adjacencyEdges(shown, 'adjacent'), [shown]);
   const aerialEdges = useMemo(() => adjacencyEdges(shown, 'aerial_adjacent'), [shown]);

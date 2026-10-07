@@ -654,9 +654,11 @@
 
 .admin-graph__body {
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   display: flex;
   gap: 0.65rem;
+  overflow: hidden;
 }
 
 .admin-graph__list {
@@ -692,7 +694,9 @@
 }
 
 .admin-graph__viewport {
+  position: relative;
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
   background: var(--parchment);
@@ -707,7 +711,9 @@
 }
 
 .admin-graph__world {
-  position: relative;
+  position: absolute;
+  top: 0;
+  left: 0;
   transform-origin: 0 0;
 }
 
