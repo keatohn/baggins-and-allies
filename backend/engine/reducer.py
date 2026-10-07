@@ -2173,10 +2173,16 @@ def _apply_pending_moves(
                 pass
             elif to_owner is None:
                 # Empty unowned (neutral): moving in captures it. If neutral had defenders, combat will decide.
-                other_units = [u for u in to_territory.units if u.instance_id not in unit_instance_ids]
-                if not other_units:
+                # Units from this faction's earlier moves into the same territory are not defenders.
+                acting = state.current_faction or faction_id
+                defenders = [
+                    u for u in to_territory.units
+                    if u.instance_id not in unit_instance_ids
+                    and not faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), acting)
+                ]
+                if not defenders:
                     state.pending_captures[to_id] = capture_owner_for_units(
-                        state, moving_units, state.current_faction or faction_id, unit_defs, faction_defs
+                        state, moving_units, acting, unit_defs, faction_defs
                     )
             elif to_owner != (state.current_faction or faction_id) and not faction_acts_as(
                 faction_defs, to_owner, state.current_faction or faction_id
