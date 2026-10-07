@@ -178,7 +178,28 @@ def unit_bearing_ring(
     return max(heroes, key=lambda unit: (_hero_power(unit_defs.get(unit.unit_id)), unit.instance_id))
 
 
-def power_for_faction(state: GameState, faction_id: str, unit_defs: dict | None = None) -> int:
+def _earns_for(state: GameState, holder: str | None, faction_id: str, faction_defs: dict | None) -> bool:
+    """A subfaction's ring pays its parent only under a pool economy with the parent capital held."""
+    if not holder:
+        return False
+    if holder == faction_id:
+        return True
+    from backend.engine.subfaction_rules import child_ids, rule_for
+    from backend.engine.utils import faction_owns_capital
+
+    if holder not in child_ids(faction_defs, faction_id):
+        return False
+    if rule_for(state, holder)["economy"] != "pool":
+        return False
+    return faction_owns_capital(state, faction_id, faction_defs or {})
+
+
+def power_for_faction(
+    state: GameState,
+    faction_id: str,
+    unit_defs: dict | None = None,
+    faction_defs: dict | None = None,
+) -> int:
     if not getattr(state, "rings_of_power", False):
         return 0
     total = 0
@@ -188,11 +209,11 @@ def power_for_faction(state: GameState, faction_id: str, unit_defs: dict | None 
             bearer = unit_bearing_ring(state, ring, unit_defs)
             if bearer is not None:
                 faction = getattr(unit_defs.get(bearer.unit_id), "faction", None)
-                if faction == faction_id:
+                if _earns_for(state, faction, faction_id, faction_defs):
                     total += int(ring.power)
                 continue
         terr = state.territories.get(ring.territory_id)
-        if terr is not None and terr.owner == faction_id:
+        if terr is not None and _earns_for(state, terr.owner, faction_id, faction_defs):
             total += int(ring.power)
     return total
 

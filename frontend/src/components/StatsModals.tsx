@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ApiFactionStats } from '../services/api';
+import type { ApiFactionStats, FactionStatEntry } from '../services/api';
 import { ringIconSrc } from '../ringsDisplay';
 import './Header.css';
 
@@ -18,7 +18,7 @@ export interface UnitForStats {
 
 export type StatsFactionData = Record<
   string,
-  { name: string; icon: string; color: string; alliance: string }
+  { name: string; icon: string; color: string; alliance: string; parent?: string }
 >;
 
 function sortByTurnOrder(factionIds: string[], turnOrder: string[]): string[] {
@@ -64,6 +64,7 @@ export function GameStatsModal({
   factionData,
   turnOrder = [],
   ringsByFaction,
+  toolbar,
   onClose,
 }: {
   factionStats: ApiFactionStats | null | undefined;
@@ -71,11 +72,48 @@ export function GameStatsModal({
   turnOrder?: string[];
   /** Ring icons for each faction row, already assigned by who holds them. */
   ringsByFaction?: Record<string, StatsRingMark[]>;
+  toolbar?: React.ReactNode;
   onClose: () => void;
 }) {
   const alliances = factionStats?.alliances ?? {};
   const factionStatEntries = factionStats?.factions ?? {};
+  const subfactionStatEntries = factionStats?.subfactions ?? {};
   const allianceOrder = ['good', 'evil'].filter((a) => a in alliances);
+
+  const ringsByRow: Record<string, StatsRingMark[]> = {};
+  for (const [fid, rings] of Object.entries(ringsByFaction ?? {})) {
+    const parent = factionData[fid]?.parent;
+    const row = parent && !subfactionStatEntries[fid] ? parent : fid;
+    (ringsByRow[row] ??= []).push(...rings);
+  }
+
+  const renderRow = (fid: string, st: FactionStatEntry, isSub: boolean) => {
+    const fd = factionData[fid];
+    const rings = ringsByRow[fid] ?? [];
+    return (
+      <tr key={fid} className={isSub ? 'stats-faction-row stats-subfaction-row' : 'stats-faction-row'}>
+        <td className="stats-col-faction">
+          <span className="stats-faction-cell-inner">
+            {fd?.icon && <img className="stats-faction-icon" src={fd.icon} alt="" aria-hidden />}
+            <span>{fd?.name ?? fid}</span>
+            {rings.length > 0 && (
+              <span className="stats-faction-rings">
+                {rings.map((ring) => (
+                  <img key={ring.id} className="stats-faction-ring" src={ringIconSrc(ring.id)} alt="" title={ring.name} />
+                ))}
+              </span>
+            )}
+          </span>
+        </td>
+        <td className="stats-col-num">{st.strongholds}</td>
+        <td className="stats-col-num">{st.territories}</td>
+        <td className="stats-col-num">{st.power_per_turn}</td>
+        <td className="stats-col-num">{isSub ? '–' : st.power}</td>
+        <td className="stats-col-num">{st.units ?? 0}</td>
+        <td className="stats-col-num">{st.unit_power ?? 0}</td>
+      </tr>
+    );
+  };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -87,6 +125,7 @@ export function GameStatsModal({
           </button>
         </header>
         <div className="stats-modal-body">
+          {toolbar && <div className="stats-modal-toolbar">{toolbar}</div>}
           {allianceOrder.length > 0 ? (
             <table className="header-stats-table header-stats-table--game">
               <colgroup>
@@ -112,7 +151,9 @@ export function GameStatsModal({
                   if (!tot) return null;
                   const allianceLabel = allianceKey === 'good' ? 'Good' : 'Evil';
                   const factionIds = sortByTurnOrder(
-                    Object.keys(factionData).filter((fid) => factionData[fid]?.alliance === allianceKey),
+                    Object.keys(factionData).filter(
+                      (fid) => factionData[fid]?.alliance === allianceKey && !factionData[fid]?.parent,
+                    ),
                     turnOrder,
                   );
                   return (
@@ -129,38 +170,14 @@ export function GameStatsModal({
                       {factionIds.map((fid) => {
                         const st = factionStatEntries[fid];
                         if (!st) return null;
-                        const fd = factionData[fid];
-                        const name = fd?.name ?? fid;
+                        const subIds = Object.keys(factionData).filter(
+                          (sid) => factionData[sid]?.parent === fid && subfactionStatEntries[sid],
+                        );
                         return (
-                          <tr key={fid} className="stats-faction-row">
-                            <td className="stats-col-faction">
-                              <span className="stats-faction-cell-inner">
-                                {fd?.icon && (
-                                  <img className="stats-faction-icon" src={fd.icon} alt="" aria-hidden />
-                                )}
-                                <span>{name}</span>
-                                {(ringsByFaction?.[fid]?.length ?? 0) > 0 && (
-                                  <span className="stats-faction-rings">
-                                    {ringsByFaction![fid].map((ring) => (
-                                      <img
-                                        key={ring.id}
-                                        className="stats-faction-ring"
-                                        src={ringIconSrc(ring.id)}
-                                        alt=""
-                                        title={ring.name}
-                                      />
-                                    ))}
-                                  </span>
-                                )}
-                              </span>
-                            </td>
-                            <td className="stats-col-num">{st.strongholds}</td>
-                            <td className="stats-col-num">{st.territories}</td>
-                            <td className="stats-col-num">{st.power_per_turn}</td>
-                            <td className="stats-col-num">{st.power}</td>
-                            <td className="stats-col-num">{st.units ?? 0}</td>
-                            <td className="stats-col-num">{st.unit_power ?? 0}</td>
-                          </tr>
+                          <React.Fragment key={fid}>
+                            {renderRow(fid, st, false)}
+                            {subIds.map((sid) => renderRow(sid, subfactionStatEntries[sid], true))}
+                          </React.Fragment>
                         );
                       })}
                     </React.Fragment>

@@ -50,9 +50,11 @@ from backend.engine.movement import (
     water_transport_relation,
 )
 from backend.engine.subfaction_rules import (
+    child_ids,
     parent_may_purchase_unit,
     pool_territory_ids,
     purchase_capacity_error,
+    rule_for,
     subfaction_mobilization_error,
     unit_destination_spec,
 )
@@ -2933,6 +2935,7 @@ def get_faction_stats(
     """
     unit_defs = unit_defs or {}
     factions: dict[str, dict[str, int]] = {}
+    subfactions: dict[str, dict[str, int]] = {}
     for faction_id in faction_defs:
         territories_count = 0
         strongholds_count = 0
@@ -2949,7 +2952,7 @@ def get_faction_stats(
             # Subfaction land is controlled here. It pays only when its economy rule is pool and the capital is held.
             if tdef and (owner == faction_id or tid in pool_ids):
                 power_per_turn += territory_current_power(state, tid, tdef)
-        power_per_turn += power_for_faction(state, faction_id, unit_defs)
+        power_per_turn += power_for_faction(state, faction_id, unit_defs, faction_defs)
         power = state.faction_resources.get(faction_id, {}).get("power", 0)
         factions[faction_id] = {
             "territories": territories_count,
@@ -2959,6 +2962,26 @@ def get_faction_stats(
             "units": 0,
             "unit_power": 0,
         }
+        # Each subfaction's share of the parent row; power_per_turn is only what it pays the parent.
+        pays = faction_owns_capital(state, faction_id, faction_defs)
+        for sub_id in child_ids(faction_defs, faction_id):
+            economy = rule_for(state, sub_id)["economy"]
+            if economy == "none":
+                continue
+            sub_pays = pays and economy == "pool"
+            sub = {"territories": 0, "strongholds": 0, "power": 0, "power_per_turn": 0, "units": 0, "unit_power": 0}
+            for tid, ts in state.territories.items():
+                if ts.owner != sub_id:
+                    continue
+                sub["territories"] += 1
+                tdef = territory_defs.get(tid)
+                if tdef and getattr(tdef, "is_stronghold", False):
+                    sub["strongholds"] += 1
+                if tdef and sub_pays:
+                    sub["power_per_turn"] += territory_current_power(state, tid, tdef)
+            if sub_pays:
+                sub["power_per_turn"] += power_for_faction(state, sub_id, unit_defs, faction_defs)
+            subfactions[sub_id] = sub
 
     # Count units and unit_power by unit's faction (so sea units in sea zones are included)
     for tid, ts in state.territories.items():
@@ -2966,12 +2989,16 @@ def get_faction_stats(
             ud = unit_defs.get(unit.unit_id)
             if not ud:
                 continue
-            fid = controlling_faction_id(faction_defs, getattr(ud, "faction", None))
+            own = getattr(ud, "faction", None)
+            fid = controlling_faction_id(faction_defs, own)
             if fid not in factions:
                 continue
+            cost = ud.cost.get("power", 0) if isinstance(getattr(ud, "cost", None), dict) else 0
             factions[fid]["units"] += 1
-            if isinstance(getattr(ud, "cost", None), dict):
-                factions[fid]["unit_power"] += ud.cost.get("power", 0)
+            factions[fid]["unit_power"] += cost
+            if own in subfactions:
+                subfactions[own]["units"] += 1
+                subfactions[own]["unit_power"] += cost
 
     alliances: dict[str, dict[str, int]] = {}
     for faction_id, fd in faction_defs.items():
@@ -3000,6 +3027,8 @@ def get_faction_stats(
         "alliances": alliances,
         "neutral_strongholds": neutral_strongholds,
     }
+    if subfactions:
+        out["subfactions"] = subfactions
     # Victory thresholds for UI markers on the good | neutral | evil stronghold bar (setup manifest).
     stronghold_vc: dict[str, int] = {}
     vc = getattr(state, "victory_criteria", None) or {}

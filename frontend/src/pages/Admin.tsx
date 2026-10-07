@@ -328,7 +328,11 @@ export default function Admin() {
   const [balanceOpen, setBalanceOpen] = useState(false);
   const audioJson = useMemo(() => ({ gains: audioGains, menu_music: menuMusic }), [audioGains, menuMusic]);
   const signalsJson = useMemo(() => ({ presets: signalPresets }), [signalPresets]);
-  const statsPreview = useMemo(() => previewStatsFromBundle(bundle), [bundle]);
+  const [statsWithRings, setStatsWithRings] = useState(true);
+  const statsPreview = useMemo(
+    () => previewStatsFromBundle(bundle, { rings: statsWithRings }),
+    [bundle, statsWithRings],
+  );
   const asymmetryError = Boolean(saveError?.includes('territory graph asymmetry'));
 
   const useJson = jsonTab[activeTab] === true;
@@ -1026,6 +1030,17 @@ export default function Admin() {
           factionStats={statsPreview.factionStats}
           factionData={statsPreview.factionData}
           turnOrder={statsPreview.turnOrder}
+          ringsByFaction={statsPreview.ringsByFaction}
+          toolbar={statsPreview.ringsMode === 'optional' ? (
+            <label>
+              <input
+                type="checkbox"
+                checked={statsWithRings}
+                onChange={(e) => setStatsWithRings(e.target.checked)}
+              />
+              Rings of Power
+            </label>
+          ) : undefined}
           onClose={() => setGameStatsOpen(false)}
         />
       )}

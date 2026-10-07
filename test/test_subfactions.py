@@ -348,6 +348,87 @@ def test_pool_income_grant_and_must_place_before_ending():
     assert validate_action(state, end_phase("numenor"), unit_defs, territories, factions).valid
 
 
+def _ring_state(economy: str):
+    from backend.engine.rings import spawn_rings
+
+    factions = _factions()
+    territories = _board()
+    hero = UnitDefinition(
+        id="elendil",
+        display_name="Elendil",
+        faction="faithful",
+        archetype="infantry",
+        tags=[],
+        attack=4,
+        defense=4,
+        movement=1,
+        health=2,
+        cost={"power": 12},
+        hero_id="elendil",
+    )
+    unit_defs = {"elendil": hero}
+    state = initialize_game_state(
+        factions,
+        territories,
+        unit_defs=unit_defs,
+        starting_setup={
+            "turn_order": ["numenor", "mordor"],
+            "territory_owners": {
+                "numenor": "numenor",
+                "andustar": "faithful",
+                "romenna": "faithful",
+                "barad_dur": "mordor",
+            },
+            "starting_units": {},
+        },
+        subfaction_rules={"faithful": {"economy": economy}},
+        special_rules=[],
+    )
+    state.rings_of_power = True
+    state.rings = spawn_rings([{
+        "type": "rings_of_power",
+        "rings": [
+            {"id": "land_ring", "name": "Land Ring", "territory_id": "romenna", "power": 3},
+            {"id": "borne", "name": "Borne", "territory_id": "andustar", "power": 5, "bearer_hero_id": "elendil"},
+        ],
+    }])
+    state.territories["andustar"].units.append(_piece("faithful_elendil_001", "elendil"))
+    return state, unit_defs, factions
+
+
+def test_subfaction_ring_power_follows_its_economy_rule():
+    from backend.engine.rings import power_for_faction
+
+    pooled, unit_defs, factions = _ring_state("pool")
+    assert power_for_faction(pooled, "numenor", unit_defs, factions) == 8
+
+    pooled.territories["numenor"].owner = "mordor"
+    assert power_for_faction(pooled, "numenor", unit_defs, factions) == 0
+
+    kept, unit_defs, factions = _ring_state("none")
+    assert power_for_faction(kept, "numenor", unit_defs, factions) == 0
+
+
+def test_stats_list_each_subfaction_share_of_its_parent():
+    from backend.engine.queries import get_faction_stats
+
+    territories = _board()
+    pooled, unit_defs, factions = _ring_state("pool")
+    stats = get_faction_stats(pooled, territories, factions, unit_defs)
+    parent = stats["factions"]["numenor"]
+    sub = stats["subfactions"]["faithful"]
+    land = sum(territories[t].produces.get("power", 0) for t in ("andustar", "romenna"))
+    assert (sub["territories"], sub["units"], sub["unit_power"]) == (2, 1, 12)
+    assert sub["power_per_turn"] == land + 8
+    assert parent["territories"] == 3 and parent["units"] == 1
+    assert parent["power_per_turn"] == territories["numenor"].produces.get("power", 0) + sub["power_per_turn"]
+
+    kept, unit_defs, factions = _ring_state("none")
+    stats = get_faction_stats(kept, territories, factions, unit_defs)
+    assert "subfactions" not in stats
+    assert stats["factions"]["numenor"]["territories"] == 3
+
+
 def test_one_territory_rounds_the_grant_down_and_lost_capital_stops_it():
     from backend.engine.actions import end_phase, end_turn
     from backend.engine.reducer import apply_action

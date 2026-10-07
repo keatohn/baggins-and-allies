@@ -994,12 +994,12 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     const territories = backendState?.territories ?? {};
     const out: Record<string, { id: string; name: string }[]> = {};
     for (const ring of rings) {
-      const fid = ringHoldingFactionId(ring, territories[ring.territory_id]?.owner, unitDefs, factionData);
+      const fid = ringHoldingFactionId(ring, territories[ring.territory_id]?.owner, unitDefs);
       if (!fid) continue;
       (out[fid] ??= []).push({ id: ring.id, name: ring.name });
     }
     return out;
-  }, [backendState?.rings, backendState?.territories, unitDefs, factionData]);
+  }, [backendState?.rings, backendState?.territories, unitDefs]);
 
   useEffect(() => {
     let cancelled = false;

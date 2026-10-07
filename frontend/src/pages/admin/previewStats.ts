@@ -1,5 +1,5 @@
 import type { AdminSetupBundle, ApiFactionStats, FactionStatEntry } from '../../services/api';
-import type { StatsFactionData, UnitForStats } from '../../components/StatsModals';
+import type { StatsFactionData, StatsRingMark, UnitForStats } from '../../components/StatsModals';
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -64,15 +64,47 @@ function unitSpecialLabels(
   return names;
 }
 
+export type RingsRuleMode = 'none' | 'always' | 'optional';
+
 export interface AdminStatsPreview {
   factionData: StatsFactionData;
   turnOrder: string[];
   unitsByFaction: Record<string, UnitForStats[]>;
   factionStats: ApiFactionStats;
+  ringsByFaction: Record<string, StatsRingMark[]>;
+  ringsMode: RingsRuleMode;
+}
+
+type RingRow = { id: string; name: string; territory_id: string; power: number; bearer_hero_id: string };
+
+function ringsRuleFromManifest(manifest: Record<string, unknown>): { mode: RingsRuleMode; rings: RingRow[] } {
+  const rules = Array.isArray(manifest.special_rules) ? manifest.special_rules : [];
+  for (const raw of rules) {
+    const rule = asRecord(raw);
+    if (asString(rule.type) !== 'rings_of_power') continue;
+    const rings: RingRow[] = [];
+    for (const rawRing of Array.isArray(rule.rings) ? rule.rings : []) {
+      const r = asRecord(rawRing);
+      const id = asString(r.id);
+      if (!id) continue;
+      rings.push({
+        id,
+        name: asString(r.name) || id,
+        territory_id: asString(r.territory_id),
+        power: Math.max(0, Math.floor(asNumber(r.power, 0))),
+        bearer_hero_id: asString(r.bearer_hero_id).trim(),
+      });
+    }
+    return { mode: rule.is_optional === true ? 'optional' : 'always', rings };
+  }
+  return { mode: 'none', rings: [] };
 }
 
 /** Match-start preview from the current (possibly unsaved) admin setup bundle. */
-export function previewStatsFromBundle(bundle: AdminSetupBundle | null): AdminStatsPreview | null {
+export function previewStatsFromBundle(
+  bundle: AdminSetupBundle | null,
+  options: { rings?: boolean } = {},
+): AdminStatsPreview | null {
   if (!bundle) return null;
 
   const units = asRecord(bundle.units);
@@ -105,6 +137,7 @@ export function previewStatsFromBundle(bundle: AdminSetupBundle | null): AdminSt
         icon: subIconFile ? `/assets/factions/${subIconFile}` : parentIcon,
         color: asString(sub.color) || '#888888',
         alliance: asString(f.alliance),
+        parent: id,
       };
     }
   }
@@ -159,16 +192,48 @@ export function previewStatsFromBundle(bundle: AdminSetupBundle | null): AdminSt
     factionStatsMap[fid] = emptyStat();
   }
 
+  const manifest = asRecord(bundle.manifest);
+  const subfactionRules = asRecord(manifest.subfaction_rules);
+  const parentOf: Record<string, string> = {};
+  for (const [id, raw] of Object.entries(factions)) {
+    for (const rawSub of Array.isArray(asRecord(raw).subfactions) ? (asRecord(raw).subfactions as unknown[]) : []) {
+      const sid = asString(asRecord(rawSub).id);
+      if (sid) parentOf[sid] = id;
+    }
+  }
+  const controller = (fid: string): string => parentOf[fid] ?? fid;
+  const subfactionStatsMap: Record<string, FactionStatEntry> = {};
+  for (const sid of Object.keys(parentOf)) {
+    const economy = asString(asRecord(subfactionRules[sid]).economy) || 'none';
+    if (economy !== 'none') subfactionStatsMap[sid] = emptyStat();
+  }
+  /** Parent row plus, for subfaction-owned things, the subfaction's own row. */
+  const rowsFor = (fid: string): FactionStatEntry[] =>
+    [factionStatsMap[controller(fid)], subfactionStatsMap[fid]].filter((s): s is FactionStatEntry => Boolean(s));
+  const parentHoldsCapital = (pid: string): boolean => {
+    const capital = asString(asRecord(factions[pid]).capital);
+    return Boolean(capital) && asString(owners[capital]) === pid;
+  };
+  /** Production from this owner pays the parent only for a pool subfaction whose parent holds its capital. */
+  const paysParent = (fid: string): boolean => {
+    const pid = parentOf[fid];
+    if (!pid) return true;
+    return asString(asRecord(subfactionRules[fid]).economy) === 'pool' && parentHoldsCapital(pid);
+  };
+
   for (const [tid, raw] of Object.entries(territories)) {
     const t = asRecord(raw);
     const owner = asString(owners[tid]);
-    if (!owner || !(owner in factionStatsMap)) continue;
-    const st = factionStatsMap[owner];
-    st.territories += 1;
-    if (t.is_stronghold === true) st.strongholds += 1;
+    if (!owner) continue;
+    const pays = paysParent(owner);
     const ppt = powerCost(t.produces);
-    st.power_per_turn += ppt;
-    st.power += ppt;
+    for (const st of rowsFor(owner)) {
+      st.territories += 1;
+      if (t.is_stronghold === true) st.strongholds += 1;
+      if (pays) st.power_per_turn += ppt;
+    }
+    const parentRow = factionStatsMap[controller(owner)];
+    if (parentRow && pays) parentRow.power += ppt;
   }
 
   for (const unitList of Object.values(startingUnits)) {
@@ -180,9 +245,37 @@ export function previewStatsFromBundle(bundle: AdminSetupBundle | null): AdminSt
       if (!unitId || count <= 0) continue;
       const ud = asRecord(units[unitId]);
       const fid = asString(ud.faction);
-      if (!fid || !(fid in factionStatsMap)) continue;
-      factionStatsMap[fid].units = (factionStatsMap[fid].units ?? 0) + count;
-      factionStatsMap[fid].unit_power = (factionStatsMap[fid].unit_power ?? 0) + powerCost(ud.cost) * count;
+      if (!fid) continue;
+      for (const st of rowsFor(fid)) {
+        st.units = (st.units ?? 0) + count;
+        st.unit_power = (st.unit_power ?? 0) + powerCost(ud.cost) * count;
+      }
+    }
+  }
+
+  const ringsRule = ringsRuleFromManifest(manifest);
+  const ringsOn = ringsRule.mode === 'always' || (ringsRule.mode === 'optional' && options.rings !== false);
+  const ringsByFaction: Record<string, StatsRingMark[]> = {};
+  if (ringsOn) {
+    for (const ring of ringsRule.rings) {
+      let holder = '';
+      if (ring.bearer_hero_id) {
+        const here = Array.isArray(startingUnits[ring.territory_id]) ? (startingUnits[ring.territory_id] as unknown[]) : [];
+        for (const entry of here) {
+          const ud = asRecord(units[asString(asRecord(entry).unit_id)]);
+          if (asString(ud.hero_id).trim() === ring.bearer_hero_id) {
+            holder = asString(ud.faction);
+            break;
+          }
+        }
+      }
+      if (!holder) holder = asString(owners[ring.territory_id]);
+      if (!holder) continue;
+      (ringsByFaction[holder] ??= []).push({ id: ring.id, name: ring.name });
+      if (!paysParent(holder)) continue;
+      for (const st of rowsFor(holder)) st.power_per_turn += ring.power;
+      const parentRow = factionStatsMap[controller(holder)];
+      if (parentRow) parentRow.power += ring.power;
     }
   }
 
@@ -206,6 +299,7 @@ export function previewStatsFromBundle(bundle: AdminSetupBundle | null): AdminSt
     alliances,
     neutral_strongholds,
   };
+  if (Object.keys(subfactionStatsMap).length > 0) factionStats.subfactions = subfactionStatsMap;
   const vc = asRecord(asRecord(bundle.manifest).victory_criteria).strongholds;
   const sh = asRecord(vc);
   const stronghold_victory: { good?: number; evil?: number } = {};
@@ -217,5 +311,5 @@ export function previewStatsFromBundle(bundle: AdminSetupBundle | null): AdminSt
     factionStats.stronghold_victory = stronghold_victory;
   }
 
-  return { factionData, turnOrder, unitsByFaction, factionStats };
+  return { factionData, turnOrder, unitsByFaction, factionStats, ringsByFaction, ringsMode: ringsRule.mode };
 }

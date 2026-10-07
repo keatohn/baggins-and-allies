@@ -482,6 +482,21 @@
   overflow-x: auto;
 }
 
+.stats-modal-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.6rem;
+  font-family: var(--font-parchment);
+  color: var(--ink-light);
+}
+
+.stats-modal-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
 /* Help: taller scroll area than default stats/specials */
 .help-modal-body {
   max-height: min(70vh, 560px);
@@ -843,6 +858,14 @@
   align-items: center;
   gap: 0.4rem;
   white-space: nowrap;
+}
+
+.stats-modal .stats-faction-row.stats-subfaction-row .stats-col-faction {
+  padding-left: 1.9em;
+}
+
+.stats-modal .stats-faction-row.stats-subfaction-row td {
+  color: var(--ink-faded);
 }
 
 .stats-modal .stats-faction-rings {

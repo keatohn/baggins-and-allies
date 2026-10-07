@@ -113,6 +113,8 @@ export interface FactionStatEntry {
 export interface ApiFactionStats {
   factions: Record<string, FactionStatEntry>;
   alliances: Record<string, FactionStatEntry>;
+  /** Each subfaction's share of its parent's row; power_per_turn is only what it pays the parent. */
+  subfactions?: Record<string, FactionStatEntry>;
   /** Strongholds with no owner (e.g. Moria). Shown as gray segment in header bar. */
   neutral_strongholds?: number;
   /** From setup victory_criteria.strongholds: marker positions on the alliance stronghold bar (good / evil thresholds). */

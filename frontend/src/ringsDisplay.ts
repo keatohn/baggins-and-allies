@@ -111,14 +111,11 @@ export function standaloneRings(
   );
 }
 
-type FactionRow = { parent?: string } | undefined;
-
-/** Faction row that holds this ring: the named bearer's faction, otherwise the territory owner. */
+/** Faction (or subfaction) that holds this ring: the named bearer's faction, otherwise the territory owner. */
 export function ringHoldingFactionId(
   ring: Pick<RingView, 'bearer_hero_id' | 'territory_id'>,
   territoryOwner: string | null | undefined,
   unitDefs: Record<string, { hero_id?: string | null; faction?: string } | undefined>,
-  factionData: Record<string, FactionRow>,
 ): string | null {
   const bearer = (ring.bearer_hero_id || '').trim();
   let faction = '';
@@ -135,9 +132,7 @@ export function ringHoldingFactionId(
   if (!faction) {
     faction = typeof territoryOwner === 'string' ? territoryOwner.trim() : '';
   }
-  if (!faction) return null;
-  const parent = factionData[faction]?.parent;
-  return typeof parent === 'string' && parent.trim() ? parent.trim() : faction;
+  return faction || null;
 }
 
 export function boostingRingsFromRules(specialRules: unknown): RingView[] {

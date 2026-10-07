@@ -5164,7 +5164,7 @@ def _handle_end_turn(
             if contributed:
                 contributing_territories.append(territory_id)
 
-        ring_power = power_for_faction(state, old_faction, unit_defs)
+        ring_power = power_for_faction(state, old_faction, unit_defs, faction_defs)
         if ring_power > 0:
             pending_income["power"] = pending_income.get("power", 0) + ring_power
 
