@@ -341,8 +341,16 @@ button.chronicle__option--active {
   color: var(--ink-faded);
 }
 
+.chronicle__option-mode {
+  font-family: var(--font-parchment), Georgia, serif;
+  font-style: italic;
+  font-size: 0.78rem;
+  color: var(--ink-faded);
+}
+
 .chronicle__option--active .chronicle__option-meta,
-.chronicle__option--active .chronicle__option-factions {
+.chronicle__option--active .chronicle__option-factions,
+.chronicle__option--active .chronicle__option-mode {
   color: var(--ink);
 }
 

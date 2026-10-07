@@ -84,8 +84,11 @@ def scenario_menu_entry(
     image = timeline_image_filename(manifest)
     if image is not None:
         entry["timeline_image"] = image
-    from backend.engine.rings import mode_declared
-    if mode_declared(manifest.get("special_rules")):
+    from backend.engine.special_rules import optional_rule_menu, rings_rule_is_mandatory
+    optional = optional_rule_menu(manifest.get("special_rules"))
+    if optional:
+        entry["optional_rules"] = optional
+    if rings_rule_is_mandatory(manifest.get("special_rules")):
         entry["rings_of_power"] = True
     return entry
 

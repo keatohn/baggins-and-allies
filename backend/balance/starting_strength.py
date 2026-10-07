@@ -6,7 +6,7 @@ Three separate readings, then one optional index:
 - Stock: effective unit power. Raw unit power is discounted by how many turns
   a stack needs before it can affect an important attack or defense.
 - Flow: economic power. Future production over a short horizon, discounted,
-  with fading-territory schedules applied turn by turn.
+  with evolving-territory schedules applied turn by turn.
 - Victory pressure: an alliance keeps a smaller share of its units and economy
   as more strongholds remain. One still needed keeps the full score. If one
   alliance already holds enough and another still needs more, the first has
@@ -265,7 +265,7 @@ def _parameters(cfg: BalanceConfig) -> dict[str, Any]:
         + ". "
         f"Economic power discounts the next {cfg.horizon_rounds} rounds of production by {cfg.discount} "
         f"each round, so a flat economy counts as {factor:.2f} times current production. "
-        "Fading territories use their printed decline. Territory count is shown and left out of the score. "
+        "Evolving territories follow their step until they stop. Territory count is shown and left out of the score. "
         "The alliance percentage compares setups; it is a resource index, separate from win probability. "
         "Land paths use ground and ford links and do not board ships, so an army with no land route "
         "stays at the floor."

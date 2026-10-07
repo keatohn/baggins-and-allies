@@ -36,6 +36,17 @@ const TAB_KEYS = [
 
 type TabKey = (typeof TAB_KEYS)[number];
 
+function printedTerritoryPower(territories: AdminSetupBundle['territories'] | undefined): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!territories) return out;
+  for (const [id, raw] of Object.entries(territories)) {
+    const produces = raw && typeof raw === 'object' ? (raw as { produces?: { power?: unknown } }).produces : undefined;
+    const n = Number(produces?.power);
+    out[id] = Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0;
+  }
+  return out;
+}
+
 function factionAndSubfactionIds(factions: AdminSetupBundle['factions'] | undefined): string[] {
   const ids: string[] = [];
   const raw = factions && typeof factions === 'object' ? factions : {};
@@ -625,6 +636,7 @@ export default function Admin() {
             setupId={selectedId}
             manifest={bundle.manifest as Record<string, unknown>}
             territoryIds={Object.keys((bundle.territories as Record<string, unknown>) ?? {}).sort()}
+            territoryPower={printedTerritoryPower(bundle.territories)}
             onManifestChange={(m) =>
               setBundle((b) => (b ? { ...b, manifest: { ...m, id: selectedId } as typeof b.manifest } : null))
             }

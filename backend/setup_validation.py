@@ -8,7 +8,7 @@ import json
 from typing import Any
 
 from backend.engine.definitions import timeline_image_filename
-from backend.engine.special_rules import parse_nonneg_int
+from backend.engine.special_rules import parse_nonneg_int, parse_signed_int
 
 
 def _as_obj(raw: str | dict[str, Any] | None, label: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -309,7 +309,7 @@ def validate_setup_documents(
         if not isinstance(special_rules, list):
             errors.append("manifest.special_rules must be a list when set")
         else:
-            seen_fading: set[str] = set()
+            seen_evolving: set[str] = set()
             for i, rule in enumerate(special_rules):
                 if not isinstance(rule, dict):
                     errors.append(f"manifest.special_rules[{i}] must be an object")
@@ -318,10 +318,16 @@ def validate_setup_documents(
                 if not isinstance(typ, str) or not typ.strip():
                     errors.append(f'manifest.special_rules[{i}].type must be a non-empty string')
                     continue
+                _validate_special_rule_option(rule, i, errors)
                 if typ == "rings_of_power":
                     _validate_rings_of_power(rule, i, territory_ids, errors)
                     continue
-                if typ != "fading_territory":
+                if typ == "fading_territory":
+                    errors.append(
+                        f'manifest.special_rules[{i}].type fading_territory is now evolving_territory'
+                    )
+                    continue
+                if typ != "evolving_territory":
                     continue
                 rows = rule.get("territories")
                 if not isinstance(rows, list) or not rows:
@@ -335,17 +341,55 @@ def validate_setup_documents(
                         errors.append(f"{prefix} must be an object")
                         continue
                     tid = row.get("territory_id")
-                    if not isinstance(tid, str) or tid not in territory_ids:
+                    known = isinstance(tid, str) and tid in territory_ids
+                    if not known:
                         errors.append(f'{prefix}.territory_id must be a known territory')
-                    elif tid in seen_fading:
-                        errors.append(f'{prefix} duplicates fading territory "{tid}"')
+                    elif tid in seen_evolving:
+                        errors.append(f'{prefix} duplicates evolving territory "{tid}"')
                     else:
-                        seen_fading.add(tid)
-                    for key in ("fade_per_turn", "floor"):
-                        if parse_nonneg_int(row.get(key)) is None:
-                            errors.append(f"{prefix}.{key} must be an integer >= 0")
+                        seen_evolving.add(tid)
+                    step = parse_signed_int(row.get("step"))
+                    if step is None or step == 0:
+                        errors.append(f"{prefix}.step must be a non-zero integer")
+                        step = None
+                    stop = parse_nonneg_int(row.get("stop_at"))
+                    if stop is None:
+                        errors.append(f"{prefix}.stop_at must be an integer >= 0")
+                    elif known and step is not None:
+                        printed = _printed_territory_power(territories.get(tid))
+                        if step > 0 and stop <= printed:
+                            errors.append(
+                                f"{prefix}.stop_at must be above printed power {printed} when step is positive"
+                            )
+                        elif step < 0 and stop >= printed:
+                            errors.append(
+                                f"{prefix}.stop_at must be below printed power {printed} when step is negative"
+                            )
 
     return errors
+
+
+def _validate_special_rule_option(rule: dict[str, Any], index: int, errors: list[str]) -> None:
+    prefix = f"manifest.special_rules[{index}]"
+    if "is_optional" in rule and not isinstance(rule.get("is_optional"), bool):
+        errors.append(f"{prefix}.is_optional must be a boolean")
+    name = rule.get("name")
+    if rule.get("is_optional") is True:
+        if not isinstance(name, str) or not name.strip():
+            errors.append(f"{prefix}.name must be a non-empty string when is_optional is true")
+    elif "name" in rule and name not in (None, ""):
+        if not isinstance(name, str) or not name.strip():
+            errors.append(f"{prefix}.name must be a non-empty string when set")
+
+
+def _printed_territory_power(territory: Any) -> int:
+    if not isinstance(territory, dict):
+        return 0
+    produces = territory.get("produces")
+    if not isinstance(produces, dict):
+        return 0
+    power = parse_nonneg_int(produces.get("power"))
+    return power if power is not None else 0
 
 
 def _validate_rings_of_power(

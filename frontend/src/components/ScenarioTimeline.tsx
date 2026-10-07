@@ -247,6 +247,9 @@ function ScenarioChoice({
       {Array.isArray(factions) && factions.length > 0 && (
         <span className="chronicle__option-factions">{factions.join(', ')}</span>
       )}
+      {scenario.optional_rules?.map((rule) => (
+        <span key={rule.type} className="chronicle__option-mode">Special Mode: {rule.name}</span>
+      ))}
     </button>
   );
 }

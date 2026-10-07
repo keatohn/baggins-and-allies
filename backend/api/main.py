@@ -92,7 +92,6 @@ from backend.engine.definitions import (
     TerritoryDefinition,
     parse_prefire_penalty_from_manifest,
 )
-from backend.engine.rings import mode_declared
 from backend.engine.shadow import (
     apply_shadow_view,
     choose_viewer_alliance,
@@ -101,8 +100,9 @@ from backend.engine.shadow import (
     visible_territory_ids,
 )
 from backend.engine.special_rules import (
-    fading_territory_index,
+    evolving_territory_index,
     parse_starting_message,
+    select_special_rules,
     territory_current_power,
 )
 from backend.audio_gains import load_audio_gains, load_menu_music, save_audio_settings
@@ -353,8 +353,10 @@ class CreateGameRequest(BaseModel):
     heroes_enabled: bool = True
     """When True, each alliance sees armies only on its land and one territory beyond. Default off."""
     shadow_of_war: bool = False
-    """When True, spawn the manifest Rings of Power catalog. Requires heroes. Default off."""
+    """Legacy rings switch, used only when optional_rules is omitted. Default off."""
     rings_of_power: bool = False
+    """Optional special rules chosen in create game, keyed by rule type. Missing types default on."""
+    optional_rules: dict[str, bool] | None = None
 
 
 class JoinGameRequest(BaseModel):
@@ -1118,11 +1120,11 @@ def state_for_response(state: GameState, game_id: str | None = None, db: Session
         else:
             ud, td, fd = unit_defs, territory_defs, faction_defs
         out["faction_stats"] = get_faction_stats(state, td, fd, ud)
-        fading = fading_territory_index(getattr(state, "special_rules", None))
-        if fading:
+        evolving = evolving_territory_index(getattr(state, "special_rules", None))
+        if evolving:
             out["territory_power"] = {
                 tid: territory_current_power(state, tid, td.get(tid))
-                for tid in fading
+                for tid in evolving
             }
         if state.active_combat and game_id and db is not None:
             combat_stat_modifiers, combat_specials, combat_attacker_effective_attack_override = _get_combat_modifiers_and_specials(state, ud, td, fd)
@@ -1577,6 +1579,11 @@ def create_game(
     victory_criteria = setup.get("victory_criteria")
     camp_cost = setup.get("camp_cost")
     stronghold_repair_cost = setup.get("stronghold_repair_cost")
+    chosen_rules, rings_on = select_special_rules(
+        setup.get("special_rules"),
+        request.optional_rules,
+        legacy_rings=bool(request.rings_of_power),
+    )
     state = initialize_game_state(
         faction_defs=fd,
         territory_defs=td,
@@ -1587,12 +1594,10 @@ def create_game(
         camp_cost=camp_cost,
         stronghold_repair_cost=stronghold_repair_cost,
         prefire_penalty=parse_prefire_penalty_from_manifest(setup.get("prefire_penalty")),
-        heroes_enabled=bool(request.heroes_enabled) or (
-            bool(request.rings_of_power) and mode_declared(setup.get("special_rules"))
-        ),
+        heroes_enabled=bool(request.heroes_enabled) or rings_on,
         shadow_of_war=bool(request.shadow_of_war),
-        rings_of_power=bool(request.rings_of_power) and mode_declared(setup.get("special_rules")),
-        special_rules=setup.get("special_rules"),
+        rings_of_power=rings_on,
+        special_rules=chosen_rules,
         subfaction_rules=setup.get("subfaction_rules"),
     )
     state.map_asset = setup["map_asset"]

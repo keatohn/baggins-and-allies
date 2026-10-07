@@ -159,7 +159,7 @@ export interface ApiGameState {
   /** Power cost per stronghold HP repaired (from setup manifest). */
   stronghold_repair_cost?: number;
   /**
-   * Current power production for territories under a fading_territory special rule.
+   * Current power production for territories under an evolving_territory special rule.
    * Territories omitted here still use the printed definition value.
    */
   territory_power?: Record<string, number>;
@@ -843,8 +843,10 @@ export interface SetupInfo {
     good_count?: number;
     evil_count?: number;
   };
-  /** Present when the scenario manifest declares a Rings of Power catalog. */
+  /** Present when Rings of Power is part of the scenario and not a player choice. */
   rings_of_power?: boolean;
+  /** Special rules the player can turn on or off. They start on. */
+  optional_rules?: { type: string; name: string }[];
 }
 
 async function authFetchJson<T>(url: string, body: object): Promise<T> {
@@ -976,6 +978,7 @@ export const api = {
     heroesEnabled: boolean = true,
     shadowOfWar: boolean = false,
     ringsOfPower: boolean = false,
+    optionalRules?: Record<string, boolean>,
   ) =>
     fetchJson<{ game_id: string; game_code: string | null; name: string; state?: ApiGameState; turn_order?: string[] }>('/games/create', {
       method: 'POST',
@@ -985,6 +988,7 @@ export const api = {
         heroes_enabled: heroesEnabled,
         shadow_of_war: shadowOfWar,
         rings_of_power: ringsOfPower,
+        ...(optionalRules != null && { optional_rules: optionalRules }),
         ...(setupId != null && { setup_id: setupId }),
       }),
     }),

@@ -178,11 +178,11 @@ def test_flat_economy_uses_the_three_round_discount():
     assert good["starting_power_score"] == pytest.approx(good["economic_power"], abs=0.02)
 
 
-def test_fading_territory_changes_later_rounds_only():
+def test_evolving_territory_changes_later_rounds_only():
     territories = {"home": _territory("home", [], power=10, stronghold=True)}
     rules = [{
-        "type": "fading_territory",
-        "territories": [{"territory_id": "home", "fade_per_turn": 2, "floor": 4}],
+        "type": "evolving_territory",
+        "territories": [{"territory_id": "home", "step": -2, "stop_at": 4}],
     }]
     report = compute_starting_strength(
         _bundle(

@@ -332,41 +332,103 @@ function TerritoryImageField({ value, onApply }: { value: unknown; onApply: (ima
   );
 }
 
-type FadingTerritoryRow = { territory_id: string; fade_per_turn: number; floor: number };
+type EvolvingTerritoryRow = { territory_id: string; step: number; stop_at: number };
 
-function fadingRowsFromManifest(manifest: Record<string, unknown>): FadingTerritoryRow[] {
+function evolvingRowsFromManifest(manifest: Record<string, unknown>): EvolvingTerritoryRow[] {
   const rules = manifest.special_rules;
   if (!Array.isArray(rules)) return [];
-  const rows: FadingTerritoryRow[] = [];
+  const rows: EvolvingTerritoryRow[] = [];
   for (const rule of rules) {
-    if (!rule || typeof rule !== 'object' || (rule as { type?: string }).type !== 'fading_territory') continue;
+    if (!rule || typeof rule !== 'object') continue;
+    const typ = (rule as { type?: string }).type;
+    if (typ !== 'evolving_territory' && typ !== 'fading_territory') continue;
     const territories = (rule as { territories?: unknown }).territories;
     if (!Array.isArray(territories)) continue;
     for (const row of territories) {
       if (!row || typeof row !== 'object') continue;
       const rec = row as Record<string, unknown>;
-      const fade = Number(rec.fade_per_turn);
-      const floor = Number(rec.floor);
+      const stop = Number(rec.stop_at != null ? rec.stop_at : rec.floor);
+      const rawStep = typ === 'fading_territory' ? -Number(rec.fade_per_turn) : Number(rec.step);
       rows.push({
         territory_id: typeof rec.territory_id === 'string' ? rec.territory_id : '',
-        fade_per_turn: Number.isFinite(fade) ? Math.max(0, Math.trunc(fade)) : 0,
-        floor: Number.isFinite(floor) ? Math.max(0, Math.trunc(floor)) : 0,
+        step: Number.isFinite(rawStep) ? Math.trunc(rawStep) : 0,
+        stop_at: Number.isFinite(stop) ? Math.max(0, Math.trunc(stop)) : 0,
       });
     }
   }
   return rows;
 }
 
-function manifestWithFadingRows(
+function specialRuleMeta(manifest: Record<string, unknown>, type: string): { name: string; is_optional: boolean } {
+  const rules = Array.isArray(manifest.special_rules) ? manifest.special_rules : [];
+  for (const rule of rules) {
+    if (!rule || typeof rule !== 'object' || (rule as { type?: string }).type !== type) continue;
+    const rec = rule as { name?: unknown; is_optional?: unknown };
+    return {
+      name: typeof rec.name === 'string' ? rec.name : '',
+      is_optional: rec.is_optional === true,
+    };
+  }
+  return { name: '', is_optional: false };
+}
+
+function withRuleMeta(
+  rule: Record<string, unknown>,
+  meta: { name: string; is_optional: boolean },
+): Record<string, unknown> {
+  const name = meta.name.trim();
+  if (name) rule.name = name;
+  rule.is_optional = meta.is_optional;
+  return rule;
+}
+
+function RuleOptionFields({
+  meta,
+  onChange,
+}: {
+  meta: { name: string; is_optional: boolean };
+  onChange: (next: { name: string; is_optional: boolean }) => void;
+}) {
+  return (
+    <>
+      {fieldRow(
+        'Rule name',
+        <input
+          type="text"
+          className="admin-form__input"
+          placeholder="Shown as Special Mode"
+          value={meta.name}
+          onChange={(e) => onChange({ ...meta, name: e.target.value })}
+        />,
+      )}
+      {fieldRow(
+        'Optional',
+        <input
+          type="checkbox"
+          checked={meta.is_optional}
+          onChange={(e) => onChange({ ...meta, is_optional: e.target.checked })}
+        />,
+      )}
+      <p className="admin-form__micro">
+        Optional rules show on the scenario card under the factions, in italics, and create game asks whether they are on. They start on. A name is required when this is checked.
+      </p>
+    </>
+  );
+}
+
+function manifestWithEvolvingRows(
   manifest: Record<string, unknown>,
-  rows: FadingTerritoryRow[],
+  rows: EvolvingTerritoryRow[],
+  meta: { name: string; is_optional: boolean },
 ): Record<string, unknown> {
   const rules = Array.isArray(manifest.special_rules) ? manifest.special_rules : [];
-  const others = rules.filter(
-    (rule) => !rule || typeof rule !== 'object' || (rule as { type?: string }).type !== 'fading_territory',
-  );
+  const others = rules.filter((rule) => {
+    if (!rule || typeof rule !== 'object') return true;
+    const typ = (rule as { type?: string }).type;
+    return typ !== 'evolving_territory' && typ !== 'fading_territory';
+  });
   const nextRules = rows.length
-    ? [...others, { type: 'fading_territory', territories: rows }]
+    ? [...others, withRuleMeta({ type: 'evolving_territory', territories: rows }, meta)]
     : others;
   const next = { ...manifest };
   if (nextRules.length) next.special_rules = nextRules;
@@ -374,33 +436,51 @@ function manifestWithFadingRows(
   return next;
 }
 
-function FadingTerritoryFields({
+function boundWarning(row: EvolvingTerritoryRow, printed: number | undefined): string | null {
+  if (!row.territory_id || printed == null || row.step === 0) return null;
+  if (row.step > 0 && row.stop_at <= printed) {
+    return `Stop at must be above printed power ${printed}.`;
+  }
+  if (row.step < 0 && row.stop_at >= printed) {
+    return `Stop at must be below printed power ${printed}.`;
+  }
+  return null;
+}
+
+function EvolvingTerritoryFields({
   manifest,
   territoryIds,
+  territoryPower,
   onManifestChange,
 }: {
   manifest: Record<string, unknown>;
   territoryIds: string[];
+  territoryPower: Record<string, number>;
   onManifestChange: (next: Record<string, unknown>) => void;
 }) {
-  const rows = fadingRowsFromManifest(manifest);
+  const rows = evolvingRowsFromManifest(manifest);
+  const meta = specialRuleMeta(manifest, 'evolving_territory');
   const used = new Set(rows.map((r) => r.territory_id).filter(Boolean));
 
-  const write = (nextRows: FadingTerritoryRow[]) => {
-    onManifestChange(manifestWithFadingRows(manifest, nextRows));
+  const write = (nextRows: EvolvingTerritoryRow[], nextMeta = meta) => {
+    onManifestChange(manifestWithEvolvingRows(manifest, nextRows, nextMeta));
   };
 
   return (
     <>
       {rows.length > 0 && (
+        <RuleOptionFields meta={meta} onChange={(next) => write(rows, next)} />
+      )}
+      {rows.length > 0 && (
         <div className="admin-form__rule-list">
           {rows.map((row, index) => {
             const options = territoryIds.filter((id) => id === row.territory_id || !used.has(id));
+            const warning = boundWarning(row, row.territory_id ? territoryPower[row.territory_id] : undefined);
             return (
               <div key={`${row.territory_id || 'new'}-${index}`} className="admin-form__rule-row">
                 <select
                   className="admin-form__input"
-                  aria-label="Fading territory"
+                  aria-label="Evolving territory"
                   value={row.territory_id}
                   onChange={(e) => {
                     const next = rows.slice();
@@ -416,33 +496,32 @@ function FadingTerritoryFields({
                   ))}
                 </select>
                 <label className="admin-form__inline-label">
-                  Fade / turn
+                  Step / turn
                   <input
                     type="number"
-                    min={0}
                     className="admin-form__input admin-form__input--narrow"
-                    aria-label="Fade per turn"
-                    value={String(row.fade_per_turn)}
+                    aria-label="Step per turn"
+                    value={String(row.step)}
                     onChange={(e) => {
                       const n = Number(e.target.value);
                       const next = rows.slice();
-                      next[index] = { ...row, fade_per_turn: Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0 };
+                      next[index] = { ...row, step: Number.isFinite(n) ? Math.trunc(n) : 0 };
                       write(next);
                     }}
                   />
                 </label>
                 <label className="admin-form__inline-label">
-                  Floor
+                  Stop at
                   <input
                     type="number"
                     min={0}
                     className="admin-form__input admin-form__input--narrow"
-                    aria-label="Power floor"
-                    value={String(row.floor)}
+                    aria-label="Stop at"
+                    value={String(row.stop_at)}
                     onChange={(e) => {
                       const n = Number(e.target.value);
                       const next = rows.slice();
-                      next[index] = { ...row, floor: Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0 };
+                      next[index] = { ...row, stop_at: Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0 };
                       write(next);
                     }}
                   />
@@ -454,6 +533,7 @@ function FadingTerritoryFields({
                 >
                   Remove
                 </button>
+                {warning && <p className="admin-form__micro">{warning}</p>}
               </div>
             );
           })}
@@ -465,13 +545,13 @@ function FadingTerritoryFields({
         disabled={territoryIds.length === 0 || used.size >= territoryIds.length}
         onClick={() => {
           const territory_id = territoryIds.find((id) => !used.has(id)) ?? '';
-          write([...rows, { territory_id, fade_per_turn: 1, floor: 0 }]);
+          write([...rows, { territory_id, step: -1, stop_at: 0 }]);
         }}
       >
-        Add fading territory
+        Add evolving territory
       </button>
       <p className="admin-form__micro">
-        Each new turn, that territory produces this much less power until it reaches the floor. Turn 1 still uses the printed power.
+        Each new turn, power changes by the step until it reaches Stop at. A negative step must stop below the printed power. A positive step must stop above it. Turn 1 still uses the printed power.
       </p>
     </>
   );
@@ -869,7 +949,11 @@ function ringsFromManifest(manifest: Record<string, unknown>): RingRow[] {
   return rows;
 }
 
-function manifestWithRings(manifest: Record<string, unknown>, rows: RingRow[]): Record<string, unknown> {
+function manifestWithRings(
+  manifest: Record<string, unknown>,
+  rows: RingRow[],
+  meta: { name: string; is_optional: boolean },
+): Record<string, unknown> {
   const rules = Array.isArray(manifest.special_rules) ? manifest.special_rules : [];
   const others = rules.filter(
     (rule) => !rule || typeof rule !== 'object' || (rule as { type?: string }).type !== 'rings_of_power',
@@ -891,7 +975,9 @@ function manifestWithRings(manifest: Record<string, unknown>, rows: RingRow[]): 
     }
     return out;
   });
-  const nextRules = rings.length ? [...others, { type: 'rings_of_power', rings }] : others;
+  const nextRules = rings.length
+    ? [...others, withRuleMeta({ type: 'rings_of_power', rings }, meta)]
+    : others;
   const next = { ...manifest };
   if (nextRules.length) next.special_rules = nextRules;
   else delete next.special_rules;
@@ -908,7 +994,8 @@ function RingFields({
   onManifestChange: (next: Record<string, unknown>) => void;
 }) {
   const rows = ringsFromManifest(manifest);
-  const write = (nextRows: RingRow[]) => onManifestChange(manifestWithRings(manifest, nextRows));
+  const meta = specialRuleMeta(manifest, 'rings_of_power');
+  const write = (nextRows: RingRow[], nextMeta = meta) => onManifestChange(manifestWithRings(manifest, nextRows, nextMeta));
   const patch = (index: number, partial: Partial<RingRow>) => {
     write(rows.map((row, i) => (i === index ? { ...row, ...partial } : row)));
   };
@@ -922,6 +1009,9 @@ function RingFields({
 
   return (
     <>
+      {rows.length > 0 && (
+        <RuleOptionFields meta={meta} onChange={(next) => write(rows, next)} />
+      )}
       {rows.length > 0 && (
         <div className="admin-form__rule-list">
           {rows.map((row, index) => (
@@ -1031,11 +1121,13 @@ export function ManifestPanel({
   setupId,
   manifest,
   territoryIds,
+  territoryPower,
   onManifestChange,
 }: {
   setupId: string;
   manifest: Record<string, unknown>;
   territoryIds: string[];
+  territoryPower: Record<string, number>;
   onManifestChange: (next: Record<string, unknown>) => void;
 }) {
   return (
@@ -1203,10 +1295,11 @@ export function ManifestPanel({
         <RingFields manifest={manifest} territoryIds={territoryIds} onManifestChange={onManifestChange} />,
       )}
       {fieldRow(
-        'Fading territories',
-        <FadingTerritoryFields
+        'Evolving territories',
+        <EvolvingTerritoryFields
           manifest={manifest}
           territoryIds={territoryIds}
+          territoryPower={territoryPower}
           onManifestChange={onManifestChange}
         />,
       )}

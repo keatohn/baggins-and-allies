@@ -299,7 +299,7 @@ export function BalanceModal({
                 <dd>
                   That production over the next {report.parameters.horizon_rounds} rounds, discounted by {report.parameters.discount}{' '}
                   each round. A flat economy counts as {report.parameters.economic_coefficient.toFixed(2)} times current
-                  production. Fading territories use their printed decline.
+                  production. Evolving territories follow their step until they stop.
                 </dd>
                 <dt>VP</dt>
                 <dd>

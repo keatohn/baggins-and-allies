@@ -734,7 +734,7 @@ class GameState:
     # Create-game switch. The ring catalog lives in special_rules; this turns it on for the game.
     rings_of_power: bool = False
     rings: list["Ring"] = field(default_factory=list)
-    # Snapshot of manifest special_rules (fading territory, etc.). Empty on older games.
+    # Snapshot of manifest special_rules (evolving territory, rings, etc.). Empty on older games.
     special_rules: list[dict[str, Any]] = field(default_factory=list)
     # Snapshot of manifest subfaction_rules, keyed by subfaction id.
     subfaction_rules: dict[str, dict[str, Any]] = field(default_factory=dict)

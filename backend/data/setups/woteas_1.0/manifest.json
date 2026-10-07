@@ -26,6 +26,8 @@
   "special_rules": [
     {
       "type": "rings_of_power",
+      "name": "Rings of Power",
+      "is_optional": true,
       "rings": [
         {"id": "narya", "name": "Narya", "territory_id": "mithlond", "power": 3},
         {"id": "nenya", "name": "Nenya", "territory_id": "ost_in_edhil", "power": 3},

@@ -10,7 +10,7 @@ export default function CreateGame() {
   const [isMultiplayer, setIsMultiplayer] = useState(false);
   const [heroesEnabled, setHeroesEnabled] = useState(true);
   const [shadowOfWar, setShadowOfWar] = useState(false);
-  const [ringsOfPower, setRingsOfPower] = useState(false);
+  const [optionalRules, setOptionalRules] = useState<Record<string, boolean>>({});
   const [setups, setSetups] = useState<SetupInfo[]>([]);
   const [selectedSetupId, setSelectedSetupId] = useState<string | null>(null);
   const [loadingSetups, setLoadingSetups] = useState(true);
@@ -51,6 +51,16 @@ export default function CreateGame() {
       setSelectedSetupId(scenariosWithContext[0].id);
   }, [scenariosWithContext, selectedSetupId]);
 
+  useEffect(() => {
+    const scenario = setups.find((s) => s.id === selectedSetupId);
+    const next: Record<string, boolean> = {};
+    for (const rule of scenario?.optional_rules ?? []) next[rule.type] = true;
+    setOptionalRules(next);
+    if (scenario?.rings_of_power) setHeroesEnabled(true);
+  }, [selectedSetupId, setups]);
+
+  const selectedScenario = scenariosWithContext.find((s) => s.id === selectedSetupId) ?? null;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -62,7 +72,8 @@ export default function CreateGame() {
         selectedSetupId ?? undefined,
         heroesEnabled,
         shadowOfWar,
-        Boolean(setups.find((s) => s.id === selectedSetupId)?.rings_of_power) && ringsOfPower,
+        Boolean(selectedScenario?.rings_of_power) || optionalRules.rings_of_power === true,
+        optionalRules,
       );
       const initialState = res.state != null
         ? { ...res.state, turn_order: res.turn_order ?? res.state.turn_order }
@@ -77,8 +88,6 @@ export default function CreateGame() {
       setLoading(false);
     }
   };
-
-  const selectedScenario = scenariosWithContext.find((s) => s.id === selectedSetupId) ?? null;
 
   return (
     <div className="create-game-page">
@@ -168,33 +177,45 @@ export default function CreateGame() {
               <button
                 type="button"
                 className={`create-game-form__picker-option ${!heroesEnabled ? 'create-game-form__picker-option--active' : ''}`}
-                onClick={() => { setHeroesEnabled(false); setRingsOfPower(false); }}
+                onClick={() => {
+                  if (selectedScenario?.rings_of_power) return;
+                  setHeroesEnabled(false);
+                  setOptionalRules((prev) => (
+                    prev.rings_of_power === undefined ? prev : { ...prev, rings_of_power: false }
+                  ));
+                }}
               >
                 Off
               </button>
             </div>
           </div>
-          {setups.find((s) => s.id === selectedSetupId)?.rings_of_power ? (
-          <div className="create-game-form__field">
-            <span className="create-game-form__field-label">Rings of Power</span>
-            <div className="create-game-form__picker" role="group" aria-label="Rings of Power on or off">
-              <button
-                type="button"
-                className={`create-game-form__picker-option ${ringsOfPower ? 'create-game-form__picker-option--active' : ''}`}
-                onClick={() => { setRingsOfPower(true); setHeroesEnabled(true); }}
-              >
-                On
-              </button>
-              <button
-                type="button"
-                className={`create-game-form__picker-option ${!ringsOfPower ? 'create-game-form__picker-option--active' : ''}`}
-                onClick={() => setRingsOfPower(false)}
-              >
-                Off
-              </button>
-            </div>
-          </div>
-          ) : null}
+          {(selectedScenario?.optional_rules ?? []).map((rule) => {
+            const enabled = optionalRules[rule.type] !== false;
+            return (
+              <div key={rule.type} className="create-game-form__field">
+                <span className="create-game-form__field-label">{rule.name}</span>
+                <div className="create-game-form__picker" role="group" aria-label={`${rule.name} on or off`}>
+                  <button
+                    type="button"
+                    className={`create-game-form__picker-option ${enabled ? 'create-game-form__picker-option--active' : ''}`}
+                    onClick={() => {
+                      setOptionalRules((prev) => ({ ...prev, [rule.type]: true }));
+                      if (rule.type === 'rings_of_power') setHeroesEnabled(true);
+                    }}
+                  >
+                    On
+                  </button>
+                  <button
+                    type="button"
+                    className={`create-game-form__picker-option ${!enabled ? 'create-game-form__picker-option--active' : ''}`}
+                    onClick={() => setOptionalRules((prev) => ({ ...prev, [rule.type]: false }))}
+                  >
+                    Off
+                  </button>
+                </div>
+              </div>
+            );
+          })}
           <div className="create-game-form__field">
             <span className="create-game-form__field-label">Shadow of War</span>
             <div className="create-game-form__picker" role="group" aria-label="Shadow of War on or off">
