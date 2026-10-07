@@ -13,8 +13,8 @@
       "dagorlad",
       "gorgoroth",
       "ithilien",
-      "mount_doom",
-      "the_black_gate"
+      "orodruin",
+      "morannon"
     ],
     "aerial_adjacent": [],
     "ford_adjacent": []
@@ -33,7 +33,7 @@
       "emyn_muil",
       "nindalf",
       "rhun_hills",
-      "the_black_gate",
+      "morannon",
       "udun"
     ],
     "aerial_adjacent": [],
@@ -163,7 +163,7 @@
     "display_name": "Khazad-dûm",
     "terrain_type": "mountains",
     "produces": {
-      "power": 1
+      "power": 8
     },
     "is_stronghold": true,
     "ownable": true,
@@ -175,14 +175,16 @@
       "south_eregion"
     ],
     "aerial_adjacent": [],
-    "ford_adjacent": []
+    "ford_adjacent": [],
+    "stronghold_base_health": 3,
+    "image": "khazad_dum.png"
   },
   "mithlond": {
     "id": "mithlond",
     "display_name": "Mithlond",
     "terrain_type": "plains",
     "produces": {
-      "power": 1
+      "power": 10
     },
     "is_stronghold": true,
     "ownable": true,
@@ -194,7 +196,9 @@
       "tower_hills"
     ],
     "aerial_adjacent": [],
-    "ford_adjacent": []
+    "ford_adjacent": [],
+    "image": "mithlond.png",
+    "stronghold_base_health": 1
   },
   "ettenmoors": {
     "id": "ettenmoors",
@@ -291,12 +295,12 @@
     "aerial_adjacent": [],
     "ford_adjacent": []
   },
-  "the_black_gate": {
-    "id": "the_black_gate",
-    "display_name": "The Black Gate",
-    "terrain_type": "wasteland",
+  "morannon": {
+    "id": "morannon",
+    "display_name": "Morannon",
+    "terrain_type": "fortress",
     "produces": {
-      "power": 1
+      "power": 5
     },
     "is_stronghold": true,
     "ownable": true,
@@ -307,7 +311,9 @@
       "udun"
     ],
     "aerial_adjacent": [],
-    "ford_adjacent": []
+    "ford_adjacent": [],
+    "image": "morannon.png",
+    "stronghold_base_health": 3
   },
   "west_calenardhon": {
     "id": "west_calenardhon",
@@ -721,14 +727,34 @@
     "aerial_adjacent": [],
     "ford_adjacent": []
   },
-  "mount_doom": {
-    "id": "mount_doom",
-    "display_name": "Mount Doom",
-    "terrain_type": "wasteland",
+  "east_enedwaith": {
+    "id": "east_enedwaith",
+    "display_name": "East Enedwaith",
+    "terrain_type": "plains",
     "produces": {
       "power": 1
     },
     "is_stronghold": false,
+    "ownable": true,
+    "adjacent": [
+      "fords_of_isen",
+      "gwathlo_central",
+      "gwathlo_south",
+      "sea_zone_10",
+      "sea_zone_9",
+      "tharbad"
+    ],
+    "aerial_adjacent": [],
+    "ford_adjacent": []
+  },
+  "orodruin": {
+    "id": "orodruin",
+    "display_name": "Orodruin",
+    "terrain_type": "volcano",
+    "produces": {
+      "power": 10
+    },
+    "is_stronghold": true,
     "ownable": true,
     "adjacent": [
       "barad_dur",
@@ -736,7 +762,9 @@
       "udun"
     ],
     "aerial_adjacent": [],
-    "ford_adjacent": []
+    "ford_adjacent": [],
+    "image": "orodruin.png",
+    "stronghold_base_health": 1
   },
   "gorgoroth": {
     "id": "gorgoroth",
@@ -751,7 +779,7 @@
       "barad_dur",
       "ithilien",
       "lithlad",
-      "mount_doom",
+      "orodruin",
       "nurn",
       "udun"
     ],
@@ -815,9 +843,9 @@
     "display_name": "Imladris",
     "terrain_type": "plains",
     "produces": {
-      "power": 1
+      "power": 3
     },
-    "is_stronghold": true,
+    "is_stronghold": false,
     "ownable": true,
     "adjacent": [
       "ettenmoors",
@@ -832,7 +860,7 @@
     "display_name": "Ost-In-Edhil",
     "terrain_type": "plains",
     "produces": {
-      "power": 1
+      "power": 10
     },
     "is_stronghold": true,
     "ownable": true,
@@ -844,7 +872,9 @@
       "west_eriador"
     ],
     "aerial_adjacent": [],
-    "ford_adjacent": []
+    "ford_adjacent": [],
+    "stronghold_base_health": 2,
+    "image": "ost_in_edhil.png"
   },
   "barad_dur": {
     "id": "barad_dur",
@@ -859,12 +889,13 @@
     "adjacent": [
       "gorgoroth",
       "lithlad",
-      "mount_doom",
+      "orodruin",
       "rhun_hills",
       "udun"
     ],
     "aerial_adjacent": [],
-    "ford_adjacent": []
+    "ford_adjacent": [],
+    "image": "barad_dur.png"
   },
   "sea_zone_4": {
     "id": "sea_zone_4",
@@ -949,12 +980,12 @@
   "falls_of_rauros": {
     "id": "falls_of_rauros",
     "display_name": "Falls of Rauros",
-    "terrain_type": "plains",
+    "terrain_type": "river",
     "produces": {
-      "power": 1
+      "power": 0
     },
     "is_stronghold": false,
-    "ownable": true,
+    "ownable": false,
     "adjacent": [
       "anduin_central",
       "anduin_south",
@@ -1128,7 +1159,7 @@
       "emyn_muil",
       "falls_of_rauros",
       "ithilien",
-      "the_black_gate"
+      "morannon"
     ],
     "aerial_adjacent": [],
     "ford_adjacent": []
@@ -1186,7 +1217,7 @@
       "gorgoroth",
       "nindalf",
       "nurn",
-      "the_black_gate",
+      "morannon",
       "udun"
     ],
     "aerial_adjacent": [],
@@ -1199,7 +1230,7 @@
     "produces": {
       "power": 1
     },
-    "is_stronghold": true,
+    "is_stronghold": false,
     "ownable": true,
     "adjacent": [
       "south_greenwood",

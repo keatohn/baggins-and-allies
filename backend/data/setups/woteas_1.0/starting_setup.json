@@ -1,24 +1,20 @@
 {
   "turn_order": [
-    "numenor",
     "sauron",
     "noldor",
-    "khazad_dum"
+    "khazad_dum",
+    "numenor"
   ],
   "territory_owners": {
     "numenor": "numenor",
     "lond_daer": "numenor",
-    "west_eriador": "numenor",
-    "east_eriador": "numenor",
-    "evendim_hills": "numenor",
-    "minhiriath": "numenor",
-    "tower_hills": "numenor",
     "barad_dur": "sauron",
     "gorgoroth": "sauron",
-    "mount_doom": "sauron",
+    "orodruin": "sauron",
     "nurn": "sauron",
+    "lithlad": "sauron",
     "udun": "sauron",
-    "the_black_gate": "sauron",
+    "morannon": "sauron",
     "dagorlad": "sauron",
     "ost_in_edhil": "noldor",
     "mithlond": "noldor",
