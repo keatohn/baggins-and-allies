@@ -209,6 +209,8 @@ class PendingMove:
     primary_unit_id: str = ""
     # Combat move: sail away from sea with mobilized intruders instead of initiating naval combat.
     avoid_forced_naval_combat: bool = False
+    # Rings of Power: this move carries one ring. The ring ends in to_territory when the move applies.
+    ring_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -226,6 +228,9 @@ class PendingMove:
             out["primary_unit_id"] = self.primary_unit_id
         if self.avoid_forced_naval_combat:
             out["avoid_forced_naval_combat"] = True
+        ring_id = getattr(self, "ring_id", None)
+        if ring_id:
+            out["ring_id"] = ring_id
         return out
 
     @classmethod
@@ -246,6 +251,8 @@ class PendingMove:
         pu = data.get("primary_unit_id")
         primary_unit_id = str(pu).strip() if pu else ""
         afnc = bool(data.get("avoid_forced_naval_combat"))
+        ring_raw = data.get("ring_id")
+        ring_id = str(ring_raw).strip() if isinstance(ring_raw, str) and ring_raw.strip() else None
         return cls(
             from_territory=str(data.get("from_territory") or ""),
             to_territory=str(data.get("to_territory") or ""),
@@ -256,6 +263,7 @@ class PendingMove:
             load_onto_boat_instance_id=load_onto_boat_instance_id or None,
             primary_unit_id=primary_unit_id,
             avoid_forced_naval_combat=afnc,
+            ring_id=ring_id,
         )
 
 
@@ -471,6 +479,8 @@ class ActiveCombat:
     # Pure naval (sea hex): land passengers embarked on attacker boats at battle start (instance_id -> boat_id).
     # Used so combat_ended attacker casualties include passengers lost when their ship sinks.
     naval_embarked_attacker_loaded_onto: dict[str, str] = field(default_factory=dict)
+    # Remaining extra hits a ring's hp_boost can still absorb this battle. None until the first round sets it.
+    ring_hp_shield: dict[str, int] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -502,6 +512,8 @@ class ActiveCombat:
             out["fuse_bomb"] = False
         if self.naval_embarked_attacker_loaded_onto:
             out["naval_embarked_attacker_loaded_onto"] = dict(self.naval_embarked_attacker_loaded_onto)
+        if self.ring_hp_shield is not None:
+            out["ring_hp_shield"] = {str(k): int(v) for k, v in self.ring_hp_shield.items()}
         return out
 
     @classmethod
@@ -558,6 +570,15 @@ class ActiveCombat:
             for k, v in nav_emb_raw.items():
                 if isinstance(k, str) and isinstance(v, str):
                     naval_embarked[k] = v
+        shield_raw = data.get("ring_hp_shield")
+        ring_hp_shield: dict[str, int] | None = None
+        if isinstance(shield_raw, dict):
+            ring_hp_shield = {}
+            for k, v in shield_raw.items():
+                try:
+                    ring_hp_shield[str(k)] = max(0, int(v))
+                except (TypeError, ValueError):
+                    continue
         return cls(
             attacker_faction=str(data.get("attacker_faction") or ""),
             territory_id=str(data.get("territory_id") or ""),
@@ -576,6 +597,84 @@ class ActiveCombat:
             ladder_equipment_count=max(0, ladder_eq),
             fuse_bomb=fuse_bomb,
             naval_embarked_attacker_loaded_onto=naval_embarked,
+            ring_hp_shield=ring_hp_shield,
+        )
+
+
+@dataclass
+class Ring:
+    """A ring object. It is not a unit. Power is whatever the scenario set for this id."""
+    id: str
+    name: str
+    power: int
+    territory_id: str
+    bearer_instance_id: str | None = None
+    # Empty means any hero may carry it, and it stays in the territory when that hero dies.
+    bearer_hero_id: str | None = None
+    # When the required bearer dies in this ring's territory, the ring moves here unbeared.
+    returns_to: str | None = None
+    attack_boost: int = 0
+    defense_boost: int = 0
+    rolls_boost: int = 0
+    hp_boost: int = 0
+    moves_boost: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "id": self.id,
+            "name": self.name,
+            "power": int(self.power),
+            "territory_id": self.territory_id,
+        }
+        if self.bearer_instance_id:
+            out["bearer_instance_id"] = self.bearer_instance_id
+        if self.bearer_hero_id:
+            out["bearer_hero_id"] = self.bearer_hero_id
+        if self.returns_to:
+            out["returns_to"] = self.returns_to
+        if self.attack_boost:
+            out["attack_boost"] = int(self.attack_boost)
+        if self.defense_boost:
+            out["defense_boost"] = int(self.defense_boost)
+        if self.rolls_boost:
+            out["rolls_boost"] = int(self.rolls_boost)
+        if self.hp_boost:
+            out["hp_boost"] = int(self.hp_boost)
+        if self.moves_boost:
+            out["moves_boost"] = int(self.moves_boost)
+        return out
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Ring":
+        if not isinstance(data, dict):
+            data = {}
+        try:
+            power = int(data.get("power", 0))
+        except (TypeError, ValueError):
+            power = 0
+        bearer = data.get("bearer_instance_id")
+        required = data.get("bearer_hero_id")
+        returns = data.get("returns_to")
+
+        def _boost(key: str) -> int:
+            raw = data.get(key, 0)
+            if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+                return 0
+            return raw
+
+        return cls(
+            id=str(data.get("id") or ""),
+            name=str(data.get("name") or data.get("id") or ""),
+            power=max(0, power),
+            territory_id=str(data.get("territory_id") or ""),
+            bearer_instance_id=str(bearer).strip() if isinstance(bearer, str) and bearer.strip() else None,
+            bearer_hero_id=str(required).strip() if isinstance(required, str) and required.strip() else None,
+            returns_to=str(returns).strip() if isinstance(returns, str) and returns.strip() else None,
+            attack_boost=_boost("attack_boost"),
+            defense_boost=_boost("defense_boost"),
+            rolls_boost=_boost("rolls_boost"),
+            hp_boost=_boost("hp_boost"),
+            moves_boost=_boost("moves_boost"),
         )
 
 
@@ -627,6 +726,9 @@ class GameState:
     heroes_enabled: bool = True
     # When True, each alliance sees armies only in its land and one territory beyond.
     shadow_of_war: bool = False
+    # Create-game switch. The ring catalog lives in special_rules; this turns it on for the game.
+    rings_of_power: bool = False
+    rings: list["Ring"] = field(default_factory=list)
     # Snapshot of manifest special_rules (fading territory, etc.). Empty on older games.
     special_rules: list[dict[str, Any]] = field(default_factory=list)
     # Faction territories at start of their turn (set when turn starts). Used for camp placement options.
@@ -704,6 +806,8 @@ class GameState:
             "prefire_penalty": getattr(self, "prefire_penalty", True),
             "heroes_enabled": getattr(self, "heroes_enabled", True),
             "shadow_of_war": bool(getattr(self, "shadow_of_war", False)),
+            "rings_of_power": bool(getattr(self, "rings_of_power", False)),
+            "rings": [ring.to_dict() for ring in (getattr(self, "rings", None) or [])],
             "special_rules": list(getattr(self, "special_rules", None) or []),
             "faction_territories_at_turn_start": self.faction_territories_at_turn_start,
             "pending_camps": self.pending_camps,
@@ -815,6 +919,8 @@ class GameState:
             prefire_penalty=parse_prefire_penalty_from_manifest(data.get("prefire_penalty")),
             heroes_enabled=parse_prefire_penalty_from_manifest(data.get("heroes_enabled")),
             shadow_of_war=bool(data.get("shadow_of_war")),
+            rings_of_power=bool(data.get("rings_of_power")),
+            rings=[Ring.from_dict(row) for row in (data.get("rings") or []) if isinstance(row, dict)],
             special_rules=parse_special_rules(data.get("special_rules")),
             faction_territories_at_turn_start=_ensure_faction_territories_at_turn_start(
                 data.get("faction_territories_at_turn_start")

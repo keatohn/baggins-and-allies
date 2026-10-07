@@ -1145,6 +1145,9 @@ def get_reachable_territories_for_unit(
     if not unit_def:
         return {}, {}
 
+    from backend.engine.rings import sync_ring_movement
+    sync_ring_movement(state, unit_defs)
+
     # Coerce so BFS never compares int distances to str/None (e.g. deepcopy/hypo state edge cases).
     try:
         max_move = int(getattr(unit, "remaining_movement", 0) or 0)

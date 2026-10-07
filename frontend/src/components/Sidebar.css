@@ -842,6 +842,7 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
 }
 
 .territory-unit-icon-wrap {
+  position: relative;
   display: inline-flex;
   width: 28px;
   height: 28px;
@@ -1544,4 +1545,82 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
   .log-entry {
     padding: 0.12rem 0;
   }
+}
+
+.territory-rings {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.territory-unit-ring {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.territory-rings__icon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.ring-carry-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.territory-rings li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 4px;
+  background: rgba(42, 28, 16, 0.12);
+  font-size: 0.85rem;
+}
+
+.territory-rings__power {
+  color: var(--ink-soft, #5c4a32);
+}
+
+.ring-carry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  margin: 0.35rem 0 0.5rem;
+}
+
+.ring-carry__label {
+  width: 100%;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ring-carry__option {
+  border: 1px solid rgba(42, 28, 16, 0.35);
+  background: transparent;
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.ring-carry__option--active {
+  background: rgba(42, 28, 16, 0.85);
+  color: #f4e4c4;
 }

@@ -17,7 +17,7 @@ applicable, then defender archer prefire when applicable, then standard rounds.
 import math
 import random
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Optional
 
 CasualtyCostVarianceCategory = Literal["Predictable", "Moderate", "Unpredictable"]
@@ -98,6 +98,40 @@ class SimOptions:
     fuse_bomb: bool = True
     # True (default): -1 to stealth and archer prefire target stats; False: 0 (setup manifest prefire_penalty).
     prefire_penalty: bool = True
+    # Optional sim-only boosts: {"unit_id", "attack", "defense", "dice", "hp"}.
+    ring_boosts: list[dict[str, Any]] | None = None
+
+
+def apply_sim_ring_boosts(
+    unit_defs: dict[str, UnitDefinition],
+    ring_boosts: list[dict[str, Any]] | None,
+) -> dict[str, UnitDefinition]:
+    """Copy unit defs and add sim-only ring boosts. The caller's catalog stays unchanged."""
+    if not ring_boosts:
+        return unit_defs
+    out = dict(unit_defs)
+    for row in ring_boosts:
+        if not isinstance(row, dict):
+            continue
+        uid = str(row.get("unit_id") or "").strip()
+        ud = out.get(uid)
+        if ud is None:
+            continue
+
+        def _n(key: str, source: dict[str, Any] = row) -> int:
+            try:
+                return max(0, int(source.get(key) or 0))
+            except (TypeError, ValueError):
+                return 0
+
+        out[uid] = replace(
+            ud,
+            attack=int(ud.attack) + _n("attack"),
+            defense=int(ud.defense) + _n("defense"),
+            dice=max(0, int(ud.dice) + _n("dice")),
+            health=max(1, int(ud.health) + _n("hp")),
+        )
+    return out
 
 
 @dataclass

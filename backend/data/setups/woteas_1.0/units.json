@@ -284,56 +284,6 @@
     "specials": [],
     "icon": "catapult.png"
   },
-  "ringwraith": {
-    "id": "ringwraith",
-    "display_name": "Ringwraith",
-    "faction": "sauron",
-    "archetype": "aerial",
-    "attack": 6,
-    "defense": 4,
-    "dice": 1,
-    "movement": 4,
-    "health": 1,
-    "transport_capacity": 0,
-    "purchasable": true,
-    "cost": {
-      "power": 14
-    },
-    "tags": [
-      "land"
-    ],
-    "specials": [
-      "aerial",
-      "terror"
-    ],
-    "icon": "ringwraith_armored.png"
-  },
-  "witch_king": {
-    "id": "witch_king",
-    "display_name": "Witch-king",
-    "faction": "sauron",
-    "hero_id": "witch_king",
-    "archetype": "aerial",
-    "attack": 6,
-    "defense": 5,
-    "dice": 1,
-    "movement": 4,
-    "health": 1,
-    "transport_capacity": 0,
-    "purchasable": true,
-    "cost": {
-      "power": 16
-    },
-    "tags": [
-      "land"
-    ],
-    "specials": [
-      "aerial",
-      "fearless",
-      "terror"
-    ],
-    "icon": "witch_king.png"
-  },
   "noldor_warrior": {
     "id": "noldor_warrior",
     "display_name": "Noldor Warrior",

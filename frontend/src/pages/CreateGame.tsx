@@ -10,6 +10,7 @@ export default function CreateGame() {
   const [isMultiplayer, setIsMultiplayer] = useState(false);
   const [heroesEnabled, setHeroesEnabled] = useState(true);
   const [shadowOfWar, setShadowOfWar] = useState(false);
+  const [ringsOfPower, setRingsOfPower] = useState(false);
   const [setups, setSetups] = useState<SetupInfo[]>([]);
   const [selectedSetupId, setSelectedSetupId] = useState<string | null>(null);
   const [loadingSetups, setLoadingSetups] = useState(true);
@@ -61,6 +62,7 @@ export default function CreateGame() {
         selectedSetupId ?? undefined,
         heroesEnabled,
         shadowOfWar,
+        Boolean(setups.find((s) => s.id === selectedSetupId)?.rings_of_power) && ringsOfPower,
       );
       const initialState = res.state != null
         ? { ...res.state, turn_order: res.turn_order ?? res.state.turn_order }
@@ -166,12 +168,33 @@ export default function CreateGame() {
               <button
                 type="button"
                 className={`create-game-form__picker-option ${!heroesEnabled ? 'create-game-form__picker-option--active' : ''}`}
-                onClick={() => setHeroesEnabled(false)}
+                onClick={() => { setHeroesEnabled(false); setRingsOfPower(false); }}
               >
                 Off
               </button>
             </div>
           </div>
+          {setups.find((s) => s.id === selectedSetupId)?.rings_of_power ? (
+          <div className="create-game-form__field">
+            <span className="create-game-form__field-label">Rings of Power</span>
+            <div className="create-game-form__picker" role="group" aria-label="Rings of Power on or off">
+              <button
+                type="button"
+                className={`create-game-form__picker-option ${ringsOfPower ? 'create-game-form__picker-option--active' : ''}`}
+                onClick={() => { setRingsOfPower(true); setHeroesEnabled(true); }}
+              >
+                On
+              </button>
+              <button
+                type="button"
+                className={`create-game-form__picker-option ${!ringsOfPower ? 'create-game-form__picker-option--active' : ''}`}
+                onClick={() => setRingsOfPower(false)}
+              >
+                Off
+              </button>
+            </div>
+          </div>
+          ) : null}
           <div className="create-game-form__field">
             <span className="create-game-form__field-label">Shadow of War</span>
             <div className="create-game-form__picker" role="group" aria-label="Shadow of War on or off">

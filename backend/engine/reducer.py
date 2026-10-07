@@ -83,6 +83,21 @@ from backend.engine.movement import (
     sea_land_adjacent_for_offload,
     get_forced_naval_combat_instance_ids,
 )
+from backend.engine.rings import (
+    apply_carried_ring,
+    claim_ring,
+    combat_boosts,
+    expand_rolls_for_bonus,
+    hero_instance_for_carry,
+    hp_shield_from_boosts,
+    merge_ring_dice,
+    merge_ring_stat_mods,
+    on_bearer_destroyed,
+    power_for_faction,
+    release_ring,
+    sync_ring_movement,
+    validate_ring_carry,
+)
 from backend.engine.special_rules import territory_current_power
 from backend.engine.queries import (
     _get_retreat_adjacent_ids,
@@ -118,6 +133,26 @@ from backend.engine.utils import (
     effective_territory_owner,
     effective_original_owner,
 )
+
+
+def _apply_ring_combat(
+    state: GameState,
+    attacker_units: list,
+    defender_units: list,
+    unit_defs: dict,
+    territory_id: str,
+    attacker_mods: dict[str, int],
+    defender_mods: dict[str, int],
+):
+    att_b = combat_boosts(state, attacker_units, unit_defs, territory_id)
+    def_b = combat_boosts(state, defender_units, unit_defs, territory_id)
+    return (
+        merge_ring_stat_mods(attacker_mods, att_b, attacking=True),
+        merge_ring_stat_mods(defender_mods, def_b, attacking=False),
+        att_b,
+        def_b,
+        hp_shield_from_boosts({**att_b, **def_b}),
+    )
 
 
 def _prefire_stat_delta(state: GameState) -> int:
@@ -1486,6 +1521,14 @@ def _handle_move_units(
             raise ValueError(
                 "avoid_forced_naval_combat: you may only sail to an adjacent sea zone (1 hex), regardless of movement allowance"
             )
+    ring_raw = action.payload.get("ring_id")
+    ring_id = str(ring_raw).strip() if isinstance(ring_raw, str) and ring_raw.strip() else None
+    ring_error = validate_ring_carry(
+        state, unit_defs, units_to_move, from_id, charge_through, ring_id,
+    )
+    if ring_error:
+        raise ValueError(ring_error)
+    bearer_id = hero_instance_for_carry(unit_defs, units_to_move) if ring_id else None
     pending_move = PendingMove(
         from_territory=from_id,
         to_territory=to_id,
@@ -1496,7 +1539,10 @@ def _handle_move_units(
         load_onto_boat_instance_id=load_onto_boat_instance_id,
         primary_unit_id=primary_unit_id,
         avoid_forced_naval_combat=avoid_forced_naval,
+        ring_id=ring_id,
     )
+    if ring_id and bearer_id:
+        claim_ring(state, ring_id, bearer_id)
     state.pending_moves.append(pending_move)
 
     return state, events
@@ -1654,6 +1700,7 @@ def _apply_pending_moves(
                     f"(from={pending_move.from_territory!r} -> {from_id!r}, "
                     f"to={pending_move.to_territory!r} -> {to_id!r})"
                 )
+            release_ring(state, getattr(pending_move, "ring_id", None))
             continue  # Skip invalid moves (non-combat: defensive)
 
         # Same expansion as move declaration / validation: payloads may list only boat IDs. Without this,
@@ -1850,6 +1897,8 @@ def _apply_pending_moves(
         else:
             cost_per_unit = distance
 
+        # A ring's moves_boost is part of the hero's movement while it sits on them.
+        sync_ring_movement(state, unit_defs)
         # Enforce movement range: no unit can move farther than its remaining_movement
         for instance_id in unit_instance_ids:
             unit = units_by_id.get(instance_id)
@@ -2142,6 +2191,8 @@ def _apply_pending_moves(
 
         event_faction = state.current_faction or faction_id or ""
         ids_for_log = ids_to_move if ids_to_move else list(unit_instance_ids)
+        apply_carried_ring(state, pending_move, to_id)
+        sync_ring_movement(state, unit_defs)
         events.append(
             units_moved(
                 event_faction,
@@ -2224,7 +2275,8 @@ def _handle_cancel_move(
     if move_index < 0 or move_index >= len(state.pending_moves):
         raise ValueError(f"Invalid move index: {move_index}")
     
-    state.pending_moves.pop(move_index)
+    cancelled = state.pending_moves.pop(move_index)
+    release_ring(state, getattr(cancelled, "ring_id", None))
     return state, events
 
 
@@ -2690,6 +2742,19 @@ def _handle_initiate_combat(
     )
     attacker_mods = merge_stat_modifiers(terrain_att, anticav_att, captain_att, sea_raider_att)
     defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
+    attacker_mods, defender_mods, ring_att_boosts, ring_def_boosts, ring_hp_shield = _apply_ring_combat(
+        state, attacker_units, defender_units, unit_defs, territory_id, attacker_mods, defender_mods,
+    )
+    if isinstance(dice_rolls, dict):
+        dice_rolls["attacker"] = expand_rolls_for_bonus(
+            list(dice_rolls.get("attacker") or []), attacker_units, unit_defs,
+            {iid: parts[2] for iid, parts in ring_att_boosts.items()},
+        )
+        dice_rolls["defender"] = expand_rolls_for_bonus(
+            list(dice_rolls.get("defender") or []), defender_units, unit_defs,
+            {iid: parts[2] for iid, parts in ring_def_boosts.items()},
+        )
+    ring_def_dice = merge_ring_dice(None, defender_units, unit_defs, ring_def_boosts)
 
     # Stealth: if EVERY attacker has stealth, they prefire at attack-1 (hits to defenders) and cancel defender archer prefire
     all_attackers_have_stealth = (
@@ -2730,6 +2795,8 @@ def _handle_initiate_combat(
             attacker_units, defender_units, unit_defs, prefire_attacker_rolls,
             stat_modifiers_attacker_extra=attacker_mods,
             prefire_penalty_delta=pd_prefire,
+            hp_shield=ring_hp_shield,
+            attacker_effective_dice_override=merge_ring_dice(None, attacker_units, unit_defs, ring_att_boosts),
         )
         stealth_stat_modifiers = {
             u.instance_id: pd_prefire + attacker_mods.get(u.instance_id, 0) for u in attacker_units
@@ -2764,8 +2831,8 @@ def _handle_initiate_combat(
         for casualty_id in round_result.defender_casualties:
             unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
             events.append(unit_destroyed(casualty_id, unit_type, defender_faction, territory_id, "combat"))
-        passenger_att = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result.attacker_casualties, unit_defs)
-        passenger_def = _remove_casualties(territory, round_result.defender_casualties, unit_defs)
+        passenger_att = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result.attacker_casualties, unit_defs, state)
+        passenger_def = _remove_casualties(territory, round_result.defender_casualties, unit_defs, state)
         for pid in passenger_att:
             unit_type = pid.split("_")[1] if "_" in pid else "unknown"
             events.append(unit_destroyed(pid, unit_type, attacker_faction, territory_id, "combat"))
@@ -2817,6 +2884,7 @@ def _handle_initiate_combat(
             cumulative_hits_received_by_defender=round_result.attacker_hits,
             fuse_bomb=fuse_bomb,
             naval_embarked_attacker_loaded_onto=dict(naval_embarked_attacker_loaded_onto),
+            ring_hp_shield=ring_hp_shield,
         )
         return state, events
 
@@ -2923,6 +2991,9 @@ def _handle_initiate_combat(
             defender_stronghold_hp=defender_stronghold_hp_cur_sw,
             defender_territory_is_stronghold=defender_territory_is_stronghold_early,
             fuse_bomb=fuse_bomb,
+            hp_shield=ring_hp_shield,
+            attacker_effective_dice_override=merge_ring_dice(None, attacker_units, unit_defs, ring_att_boosts),
+            defender_effective_dice_override=ring_def_dice,
         )
         ladder_ids_sw = get_ladder_infantry_instance_ids(attacker_units, unit_defs)
         _initiate_ladder_infantry_ids = ladder_ids_sw
@@ -2972,8 +3043,8 @@ def _handle_initiate_combat(
         for casualty_id in round_result_sw.defender_casualties:
             unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
             events.append(unit_destroyed(casualty_id, unit_type, defender_faction, territory_id, "combat"))
-        passenger_att_sw = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result_sw.attacker_casualties, unit_defs)
-        passenger_def_sw = _remove_casualties(territory, round_result_sw.defender_casualties, unit_defs)
+        passenger_att_sw = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result_sw.attacker_casualties, unit_defs, state)
+        passenger_def_sw = _remove_casualties(territory, round_result_sw.defender_casualties, unit_defs, state)
         for pid in passenger_att_sw:
             unit_type = pid.split("_")[1] if "_" in pid else "unknown"
             events.append(unit_destroyed(pid, unit_type, attacker_faction, territory_id, "combat"))
@@ -2990,7 +3061,7 @@ def _handle_initiate_combat(
             bomb_pair_casualties_sw = list(paired_bombikazi_sw | paired_bombs_sw)
         if bomb_pair_casualties_sw:
             attacker_units[:] = [u for u in attacker_units if u.instance_id not in bomb_pair_casualties_sw]
-            passenger_att_bomb_sw = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, bomb_pair_casualties_sw, unit_defs)
+            passenger_att_bomb_sw = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, bomb_pair_casualties_sw, unit_defs, state)
             for iid in bomb_pair_casualties_sw:
                 unit_type = iid.split("_")[1] if "_" in iid else "unknown"
                 events.append(unit_destroyed(iid, unit_type, attacker_faction, territory_id, "combat"))
@@ -3076,6 +3147,7 @@ def _handle_initiate_combat(
             ladder_equipment_count=ladder_count_sw,
             fuse_bomb=fuse_bomb,
             naval_embarked_attacker_loaded_onto=dict(naval_embarked_attacker_loaded_onto),
+            ring_hp_shield=ring_hp_shield,
         )
         return state, events
 
@@ -3089,6 +3161,8 @@ def _handle_initiate_combat(
             stat_modifiers_defender_extra=defender_mods,
             territory_def=territory_def,
             prefire_penalty_delta=archer_prefire_penalty,
+            hp_shield=ring_hp_shield,
+            defender_effective_dice_override=ring_def_dice,
         )
         # Group defender dice for UI (archers at defense-1 or defense+0, merged with terrain)
         archer_stat_modifiers = {
@@ -3164,8 +3238,8 @@ def _handle_initiate_combat(
         for casualty_id in round_result.attacker_casualties:
             unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
             events.append(unit_destroyed(casualty_id, unit_type, attacker_faction, territory_id, "combat"))
-        passenger_att = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result.attacker_casualties, unit_defs)
-        passenger_def = _remove_casualties(territory, round_result.defender_casualties, unit_defs)
+        passenger_att = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result.attacker_casualties, unit_defs, state)
+        passenger_def = _remove_casualties(territory, round_result.defender_casualties, unit_defs, state)
         for pid in passenger_att:
             unit_type = pid.split("_")[1] if "_" in pid else "unknown"
             events.append(unit_destroyed(pid, unit_type, attacker_faction, territory_id, "combat"))
@@ -3219,6 +3293,7 @@ def _handle_initiate_combat(
             cumulative_hits_received_by_defender=0,
             fuse_bomb=fuse_bomb,
             naval_embarked_attacker_loaded_onto=dict(naval_embarked_attacker_loaded_onto),
+            ring_hp_shield=ring_hp_shield,
         )
         return state, events
 
@@ -3227,6 +3302,7 @@ def _handle_initiate_combat(
         attacker_units, unit_defs,
         use_paired_fused_siegework_rules=True,
     )
+    att_effective_dice = merge_ring_dice(att_effective_dice, attacker_units, unit_defs, ring_att_boosts)
     attacker_dice_grouped = group_dice_by_stat(
         attacker_units, dice_rolls.get("attacker", []), unit_defs, is_attacker=True,
         stat_modifiers=attacker_mods or None,
@@ -3304,6 +3380,8 @@ def _handle_initiate_combat(
         defender_territory_is_stronghold=defender_territory_is_stronghold,
         exclude_archetypes_from_rolling=["siegework"],
         attacker_ladder_instance_ids=set(_initiate_ladder_infantry_ids),
+        defender_effective_dice_override=ring_def_dice,
+        hp_shield=ring_hp_shield,
     )
     if defender_stronghold_hp_after is not None:
         territory.stronghold_current_health = defender_stronghold_hp_after
@@ -3368,8 +3446,8 @@ def _handle_initiate_combat(
         unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
         events.append(unit_destroyed(casualty_id, unit_type, defender_faction, territory_id, "combat"))
 
-    passenger_att = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result.attacker_casualties, unit_defs)
-    passenger_def = _remove_casualties(territory, round_result.defender_casualties, unit_defs)
+    passenger_att = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result.attacker_casualties, unit_defs, state)
+    passenger_def = _remove_casualties(territory, round_result.defender_casualties, unit_defs, state)
     for pid in passenger_att:
         unit_type = pid.split("_")[1] if "_" in pid else "unknown"
         events.append(unit_destroyed(pid, unit_type, attacker_faction, territory_id, "combat"))
@@ -3414,6 +3492,7 @@ def _handle_initiate_combat(
         ladder_equipment_count=_initiate_ladder_equipment_count,
         fuse_bomb=fuse_bomb,
         naval_embarked_attacker_loaded_onto=dict(naval_embarked_attacker_loaded_onto),
+        ring_hp_shield=ring_hp_shield,
     )
     return state, events
 
@@ -3532,11 +3611,28 @@ def _handle_continue_combat(
     )
     attacker_mods = merge_stat_modifiers(terrain_att, anticav_att, captain_att, sea_raider_att)
     defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
+    attacker_mods, defender_mods, ring_att_boosts, ring_def_boosts, fresh_ring_shield = _apply_ring_combat(
+        state, attacker_units, defender_units, unit_defs, combat.territory_id, attacker_mods, defender_mods,
+    )
+    if combat.ring_hp_shield is None:
+        combat.ring_hp_shield = fresh_ring_shield
+    ring_hp_shield = combat.ring_hp_shield
+    if isinstance(dice_rolls, dict):
+        dice_rolls["attacker"] = expand_rolls_for_bonus(
+            list(dice_rolls.get("attacker") or []), attacker_units, unit_defs,
+            {iid: parts[2] for iid, parts in ring_att_boosts.items()},
+        )
+        dice_rolls["defender"] = expand_rolls_for_bonus(
+            list(dice_rolls.get("defender") or []), defender_units, unit_defs,
+            {iid: parts[2] for iid, parts in ring_def_boosts.items()},
+        )
+    ring_def_dice = merge_ring_dice(None, defender_units, unit_defs, ring_def_boosts)
 
     att_effective_dice, att_self_destruct, att_attack_override = get_attacker_effective_dice_and_bombikazi_self_destruct(
         attacker_units, unit_defs,
         use_paired_fused_siegework_rules=use_paired_fused_siegework_rules,
     )
+    att_effective_dice = merge_ring_dice(att_effective_dice, attacker_units, unit_defs, ring_att_boosts)
     # Re-evaluate which infantry are currently "on ladders" for this round.
     # Ladder equipment (siegeworks) can be destroyed between rounds, so the
     # available capacity (and thus which climbers are laddered) can change.
@@ -3683,6 +3779,9 @@ def _handle_continue_combat(
             defender_stronghold_hp=defender_stronghold_hp_cur,
             defender_territory_is_stronghold=defender_territory_is_stronghold,
             fuse_bomb=fuse_bomb,
+            hp_shield=ring_hp_shield,
+            attacker_effective_dice_override=att_effective_dice,
+            defender_effective_dice_override=ring_def_dice,
         )
         combat.ladder_infantry_instance_ids = get_ladder_infantry_instance_ids(
             attacker_units, unit_defs,
@@ -3759,8 +3858,8 @@ def _handle_continue_combat(
         for casualty_id in round_result.defender_casualties:
             unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
             events.append(unit_destroyed(casualty_id, unit_type, defender_faction, combat.territory_id, "combat"))
-        passenger_att = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result.attacker_casualties, unit_defs)
-        passenger_def = _remove_casualties(territory, round_result.defender_casualties, unit_defs)
+        passenger_att = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result.attacker_casualties, unit_defs, state)
+        passenger_def = _remove_casualties(territory, round_result.defender_casualties, unit_defs, state)
         for pid in passenger_att:
             unit_type = pid.split("_")[1] if "_" in pid else "unknown"
             events.append(unit_destroyed(pid, unit_type, combat.attacker_faction, combat.territory_id, "combat"))
@@ -3778,7 +3877,7 @@ def _handle_continue_combat(
             bomb_pair_casualties = list(paired_bombikazi | paired_bombs)
         if bomb_pair_casualties:
             attacker_units[:] = [u for u in attacker_units if u.instance_id not in bomb_pair_casualties]
-            passenger_att_bomb = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, bomb_pair_casualties, unit_defs)
+            passenger_att_bomb = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, bomb_pair_casualties, unit_defs, state)
             for iid in bomb_pair_casualties:
                 unit_type = iid.split("_")[1] if "_" in iid else "unknown"
                 events.append(unit_destroyed(iid, unit_type, combat.attacker_faction, combat.territory_id, "combat"))
@@ -3866,6 +3965,8 @@ def _handle_continue_combat(
             stat_modifiers_defender_extra=defender_mods,
             territory_def=territory_def,
             prefire_penalty_delta=archer_prefire_penalty_c,
+            hp_shield=ring_hp_shield,
+            defender_effective_dice_override=ring_def_dice,
         )
         archer_stat_modifiers_c = {
             u.instance_id: archer_prefire_penalty_c + defender_mods.get(u.instance_id, 0)
@@ -3936,8 +4037,8 @@ def _handle_continue_combat(
         for casualty_id in round_result_ar.attacker_casualties:
             unit_type = casualty_id.split("_")[1] if "_" in casualty_id else "unknown"
             events.append(unit_destroyed(casualty_id, unit_type, combat.attacker_faction, combat.territory_id, "combat"))
-        passenger_att_ar = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result_ar.attacker_casualties, unit_defs)
-        passenger_def_ar = _remove_casualties(territory, round_result_ar.defender_casualties, unit_defs)
+        passenger_att_ar = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result_ar.attacker_casualties, unit_defs, state)
+        passenger_def_ar = _remove_casualties(territory, round_result_ar.defender_casualties, unit_defs, state)
         for pid in passenger_att_ar:
             unit_type = pid.split("_")[1] if "_" in pid else "unknown"
             events.append(unit_destroyed(pid, unit_type, combat.attacker_faction, combat.territory_id, "combat"))
@@ -3997,6 +4098,8 @@ def _handle_continue_combat(
         defender_territory_is_stronghold=defender_territory_is_stronghold,
         exclude_archetypes_from_rolling=["siegework"],
         attacker_ladder_instance_ids=ladder_ids_combat,
+        defender_effective_dice_override=ring_def_dice,
+        hp_shield=ring_hp_shield,
     )
     if defender_stronghold_hp_after is not None:
         territory.stronghold_current_health = defender_stronghold_hp_after
@@ -4053,8 +4156,8 @@ def _handle_continue_combat(
         events.append(unit_destroyed(casualty_id, unit_type, defender_faction, combat.territory_id, "combat"))
 
     # Remove casualties (attackers may be in sea zone for sea raid). Passengers die when their boat is destroyed.
-    passenger_att = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result.attacker_casualties, unit_defs)
-    passenger_def = _remove_casualties(territory, round_result.defender_casualties, unit_defs)
+    passenger_att = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, round_result.attacker_casualties, unit_defs, state)
+    passenger_def = _remove_casualties(territory, round_result.defender_casualties, unit_defs, state)
     for pid in passenger_att:
         unit_type = pid.split("_")[1] if "_" in pid else "unknown"
         events.append(unit_destroyed(pid, unit_type, combat.attacker_faction, combat.territory_id, "combat"))
@@ -4238,6 +4341,7 @@ def _remove_casualties(
     territory: TerritoryState,
     casualty_ids: list[str],
     unit_defs: dict[str, UnitDefinition] | None = None,
+    state: GameState | None = None,
 ) -> list[str]:
     """
     Remove units with the given instance_ids from a territory.
@@ -4245,6 +4349,13 @@ def _remove_casualties(
     Returns list of passenger instance_ids that were removed (so caller can emit unit_destroyed for them).
     """
     casualty_set = set(casualty_ids)
+    if state is not None and unit_defs:
+        death_tid = next((tid for tid, ts in state.territories.items() if ts is territory), None)
+        if death_tid:
+            for unit in list(territory.units):
+                if unit.instance_id in casualty_set:
+                    on_bearer_destroyed(state, unit, death_tid, unit_defs)
+            sync_ring_movement(state, unit_defs)
     if unit_defs:
         for u in list(territory.units):
             if u.instance_id not in casualty_set:
@@ -4292,12 +4403,13 @@ def _sea_raid_remove_attacker_casualties(
     land_territory: TerritoryState,
     casualty_ids: list[str],
     unit_defs: dict[str, UnitDefinition] | None,
+    state: GameState | None = None,
 ) -> list[str]:
     """Remove attacker casualties from sea and/or land (sea raid attackers may be split across both)."""
     extra: list[str] = []
     if sea_zone is not None:
-        extra.extend(_remove_casualties(sea_zone, casualty_ids, unit_defs))
-    extra.extend(_remove_casualties(land_territory, casualty_ids, unit_defs))
+        extra.extend(_remove_casualties(sea_zone, casualty_ids, unit_defs, state))
+    extra.extend(_remove_casualties(land_territory, casualty_ids, unit_defs, state))
     return extra
 
 
@@ -4332,10 +4444,11 @@ def _maybe_sea_raid_remove_attacker_casualties(
     attacker_territory: TerritoryState,
     casualty_ids: list[str],
     unit_defs: dict[str, UnitDefinition] | None,
+    state: GameState | None = None,
 ) -> list[str]:
     if sea_zone_id and sea_zone is not None:
-        return _sea_raid_remove_attacker_casualties(sea_zone, land_territory, casualty_ids, unit_defs)
-    return _remove_casualties(attacker_territory, casualty_ids, unit_defs)
+        return _sea_raid_remove_attacker_casualties(sea_zone, land_territory, casualty_ids, unit_defs, state)
+    return _remove_casualties(attacker_territory, casualty_ids, unit_defs, state)
 
 
 def _maybe_sea_raid_sync_attacker_survivor_health(
@@ -4831,6 +4944,7 @@ def _reset_unit_stats_for_faction(
     back. Only called when ending non_combat_move phase — never during or
     between combat rounds.
     """
+    sync_ring_movement(state, unit_defs)
     for territory in state.territories.values():
         for unit in territory.units:
             unit_faction = get_unit_faction(unit, unit_defs)
@@ -4965,6 +5079,10 @@ def _handle_end_turn(
 
             if contributed:
                 contributing_territories.append(territory_id)
+
+        ring_power = power_for_faction(state, old_faction, unit_defs)
+        if ring_power > 0:
+            pending_income["power"] = pending_income.get("power", 0) + ring_power
 
         if pending_income:
             events.append(income_calculated(old_faction, pending_income, contributing_territories))

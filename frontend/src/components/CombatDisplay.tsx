@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, useContext, createContext } from 'react';
 import {
   playArcherPrefireCommenceSound,
   playCombatDiceShelfRevealSound,
@@ -6,6 +6,26 @@ import {
   stopSiegeworksRoundCommenceSound,
 } from '../audio/gameAudio';
 import './CombatDisplay.css';
+
+const CombatRingContext = createContext<Record<string, { id: string; name: string }[]>>({});
+
+function RingMarks({ unitType }: { unitType: string }) {
+  const byType = useContext(CombatRingContext);
+  const rings = byType[unitType] ?? [];
+  return (
+    <>
+      {rings.map((ring) => (
+        <img
+          key={ring.id}
+          className="combat-ring-badge"
+          src={`/assets/rings/${ring.id}.png`}
+          alt={ring.name}
+          title={ring.name}
+        />
+      ))}
+    </>
+  );
+}
 
 /**
  * Live territory state drops dead instance ids; standard combat shelves must still show every stack
@@ -406,6 +426,8 @@ interface CombatDisplayProps {
   combatUnitDefs?: Record<string, { archetype?: string; specials?: string[] }>;
   /** When true, show Fuse bomb Yes/No before Start (attacker has bomb + bombikazi pairing possible). */
   attackerHasFuseBombOption?: boolean;
+  /** Ring icons drawn on the hero of this unit type, boost or not. */
+  ringIconsByUnitType?: Record<string, { id: string; name: string }[]>;
 }
 
 // Combat phase states
@@ -809,6 +831,7 @@ function UnitRow({
                     </span>
                   )}
                   {u0 && <img src={u0.icon} alt={u0.name} />}
+                  <RingMarks unitType={seg.unitType} />
                   {showEliminated ? (
                     <span className="unit-stack-eliminated-x" aria-hidden title="Stack eliminated">×</span>
                   ) : (
@@ -920,6 +943,7 @@ function UnitRow({
                             </span>
                           )}
                           <img src={uu.icon} alt={uu.name} />
+                          <RingMarks unitType={ut} />
                           {showEliminatedNodice ? (
                             <span className="unit-stack-eliminated-x" aria-hidden>×</span>
                           ) : (
@@ -990,6 +1014,7 @@ function UnitRow({
             </span>
           )}
           <img src={group.icon} alt={group.name} />
+          <RingMarks unitType={group.unitType} />
           {showEliminated ? (
             <span className="unit-stack-eliminated-x" aria-hidden title="Stack eliminated">×</span>
           ) : (
@@ -1101,6 +1126,7 @@ function UnitRow({
                 </span>
               )}
               <img src={group.icon} alt={group.name} />
+              <RingMarks unitType={group.unitType} />
               {showEliminated ? (
                 <span className="unit-stack-eliminated-x" aria-hidden title="Stack eliminated">×</span>
               ) : (
@@ -1522,6 +1548,7 @@ function CombatDisplay({
   attackerRamUnitTypes = [],
   combatUnitDefs = {},
   attackerHasFuseBombOption = false,
+  ringIconsByUnitType = {},
 }: CombatDisplayProps) {
   const [casualtyPriorityPill, setCasualtyPriorityPill] = useState<'best_unit' | 'best_attack'>(casualtyPriorityAttacker as 'best_unit' | 'best_attack');
   const [mustConquerPill, setMustConquerPill] = useState(mustConquerProp);
@@ -2397,6 +2424,7 @@ function CombatDisplay({
   }, [terrorFinalRound, terrorRerolledIndicesByStat]);
 
   return (
+    <CombatRingContext.Provider value={ringIconsByUnitType}>
     <div className="modal-overlay">
       <div className="modal combat-modal">
         <header className="modal-header">
@@ -2695,6 +2723,7 @@ function CombatDisplay({
         </footer>
       </div>
     </div>
+    </CombatRingContext.Provider>
   );
 }
 

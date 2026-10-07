@@ -227,6 +227,7 @@ def initialize_game_state(
     heroes_enabled: bool | None = None,
     special_rules: list | None = None,
     shadow_of_war: bool | None = None,
+    rings_of_power: bool | None = None,
 ) -> GameState:
     """
     Create an initial game state with all factions and territories set up.
@@ -351,11 +352,17 @@ def initialize_game_state(
         prefire_penalty=prefire_penalty_val,
         heroes_enabled=heroes_enabled_val,
         shadow_of_war=bool(shadow_of_war),
+        rings_of_power=bool(rings_of_power) and heroes_enabled_val,
         special_rules=parsed_special_rules,
         faction_territories_at_turn_start=faction_territories_at_turn_start,
         turn_order=turn_order,
         starting_territory_owners=starting_territory_owners,
     )
+    if state.rings_of_power:
+        from backend.engine.rings import spawn_rings, sync_ring_movement
+        state.rings = spawn_rings(parsed_special_rules)
+    else:
+        sync_ring_movement = None
 
     # Add starting units if provided
     if starting_setup and "starting_units" in starting_setup and unit_defs:
@@ -392,6 +399,9 @@ def initialize_game_state(
                         base_health=unit_def.health,
                     )
                     territory.units.append(unit)
+
+    if sync_ring_movement is not None and unit_defs:
+        sync_ring_movement(state, unit_defs)
 
     return state
 

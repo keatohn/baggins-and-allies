@@ -11,6 +11,7 @@ import MobilizationTray from './MobilizationTray';
 import NavalTray, { type BoatInTray, type NavalTrayBoatTapMovePayload } from './NavalTray';
 import { applyPassengerReassignToAllocation } from '../utils/navalTrayAllocation';
 import { compareUnitStacksByMapOrder } from '../utils/unitStackSort';
+import { ringHostUnitId, ringIconSrc, ringsOnUnit, type RingView } from '../ringsDisplay';
 import './GameMap.css';
 import { sortSeaZoneIdsByNumericSuffix, seaZonesReachableBySailFrom } from '../seaZoneSort';
 import {
@@ -369,6 +370,10 @@ export interface PendingMoveConfirm {
    * `count` / `maxCount` are number of ships; confirm submits flattened slice of the first `count` stacks.
    */
   navalBoatStacks?: string[][];
+  /** Ring carried by the one hero in this move. Omitted means the ring stays. */
+  ringId?: string | null;
+  /** True after the bearer answers the carry prompt. */
+  ringCarryDecided?: boolean;
 }
 
 // Backend-provided movement data
@@ -406,11 +411,12 @@ interface GameMapProps {
   territoryUnits: Record<string, { unit_id: string; count: number; instances?: string[] }[]>;
   /** Territories whose unit stacks stay hidden. Borders, owner color, and markers still draw. */
   shadowedTerritories?: ReadonlySet<string>;
+  rings?: RingView[];
   /** Full unit list per territory (for sea zones: boats + loaded_onto to show passenger count per boat). */
   territoryUnitsFull?: Record<string, { instance_id: string; unit_id: string; loaded_onto?: string | null }[]>;
   unitDefs: Record<string, { name: string; icon: string; faction?: string; archetype?: string; tags?: string[]; home_territory_ids?: string[]; cost?: number; transport_capacity?: number; hero_id?: string }>;
   unitStats: Record<string, { movement: number }>;
-  factionData: Record<string, { name: string; icon: string; color: string; alliance: string; capital?: string }>;
+  factionData: Record<string, { name: string; icon: string; color: string; alliance: string; capital?: string; parent?: string }>;
   onTerritorySelect: (territoryId: string | null) => void;
   /** When provided (e.g. during movement phase), a short tap/click on a multi-boat stack in a sea zone opens the naval tray. */
   onSeaZoneStackClick?: (territoryId: string) => void;
@@ -834,6 +840,7 @@ function GameMap({
   territoryData,
   territoryUnits,
   shadowedTerritories,
+  rings = [],
   territoryUnitsFull = {},
   unitDefs,
   unitStats: _unitStats,
@@ -4658,6 +4665,38 @@ function GameMap({
                       })}
                     </div>
 
+                    <div className="territory-ring-layer">
+                      {rings.map((ring) => {
+                        if (shadowedTerritories?.has(ring.territory_id)) return null;
+                        const present = territoryUnitsFull?.[ring.territory_id]?.length
+                          ? territoryUnitsFull[ring.territory_id]
+                          : (territoryUnits[ring.territory_id] ?? []);
+                        if (ringHostUnitId(ring, present, unitDefs)) return null;
+                        const layout = territoryPositions[ring.territory_id];
+                        const anchor = layout?.marker ?? layout?.center ?? territoryCentroids[ring.territory_id];
+                        if (!anchor) return null;
+                        const screenPos = clampToMap(svgToScreen(anchor.x, anchor.y));
+                        const siblings = rings.filter((other) => {
+                          if (other.territory_id !== ring.territory_id) return false;
+                          const otherPresent = territoryUnitsFull?.[other.territory_id]?.length
+                            ? territoryUnitsFull[other.territory_id]
+                            : (territoryUnits[other.territory_id] ?? []);
+                          return !ringHostUnitId(other, otherPresent, unitDefs);
+                        });
+                        const index = siblings.findIndex((other) => other.id === ring.id);
+                        return (
+                          <img
+                            key={ring.id}
+                            className="territory-ring-token"
+                            src={ringIconSrc(ring.id)}
+                            alt={ring.name}
+                            title={`${ring.name} (+${ring.power})`}
+                            style={{ left: screenPos.x, top: screenPos.y + 14 + index * 18 }}
+                          />
+                        );
+                      })}
+                    </div>
+
                     <div className="unit-layer">
                       {Object.entries(territoryUnits).map(([territoryId, units]) => {
                         if (shadowedTerritories?.has(territoryId)) return null;
@@ -4794,6 +4833,7 @@ function GameMap({
                                             territoryId={territoryId}
                                             count={boatCount}
                                             unitDef={unitDefs[unit_id]}
+                                            ringIcons={ringsOnUnit(rings, territoryId, unit_id, territoryUnitsFull?.[territoryId] ?? [], unitDefs)}
                                             isSelected={selectedUnit?.territory === territoryId && selectedUnit?.unitType === unit_id}
                                             disabled={!canDrag}
                                             factionColor={unitFactionColor}
@@ -4856,6 +4896,7 @@ function GameMap({
                                           showForcedNavalStandoff={false}
                                           isNaval={false}
                                           isHero={Boolean(unitDefs[unit_id]?.hero_id)}
+                                          ringIcons={ringsOnUnit(rings, territoryId, unit_id, territoryUnitsFull?.[territoryId] ?? territoryUnits[territoryId] ?? [], unitDefs)}
                                           instanceIds={instanceIdsForUnit}
                                         />
                                       </span>
@@ -4952,6 +4993,7 @@ function GameMap({
                                       showForcedNavalStandoff={showForcedNavalStandoffStacked}
                                       isNaval={seaHullIds.has(unit_id)}
                                       isHero={Boolean(unitDefs[unit_id]?.hero_id)}
+                                      ringIcons={ringsOnUnit(rings, territoryId, unit_id, territoryUnitsFull?.[territoryId] ?? territoryUnits[territoryId] ?? [], unitDefs)}
                                       instanceIds={instanceIdsForUnit.length > 0 ? instanceIdsForUnit : undefined}
                                     />
                                   </span>

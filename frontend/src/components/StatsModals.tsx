@@ -1,5 +1,6 @@
 import React from 'react';
 import type { ApiFactionStats } from '../services/api';
+import { ringIconSrc } from '../ringsDisplay';
 import './Header.css';
 
 export interface UnitForStats {
@@ -56,15 +57,20 @@ function unitStatsFactionOrder(
   return [...sortByTurnOrder(fromData, turnOrder), ...sortByTurnOrder(extra, turnOrder)];
 }
 
+export type StatsRingMark = { id: string; name: string };
+
 export function GameStatsModal({
   factionStats,
   factionData,
   turnOrder = [],
+  ringsByFaction,
   onClose,
 }: {
   factionStats: ApiFactionStats | null | undefined;
   factionData: StatsFactionData;
   turnOrder?: string[];
+  /** Ring icons for each faction row, already assigned by who holds them. */
+  ringsByFaction?: Record<string, StatsRingMark[]>;
   onClose: () => void;
 }) {
   const alliances = factionStats?.alliances ?? {};
@@ -133,6 +139,19 @@ export function GameStatsModal({
                                   <img className="stats-faction-icon" src={fd.icon} alt="" aria-hidden />
                                 )}
                                 <span>{name}</span>
+                                {(ringsByFaction?.[fid]?.length ?? 0) > 0 && (
+                                  <span className="stats-faction-rings">
+                                    {ringsByFaction![fid].map((ring) => (
+                                      <img
+                                        key={ring.id}
+                                        className="stats-faction-ring"
+                                        src={ringIconSrc(ring.id)}
+                                        alt=""
+                                        title={ring.name}
+                                      />
+                                    ))}
+                                  </span>
+                                )}
                               </span>
                             </td>
                             <td className="stats-col-num">{st.strongholds}</td>

@@ -590,6 +590,8 @@ def resolve_combat_round(
     defender_territory_is_stronghold: bool = False,
     exclude_archetypes_from_rolling: list[str] | None = None,
     attacker_ladder_instance_ids: set[str] | None = None,
+    defender_effective_dice_override: dict[str, int] | None = None,
+    hp_shield: dict[str, int] | None = None,
 ) -> tuple[RoundResult, int | None]:
     """
     Resolve a single combat round.
@@ -642,6 +644,7 @@ def resolve_combat_round(
         else _count_hits(
             defender_units, defender_rolls, unit_defs, is_attacker=False,
             stat_modifiers=stat_modifiers_defender,
+            effective_dice_override=defender_effective_dice_override,
             exclude_archetypes=exclude_arch,
         )
     )
@@ -666,6 +669,7 @@ def resolve_combat_round(
         casualty_order=casualty_order_attacker,
         must_conquer=must_conquer,
         is_naval_combat=is_naval_combat_attacker,
+        hp_shield=hp_shield,
     )
     # Defender: when ladder hits exist, apply ladder hits first (non-stronghold first), then remaining (stronghold first)
 
@@ -678,6 +682,7 @@ def resolve_combat_round(
             is_naval_combat=is_naval_combat_defender,
             territory_is_stronghold=defender_territory_is_stronghold,
             hits_from_ladder=from_ladder,
+            hp_shield=hp_shield,
         )
     if ladder_hits > 0 and hits_to_defender_units > 0:
         ladder_cas, ladder_wound = _defender_apply(
@@ -846,6 +851,7 @@ def _apply_hits(
     is_naval_combat: bool = False,
     territory_is_stronghold: bool = False,
     hits_from_ladder: bool = False,
+    hp_shield: dict[str, int] | None = None,
 ) -> tuple[list[str], list[str]]:
     """
     Apply hits to units, returning (destroyed_ids, wounded_ids).
@@ -952,6 +958,14 @@ def _apply_hits(
                     target = min(aerials, key=sort_key)
                 elif sw:
                     target = min(sw, key=sort_key)
+
+        # A ring's extra health absorbs a hit before the unit's own health does.
+        shield = hp_shield or {}
+        if shield.get(target.instance_id, 0) > 0:
+            shield[target.instance_id] -= 1
+            remaining_hits -= 1
+            wounded_ids.add(target.instance_id)
+            continue
 
         # Apply one hit
         target.remaining_health -= 1
@@ -1511,6 +1525,8 @@ def resolve_archer_prefire(
     territory_def: "TerritoryDefinition | None" = None,
     *,
     prefire_penalty_delta: int = -1,
+    hp_shield: dict[str, int] | None = None,
+    defender_effective_dice_override: dict[str, int] | None = None,
 ) -> RoundResult:
     """
     Resolve defender archer prefire: only units with the archer special roll at defense-1; hits to attackers only.
@@ -1527,6 +1543,7 @@ def resolve_archer_prefire(
     defender_hits = _count_hits(
         defender_archer_units, defender_rolls, unit_defs, is_attacker=False,
         stat_modifiers=stat_modifiers,
+        effective_dice_override=defender_effective_dice_override,
     )
     attacker_hits = 0  # Attackers do not roll in prefire
 
@@ -1534,6 +1551,7 @@ def resolve_archer_prefire(
         attacker_units, defender_hits, unit_defs, is_attacker=True,
         casualty_order="best_unit",
         must_conquer=False,
+        hp_shield=hp_shield,
     )
     defender_casualties: list[str] = []
     defender_wounded: list[str] = []
@@ -1565,6 +1583,9 @@ def resolve_siegeworks_round(
     defender_territory_is_stronghold: bool = False,
     *,
     fuse_bomb: bool = True,
+    hp_shield: dict[str, int] | None = None,
+    attacker_effective_dice_override: dict[str, int] | None = None,
+    defender_effective_dice_override: dict[str, int] | None = None,
 ) -> tuple[RoundResult, int | None, int]:
     """
     Resolve the dedicated siegeworks round.
@@ -1642,6 +1663,7 @@ def resolve_siegeworks_round(
     defender_hits = _count_hits(
         defender_siegework_rolling, defender_rolls, unit_defs, is_attacker=False,
         stat_modifiers=stat_modifiers_defender,
+        effective_dice_override=defender_effective_dice_override,
     ) if defender_siegework_rolling else 0
 
     attacker_casualties, attacker_wounded = _apply_hits(
@@ -1649,6 +1671,7 @@ def resolve_siegeworks_round(
         stat_modifiers=stat_modifiers_attacker,
         casualty_order=casualty_order_attacker,
         must_conquer=False,
+        hp_shield=hp_shield,
     )
     defender_casualties, defender_wounded = _apply_hits(
         defender_units, hits_to_defender_units, unit_defs, is_attacker=False,
@@ -1657,6 +1680,7 @@ def resolve_siegeworks_round(
         must_conquer=False,
         territory_is_stronghold=defender_territory_is_stronghold,
         hits_from_ladder=False,
+        hp_shield=hp_shield,
     )
 
     result = RoundResult(
@@ -1682,6 +1706,8 @@ def resolve_stealth_prefire(
     stat_modifiers_attacker_extra: dict[str, int] | None = None,
     *,
     prefire_penalty_delta: int = -1,
+    hp_shield: dict[str, int] | None = None,
+    attacker_effective_dice_override: dict[str, int] | None = None,
 ) -> RoundResult:
     """
     Resolve attacker stealth prefire: only attackers roll at attack-1, hits applied to defenders only.
@@ -1695,6 +1721,7 @@ def resolve_stealth_prefire(
     attacker_hits = _count_hits(
         attacker_units, attacker_rolls, unit_defs, is_attacker=True,
         stat_modifiers=stat_modifiers,
+        effective_dice_override=attacker_effective_dice_override,
     )
     defender_hits = 0  # Defenders do not roll in stealth prefire
 
@@ -1702,6 +1729,7 @@ def resolve_stealth_prefire(
         defender_units, attacker_hits, unit_defs, is_attacker=False,
         casualty_order="best_unit",
         must_conquer=False,
+        hp_shield=hp_shield,
     )
     attacker_casualties: list[str] = []
     attacker_wounded: list[str] = []

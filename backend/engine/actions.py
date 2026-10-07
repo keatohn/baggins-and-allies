@@ -64,6 +64,7 @@ def move_units(
     load_onto_boat_instance_id: str | None = None,  # Load: assign passengers only to this boat in destination sea zone
     sail_to_offload_land_territory_id: str | None = None,  # sea→sea sail only: land hex you will offload/raid onto (server-only)
     avoid_forced_naval_combat: bool = False,
+    ring_id: str | None = None,
 ) -> Action:
     """
     Move units from one territory to another.
@@ -88,6 +89,8 @@ def move_units(
         payload["sail_to_offload_land_territory_id"] = sail_to_offload_land_territory_id
     if avoid_forced_naval_combat:
         payload["avoid_forced_naval_combat"] = True
+    if ring_id:
+        payload["ring_id"] = ring_id
     return Action(
         type="move_units",
         faction=faction,

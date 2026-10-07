@@ -91,6 +91,7 @@ export interface ApiPendingMove {
   /** "load" | "offload" | "sail" for sea transport; omitted for normal moves */
   move_type?: string | null;
   load_onto_boat_instance_id?: string | null;
+  ring_id?: string | null;
 }
 
 export interface ApiPendingMobilization {
@@ -150,6 +151,9 @@ export interface ApiGameState {
   heroes_enabled?: boolean;
   /** Create-game option. Missing or false leaves the board fully visible. */
   shadow_of_war?: boolean;
+  /** Create-game option. Missing or false means this game has no rings. */
+  rings_of_power?: boolean;
+  rings?: ApiRing[];
   /** Territory ids whose armies this viewer cannot see. Omitted when the mode is off. */
   shadowed_territories?: string[];
   /** Power cost per stronghold HP repaired (from setup manifest). */
@@ -164,6 +168,21 @@ export interface ApiGameState {
    * Client should treat these hexes as owned by the capturer for highlights / move fallback BFS.
    */
   pending_captures?: Record<string, string>;
+}
+
+export interface ApiRing {
+  id: string;
+  name: string;
+  power: number;
+  territory_id: string;
+  bearer_instance_id?: string | null;
+  bearer_hero_id?: string | null;
+  returns_to?: string | null;
+  attack_boost?: number;
+  defense_boost?: number;
+  rolls_boost?: number;
+  hp_boost?: number;
+  moves_boost?: number;
 }
 
 export interface ApiTerritory {
@@ -806,6 +825,8 @@ export interface SetupInfo {
     good_count?: number;
     evil_count?: number;
   };
+  /** Present when the scenario manifest declares a Rings of Power catalog. */
+  rings_of_power?: boolean;
 }
 
 async function authFetchJson<T>(url: string, body: object): Promise<T> {
@@ -936,6 +957,7 @@ export const api = {
     setupId?: string,
     heroesEnabled: boolean = true,
     shadowOfWar: boolean = false,
+    ringsOfPower: boolean = false,
   ) =>
     fetchJson<{ game_id: string; game_code: string | null; name: string; state?: ApiGameState; turn_order?: string[] }>('/games/create', {
       method: 'POST',
@@ -944,6 +966,7 @@ export const api = {
         is_multiplayer: isMultiplayer,
         heroes_enabled: heroesEnabled,
         shadow_of_war: shadowOfWar,
+        rings_of_power: ringsOfPower,
         ...(setupId != null && { setup_id: setupId }),
       }),
     }),
@@ -1008,6 +1031,7 @@ export const api = {
       is_sea_raid?: boolean;
       retreat_when_attacker_units_le?: number | null;
       stronghold_initial_hp?: number | null;
+      ring_boosts?: { unit_id: string; attack?: number; defense?: number; dice?: number; hp?: number }[];
     };
   }) =>
     fetchJson<SimulateCombatResponse>('/simulate-combat', {
@@ -1088,7 +1112,7 @@ export const api = {
   // Move units (declares a pending move). chargeThrough for cavalry charging (empty enemy territories to conquer).
   // loadOntoBoatInstanceId: when loading to sea, assign passengers only to this boat.
   // offloadSeaZoneId: when moving sea->land and multiple sea zones can offload, send the chosen one (after need_offload_sea_choice).
-  move: (gameId: string, fromTerritory: string, toTerritory: string, unitInstanceIds: string[], chargeThrough?: string[], loadOntoBoatInstanceId?: string | null, offloadSeaZoneId?: string | null, avoidForcedNavalCombat?: boolean) => {
+  move: (gameId: string, fromTerritory: string, toTerritory: string, unitInstanceIds: string[], chargeThrough?: string[], loadOntoBoatInstanceId?: string | null, offloadSeaZoneId?: string | null, avoidForcedNavalCombat?: boolean, ringId?: string | null) => {
     const ids = Array.from(unitInstanceIds, (id: unknown) =>
       typeof id === 'string' ? id : (id != null && typeof id === 'object' && 'instance_id' in id ? String((id as { instance_id: unknown }).instance_id) : '')
     ).filter(Boolean);
@@ -1129,6 +1153,9 @@ export const api = {
     }
     if (avoidForcedNavalCombat) {
       body.avoid_forced_naval_combat = true;
+    }
+    if (ringId) {
+      body.ring_id = String(ringId);
     }
     return fetchJson<ActionResponse>(`/games/${gameId}/move`, {
       method: 'POST',

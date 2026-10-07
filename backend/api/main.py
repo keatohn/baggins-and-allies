@@ -92,6 +92,7 @@ from backend.engine.definitions import (
     TerritoryDefinition,
     parse_prefire_penalty_from_manifest,
 )
+from backend.engine.rings import mode_declared
 from backend.engine.shadow import (
     apply_shadow_view,
     choose_viewer_alliance,
@@ -180,7 +181,7 @@ from backend.engine.movement import (
     water_transport_relation,
 )
 from backend.engine.queries import _is_naval_unit, get_valid_offload_sea_zones, participates_in_sea_hex_naval_combat
-from backend.engine.combat_sim import run_simulation, SimOptions
+from backend.engine.combat_sim import apply_sim_ring_boosts, run_simulation, SimOptions
 from backend.engine.combat_specials import (
     compute_battle_specials_and_modifiers,
     stacks_to_synthetic_units,
@@ -350,6 +351,8 @@ class CreateGameRequest(BaseModel):
     heroes_enabled: bool = True
     """When True, each alliance sees armies only on its land and one territory beyond. Default off."""
     shadow_of_war: bool = False
+    """When True, spawn the manifest Rings of Power catalog. Requires heroes. Default off."""
+    rings_of_power: bool = False
 
 
 class JoinGameRequest(BaseModel):
@@ -392,6 +395,7 @@ class MoveRequest(BaseModel):
     load_onto_boat_instance_id: str | None = None  # Load: assign passengers only to this boat in the destination sea zone
     offload_sea_zone_id: str | None = None  # Sea->land: when multiple sea zones can offload to this land, client sends which one to sail to
     avoid_forced_naval_combat: bool | None = None  # Combat move: sail away from mobilization standoff instead of fighting
+    ring_id: str | None = None  # Rings of Power: carry this ring with the one hero in the move
 
 
 class CombatRequest(BaseModel):
@@ -466,6 +470,7 @@ class SimulateCombatOptionsRequest(BaseModel):
     is_sea_raid: bool | None = None  # land combat: Sea Raider special +attack; not naval combat
     retreat_when_attacker_units_le: int | None = None  # retreat when attacker count <= this after a round
     stronghold_initial_hp: int | None = None  # when set, defender stronghold starts at this HP for the sim
+    ring_boosts: list[dict[str, Any]] | None = None  # sim-only: {unit_id, attack, defense, dice, hp}
 
 
 class SimulateCombatRequest(BaseModel):
@@ -1580,8 +1585,11 @@ def create_game(
         camp_cost=camp_cost,
         stronghold_repair_cost=stronghold_repair_cost,
         prefire_penalty=parse_prefire_penalty_from_manifest(setup.get("prefire_penalty")),
-        heroes_enabled=bool(request.heroes_enabled),
+        heroes_enabled=bool(request.heroes_enabled) or (
+            bool(request.rings_of_power) and mode_declared(setup.get("special_rules"))
+        ),
         shadow_of_war=bool(request.shadow_of_war),
+        rings_of_power=bool(request.rings_of_power) and mode_declared(setup.get("special_rules")),
         special_rules=setup.get("special_rules"),
     )
     state.map_asset = setup["map_asset"]
@@ -1965,7 +1973,10 @@ def simulate_combat(request: SimulateCombatRequest, db: Session = Depends(get_db
         retreat_when_attacker_units_le=o.retreat_when_attacker_units_le if o else None,
         stronghold_initial_hp=stronghold_hp,
         prefire_penalty=prefire_penalty_on,
+        ring_boosts=list(o.ring_boosts) if o and o.ring_boosts else None,
     )
+    if opts.ring_boosts:
+        ud = apply_sim_ring_boosts(ud, opts.ring_boosts)
     is_sea_raid = bool(opts.is_sea_raid)
     # Build battle context from combat_specials engine (single source of truth) so frontend shows backend-derived specials/shelves
     battle_context: BattleContext | None = None
@@ -3198,6 +3209,7 @@ def do_move(
         move_type=move_type,
         load_onto_boat_instance_id=request.load_onto_boat_instance_id,
         avoid_forced_naval_combat=bool(request.avoid_forced_naval_combat),
+        ring_id=(request.ring_id or "").strip() or None,
     )
     validation = validate_action(state, action, ud, td, fd, cd, port_d)
     if not validation.valid:

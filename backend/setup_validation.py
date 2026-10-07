@@ -258,6 +258,9 @@ def validate_setup_documents(
                 if not isinstance(typ, str) or not typ.strip():
                     errors.append(f'manifest.special_rules[{i}].type must be a non-empty string')
                     continue
+                if typ == "rings_of_power":
+                    _validate_rings_of_power(rule, i, territory_ids, errors)
+                    continue
                 if typ != "fading_territory":
                     continue
                 rows = rule.get("territories")
@@ -283,6 +286,56 @@ def validate_setup_documents(
                             errors.append(f"{prefix}.{key} must be an integer >= 0")
 
     return errors
+
+
+def _validate_rings_of_power(
+    rule: dict[str, Any],
+    index: int,
+    territory_ids: set[str],
+    errors: list[str],
+) -> None:
+    rows = rule.get("rings")
+    prefix = f"manifest.special_rules[{index}]"
+    if not isinstance(rows, list) or not rows:
+        errors.append(f"{prefix}.rings must be a non-empty list")
+        return
+    seen: set[str] = set()
+    for j, row in enumerate(rows):
+        row_prefix = f"{prefix}.rings[{j}]"
+        if not isinstance(row, dict):
+            errors.append(f"{row_prefix} must be an object")
+            continue
+        rid = row.get("id")
+        if not isinstance(rid, str) or not rid.strip():
+            errors.append(f"{row_prefix}.id must be a non-empty string")
+        elif rid.strip() in seen:
+            errors.append(f'{row_prefix} duplicates ring id "{rid.strip()}"')
+        else:
+            seen.add(rid.strip())
+        name = row.get("name")
+        if not isinstance(name, str) or not name.strip():
+            errors.append(f"{row_prefix}.name must be a non-empty string")
+        tid = row.get("territory_id")
+        if not isinstance(tid, str) or tid not in territory_ids:
+            errors.append(f"{row_prefix}.territory_id must be a known territory")
+        power = row.get("power")
+        if isinstance(power, bool) or not isinstance(power, int) or power < 0:
+            errors.append(f"{row_prefix}.power must be an integer >= 0")
+        for key in ("bearer_hero_id", "returns_to"):
+            raw = row.get(key)
+            if raw is None or raw == "":
+                continue
+            if not isinstance(raw, str) or not raw.strip():
+                errors.append(f"{row_prefix}.{key} must be a non-empty string when set")
+        home = row.get("returns_to")
+        if isinstance(home, str) and home.strip() and home.strip() not in territory_ids:
+            errors.append(f"{row_prefix}.returns_to must be a known territory")
+        for key in ("attack_boost", "defense_boost", "rolls_boost", "hp_boost", "moves_boost"):
+            raw = row.get(key)
+            if raw is None:
+                continue
+            if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+                errors.append(f"{row_prefix}.{key} must be an integer >= 0")
 
 
 def validate_setup_payload(payload: dict[str, Any]) -> list[str]:

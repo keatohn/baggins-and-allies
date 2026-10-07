@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import type { GameState, GamePhase, FactionId, GameEvent, SelectedUnit, DeclaredBattle } from './types/game';
+import { boostingRingsFromRules, highestPowerHeroUnitId, ringHoldingFactionId, ringsOnUnit } from './ringsDisplay';
 import Header from './components/Header';
 import GameMap, { type PendingMoveConfirm } from './components/GameMap';
 import Sidebar from './components/Sidebar';
@@ -178,6 +179,9 @@ export interface BulkMoveConfirmState {
   fromTerritory: string;
   toTerritory: string;
   stacks: BulkMoveConfirmStack[];
+  /** Ring carried by the highest-power hero in this All move. */
+  ringId?: string | null;
+  ringCarryDecided?: boolean;
 }
 
 export interface BulkMobilizeConfirmState {
@@ -954,14 +958,15 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     return defs;
   }, [definitions]);
 
-  const factionData: Record<string, { name: string; icon: string; color: string; alliance: string; capital: string }> = useMemo(() => {
+  const factionData: Record<string, { name: string; icon: string; color: string; alliance: string; capital: string; parent?: string }> = useMemo(() => {
     if (!definitions) return {};
 
-    const data: Record<string, { name: string; icon: string; color: string; alliance: string; capital: string }> = {};
+    const data: Record<string, { name: string; icon: string; color: string; alliance: string; capital: string; parent?: string }> = {};
     for (const [id, faction] of Object.entries(definitions.factions)) {
+      const parentIcon = `/assets/factions/${faction.icon || `${id}.png`}`;
       data[id] = {
         name: faction.display_name,
-        icon: `/assets/factions/${faction.icon || `${id}.png`}`,
+        icon: parentIcon,
         color: faction.color,
         alliance: faction.alliance,
         capital: faction.capital ?? '',
@@ -969,6 +974,18 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     }
     return data;
   }, [definitions]);
+
+  const ringsByFaction = useMemo(() => {
+    const rings = backendState?.rings ?? [];
+    const territories = backendState?.territories ?? {};
+    const out: Record<string, { id: string; name: string }[]> = {};
+    for (const ring of rings) {
+      const fid = ringHoldingFactionId(ring, territories[ring.territory_id]?.owner, unitDefs, factionData);
+      if (!fid) continue;
+      (out[fid] ??= []).push({ id: ring.id, name: ring.name });
+    }
+    return out;
+  }, [backendState?.rings, backendState?.territories, unitDefs, factionData]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2998,6 +3015,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         loadOntoBoatId,
         offloadSeaZoneIdForRaid,
         avoidForcedMain,
+        pendingMoveConfirm.ringId,
       );
       if (result.need_offload_sea_choice && result.valid_offload_sea_zones?.length) {
         setPendingOffloadSeaChoice({
@@ -3073,7 +3091,11 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
 
   const handleConfirmBulkMove = useCallback(async () => {
     if (!bulkMoveConfirm || !GAME_ID || !backendState) return;
-    const { fromTerritory, stacks } = bulkMoveConfirm;
+    const { fromTerritory, stacks, ringId } = bulkMoveConfirm;
+    const heroUnitId = highestPowerHeroUnitId(
+      stacks.filter((stack) => stack.instanceIds.length === 1).map((stack) => stack.unitId),
+      unitDefs,
+    );
     const cats = new Set(
       stacks.map((s) => movementSfxCategoryFromUnitDef(definitions?.units?.[s.unitId])),
     );
@@ -3091,7 +3113,20 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
 
     for (const stack of fordSubmitOrder) {
       try {
-        const res = await api.move(GAME_ID, fromTerritory, stack.destForApi, stack.instanceIds, stack.chargeThrough);
+        const carryRing = ringId && heroUnitId && stack.unitId === heroUnitId && stack.instanceIds.length === 1
+          ? ringId
+          : undefined;
+        const res = await api.move(
+          GAME_ID,
+          fromTerritory,
+          stack.destForApi,
+          stack.instanceIds,
+          stack.chargeThrough,
+          undefined,
+          undefined,
+          undefined,
+          carryRing,
+        );
         setBackendState(res.state);
         if (res.can_act !== undefined) setCanAct(res.can_act);
         if (res.events?.length) addBackendEvents(res.events);
@@ -3107,7 +3142,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     } catch {
       /* ignore refresh failure */
     }
-  }, [bulkMoveConfirm, GAME_ID, backendState, gameState.phase, definitions, addBackendEvents, addLogEntry]);
+  }, [bulkMoveConfirm, GAME_ID, backendState, gameState.phase, definitions, unitDefs, addBackendEvents, addLogEntry]);
 
   const handleChooseSeaRaidSeaZone = useCallback((seaZoneId: string) => {
     setPendingMoveConfirm(prev => prev ? { ...prev, chosenSeaZoneId: seaZoneId, seaRaidSeaZoneOptions: undefined } : null);
@@ -3971,6 +4006,17 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       attackerRamUnitTypes,
       combatUnitDefs,
       attackerHasFuseBombOption,
+      ringIconsByUnitType: (() => {
+        const territoryId = effectiveCombat.territory;
+        const rings = backendState.rings ?? [];
+        const present = backendState.territories[territoryId]?.units ?? [];
+        const byType: Record<string, { id: string; name: string }[]> = {};
+        for (const unitId of new Set(present.map((unit) => unit.unit_id))) {
+          const on = ringsOnUnit(rings, territoryId, unitId, present, unitDefs);
+          if (on.length > 0) byType[unitId] = on.map((ring) => ({ id: ring.id, name: ring.name }));
+        }
+        return byType;
+      })(),
     };
   }, [effectiveCombat, openBattleKey, backendState, currentTerritoryData, gameState.current_faction, definitions, unitDefs, validRetreatDestinations, factionData, canAct, spectatingBattle, ac, acTerritoryId, acSeaZoneId, acAttackerInstanceIds, eventLog]);
 
@@ -4151,6 +4197,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         factionData={factionData}
         effectivePower={currentPower}
         factionStats={backendState?.faction_stats}
+        ringsByFaction={ringsByFaction}
         unitsByFaction={unitsByFaction}
         gameName={gameMeta?.name ?? null}
         setupDisplayName={gameMeta?.scenario?.display_name ?? null}
@@ -4186,6 +4233,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               territoryDefenderCasualtyOrder={backendState?.territory_defender_casualty_order ?? {}}
               heroesEnabled={backendState?.heroes_enabled !== false}
               shadowedTerritories={shadowedTerritories}
+              scenarioRings={boostingRingsFromRules((backendState as { special_rules?: unknown } | null)?.special_rules)}
               embedded
             />
           </div>
@@ -4202,6 +4250,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               territoryData={currentTerritoryData}
               territoryUnits={currentTerritoryUnits}
               shadowedTerritories={shadowedTerritories}
+              rings={backendState?.rings ?? []}
               territoryUnitsFull={territoryUnitsFull}
               unitDefs={unitDefs}
               unitStats={unitStats}
@@ -4363,6 +4412,9 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               territoryData={currentTerritoryData}
               territoryUnits={currentTerritoryUnits}
               shadowedTerritories={shadowedTerritories}
+              rings={backendState?.rings ?? []}
+              carriedRingIds={new Set((backendState?.pending_moves ?? []).map((move) => move.ring_id).filter((id): id is string => Boolean(id)))}
+              onDecideRingCarry={(ringId) => setPendingMoveConfirm((prev) => prev ? { ...prev, ringId, ringCarryDecided: true } : prev)}
               territoryUnitStacksWithMovement={territoryUnitStacksWithMovement}
               unitDefs={unitDefs}
               factionData={factionData}
@@ -4391,6 +4443,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               bulkMoveConfirm={bulkMoveConfirm}
               onConfirmBulkMove={handleConfirmBulkMove}
               onCancelBulkMove={handleCancelBulkMove}
+              onDecideBulkRingCarry={(ringId) => setBulkMoveConfirm((prev) => prev ? { ...prev, ringId, ringCarryDecided: true } : prev)}
               onCancelPendingMove={handleCancelPendingMove}
               bulkMobilizeConfirm={bulkMobilizeConfirm}
               onConfirmBulkMobilize={handleConfirmBulkMobilize}
@@ -4509,6 +4562,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           attackerRamUnitTypes={combatDisplayProps.attackerRamUnitTypes}
           combatUnitDefs={combatDisplayProps.combatUnitDefs}
           attackerHasFuseBombOption={combatDisplayProps.attackerHasFuseBombOption}
+          ringIconsByUnitType={combatDisplayProps.ringIconsByUnitType}
         />
       )}
 

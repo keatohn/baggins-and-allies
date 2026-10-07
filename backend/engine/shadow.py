@@ -132,6 +132,12 @@ def apply_shadow_view(
             shadowed.append(tid)
             terr["units"] = []
     out["shadowed_territories"] = shadowed
+    rings = out.get("rings")
+    if isinstance(rings, list):
+        out["rings"] = [
+            ring for ring in rings
+            if isinstance(ring, dict) and ring.get("territory_id") in visible
+        ]
 
     order = out.get("territory_defender_casualty_order")
     if isinstance(order, dict):

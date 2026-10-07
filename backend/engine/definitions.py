@@ -84,6 +84,9 @@ def scenario_menu_entry(
     image = timeline_image_filename(manifest)
     if image is not None:
         entry["timeline_image"] = image
+    from backend.engine.rings import mode_declared
+    if mode_declared(manifest.get("special_rules")):
+        entry["rings_of_power"] = True
     return entry
 
 
@@ -426,6 +429,13 @@ class FactionTable(dict[str, FactionDefinition]):
                     subfactions=(),
                 )
         self._resolved = resolved
+
+    def __deepcopy__(self, memo: dict) -> "FactionTable":
+        from copy import deepcopy
+        cloned = {k: deepcopy(v, memo) for k, v in self.items()}
+        result = FactionTable(cloned)
+        memo[id(self)] = result
+        return result
 
     def get(self, key: str, default: Any = None) -> FactionDefinition | Any:
         if key in self._resolved:

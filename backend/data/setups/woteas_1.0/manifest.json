@@ -23,6 +23,29 @@
   "camp_cost": 10,
   "stronghold_repair_cost": 2,
   "prefire_penalty": false,
+  "special_rules": [
+    {
+      "type": "rings_of_power",
+      "rings": [
+        {"id": "narya", "name": "Narya", "territory_id": "mithlond", "power": 3},
+        {"id": "nenya", "name": "Nenya", "territory_id": "ost_in_edhil", "power": 3},
+        {"id": "vilya", "name": "Vilya", "territory_id": "ost_in_edhil", "power": 3},
+        {"id": "durins_ring", "name": "Durin's Ring", "territory_id": "khazad_dum", "power": 2},
+        {"id": "the_six", "name": "The Six", "territory_id": "ost_in_edhil", "power": 4},
+        {"id": "the_nine", "name": "The Nine", "territory_id": "ost_in_edhil", "power": 4},
+      {
+        "id": "the_one",
+        "name": "The One",
+        "territory_id": "east_eriador",
+        "power": 4,
+        "bearer_hero_id": "sauron",
+        "returns_to": "orodruin",
+        "attack_boost": 1,
+        "defense_boost": 1
+      }
+      ]
+    }
+  ],
   "lobby_music": [
     "fellowship.m4a"
   ],

@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import type { Definitions } from '../services/api';
 import api, { type SimulateCombatResponse } from '../services/api';
 import './CombatSimulatorPanel.css';
+import type { RingView } from '../ringsDisplay';
 
 /** Per-territory list of stacks (unit_id + count). */
 type TerritoryUnitsMap = Record<string, { unit_id: string; count: number }[]>;
@@ -30,6 +31,8 @@ interface CombatSimulatorPanelProps {
   heroesEnabled?: boolean;
   /** Territories whose defender stacks must not be copied into the simulator. */
   shadowedTerritories?: ReadonlySet<string>;
+  /** Scenario rings that grant a combat boost. Each one gets a sim checkbox. */
+  scenarioRings?: RingView[];
   onClose?: () => void;
   embedded?: boolean;
 }
@@ -751,6 +754,7 @@ export default function CombatSimulatorPanel({
   territoryDefenderCasualtyOrder = {},
   heroesEnabled = true,
   shadowedTerritories,
+  scenarioRings = [],
   onClose,
   embedded,
 }: CombatSimulatorPanelProps) {
@@ -824,6 +828,8 @@ export default function CombatSimulatorPanel({
       }));
   }, [definitions?.territories, combatDomain]);
   const [attackerCounts, setAttackerCounts] = useState<Record<UnitId, number>>({});
+  /** ring id -> hero unit id the boost is applied to. Present key means the checkbox is on. */
+  const [ringBearers, setRingBearers] = useState<Record<string, string>>({});
   const [casualtyOrderAttacker, setCasualtyOrderAttacker] = useState<'best_unit' | 'best_attack'>('best_unit');
   const [casualtyOrderDefender, setCasualtyOrderDefender] = useState<'best_unit' | 'best_defense'>('best_unit');
   const [mustConquer, setMustConquer] = useState(false);
@@ -848,6 +854,16 @@ export default function CombatSimulatorPanel({
   const [addDefenderDropdownOpen, setAddDefenderDropdownOpen] = useState(false);
   /** Editable counts for defenders that come from the territory; keyed by unit_id, defaults to actual territory count. */
   const [defenderTerritoryCounts, setDefenderTerritoryCounts] = useState<Record<string, number>>({});
+  const simHeroChoices = useMemo(() => {
+    const ids = new Set<string>();
+    const consider = (unitId: string, count: number) => {
+      if (count > 0 && isHeroUnit(definitions, unitId)) ids.add(unitId);
+    };
+    for (const [unitId, count] of Object.entries(attackerCounts)) consider(unitId, count);
+    for (const [unitId, count] of Object.entries(defenderTerritoryCounts)) consider(unitId, count);
+    for (const row of addedDefenderStacks) consider(row.unit_id, row.count);
+    return [...ids];
+  }, [attackerCounts, defenderTerritoryCounts, addedDefenderStacks, definitions]);
 
   const factionsNoNeutral = useMemo(() => allFactions.filter((f) => f.id !== 'neutral'), [allFactions]);
   const factionsSeaOnly = useMemo(
@@ -1252,6 +1268,15 @@ export default function CombatSimulatorPanel({
       is_sea_raid: isLandCombat && isSeaRaid ? true : undefined,
       retreat_when_attacker_units_le: retreatEnabled && retreatWhenUnitsLe !== null ? retreatWhenUnitsLe : undefined,
       stronghold_initial_hp: strongholdHpEnabled ? Math.max(0, Math.min(strongholdHpAmount, strongholdHpMax)) : undefined,
+      ring_boosts: scenarioRings
+        .filter((ring) => ringBearers[ring.id])
+        .map((ring) => ({
+          unit_id: ringBearers[ring.id],
+          attack: ring.attack_boost ?? 0,
+          defense: ring.defense_boost ?? 0,
+          dice: ring.rolls_boost ?? 0,
+          hp: ring.hp_boost ?? 0,
+        })),
     };
     const baseParams = {
       attacker_stacks: attStacks,
@@ -1978,6 +2003,42 @@ export default function CombatSimulatorPanel({
               </label>
               <span className="combat-sim-option-name">Must Conquer</span>
             </div>
+            {scenarioRings.map((ring) => {
+              const checked = Object.prototype.hasOwnProperty.call(ringBearers, ring.id);
+              const heroReady = simHeroChoices.length > 0;
+              return (
+                <div key={ring.id} className="combat-sim-option-line">
+                  <label className="combat-sim-checkbox-wrap">
+                    <input
+                      type="checkbox"
+                      className="combat-sim-checkbox"
+                      checked={checked}
+                      onChange={(e) => {
+                        setRingBearers((prev) => {
+                          const next = { ...prev };
+                          if (e.target.checked) next[ring.id] = simHeroChoices[0] ?? '';
+                          else delete next[ring.id];
+                          return next;
+                        });
+                      }}
+                    />
+                  </label>
+                  <span className="combat-sim-option-name">{ring.name}</span>
+                  <select
+                    className="combat-sim-ring-hero"
+                    disabled={!checked || !heroReady}
+                    value={checked ? (ringBearers[ring.id] ?? '') : ''}
+                    onChange={(e) => setRingBearers((prev) => ({ ...prev, [ring.id]: e.target.value }))}
+                  >
+                    {heroReady ? simHeroChoices.map((unitId) => (
+                      <option key={unitId} value={unitId}>{unitDefs[unitId]?.name || unitId}</option>
+                    )) : (
+                      <option value="">Add a hero</option>
+                    )}
+                  </select>
+                </div>
+              );
+            })}
             {isLandCombat && (
               <div className="combat-sim-option-line">
                 <label className="combat-sim-checkbox-wrap">

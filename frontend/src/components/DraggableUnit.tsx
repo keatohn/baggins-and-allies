@@ -26,6 +26,8 @@ interface DraggableUnitProps {
   passengerCount?: number;
   /** When set (e.g. boat + passengers), use these instance IDs for the move. */
   instanceIds?: string[];
+  /** Rings sitting on this hero. Shown even when the ring has no combat boost. */
+  ringIcons?: { id: string; name: string }[];
 }
 
 function DraggableUnit({
@@ -44,6 +46,7 @@ function DraggableUnit({
   isHero = false,
   passengerCount = 0,
   instanceIds,
+  ringIcons = [],
 }: DraggableUnitProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id,
@@ -88,6 +91,16 @@ function DraggableUnit({
       {...attributes}
     >
       <img src={unitDef.icon} alt={unitDef.name} draggable={false} />
+      {ringIcons.map((ring) => (
+        <img
+          key={ring.id}
+          className="unit-token-ring"
+          src={`/assets/rings/${ring.id}.png`}
+          alt={ring.name}
+          title={ring.name}
+          draggable={false}
+        />
+      ))}
       <span className={`count ${count === 1 && passengerCount === 0 ? 'single' : ''}`}>{count}</span>
       {passengerCount > 0 && (
         <span className="unit-token-passenger-badge" title={`${passengerCount} unit(s) aboard`}>{passengerCount}</span>

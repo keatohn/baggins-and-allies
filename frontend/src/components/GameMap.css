@@ -1111,3 +1111,18 @@
     box-sizing: border-box;
   }
 }
+
+.territory-ring-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.territory-ring-token {
+  position: absolute;
+  transform: translate(-50%, 0);
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.45));
+}

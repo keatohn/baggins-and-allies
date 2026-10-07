@@ -13,6 +13,17 @@
   touch-action: none;
 }
 
+.unit-token-ring {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  pointer-events: none;
+  z-index: 2;
+}
+
 .unit-token[role='button']:not(.disabled) {
   cursor: grab !important;
 }

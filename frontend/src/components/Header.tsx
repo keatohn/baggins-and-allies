@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import type { GameState } from '../types/game';
 import type { ApiFactionStats, SpecialDefinition } from '../services/api';
 import StrongholdAllianceBar from './StrongholdAllianceBar';
-import { GameStatsModal, UnitStatsModal, type UnitForStats } from './StatsModals';
+import { GameStatsModal, UnitStatsModal, type StatsRingMark, type UnitForStats } from './StatsModals';
 import './Header.css';
 
 export type { UnitForStats };
@@ -12,9 +12,11 @@ interface HeaderProps {
   gameState: GameState;
   /** Faction IDs in display order for ticker (from create response or backend). Overrides gameState.turn_order when provided. */
   turnOrderForTicker?: string[];
-  factionData: Record<string, { name: string; icon: string; color: string; alliance: string }>;
+  factionData: Record<string, { name: string; icon: string; color: string; alliance: string; parent?: string }>;
   effectivePower?: number;
   factionStats?: ApiFactionStats | null;
+  /** Rings held by each faction, shown beside the name in Game Stats. */
+  ringsByFaction?: Record<string, StatsRingMark[]>;
   unitsByFaction?: Record<string, UnitForStats[]>;
   /** Current game name (created/loaded), shown under "Baggins & Allies" in the center */
   gameName?: string | null;
@@ -49,7 +51,7 @@ function phaseLabel(phase: string): string {
   return `${formatPhase(phase)} (${current}/${n})`;
 }
 
-function Header({ gameState, turnOrderForTicker, factionData, effectivePower, factionStats, unitsByFaction = {}, gameName = null, setupDisplayName = null, specials = {}, specialsOrder: _specialsOrder = [], unitsBySpecial = {}, onOpenCombatSim }: HeaderProps) {
+function Header({ gameState, turnOrderForTicker, factionData, effectivePower, factionStats, ringsByFaction, unitsByFaction = {}, gameName = null, setupDisplayName = null, specials = {}, specialsOrder: _specialsOrder = [], unitsBySpecial = {}, onOpenCombatSim }: HeaderProps) {
   const [statsOpen, setStatsOpen] = useState(false);
   const [specialsOpen, setSpecialsOpen] = useState(false);
   const [unitStatsOpen, setUnitStatsOpen] = useState(false);
@@ -182,7 +184,9 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
         <div className="header-turn-ticker" aria-label="Turn order" style={factionColor ? { borderColor: factionColor } : undefined}>
           {(() => {
             const displayOrder = turnOrder.filter((f) => factionData[f]);
-            const order = displayOrder.length > 0 ? displayOrder : Object.keys(factionData).sort();
+            const order = displayOrder.length > 0
+              ? displayOrder
+              : Object.keys(factionData).filter((fid) => !factionData[fid]?.parent).sort();
             return order.map((fid) => {
               const fd = factionData[fid];
               const isCurrent = fid === gameState.current_faction;
@@ -219,6 +223,7 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
           factionStats={factionStats}
           factionData={factionData}
           turnOrder={turnOrder}
+          ringsByFaction={ringsByFaction}
           onClose={() => setStatsOpen(false)}
         />
       )}
