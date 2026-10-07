@@ -100,6 +100,17 @@ def _home_territory_ids(ud: UnitDefinition) -> list[str]:
     return list(ids) if ids else []
 
 
+def subfaction_owns_for(
+    owner: str | None,
+    faction_id: str,
+    faction_defs: dict[str, FactionDefinition] | None,
+) -> bool:
+    """True when owner is a subfaction of faction_id. Parent home units may deploy on its land."""
+    if not owner or owner == faction_id or not faction_defs:
+        return False
+    return controlling_faction_id(faction_defs, owner) == faction_id
+
+
 def _sea_zone_adjacent_to_owned_port(
     state: GameState,
     sea_zone_id: str,
@@ -822,7 +833,7 @@ def _validate_purchase(
 
     # Check mobilization capacity: land and sea are capped separately (camps vs port-adjacent sea zones)
     capacity_info = get_mobilization_capacity(
-        state, faction_id, territory_defs, camp_defs or {}, port_defs or {}, unit_defs
+        state, faction_id, territory_defs, camp_defs or {}, port_defs or {}, unit_defs, faction_defs
     )
     territories_list = capacity_info.get("territories", [])
     land_capacity = sum(t.get("power", 0) for t in territories_list) + sum(
@@ -1087,7 +1098,7 @@ def _validate_move(
                 load_onto_boat_id = (action.payload.get("load_onto_boat_instance_id") or "").strip() or None
                 if load_onto_boat_id:
                     slots = remaining_load_slots_on_boat(
-                        slot_state, destination, load_onto_boat_id, faction_id, unit_defs, territory_defs, state.phase
+                        slot_state, destination, load_onto_boat_id, faction_id, unit_defs, territory_defs, state.phase, faction_defs
                     )
                     if len(units_in_stack) > slots:
                         return ValidationResult(
@@ -1097,7 +1108,7 @@ def _validate_move(
                         )
                 else:
                     slots_left = remaining_sea_load_passenger_slots(
-                        slot_state, destination, faction_id, unit_defs, territory_defs, state.phase
+                        slot_state, destination, faction_id, unit_defs, territory_defs, state.phase, faction_defs
                     )
                     if len(units_in_stack) > slots_left:
                         return ValidationResult(
@@ -1236,7 +1247,7 @@ def _validate_move(
                     f"Boat {load_onto_boat_id} does not belong to faction {faction_id}",
                 )
             slots = remaining_load_slots_on_boat(
-                slot_state, destination, load_onto_boat_id, faction_id, unit_defs, territory_defs, state.phase
+                slot_state, destination, load_onto_boat_id, faction_id, unit_defs, territory_defs, state.phase, faction_defs
             )
             if len(units_in_stack) > slots:
                 return ValidationResult(
@@ -1246,7 +1257,7 @@ def _validate_move(
                 )
         else:
             slots_left = remaining_sea_load_passenger_slots(
-                slot_state, destination, faction_id, unit_defs, territory_defs, state.phase
+                slot_state, destination, faction_id, unit_defs, territory_defs, state.phase, faction_defs
             )
             if len(units_in_stack) > slots_left:
                 return ValidationResult(
@@ -1284,7 +1295,7 @@ def _validate_move(
             if not faction_acts_as(faction_defs, get_unit_faction(boat_unit, unit_defs), faction_id):
                 return ValidationResult(False, f"Boat {load_onto_boat_id} does not belong to faction {faction_id}")
             slots = remaining_load_slots_on_boat(
-                slot_state, destination, load_onto_boat_id, faction_id, unit_defs, territory_defs, state.phase
+                slot_state, destination, load_onto_boat_id, faction_id, unit_defs, territory_defs, state.phase, faction_defs
             )
             if len(passengers) > slots:
                 return ValidationResult(
@@ -1294,7 +1305,7 @@ def _validate_move(
                 )
         else:
             slots_left = remaining_sea_load_passenger_slots(
-                slot_state, destination, faction_id, unit_defs, territory_defs, state.phase
+                slot_state, destination, faction_id, unit_defs, territory_defs, state.phase, faction_defs
             )
             if len(passengers) > slots_left:
                 return ValidationResult(
@@ -1503,7 +1514,8 @@ def _validate_mobilize(
             return ValidationResult(False, err)
     elif sub_mobilization is None:
         # Land: camp or home territory for that unit (home works at port capitals e.g. Corsair → Umbar). Not generic port land deployment.
-        has_camp = _territory_has_standing_camp(state, destination, camp_defs)
+        on_subfaction_land = subfaction_owns_for(dest_territory.owner, faction_id, faction_defs)
+        has_camp = not on_subfaction_land and _territory_has_standing_camp(state, destination, camp_defs)
         is_home_for = {}  # unit_id -> True if this territory is home for that unit type
         for uid, ud in unit_defs.items():
             if getattr(ud, "faction", None) != faction_id:
@@ -1519,7 +1531,7 @@ def _validate_mobilize(
                         f"Land units can only mobilize to a standing camp or a home territory for that unit type; "
                         f"{destination} is not valid for {uid}",
                     )
-        if dest_territory.owner != faction_id:
+        if dest_territory.owner != faction_id and not on_subfaction_land:
             return ValidationResult(False, f"{destination} is not owned by {faction_id}")
         power_production = territory_current_power(state, destination, dest_def)
         this_count = sum(item.get("count", 0) for item in units_to_mobilize)
@@ -1910,7 +1922,7 @@ def _purchased_units_have_a_destination(
     pending_unit: dict[tuple[str, str], int],
 ) -> bool:
     capacity = get_mobilization_capacity(
-        state, faction_id, territory_defs, camp_defs, port_defs, unit_defs,
+        state, faction_id, territory_defs, camp_defs, port_defs, unit_defs, faction_defs,
     )
     parent_power: dict[str, int] = {}
     parent_home: dict[tuple[str, str], int] = {}
@@ -1927,7 +1939,7 @@ def _purchased_units_have_a_destination(
     for row in capacity.get("river_zones") or []:
         parent_power[row.get("river_zone_id")] = int(row.get("power", 0) or 0)
     parent_land = set(get_mobilization_territories(
-        state, faction_id, territory_defs, camp_defs, port_defs, unit_defs,
+        state, faction_id, territory_defs, camp_defs, port_defs, unit_defs, faction_defs,
     ))
     parent_sea = set(get_mobilization_sea_zones(state, faction_id, territory_defs, port_defs))
     parent_river = set(get_mobilization_river_zones(state, faction_id, territory_defs))
@@ -2284,11 +2296,12 @@ def get_mobilization_territories(
     camp_defs: dict[str, CampDefinition] | None = None,
     port_defs: dict[str, PortDefinition] | None = None,
     unit_defs: dict[str, UnitDefinition] | None = None,
+    faction_defs: dict[str, FactionDefinition] | None = None,
 ) -> list[str]:
     """
     Get territory IDs where faction can mobilize land units:
     - Owned territories with a standing camp, or
-    - Owned territories that are home for at least one unit type (cap 1 per type per phase), including port capitals (e.g. Corsair → Umbar).
+    - Owned or subfaction territories that are home for at least one unit type (cap 1 per type per phase), including port capitals (e.g. Corsair → Umbar).
     Land does not deploy to ports generically; ships use adjacent sea zones.
     """
     camp_defs = camp_defs or {}
@@ -2302,9 +2315,12 @@ def get_mobilization_territories(
             result.append(territory_id)
     # Home territories: owned, no camp yet in list; include even if territory has a port (home special overrides for that unit)
     for territory_id, territory in state.territories.items():
-        if territory.owner != faction_id or territory_id in result:
+        if territory_id in result:
             continue
-        if _territory_has_standing_camp(state, territory_id, camp_defs):
+        if territory.owner == faction_id:
+            if _territory_has_standing_camp(state, territory_id, camp_defs):
+                continue
+        elif not subfaction_owns_for(territory.owner, faction_id, faction_defs):
             continue
         for ud in unit_defs.values():
             if getattr(ud, "faction", None) != faction_id:
@@ -2358,6 +2374,7 @@ def get_mobilization_capacity(
     camp_defs: dict[str, CampDefinition] | None = None,
     port_defs: dict[str, PortDefinition] | None = None,
     unit_defs: dict[str, UnitDefinition] | None = None,
+    faction_defs: dict[str, FactionDefinition] | None = None,
 ) -> dict[str, Any]:
     """
     Get mobilization capacity for a faction.
@@ -2413,11 +2430,14 @@ def get_mobilization_capacity(
                 **({"home_unit_capacity": home_on_port} if home_on_port else {}),
             })
             # Ports only mobilize naval to sea zones; do not add to total land capacity
-    # Home-only territories: owned, no camp/port; cap 1 per unit type that has this as home
+    # Home-only territories: owned with no camp/port, or any subfaction land; cap 1 per unit type that has this as home
     for territory_id, territory in state.territories.items():
-        if territory.owner != faction_id or territory_id in seen:
+        if territory_id in seen:
             continue
-        if _territory_has_standing_camp(state, territory_id, camp_defs) or _territory_has_port(territory_id, port_defs):
+        if territory.owner == faction_id:
+            if _territory_has_standing_camp(state, territory_id, camp_defs) or _territory_has_port(territory_id, port_defs):
+                continue
+        elif not subfaction_owns_for(territory.owner, faction_id, faction_defs):
             continue
         home_units: dict[str, int] = {}
         for unit_id, ud in unit_defs.items():
@@ -2474,6 +2494,7 @@ def count_open_home_mobilization_slots_for_unit(
     camp_defs: dict[str, CampDefinition] | None,
     port_defs: dict[str, PortDefinition] | None,
     unit_defs: dict[str, UnitDefinition],
+    faction_defs: dict[str, FactionDefinition] | None = None,
 ) -> int:
     """
     Units with home special only deploy to home territories (and port homes). Count how many
@@ -2483,7 +2504,7 @@ def count_open_home_mobilization_slots_for_unit(
     if not ud or not has_unit_special(ud, "home") or not _home_territory_ids(ud):
         return 0
     cap = get_mobilization_capacity(
-        state, faction_id, territory_defs, camp_defs, port_defs, unit_defs
+        state, faction_id, territory_defs, camp_defs, port_defs, unit_defs, faction_defs
     )
     total = 0
     for bucket in (cap.get("territories") or [], cap.get("port_territories") or []):
@@ -2510,6 +2531,7 @@ def _faction_has_sea_raid_passengers_in_sea_zone(
     sea_zone: TerritoryState | None,
     faction_id: str,
     unit_defs: dict[str, UnitDefinition],
+    faction_defs: dict[str, FactionDefinition] | None = None,
 ) -> bool:
     """
     True if this faction has land (non-naval) units in the sea hex — the same units the sea-raid land
@@ -2521,7 +2543,7 @@ def _faction_has_sea_raid_passengers_in_sea_zone(
     if not sea_zone:
         return False
     for u in sea_zone.units:
-        if get_unit_faction(u, unit_defs) != faction_id:
+        if not faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), faction_id):
             continue
         ud = unit_defs.get(u.unit_id)
         if not is_land_unit(ud) or _is_naval_unit(ud):
@@ -2597,6 +2619,7 @@ def get_contested_territories(
                         state.territories.get(staged_sea),
                         faction_id,
                         unit_defs,
+                        faction_defs,
                     )
             if include_sea_zone:
                 entry["sea_zone_id"] = staged_sea
@@ -2904,7 +2927,7 @@ def get_aerial_units_must_move(
         unit_faction = None
         for unit in territory.units:
             u_faction = get_unit_faction(unit, unit_defs)
-            if u_faction != current_faction:
+            if not faction_acts_as(faction_defs, u_faction, current_faction):
                 continue
             unit_def = unit_defs.get(unit.unit_id)
             if not is_aerial_unit(unit_def):

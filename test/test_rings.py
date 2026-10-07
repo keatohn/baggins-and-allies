@@ -130,16 +130,51 @@ def _carry_state():
 
 def test_only_a_hero_whose_move_reaches_the_ring_can_carry_it():
     state, defs, hero, spear = _carry_state()
-    assert validate_ring_carry(state, defs, [spear], "ost_in_edhil", [], "the_nine") == (
+    assert validate_ring_carry(state, defs, [spear], "ost_in_edhil", [], ["the_nine"]) == (
         "A ring moves only with a single hero"
     )
-    assert validate_ring_carry(state, defs, [hero], "mithlond", [], "the_nine") == (
+    assert validate_ring_carry(state, defs, [hero], "mithlond", [], ["the_nine"]) == (
         "A ring leaves only with a hero moving out of its territory"
     )
-    assert validate_ring_carry(state, defs, [hero], "mithlond", ["ost_in_edhil"], "the_nine") == (
+    assert validate_ring_carry(state, defs, [hero], "mithlond", ["ost_in_edhil"], ["the_nine"]) == (
         "A ring leaves only with a hero moving out of its territory"
     )
-    assert validate_ring_carry(state, defs, [hero], "mithlond", [], "narya") is None
+    assert validate_ring_carry(state, defs, [hero], "mithlond", [], ["narya"]) is None
+    assert validate_ring_carry(state, defs, [hero], "mithlond", [], ["narya", "the_nine"]) == (
+        "A ring leaves only with a hero moving out of its territory"
+    )
+
+
+def test_one_hero_carries_every_ring_he_chose():
+    state, defs, hero, _ = _carry_state()
+    state.rings[1].territory_id = "mithlond"
+    assert validate_ring_carry(state, defs, [hero], "mithlond", [], ["narya", "the_nine"]) is None
+    move = PendingMove(
+        from_territory="mithlond",
+        to_territory="lune",
+        unit_instance_ids=[hero.instance_id],
+        phase="non_combat_move",
+        ring_ids=["narya", "the_nine"],
+    )
+    for ring in state.rings:
+        claim_ring(state, ring.id, hero.instance_id)
+    apply_carried_ring(state, move, "lune")
+    assert [(ring.territory_id, ring.carried_in_by) for ring in state.rings] == [
+        ("lune", hero.instance_id),
+        ("lune", hero.instance_id),
+    ]
+
+
+def test_pending_move_reads_the_old_single_ring_field():
+    move = PendingMove.from_dict({
+        "from_territory": "mithlond",
+        "to_territory": "lune",
+        "unit_instance_ids": ["h1"],
+        "phase": "non_combat_move",
+        "ring_id": "narya",
+    })
+    assert move.ring_ids == ["narya"]
+    assert move.to_dict()["ring_ids"] == ["narya"]
 
 
 def test_applied_move_leaves_the_ring_in_the_heros_destination():
@@ -149,7 +184,7 @@ def test_applied_move_leaves_the_ring_in_the_heros_destination():
         to_territory="lune",
         unit_instance_ids=["noldor_gil_galad_001"],
         phase="non_combat_move",
-        ring_id="narya",
+        ring_ids=["narya"],
     )
     apply_carried_ring(state, move, "lune")
     narya = next(ring for ring in state.rings if ring.id == "narya")
@@ -203,7 +238,7 @@ def test_attacker_holds_only_the_ring_he_carried_into_battle():
         to_territory="mithlond",
         unit_instance_ids=[gil_galad.instance_id],
         phase="combat_move",
-        ring_id="vilya",
+        ring_ids=["vilya"],
     ), "mithlond")
     state.territories["east_eriador"].units.remove(gil_galad)
     state.territories["mithlond"].units.append(gil_galad)
@@ -290,9 +325,9 @@ def test_required_bearer_death_sends_the_ring_home_and_others_stay():
     ))
     defs["sauron"] = SimpleNamespace(hero_id="sauron", faction="mordor", cost={"power": 18}, movement=1)
     defs["gil_galad"] = SimpleNamespace(hero_id="gil_galad", faction="noldor", cost={"power": 12}, movement=1)
-    assert validate_ring_carry(state, defs, [hero], "mithlond", [], "the_one") is None
+    assert validate_ring_carry(state, defs, [hero], "mithlond", [], ["the_one"]) is None
     sauron = state.territories["mithlond"].units[-1]
-    assert validate_ring_carry(state, defs, [sauron], "mithlond", [], "the_one") is None
+    assert validate_ring_carry(state, defs, [sauron], "mithlond", [], ["the_one"]) is None
     assert power_for_faction(state, "mordor", defs) == 4
     assert power_for_faction(state, "noldor", defs) == 7
     on_bearer_destroyed(state, sauron, "mithlond", defs)

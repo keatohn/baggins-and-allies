@@ -16,6 +16,7 @@ from backend.engine.state import (
     PendingMobilization,
     PendingCampPlacement,
     _combat_dice_log_jsonable,
+    parse_ring_ids,
 )
 from backend.engine.actions import Action
 from backend.engine.definitions import (
@@ -96,7 +97,7 @@ from backend.engine.rings import (
     merge_ring_stat_mods,
     on_bearer_destroyed,
     power_for_faction,
-    release_ring,
+    release_rings,
     sync_ring_movement,
     validate_ring_carry,
 )
@@ -111,6 +112,7 @@ from backend.engine.queries import (
     get_mobilization_capacity,
     unique_units_purchase_error,
     _home_territory_ids,
+    subfaction_owns_for,
     _is_naval_unit,
     _purchase_kind,
     participates_in_sea_hex_naval_combat,
@@ -719,7 +721,7 @@ def _handle_purchase_units(
 
     # Validate land vs sea mobilization capacity (camps vs port-adjacent sea zones)
     capacity_info = get_mobilization_capacity(
-        state, faction_id, territory_defs, camp_defs, port_defs, unit_defs
+        state, faction_id, territory_defs, camp_defs, port_defs, unit_defs, faction_defs
     )
     territories_list = capacity_info.get("territories", [])
     land_cap = sum(t.get("power", 0) for t in territories_list) + sum(
@@ -1212,7 +1214,7 @@ def _handle_move_units(
                     load_onto_decl = (action.payload.get("load_onto_boat_instance_id") or "").strip() or None
                     if load_onto_decl:
                         boat_slots = remaining_load_slots_on_boat(
-                            state_for_embark_slots, to_id, load_onto_decl, faction_id, unit_defs, territory_defs, state.phase
+                            state_for_embark_slots, to_id, load_onto_decl, faction_id, unit_defs, territory_defs, state.phase, faction_defs
                         )
                         if len(units_to_move) > boat_slots:
                             raise ValueError(
@@ -1221,7 +1223,7 @@ def _handle_move_units(
                             )
                     else:
                         zone_slots = remaining_sea_load_passenger_slots(
-                            state_for_embark_slots, to_id, faction_id, unit_defs, territory_defs, state.phase
+                            state_for_embark_slots, to_id, faction_id, unit_defs, territory_defs, state.phase, faction_defs
                         )
                         if len(units_to_move) > zone_slots:
                             raise ValueError(
@@ -1327,7 +1329,7 @@ def _handle_move_units(
                 load_onto_decl = (action.payload.get("load_onto_boat_instance_id") or "").strip() or None
                 if load_onto_decl:
                     boat_slots = remaining_load_slots_on_boat(
-                        state_for_embark_slots, to_id, load_onto_decl, faction_id, unit_defs, territory_defs, state.phase
+                        state_for_embark_slots, to_id, load_onto_decl, faction_id, unit_defs, territory_defs, state.phase, faction_defs
                     )
                     if len(units_to_move) > boat_slots:
                         raise ValueError(
@@ -1336,7 +1338,7 @@ def _handle_move_units(
                         )
                 else:
                     zone_slots = remaining_sea_load_passenger_slots(
-                        state_for_embark_slots, to_id, faction_id, unit_defs, territory_defs, state.phase
+                        state_for_embark_slots, to_id, faction_id, unit_defs, territory_defs, state.phase, faction_defs
                     )
                     if len(units_to_move) > zone_slots:
                         raise ValueError(
@@ -1356,7 +1358,7 @@ def _handle_move_units(
                 load_onto_decl = (action.payload.get("load_onto_boat_instance_id") or "").strip() or None
                 if load_onto_decl:
                     boat_slots = remaining_load_slots_on_boat(
-                        state_for_embark_slots, to_id, load_onto_decl, faction_id, unit_defs, territory_defs, state.phase
+                        state_for_embark_slots, to_id, load_onto_decl, faction_id, unit_defs, territory_defs, state.phase, faction_defs
                     )
                     if len(passengers) > boat_slots:
                         raise ValueError(
@@ -1365,7 +1367,7 @@ def _handle_move_units(
                         )
                 else:
                     zone_slots = remaining_sea_load_passenger_slots(
-                        state_for_embark_slots, to_id, faction_id, unit_defs, territory_defs, state.phase
+                        state_for_embark_slots, to_id, faction_id, unit_defs, territory_defs, state.phase, faction_defs
                     )
                     if len(passengers) > zone_slots:
                         raise ValueError(
@@ -1517,14 +1519,13 @@ def _handle_move_units(
             raise ValueError(
                 "avoid_forced_naval_combat: you may only sail to an adjacent sea zone (1 hex), regardless of movement allowance"
             )
-    ring_raw = action.payload.get("ring_id")
-    ring_id = str(ring_raw).strip() if isinstance(ring_raw, str) and ring_raw.strip() else None
+    ring_ids = parse_ring_ids(action.payload.get("ring_ids"), action.payload.get("ring_id"))
     ring_error = validate_ring_carry(
-        state, unit_defs, units_to_move, from_id, charge_through, ring_id,
+        state, unit_defs, units_to_move, from_id, charge_through, ring_ids,
     )
     if ring_error:
         raise ValueError(ring_error)
-    bearer_id = hero_instance_for_carry(unit_defs, units_to_move) if ring_id else None
+    bearer_id = hero_instance_for_carry(unit_defs, units_to_move) if ring_ids else None
     pending_move = PendingMove(
         from_territory=from_id,
         to_territory=to_id,
@@ -1535,10 +1536,11 @@ def _handle_move_units(
         load_onto_boat_instance_id=load_onto_boat_instance_id,
         primary_unit_id=primary_unit_id,
         avoid_forced_naval_combat=avoid_forced_naval,
-        ring_id=ring_id,
+        ring_ids=ring_ids,
     )
-    if ring_id and bearer_id:
-        claim_ring(state, ring_id, bearer_id)
+    if bearer_id:
+        for ring_id in ring_ids:
+            claim_ring(state, ring_id, bearer_id)
     state.pending_moves.append(pending_move)
 
     return state, events
@@ -1696,7 +1698,7 @@ def _apply_pending_moves(
                     f"(from={pending_move.from_territory!r} -> {from_id!r}, "
                     f"to={pending_move.to_territory!r} -> {to_id!r})"
                 )
-            release_ring(state, getattr(pending_move, "ring_id", None))
+            release_rings(state, getattr(pending_move, "ring_ids", None))
             continue  # Skip invalid moves (non-combat: defensive)
 
         # Same expansion as move declaration / validation: payloads may list only boat IDs. Without this,
@@ -2290,7 +2292,7 @@ def _handle_cancel_move(
         raise ValueError(f"Invalid move index: {move_index}")
     
     cancelled = state.pending_moves.pop(move_index)
-    release_ring(state, getattr(cancelled, "ring_id", None))
+    release_rings(state, getattr(cancelled, "ring_ids", None))
     return state, events
 
 
@@ -2376,9 +2378,10 @@ def _handle_mobilize_units(
         if not fits:
             raise ValueError(err)
     elif sub_mobilization is None:
-        if dest_territory.owner != faction_id:
+        on_subfaction_land = subfaction_owns_for(dest_territory.owner, faction_id, faction_defs)
+        if dest_territory.owner != faction_id and not on_subfaction_land:
             raise ValueError(f"Cannot mobilize to {destination_id}: not owned by {faction_id}")
-        has_camp = _territory_has_standing_camp(state, destination_id, camp_defs)
+        has_camp = not on_subfaction_land and _territory_has_standing_camp(state, destination_id, camp_defs)
         is_home_for = {}
         for uid, ud in unit_defs.items():
             if getattr(ud, "faction", None) != faction_id:

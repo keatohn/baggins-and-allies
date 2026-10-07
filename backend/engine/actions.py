@@ -5,6 +5,8 @@ Actions are immutable, deterministic instructions.
 
 from dataclasses import dataclass
 
+from backend.engine.state import parse_ring_ids
+
 
 @dataclass
 class Action:
@@ -65,6 +67,7 @@ def move_units(
     sail_to_offload_land_territory_id: str | None = None,  # sea→sea sail only: land hex you will offload/raid onto (server-only)
     avoid_forced_naval_combat: bool = False,
     ring_id: str | None = None,
+    ring_ids: list[str] | None = None,
 ) -> Action:
     """
     Move units from one territory to another.
@@ -89,8 +92,9 @@ def move_units(
         payload["sail_to_offload_land_territory_id"] = sail_to_offload_land_territory_id
     if avoid_forced_naval_combat:
         payload["avoid_forced_naval_combat"] = True
-    if ring_id:
-        payload["ring_id"] = ring_id
+    rings = parse_ring_ids(ring_ids, ring_id)
+    if rings:
+        payload["ring_ids"] = rings
     return Action(
         type="move_units",
         faction=faction,

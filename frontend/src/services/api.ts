@@ -91,7 +91,7 @@ export interface ApiPendingMove {
   /** "load" | "offload" | "sail" for sea transport; omitted for normal moves */
   move_type?: string | null;
   load_onto_boat_instance_id?: string | null;
-  ring_id?: string | null;
+  ring_ids?: string[];
 }
 
 export interface ApiPendingMobilization {
@@ -1138,7 +1138,7 @@ export const api = {
   // Move units (declares a pending move). chargeThrough for cavalry charging (empty enemy territories to conquer).
   // loadOntoBoatInstanceId: when loading to sea, assign passengers only to this boat.
   // offloadSeaZoneId: when moving sea->land and multiple sea zones can offload, send the chosen one (after need_offload_sea_choice).
-  move: (gameId: string, fromTerritory: string, toTerritory: string, unitInstanceIds: string[], chargeThrough?: string[], loadOntoBoatInstanceId?: string | null, offloadSeaZoneId?: string | null, avoidForcedNavalCombat?: boolean, ringId?: string | null) => {
+  move: (gameId: string, fromTerritory: string, toTerritory: string, unitInstanceIds: string[], chargeThrough?: string[], loadOntoBoatInstanceId?: string | null, offloadSeaZoneId?: string | null, avoidForcedNavalCombat?: boolean, ringIds?: string[]) => {
     const ids = Array.from(unitInstanceIds, (id: unknown) =>
       typeof id === 'string' ? id : (id != null && typeof id === 'object' && 'instance_id' in id ? String((id as { instance_id: unknown }).instance_id) : '')
     ).filter(Boolean);
@@ -1180,8 +1180,8 @@ export const api = {
     if (avoidForcedNavalCombat) {
       body.avoid_forced_naval_combat = true;
     }
-    if (ringId) {
-      body.ring_id = String(ringId);
+    if (ringIds && ringIds.length > 0) {
+      body.ring_ids = ringIds.map(String);
     }
     return fetchJson<ActionResponse>(`/games/${gameId}/move`, {
       method: 'POST',

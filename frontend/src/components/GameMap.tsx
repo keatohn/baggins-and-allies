@@ -239,10 +239,11 @@ function getLandToSeaLoadCapacityRemaining(
   pendingMoves: PendingMove[] | undefined,
   gamePhase: string,
   territoryData: Record<string, { terrain?: string } | undefined>,
+  factionData: Record<string, { parent?: string } | undefined>,
 ): number {
   const boats = fullUnits.filter((u) => {
     if (!navalUnitIds.has(u.unit_id) || u.loaded_onto) return false;
-    return unitDefs[u.unit_id]?.faction === currentFaction;
+    return unitCommandedByCurrent(unitDefs[u.unit_id]?.faction, currentFaction, factionData);
   });
   let total = 0;
   for (const boat of boats) {
@@ -370,8 +371,8 @@ export interface PendingMoveConfirm {
    * `count` / `maxCount` are number of ships; confirm submits flattened slice of the first `count` stacks.
    */
   navalBoatStacks?: string[][];
-  /** Ring carried by the one hero in this move. Omitted means the ring stays. */
-  ringId?: string | null;
+  /** Rings carried by the one hero in this move. Omitted means every ring stays. */
+  ringIds?: string[];
   /** True after the bearer answers the carry prompt. */
   ringCarryDecided?: boolean;
 }
@@ -458,7 +459,7 @@ interface GameMapProps {
   ) => void;
   onCampDrop?: (campIndex: number, territoryId: string) => void;
   mobilizationTray?: {
-    purchases: { unitId: string; name: string; icon: string; count: number }[];
+    purchases: { unitId: string; name: string; icon: string; count: number; subfaction?: boolean; color?: string }[];
     pendingCamps: { campIndex: number; options?: string[] }[];
     factionColor: string;
     selectedUnitId: string | null;
@@ -1093,7 +1094,7 @@ function GameMap({
     if (activeDragId.startsWith('mobilize-camp-')) return null; // camps use activeCampDrag
     const unitId = activeDragId.replace(/^mobilize-/, '');
     const purchase = mobilizationTray?.purchases?.find(p => p.unitId === unitId) ?? null;
-    return purchase ? { ...purchase, factionColor: mobilizationTray?.factionColor ?? '' } : null;
+    return purchase ? { ...purchase, factionColor: purchase.color || mobilizationTray?.factionColor || '' } : null;
   }, [activeDragId, mobilizationTray?.purchases, mobilizationTray?.factionColor]);
 
   const activeCampDrag = useMemo(() => {
@@ -2420,7 +2421,7 @@ function GameMap({
       unitId: p.unitId,
       count: p.count,
       unitDef: { name: p.name, icon: p.icon },
-      factionColor: mobilizationTray.factionColor ?? undefined,
+      factionColor: p.color || mobilizationTray.factionColor || undefined,
       isNaval: navalUnitIds.has(p.unitId),
       isHero: Boolean(unitDefs[p.unitId]?.hero_id),
       passengerCount: 0,
@@ -2522,7 +2523,7 @@ function GameMap({
         unitId: p.unitId,
         count: p.count,
         unitDef: { name: p.name, icon: p.icon },
-        factionColor: mobilizationTray?.factionColor ?? undefined,
+        factionColor: p.color || mobilizationTray?.factionColor || undefined,
         isNaval: navalUnitIds.has(p.unitId),
         isHero: Boolean(unitDefs[p.unitId]?.hero_id),
         passengerCount: 0,
@@ -2800,13 +2801,16 @@ function GameMap({
       }
       const { unitId, unitName, icon, count } = (data as { unitId: string; unitName: string; icon: string; count: number });
       if (targetTerritory && validDropTargets.has(targetTerritory)) {
+        const spec = unitId ? mobilizeUnitDestinations[unitId] : undefined;
         const campRemaining = remainingMobilizationCapacity[targetTerritory] ?? 0;
         const homeRemaining = unitId ? (remainingHomeSlots[targetTerritory]?.[unitId] ?? 0) : 0;
-        const cappedCount = campRemaining > 0
-          ? Math.min(count, campRemaining)
-          : homeRemaining > 0
-            ? Math.min(count, 1)
-            : 0;
+        const cappedCount = spec
+          ? Math.min(count, spec.room[targetTerritory] ?? 0)
+          : campRemaining > 0
+            ? Math.min(count, campRemaining)
+            : homeRemaining > 0
+              ? Math.min(count, 1)
+              : 0;
         if (cappedCount > 0) {
           const destCanon = resolveTerritoryDropId(targetTerritory) || targetTerritory;
           setMobilizationDestinationClickCanon(destCanon);
@@ -3135,6 +3139,7 @@ function GameMap({
             pendingMoves,
             gameState.phase,
             territoryData,
+            factionData,
           );
           const backendReachLand =
             availableLandInstanceIds !== null && availableLandInstanceIds.length > 0;
@@ -3265,7 +3270,7 @@ function GameMap({
     setActiveUnit(null);
     setActiveDragId(null);
     setValidDropTargets(new Set());
-  }, [activeUnit, validDropTargets, territoryUnits, territoryUnitsFull, pendingMoves, availableMoveTargets, navalUnitIds, onSetPendingMove, _onDropDestination, onBulkMoveDrop, onMobilizationDrop, onMobilizationAllDrop, onCampDrop, gameState.phase, gameState.current_faction, factionData, unitDefs, territoryData, resolveTerritoryDropId, canAct, loadAllocation, onLoadAllocationChange, navalTray]);
+  }, [activeUnit, validDropTargets, territoryUnits, territoryUnitsFull, pendingMoves, availableMoveTargets, navalUnitIds, onSetPendingMove, _onDropDestination, onBulkMoveDrop, onMobilizationDrop, onMobilizationAllDrop, onCampDrop, remainingMobilizationCapacity, remainingHomeSlots, mobilizeUnitDestinations, gameState.phase, gameState.current_faction, factionData, unitDefs, territoryData, resolveTerritoryDropId, canAct, loadAllocation, onLoadAllocationChange, navalTray]);
 
   const handleDragCancel = useCallback(() => {
     lastMapDragPointerRef.current = null;
@@ -4024,7 +4029,7 @@ function GameMap({
                         const hasHome = Object.values(unitDefs).some((def) => {
                           const ids = def.home_territory_ids ?? [];
                           if (ids.length === 0 || !ids.includes(territoryId)) return false;
-                          return !territory.owner || def.faction === territory.owner;
+                          return !territory.owner || def.faction === territory.owner || factionData[territory.owner]?.parent === def.faction;
                         });
                         const showFactionLogo = territory.stronghold && territory.owner && factionData[territory.owner];
                         const showNeutralStronghold = territory.stronghold && !territory.owner;

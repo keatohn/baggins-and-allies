@@ -179,8 +179,8 @@ export interface BulkMoveConfirmState {
   fromTerritory: string;
   toTerritory: string;
   stacks: BulkMoveConfirmStack[];
-  /** Ring carried by the highest-power hero in this All move. */
-  ringId?: string | null;
+  /** Rings carried by the highest-power hero in this All move. */
+  ringIds?: string[];
   ringCarryDecided?: boolean;
 }
 
@@ -1493,6 +1493,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           icon: unitDefs[p.unit_id]?.icon || `/assets/units/${p.unit_id}.png`,
           count: p.count,
           subfaction: Boolean(unitFaction && factionData[unitFaction]?.parent),
+          color: unitFaction ? factionData[unitFaction]?.color : undefined,
         };
       });
   }, [backendState, definitions, unitDefs, factionData]);
@@ -2108,6 +2109,31 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       : hasRiver
         ? validMobilizeRiverZones
         : validMobilizeTerritories;
+
+    if (purchases.some(p => mobilizeUnitDestinations[p.unitId])) {
+      const listFor = (p: { unitId: string }) => {
+        const spec = mobilizeUnitDestinations[p.unitId];
+        if (!spec) return candidateZones;
+        return hasNaval ? spec.sea_zones : hasRiver ? spec.river_zones : spec.territories;
+      };
+      const zones = new Set<string>();
+      for (const p of purchases) for (const id of listFor(p)) zones.add(id);
+      return [...zones].filter((destId) => {
+        let shared = 0;
+        let sharedRoom = Infinity;
+        for (const p of purchases) {
+          if (!listFor(p).includes(destId)) return false;
+          const spec = mobilizeUnitDestinations[p.unitId];
+          if (spec?.unlimited) continue;
+          shared += p.count;
+          const room = spec
+            ? spec.room[destId] ?? 0
+            : Math.max(remainingMobilizationCapacity[destId] ?? 0, remainingHomeSlots[destId]?.[p.unitId] ?? 0);
+          sharedRoom = Math.min(sharedRoom, room);
+        }
+        return shared === 0 || sharedRoom >= shared;
+      });
+    }
     if (candidateZones.length === 0) return [];
 
     if (hasNaval || hasRiver) {
@@ -2131,6 +2157,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     validMobilizeTerritories,
     remainingMobilizationCapacity,
     remainingHomeSlots,
+    mobilizeUnitDestinations,
   ]);
 
   // Naval tray: boats + passengers for selected sea zone (movement phases only). Pending loads are not yet in
@@ -2166,7 +2193,10 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     });
     const faction = gameState.current_faction ?? '';
     let navalBoatsSorted = boats
-      .filter((u) => unitDefs[u.unit_id]?.faction === faction)
+      .filter((u) => {
+        const fid = unitDefs[u.unit_id]?.faction;
+        return fid === faction || (Boolean(fid) && factionData[fid!]?.parent === faction);
+      })
       .sort((a, b) => a.instance_id.localeCompare(b.instance_id));
     if (navalBoatsSorted.length === 0) {
       navalBoatsSorted = [...boats].sort((a, b) => a.instance_id.localeCompare(b.instance_id));
@@ -3099,7 +3129,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         loadOntoBoatId,
         offloadSeaZoneIdForRaid,
         avoidForcedMain,
-        pendingMoveConfirm.ringId,
+        pendingMoveConfirm.ringIds,
       );
       if (result.need_offload_sea_choice && result.valid_offload_sea_zones?.length) {
         setPendingOffloadSeaChoice({
@@ -3175,7 +3205,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
 
   const handleConfirmBulkMove = useCallback(async () => {
     if (!bulkMoveConfirm || !GAME_ID || !backendState) return;
-    const { fromTerritory, stacks, ringId } = bulkMoveConfirm;
+    const { fromTerritory, stacks, ringIds } = bulkMoveConfirm;
     const heroUnitId = highestPowerHeroUnitId(
       stacks.filter((stack) => stack.instanceIds.length === 1).map((stack) => stack.unitId),
       unitDefs,
@@ -3197,8 +3227,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
 
     for (const stack of fordSubmitOrder) {
       try {
-        const carryRing = ringId && heroUnitId && stack.unitId === heroUnitId && stack.instanceIds.length === 1
-          ? ringId
+        const carryRings = ringIds?.length && heroUnitId && stack.unitId === heroUnitId && stack.instanceIds.length === 1
+          ? ringIds
           : undefined;
         const res = await api.move(
           GAME_ID,
@@ -3209,7 +3239,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           undefined,
           undefined,
           undefined,
-          carryRing,
+          carryRings,
         );
         setBackendState(res.state);
         if (res.can_act !== undefined) setCanAct(res.can_act);
@@ -3764,6 +3794,10 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         : '';
     const attackerAlliance =
       (definitions.factions?.[attackerFaction] as { alliance?: string } | undefined)?.alliance ?? '';
+    const commandedByAttacker = (unitId: string) => {
+      const fid = definitions.units[unitId]?.faction;
+      return Boolean(fid) && (fid === attackerFaction || factionData[fid!]?.parent === attackerFaction);
+    };
 
     const initialAttackerUnits: CombatUnit[] = [];
     const initialDefenderUnits: CombatUnit[] = [];
@@ -3877,8 +3911,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           }
         }
         for (const unit of backendTerritory.units ?? []) {
-          const isDefenderUnit = definitions.units[unit.unit_id]?.faction !== attackerFaction;
-          if (!isDefenderUnit) continue;
+          if (commandedByAttacker(unit.unit_id)) continue;
           const combatUnit = buildCombatUnit(unit, false);
           if (combatUnit) initialDefenderUnits.push(combatUnit);
         }
@@ -3889,7 +3922,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           if (isNavalHexCombat) {
             if (!unitParticipatesInSeaHexCombat(unit)) continue;
           }
-          const isAttackerUnit = definitions.units[unit.unit_id]?.faction === attackerFaction;
+          const isAttackerUnit = commandedByAttacker(unit.unit_id);
           const combatUnit = buildCombatUnit(unit, isAttackerUnit);
           if (combatUnit) {
             if (isAttackerUnit) initialAttackerUnits.push(combatUnit);
@@ -4502,8 +4535,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               territoryUnits={currentTerritoryUnits}
               shadowedTerritories={shadowedTerritories}
               rings={backendState?.rings ?? []}
-              carriedRingIds={new Set((backendState?.pending_moves ?? []).map((move) => move.ring_id).filter((id): id is string => Boolean(id)))}
-              onDecideRingCarry={(ringId) => setPendingMoveConfirm((prev) => prev ? { ...prev, ringId, ringCarryDecided: true } : prev)}
+              carriedRingIds={new Set((backendState?.pending_moves ?? []).flatMap((move) => move.ring_ids ?? []))}
+              onDecideRingCarry={(ringIds) => setPendingMoveConfirm((prev) => prev ? { ...prev, ringIds, ringCarryDecided: true } : prev)}
               territoryUnitStacksWithMovement={territoryUnitStacksWithMovement}
               unitDefs={unitDefs}
               factionData={factionData}
@@ -4532,7 +4565,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               bulkMoveConfirm={bulkMoveConfirm}
               onConfirmBulkMove={handleConfirmBulkMove}
               onCancelBulkMove={handleCancelBulkMove}
-              onDecideBulkRingCarry={(ringId) => setBulkMoveConfirm((prev) => prev ? { ...prev, ringId, ringCarryDecided: true } : prev)}
+              onDecideBulkRingCarry={(ringIds) => setBulkMoveConfirm((prev) => prev ? { ...prev, ringIds, ringCarryDecided: true } : prev)}
               onCancelPendingMove={handleCancelPendingMove}
               bulkMobilizeConfirm={bulkMobilizeConfirm}
               onConfirmBulkMobilize={handleConfirmBulkMobilize}

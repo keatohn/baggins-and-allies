@@ -197,6 +197,17 @@ class UnitStack:
         return cls(unit_id=str(data.get("unit_id") or ""), count=max(0, count))
 
 
+def parse_ring_ids(raw_list: Any, raw_single: Any = None) -> list[str]:
+    """Distinct non-empty ring ids, in order. raw_single is the old one-ring field."""
+    items = list(raw_list) if isinstance(raw_list, list) else []
+    items.append(raw_single)
+    out: list[str] = []
+    for item in items:
+        if isinstance(item, str) and item.strip() and item.strip() not in out:
+            out.append(item.strip())
+    return out
+
+
 @dataclass
 class PendingMove:
     """A pending unit movement, stored until phase end."""
@@ -214,8 +225,8 @@ class PendingMove:
     primary_unit_id: str = ""
     # Combat move: sail away from sea with mobilized intruders instead of initiating naval combat.
     avoid_forced_naval_combat: bool = False
-    # Rings of Power: this move carries one ring. The ring ends in to_territory when the move applies.
-    ring_id: str | None = None
+    # Rings of Power: rings this move carries. Each ends in to_territory when the move applies.
+    ring_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -233,9 +244,8 @@ class PendingMove:
             out["primary_unit_id"] = self.primary_unit_id
         if self.avoid_forced_naval_combat:
             out["avoid_forced_naval_combat"] = True
-        ring_id = getattr(self, "ring_id", None)
-        if ring_id:
-            out["ring_id"] = ring_id
+        if self.ring_ids:
+            out["ring_ids"] = list(self.ring_ids)
         return out
 
     @classmethod
@@ -256,8 +266,7 @@ class PendingMove:
         pu = data.get("primary_unit_id")
         primary_unit_id = str(pu).strip() if pu else ""
         afnc = bool(data.get("avoid_forced_naval_combat"))
-        ring_raw = data.get("ring_id")
-        ring_id = str(ring_raw).strip() if isinstance(ring_raw, str) and ring_raw.strip() else None
+        ring_ids = parse_ring_ids(data.get("ring_ids"), data.get("ring_id"))
         return cls(
             from_territory=str(data.get("from_territory") or ""),
             to_territory=str(data.get("to_territory") or ""),
@@ -268,7 +277,7 @@ class PendingMove:
             load_onto_boat_instance_id=load_onto_boat_instance_id or None,
             primary_unit_id=primary_unit_id,
             avoid_forced_naval_combat=afnc,
-            ring_id=ring_id,
+            ring_ids=ring_ids,
         )
 
 

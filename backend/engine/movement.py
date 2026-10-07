@@ -221,6 +221,7 @@ def remaining_load_slots_on_boat(
     unit_defs: dict[str, UnitDefinition],
     territory_defs: dict[str, TerritoryDefinition],
     phase: str,
+    faction_defs: dict[str, FactionDefinition] | None = None,
 ) -> int:
     """
     Empty passenger slots on a specific boat for new load declarations this phase.
@@ -235,7 +236,9 @@ def remaining_load_slots_on_boat(
         return 0
     bud = unit_defs.get(boat_unit.unit_id)
     zone_def = territory_defs.get(to_key)
-    if not _is_transport_boat_for_zone(bud, zone_def) or get_unit_faction(boat_unit, unit_defs) != faction_id:
+    if not _is_transport_boat_for_zone(bud, zone_def) or not faction_acts_as(
+        faction_defs, get_unit_faction(boat_unit, unit_defs), faction_id
+    ):
         return 0
     cap = getattr(bud, "transport_capacity", 0) or 0
     onboard = sum(1 for u in to_t.units if getattr(u, "loaded_onto", None) == boat_instance_id)
@@ -259,6 +262,7 @@ def remaining_sea_load_passenger_slots(
     unit_defs: dict[str, UnitDefinition],
     territory_defs: dict[str, TerritoryDefinition],
     phase: str,
+    faction_defs: dict[str, FactionDefinition] | None = None,
 ) -> int:
     """
     How many more land units can be declared loading into this sea zone this phase.
@@ -274,7 +278,7 @@ def remaining_sea_load_passenger_slots(
         if getattr(boat, "loaded_onto", None):
             continue
         bud = unit_defs.get(boat.unit_id)
-        if get_unit_faction(boat, unit_defs) != faction_id or not _is_transport_boat_for_zone(bud, territory_defs.get(to_key)):
+        if not faction_acts_as(faction_defs, get_unit_faction(boat, unit_defs), faction_id) or not _is_transport_boat_for_zone(bud, territory_defs.get(to_key)):
             continue
         cap = getattr(bud, "transport_capacity", 0) or 0
         onboard = sum(1 for u in to_t.units if getattr(u, "loaded_onto", None) == boat.instance_id)
@@ -368,7 +372,7 @@ def get_forced_naval_combat_instance_ids(
             ud = unit_defs.get(u.unit_id)
             if not _is_transport_boat_for_zone(ud, territory_defs.get(sea_id)):
                 continue
-            if get_unit_faction(u, unit_defs) != faction_id:
+            if not faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), faction_id):
                 continue
             out.append(u.instance_id)
     return sorted(set(out))
@@ -397,7 +401,7 @@ def _land_adjacent_has_friendly_loadable_passengers(
         ud = unit_defs.get(u.unit_id)
         if not is_land_unit(ud) or not is_transportable(ud):
             continue
-        if get_unit_faction(u, unit_defs) != faction_id:
+        if not faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), faction_id):
             continue
         if getattr(u, "loaded_onto", None):
             continue
@@ -471,6 +475,7 @@ def empty_sea_zone_valid_for_combat_move_sail_then_load_raid(
         unit_defs,
         territory_defs,
         phase,
+        faction_defs,
     ) <= 0:
         return False
     sea_def = territory_defs.get(
@@ -580,7 +585,7 @@ def expand_sea_offload_instance_ids(
     boat_set = set(boat_ids_in_request)
     added: list[str] = []
     for u in terr.units:
-        if get_unit_faction(u, unit_defs) != faction_id:
+        if not faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), faction_id):
             continue
         lo = getattr(u, "loaded_onto", None)
         if lo and lo in boat_set and u.instance_id not in ids:
@@ -1427,7 +1432,7 @@ def get_reachable_territories_for_unit(
                     and is_transportable(unit_def)
                     and embark_slot_state is not None
                     and remaining_sea_load_passenger_slots(
-                        embark_slot_state, territory_id, cf, unit_defs, territory_defs, phase
+                        embark_slot_state, territory_id, cf, unit_defs, territory_defs, phase, faction_defs
                     )
                     > 0
                 ):
@@ -1492,7 +1497,7 @@ def get_reachable_territories_for_unit(
                     and is_transportable(unit_def)
                     and embark_slot_state is not None
                     and remaining_sea_load_passenger_slots(
-                        embark_slot_state, territory_id, cf, unit_defs, territory_defs, phase
+                        embark_slot_state, territory_id, cf, unit_defs, territory_defs, phase, faction_defs
                     )
                     > 0
                 ):

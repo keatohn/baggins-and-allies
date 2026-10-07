@@ -83,7 +83,7 @@ interface SidebarProps {
     tags?: string[];
     hero_id?: string;
   }>;
-  factionData: Record<string, { name: string; icon: string; color: string; alliance: string; capital?: string }>;
+  factionData: Record<string, { name: string; icon: string; color: string; alliance: string; capital?: string; parent?: string }>;
   eventLog: GameEvent[];
   onEndPhase: () => void;
   onOpenPurchase: () => void;
@@ -114,7 +114,7 @@ interface SidebarProps {
   bulkMoveConfirm?: BulkMoveConfirmState | null;
   onConfirmBulkMove?: () => void;
   onCancelBulkMove?: () => void;
-  onDecideBulkRingCarry?: (ringId: string | null) => void;
+  onDecideBulkRingCarry?: (ringIds: string[]) => void;
   onCancelPendingMove?: (moveId: string) => void;
   pendingMobilization?: PendingMobilization | null;
   onUpdateMobilizationCount?: (count: number) => void;
@@ -150,7 +150,7 @@ interface SidebarProps {
   shadowedTerritories?: ReadonlySet<string>;
   rings?: RingView[];
   carriedRingIds?: ReadonlySet<string>;
-  onDecideRingCarry?: (ringId: string | null) => void;
+  onDecideRingCarry?: (ringIds: string[]) => void;
   /** Set defender casualty order for a territory (owner only). */
   onSetTerritoryDefenderCasualtyOrder?: (territoryId: string, casualtyOrder: 'best_unit' | 'best_defense') => void;
   /** When !canAct and phase is combat: which battle is currently in progress (territory_id; optional sea_zone_id for sea raids). */
@@ -363,6 +363,85 @@ function plannedNonCombatMoveTypeLabel(
   if (!mt) return null;
   if (mt === 'aerial') return 'Move';
   return mt.charAt(0).toUpperCase() + mt.slice(1);
+}
+
+function RingCarryPrompt({
+  heroName,
+  destName,
+  rings,
+  onDecide,
+  onCancel,
+}: {
+  heroName: string;
+  destName: string;
+  rings: RingView[];
+  onDecide: (ringIds: string[]) => void;
+  onCancel: () => void;
+}) {
+  const [chosen, setChosen] = useState<string[]>([]);
+  const single = rings.length === 1;
+  const setCarry = (ringId: string, carry: boolean) => {
+    setChosen((prev) => (carry
+      ? (prev.includes(ringId) ? prev : [...prev, ringId])
+      : prev.filter((id) => id !== ringId)));
+  };
+  return (
+    <div className="ring-carry-prompt">
+      <p className="charge-path-prompt">
+        {single
+          ? `Is ${heroName} bearing this ring into ${destName}?`
+          : `Which rings is ${heroName} bearing into ${destName}?`}
+      </p>
+      {rings.map((ring) => {
+        const carry = chosen.includes(ring.id);
+        return (
+          <div key={ring.id} className="ring-carry">
+            <img className="ring-carry__icon" src={ringIconSrc(ring.id)} alt="" />
+            <span className="ring-carry__label">{ring.name}</span>
+            {!single && (
+              <span className="ring-carry__options">
+                <button
+                  type="button"
+                  className={`ring-carry__option${carry ? ' ring-carry__option--active' : ''}`}
+                  onClick={() => setCarry(ring.id, true)}
+                >
+                  Carry
+                </button>
+                <button
+                  type="button"
+                  className={`ring-carry__option${carry ? '' : ' ring-carry__option--active'}`}
+                  onClick={() => setCarry(ring.id, false)}
+                >
+                  Leave
+                </button>
+              </span>
+            )}
+          </div>
+        );
+      })}
+      <div className="move-confirm-buttons">
+        {single ? (
+          <>
+            <button type="button" className="confirm-move-btn" onClick={() => onDecide([rings[0].id])}>
+              Carry
+            </button>
+            <button type="button" className="cancel-move-btn" onClick={() => onDecide([])}>
+              Leave
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="confirm-move-btn"
+            onClick={() => onDecide(rings.map((ring) => ring.id).filter((id) => chosen.includes(id)))}
+          >
+            Continue
+          </button>
+        )}
+        <button type="button" className="cancel-move-btn" onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
+  );
 }
 
 function SignalFlag({ color }: { color: string }) {
@@ -696,35 +775,14 @@ function Sidebar({
                     ))
                     : [];
                   if (carryChoices.length > 0 && !bulkMoveConfirm.ringCarryDecided) {
-                    const heroName = unitDefs[heroUnitId!]?.name || heroUnitId;
-                    const destName = territoryData[bulkMoveConfirm.toTerritory]?.name || bulkMoveConfirm.toTerritory;
                     return (
-                      <>
-                        {carryChoices.map((ring) => (
-                          <div key={ring.id} className="ring-carry-prompt">
-                            <p className="charge-path-prompt">
-                              Is {heroName} bearing {ring.name} into {destName}?
-                            </p>
-                            <button
-                              type="button"
-                              className="confirm-move-btn"
-                              onClick={() => onDecideBulkRingCarry?.(ring.id)}
-                            >
-                              Yes, carry it
-                            </button>
-                          </div>
-                        ))}
-                        <div className="move-confirm-buttons">
-                          <button
-                            type="button"
-                            className="cancel-move-btn"
-                            onClick={() => onDecideBulkRingCarry?.(null)}
-                          >
-                            No, leave it
-                          </button>
-                          <button type="button" className="cancel-move-btn" onClick={() => onCancelBulkMove?.()}>Cancel</button>
-                        </div>
-                      </>
+                      <RingCarryPrompt
+                        heroName={unitDefs[heroUnitId!]?.name || heroUnitId!}
+                        destName={territoryData[bulkMoveConfirm.toTerritory]?.name || bulkMoveConfirm.toTerritory}
+                        rings={carryChoices}
+                        onDecide={(ringIds) => onDecideBulkRingCarry?.(ringIds)}
+                        onCancel={() => onCancelBulkMove?.()}
+                      />
                     );
                   }
                   return (
@@ -883,35 +941,14 @@ function Sidebar({
                           : [];
                         const needsRingAnswer = carryChoices.length > 0 && !pendingMoveConfirm.ringCarryDecided;
                         if (needsRingAnswer) {
-                          const heroName = pendingMoveConfirm.unitDef?.name || pendingMoveConfirm.unitId;
-                          const destName = territoryData[pendingMoveConfirm.toTerritory]?.name || pendingMoveConfirm.toTerritory;
                           return (
-                            <>
-                              {carryChoices.map((ring) => (
-                                <div key={ring.id} className="ring-carry-prompt">
-                                  <p className="charge-path-prompt">
-                                    Is {heroName} bearing {ring.name} into {destName}?
-                                  </p>
-                                  <button
-                                    type="button"
-                                    className="confirm-move-btn"
-                                    onClick={() => onDecideRingCarry?.(ring.id)}
-                                  >
-                                    Yes, carry it
-                                  </button>
-                                </div>
-                              ))}
-                              <div className="move-confirm-buttons">
-                                <button
-                                  type="button"
-                                  className="cancel-move-btn"
-                                  onClick={() => onDecideRingCarry?.(null)}
-                                >
-                                  No, leave it
-                                </button>
-                                <button type="button" className="cancel-move-btn" onClick={onCancelMove}>Cancel</button>
-                              </div>
-                            </>
+                            <RingCarryPrompt
+                              heroName={pendingMoveConfirm.unitDef?.name || pendingMoveConfirm.unitId}
+                              destName={territoryData[pendingMoveConfirm.toTerritory]?.name || pendingMoveConfirm.toTerritory}
+                              rings={carryChoices}
+                              onDecide={(ringIds) => onDecideRingCarry?.(ringIds)}
+                              onCancel={() => onCancelMove?.()}
+                            />
                           );
                         }
                         return (
@@ -1495,7 +1532,7 @@ function Sidebar({
               (() => {
                 const homeUnitNames = Object.entries(unitDefs)
                   .filter(([, def]) => {
-                    if (def.faction !== territory.owner) return false;
+                    if (def.faction !== territory.owner && factionData[territory.owner!]?.parent !== def.faction) return false;
                     const ids = def.home_territory_ids ?? [];
                     return ids.includes(selectedTerritory);
                   })

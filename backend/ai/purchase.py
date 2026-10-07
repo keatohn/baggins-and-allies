@@ -26,6 +26,7 @@ from backend.engine.queries import (
     count_open_home_mobilization_slots_for_unit,
     count_unit_instances,
     count_hero_family_instances,
+    subfaction_owns_for,
 )
 from backend.engine.queries import _is_naval_unit, get_unit_faction
 from backend.engine.utils import faction_owns_capital, has_unit_special, unit_hero_id
@@ -197,7 +198,7 @@ def _attack_needs_siege(
     True if there is an enemy or neutral stronghold one step from our land mobilization
     territories (so a slow siegework unit can get there the turn after it's placed).
     """
-    mob_territories = get_mobilization_territories(state, faction_id, td, cd, port_d, ud)
+    mob_territories = get_mobilization_territories(state, faction_id, td, cd, port_d, ud, fd)
     if not mob_territories:
         return False
     our_fd = fd.get(faction_id)
@@ -422,7 +423,7 @@ def decide_purchase(ctx: AIContext):
         return end_phase(faction_id)
 
     capacity_info = get_mobilization_capacity(
-        state, faction_id, td, cd, port_d, ud
+        state, faction_id, td, cd, port_d, ud, ctx.faction_defs
     )
     territories_list = capacity_info.get("territories", [])
     land_cap = sum(t.get("power", 0) for t in territories_list) + sum(
@@ -513,7 +514,8 @@ def decide_purchase(ctx: AIContext):
         out: list[str] = []
         for tid in raw:
             terr = (state.territories or {}).get(tid)
-            if terr and getattr(terr, "owner", None) == faction_id:
+            owner = getattr(terr, "owner", None) if terr else None
+            if owner == faction_id or subfaction_owns_for(owner, faction_id, ctx.faction_defs):
                 out.append(tid)
         return out
 
@@ -767,7 +769,7 @@ def decide_purchase(ctx: AIContext):
             u_e = ud.get(unit_id)
             if u_e and has_unit_special(u_e, "home") and (getattr(u_e, "home_territory_ids", None) or []):
                 open_slots = count_open_home_mobilization_slots_for_unit(
-                    state, faction_id, unit_id, td, cd, port_d, ud
+                    state, faction_id, unit_id, td, cd, port_d, ud, ctx.faction_defs
                 )
                 home_rem = open_slots - purchases.get(unit_id, 0)
             score = compute_purchase_score(
@@ -790,7 +792,7 @@ def decide_purchase(ctx: AIContext):
         u_pick = ud.get(best_unit_id)
         if u_pick and has_unit_special(u_pick, "home") and (getattr(u_pick, "home_territory_ids", None) or []):
             open_s = count_open_home_mobilization_slots_for_unit(
-                state, faction_id, best_unit_id, td, cd, port_d, ud
+                state, faction_id, best_unit_id, td, cd, port_d, ud, ctx.faction_defs
             )
             # This pick consumes one slot: remaining-before-pick = open_s - (purchases[uid]-1)
             pick_home_rem = open_s - (purchases.get(best_unit_id, 0) - 1)

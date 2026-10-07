@@ -275,7 +275,7 @@ def build_strategic_turn_context(ctx: AIContext) -> StrategicTurnContext:
         max_our_p, ally_pressure_max * STRATEGIC_ALLY_PURCHASE_DEFENSE_PRIORITY_MULT
     )
 
-    capacity = get_mobilization_capacity(state, faction_id, td, cd, port_d, ud)
+    capacity = get_mobilization_capacity(state, faction_id, td, cd, port_d, ud, fd)
     naval_sea_zone_bonus = _naval_sea_zone_bonuses(
         state,
         faction_id,

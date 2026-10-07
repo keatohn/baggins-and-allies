@@ -1599,17 +1599,28 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
 
 .ring-carry {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: 0.5rem;
   align-items: center;
-  margin: 0.35rem 0 0.5rem;
+  padding: 0.25rem 0.45rem;
+  border-radius: 4px;
+  background: rgba(42, 28, 16, 0.12);
+}
+
+.ring-carry__icon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 
 .ring-carry__label {
-  width: 100%;
-  font-size: 0.75rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  flex: 1;
+  font-size: 0.85rem;
+}
+
+.ring-carry__options {
+  display: flex;
+  gap: 0.25rem;
 }
 
 .ring-carry__option {

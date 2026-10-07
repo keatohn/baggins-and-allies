@@ -553,6 +553,56 @@ def test_any_home_sea_does_not_need_a_port_and_camps_include_the_parent():
     ).valid
 
 
+def test_parent_home_unit_deploys_to_its_home_on_subfaction_land():
+    from backend.engine.actions import mobilize_units
+    from backend.engine.queries import get_mobilization_capacity, get_mobilization_territories
+    from backend.engine.state import UnitStack
+
+    factions = _factions()
+    territories = _board()
+    guard = _unit("guard", "numenor")
+    guard.specials = ["home"]
+    guard.home_territory_ids = ["andustar"]
+    unit_defs = {"guard": guard, "foot": _unit("foot", "numenor")}
+    state = initialize_game_state(
+        factions,
+        territories,
+        unit_defs=unit_defs,
+        starting_setup={
+            "turn_order": ["numenor", "mordor"],
+            "territory_owners": {
+                "numenor": "numenor",
+                "andustar": "faithful",
+                "romenna": "faithful",
+                "barad_dur": "mordor",
+            },
+            "starting_units": {},
+        },
+    )
+    state.phase = "mobilization"
+    state.faction_purchased_units["numenor"] = [
+        UnitStack(unit_id="guard", count=2),
+        UnitStack(unit_id="foot", count=1),
+    ]
+
+    assert "andustar" in get_mobilization_territories(state, "numenor", territories, {}, {}, unit_defs, factions)
+    rows = get_mobilization_capacity(state, "numenor", territories, {}, {}, unit_defs, factions)["territories"]
+    assert {"territory_id": "andustar", "power": 0, "home_unit_capacity": {"guard": 1}} in rows
+    assert "romenna" not in {row["territory_id"] for row in rows}
+
+    one = mobilize_units("numenor", "andustar", [{"unit_id": "guard", "count": 1}])
+    assert validate_action(state, one, unit_defs, territories, factions).valid
+    two = mobilize_units("numenor", "andustar", [{"unit_id": "guard", "count": 2}])
+    assert not validate_action(state, two, unit_defs, territories, factions).valid
+    foot = mobilize_units("numenor", "andustar", [{"unit_id": "foot", "count": 1}])
+    assert not validate_action(state, foot, unit_defs, territories, factions).valid
+
+    state, _ = apply_action(state, one, unit_defs, territories, factions)
+    assert state.pending_mobilizations[-1].destination == "andustar"
+    again = mobilize_units("numenor", "andustar", [{"unit_id": "guard", "count": 1}])
+    assert not validate_action(state, again, unit_defs, territories, factions).valid
+
+
 def test_parent_can_buy_subfaction_units_when_the_rule_allows_it():
     factions = _factions()
     territories = _board()

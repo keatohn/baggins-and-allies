@@ -378,30 +378,31 @@ def validate_ring_carry(
     units_to_move: list,
     from_id: str,
     charge_through: list[str] | None,
-    ring_id: str | None,
+    ring_ids: list[str] | None,
 ) -> str | None:
-    """Error text when this move cannot carry the ring. None when the carry is legal or absent."""
-    if not ring_id:
+    """Error text when this move cannot carry these rings. None when the carry is legal or absent."""
+    if not ring_ids:
         return None
     if not getattr(state, "rings_of_power", False):
         return "Rings of Power is off"
-    ring = _ring_by_id(state, ring_id)
-    if ring is None:
-        return "Unknown ring"
     heroes = [unit for unit in units_to_move if _is_hero(unit_defs.get(unit.unit_id))]
     if len(heroes) != 1:
         return "A ring moves only with a single hero"
     hero = heroes[0]
     for pending in state.pending_moves:
-        pending_ring = getattr(pending, "ring_id", None)
-        if pending_ring and hero.instance_id in (pending.unit_instance_ids or []):
+        pending_rings = getattr(pending, "ring_ids", None) or []
+        if pending_rings and hero.instance_id in (pending.unit_instance_ids or []):
             return "That hero is already carrying a ring"
-        if pending_ring == ring_id:
+        if any(rid in pending_rings for rid in ring_ids):
             return "That ring is already being carried"
-    if ring.bearer_instance_id and ring.bearer_instance_id != hero.instance_id:
-        return "Another hero is carrying that ring"
-    if ring.territory_id != from_id:
-        return "A ring leaves only with a hero moving out of its territory"
+    for ring_id in ring_ids:
+        ring = _ring_by_id(state, ring_id)
+        if ring is None:
+            return "Unknown ring"
+        if ring.bearer_instance_id and ring.bearer_instance_id != hero.instance_id:
+            return "Another hero is carrying that ring"
+        if ring.territory_id != from_id:
+            return "A ring leaves only with a hero moving out of its territory"
     return None
 
 
@@ -411,27 +412,24 @@ def claim_ring(state: GameState, ring_id: str, hero_instance_id: str) -> None:
         ring.bearer_instance_id = hero_instance_id
 
 
-def release_ring(state: GameState, ring_id: str | None) -> None:
-    if not ring_id:
-        return
-    ring = _ring_by_id(state, ring_id)
-    if ring is not None:
-        ring.bearer_instance_id = None
+def release_rings(state: GameState, ring_ids: list[str] | None) -> None:
+    for ring_id in ring_ids or []:
+        ring = _ring_by_id(state, ring_id)
+        if ring is not None:
+            ring.bearer_instance_id = None
 
 
 def apply_carried_ring(state: GameState, move: PendingMove, to_id: str) -> None:
-    ring_id = getattr(move, "ring_id", None)
-    if not ring_id:
-        return
-    ring = _ring_by_id(state, ring_id)
-    if ring is None:
-        return
-    carrier = ring.bearer_instance_id
-    if carrier not in (move.unit_instance_ids or []):
-        carrier = None
-    ring.territory_id = to_id
-    ring.bearer_instance_id = None
-    ring.carried_in_by = carrier
+    for ring_id in getattr(move, "ring_ids", None) or []:
+        ring = _ring_by_id(state, ring_id)
+        if ring is None:
+            continue
+        carrier = ring.bearer_instance_id
+        if carrier not in (move.unit_instance_ids or []):
+            carrier = None
+        ring.territory_id = to_id
+        ring.bearer_instance_id = None
+        ring.carried_in_by = carrier
 
 
 def clear_ring_carriers(state: GameState) -> None:

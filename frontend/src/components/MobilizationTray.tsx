@@ -10,6 +10,7 @@ interface UnitPurchase {
   icon: string;
   count: number;
   subfaction?: boolean;
+  color?: string;
 }
 
 interface PendingCamp {
@@ -66,7 +67,7 @@ function DraggablePurchaseStack({
     <div
       ref={setNodeRef}
       className={`purchase-stack ${isSelected ? 'selected' : ''} ${isActiveDrag ? 'dragging-source' : ''}`}
-      style={{ ...style, borderColor: factionColor }}
+      style={{ ...style, borderColor: purchase.color || factionColor }}
       onClick={onSelect}
       {...attributes}
       {...listeners}

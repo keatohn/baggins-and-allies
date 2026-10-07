@@ -90,6 +90,7 @@ from backend.engine.definitions import (
     load_starting_setup,
     definitions_from_snapshot,
     TerritoryDefinition,
+    faction_acts_as,
     parse_prefire_penalty_from_manifest,
 )
 from backend.engine.shadow import (
@@ -399,7 +400,8 @@ class MoveRequest(BaseModel):
     load_onto_boat_instance_id: str | None = None  # Load: assign passengers only to this boat in the destination sea zone
     offload_sea_zone_id: str | None = None  # Sea->land: when multiple sea zones can offload to this land, client sends which one to sail to
     avoid_forced_naval_combat: bool | None = None  # Combat move: sail away from mobilization standoff instead of fighting
-    ring_id: str | None = None  # Rings of Power: carry this ring with the one hero in the move
+    ring_id: str | None = None  # Rings of Power: older clients send one ring
+    ring_ids: list[str] | None = None  # Rings of Power: carry these rings with the one hero in the move
 
 
 class CombatRequest(BaseModel):
@@ -2796,7 +2798,7 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
         if phase == "purchase":
             purchasable = get_purchasable_units(state, faction, ud, fd)
             actions["purchasable_units"] = purchasable
-            capacity_info = get_mobilization_capacity(state, faction, td, cd, port_d, ud)
+            capacity_info = get_mobilization_capacity(state, faction, td, cd, port_d, ud, fd)
             actions["mobilization_capacity"] = capacity_info.get("total_capacity", 0)
             territories_list = capacity_info.get("territories", [])
             camp_land_only = sum(t.get("power", 0) for t in territories_list)
@@ -2940,10 +2942,10 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                     "valid_destinations": retreat_destinations,
                 }
         elif phase == "mobilization":
-            mobilize_territories = get_mobilization_territories(state, faction, td, cd, port_d, ud)
+            mobilize_territories = get_mobilization_territories(state, faction, td, cd, port_d, ud, fd)
             mobilize_sea_zones = get_mobilization_sea_zones(state, faction, td, port_d)
             mobilize_river_zones = get_mobilization_river_zones(state, faction, td)
-            mobilize_capacity = get_mobilization_capacity(state, faction, td, cd, port_d, ud)
+            mobilize_capacity = get_mobilization_capacity(state, faction, td, cd, port_d, ud, fd)
             purchased = get_purchased_units(state, faction)
             unit_destinations = {}
             for stack in purchased:
@@ -3230,7 +3232,8 @@ def do_move(
         move_type=move_type,
         load_onto_boat_instance_id=request.load_onto_boat_instance_id,
         avoid_forced_naval_combat=bool(request.avoid_forced_naval_combat),
-        ring_id=(request.ring_id or "").strip() or None,
+        ring_id=request.ring_id,
+        ring_ids=request.ring_ids,
     )
     validation = validate_action(state, action, ud, td, fd, cd, port_d)
     if not validation.valid:
@@ -3565,7 +3568,7 @@ def _generate_initiate_combat_payload(
         attackers_from_sea = sorted(
             [
                 u for u in sea_zone.units
-                if ud.get(u.unit_id) and ud[u.unit_id].faction == attacker_faction
+                if ud.get(u.unit_id) and faction_acts_as(fd, ud[u.unit_id].faction, attacker_faction)
                 and not combat_is_naval_unit(ud.get(u.unit_id))
                 and not _is_river_unit(ud.get(u.unit_id))
             ],
@@ -3577,7 +3580,7 @@ def _generate_initiate_combat_payload(
             attackers = sorted(
                 [
                     u for u in territory.units
-                    if ud.get(u.unit_id) and ud[u.unit_id].faction == attacker_faction
+                    if ud.get(u.unit_id) and faction_acts_as(fd, ud[u.unit_id].faction, attacker_faction)
                     and not combat_is_naval_unit(ud.get(u.unit_id))
                 and not _is_river_unit(ud.get(u.unit_id))
                 ],
@@ -3587,7 +3590,7 @@ def _generate_initiate_combat_payload(
             [
                 u for u in territory.units
                 if ud.get(u.unit_id)
-                and ud[u.unit_id].faction != attacker_faction
+                and not faction_acts_as(fd, ud[u.unit_id].faction, attacker_faction)
                 and (getattr(fd.get(ud[u.unit_id].faction), "alliance", None) if fd.get(ud[u.unit_id].faction) else None) != attacker_alliance
             ],
             key=lambda u: u.instance_id,
@@ -3599,7 +3602,7 @@ def _generate_initiate_combat_payload(
         attackers = sorted(
             [
                 u for u in territory.units
-                if ud.get(u.unit_id) and ud[u.unit_id].faction == attacker_faction
+                if ud.get(u.unit_id) and faction_acts_as(fd, ud[u.unit_id].faction, attacker_faction)
                 and (
                     not is_sea_zone_combat
                     or participates_in_sea_hex_naval_combat(u, ud.get(u.unit_id))
@@ -3611,7 +3614,7 @@ def _generate_initiate_combat_payload(
             [
                 u for u in territory.units
                 if ud.get(u.unit_id)
-                and ud[u.unit_id].faction != attacker_faction
+                and not faction_acts_as(fd, ud[u.unit_id].faction, attacker_faction)
                 and (getattr(fd.get(ud[u.unit_id].faction), "alliance", None) if fd.get(ud[u.unit_id].faction) else None) != attacker_alliance
                 and (
                     not is_sea_zone_combat

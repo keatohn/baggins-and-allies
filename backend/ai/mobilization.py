@@ -420,7 +420,7 @@ def decide_mobilization(ctx: AIContext):
     if not purchased:
         return end_phase(faction_id)
 
-    capacity = get_mobilization_capacity(state, faction_id, td, cd, port_d, ud)
+    capacity = get_mobilization_capacity(state, faction_id, td, cd, port_d, ud, ctx.faction_defs)
     territories = list(capacity.get("territories", []))
     port_territories = capacity.get("port_territories", [])
     for pt in port_territories:
