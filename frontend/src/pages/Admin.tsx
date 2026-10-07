@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, getAuthToken, getResolvedApiBase, usesViteApiProxy } from '../services/api';
-import type { AdminSetupBundle, AdminSetupListItem, AuthPlayer, Catalog } from '../services/api';
+import type { AdminSetupBundle, AdminSetupListItem, AuthPlayer, Catalog, UnitFormulas } from '../services/api';
 import {
   CampsPanel,
   FactionsPanel,
@@ -14,6 +14,8 @@ import {
 } from './admin/SetupEditorPanels';
 import { AudioPanel } from './admin/AudioPanel';
 import { CatalogPanel } from './admin/CatalogPanel';
+import { FormulasPanel } from './admin/FormulasPanel';
+import { EMPTY_FORMULAS, asFormulas, predictCost, unitFeatures, unitPowerCost } from './admin/unitFormulas';
 import { SignalsPanel } from './admin/SignalsPanel';
 import type { SignalPreset } from '../territorySignals';
 import { isValidSetupId } from './admin/setupId';
@@ -21,7 +23,7 @@ import { BalanceModal } from './admin/BalanceModal';
 import { previewStatsFromBundle } from './admin/previewStats';
 import { completeTerritoryAsymmetries } from './admin/territoryGraph';
 import { MapViewPane, type MapSetupDraft } from './admin/MapViewPane';
-import { GameStatsModal, UnitStatsModal } from '../components/StatsModals';
+import { GameStatsModal, UnitStatsModal, type UnitStatsExtraColumn } from '../components/StatsModals';
 import './Admin.css';
 
 const TAB_KEYS = [
@@ -340,7 +342,10 @@ export default function Admin() {
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [catalogJsonMode, setCatalogJsonMode] = useState(false);
   const [catalog, setCatalog] = useState<Catalog>(EMPTY_CATALOG);
-  const globalOpen = audioOpen || signalsOpen || catalogOpen;
+  const [formulasOpen, setFormulasOpen] = useState(false);
+  const [formulasJsonMode, setFormulasJsonMode] = useState(false);
+  const [formulas, setFormulas] = useState<UnitFormulas>(EMPTY_FORMULAS);
+  const globalOpen = audioOpen || signalsOpen || catalogOpen || formulasOpen;
   const [unitStatsOpen, setUnitStatsOpen] = useState(false);
   const [gameStatsOpen, setGameStatsOpen] = useState(false);
   const [balanceOpen, setBalanceOpen] = useState(false);
@@ -351,6 +356,40 @@ export default function Admin() {
     () => previewStatsFromBundle(bundle, { rings: statsWithRings, specials: catalog.specials }),
     [bundle, statsWithRings, catalog.specials],
   );
+  const formulaColumns = useMemo((): UnitStatsExtraColumn[] => {
+    const units = (bundle?.units ?? {}) as Record<string, Record<string, unknown>>;
+    const shown = [
+      { key: 'regression', formula: formulas.regression },
+      { key: 'custom', formula: formulas.custom },
+    ].filter(({ formula }) => formula.show);
+    if (!shown.length) return [];
+    const columns: UnitStatsExtraColumn[] = shown.map(({ key, formula }) => ({
+      key,
+      label: formula.label.trim() || (key === 'regression' ? 'Fit' : 'Custom'),
+      tone: 'formula',
+      values: {},
+    }));
+    const diff: UnitStatsExtraColumn = { key: 'diff', label: formulas.diff_label.trim() || 'Δ', tone: 'diff', values: {} };
+    for (const [id, unit] of Object.entries(units)) {
+      const feats = unitFeatures(unit);
+      const cost = unitPowerCost(unit);
+      const priced = unit.purchasable !== false && cost > 0;
+      let total = 0;
+      shown.forEach(({ formula }, i) => {
+        const predicted = predictCost(formula, feats);
+        columns[i].values[id] = predicted;
+        total += predicted - cost;
+      });
+      if (priced) diff.values[id] = total;
+    }
+    return [...columns, diff];
+  }, [bundle?.units, formulas]);
+  const formulaKey = formulaColumns.length
+    ? `${formulaColumns
+        .filter((c) => c.tone === 'formula')
+        .map((c) => c.label)
+        .join(', ')} = predicted cost | ${formulaColumns[formulaColumns.length - 1].label} = sum of (predicted − P): green = underpriced, red = overpriced`
+    : undefined;
   const ringsToggle = statsPreview?.ringsMode === 'optional' ? (
     <label>
       <input type="checkbox" checked={statsWithRings} onChange={(e) => setStatsWithRings(e.target.checked)} />
@@ -409,6 +448,10 @@ export default function Admin() {
       .getCatalog()
       .then((c) => setCatalog(asCatalog(c)))
       .catch(() => setCatalog(EMPTY_CATALOG));
+    api
+      .adminGetFormulas()
+      .then((f) => setFormulas(asFormulas(f)))
+      .catch(() => setFormulas(EMPTY_FORMULAS));
   }, [player?.is_admin]);
 
   const loadBundle = useCallback((id: string) => {
@@ -472,6 +515,19 @@ export default function Admin() {
       try {
         const res = await api.adminPutCatalog(catalog);
         setCatalog(asCatalog(res.catalog));
+        setSaveOk(true);
+      } catch (e) {
+        setSaveError(e instanceof Error ? e.message : 'Save failed');
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+    if (formulasOpen) {
+      setSaving(true);
+      try {
+        const res = await api.adminPutFormulas(formulas);
+        setFormulas(asFormulas(res.formulas));
         setSaveOk(true);
       } catch (e) {
         setSaveError(e instanceof Error ? e.message : 'Save failed');
@@ -589,6 +645,12 @@ export default function Admin() {
   };
 
   const renderTabBody = () => {
+    if (formulasOpen) {
+      if (formulasJsonMode) {
+        return <JsonTabEditor value={formulas} onChange={(p) => setFormulas(asFormulas(p))} />;
+      }
+      return <FormulasPanel formulas={formulas} onChange={setFormulas} setups={setups} specials={catalog.specials} />;
+    }
     if (catalogOpen) {
       if (catalogJsonMode) {
         return <JsonTabEditor value={catalog} onChange={(p) => setCatalog(asCatalog(p))} />;
@@ -747,8 +809,9 @@ export default function Admin() {
     }
   };
 
-  const openSection = (section: 'setups' | 'catalog' | 'audio' | 'signals') => {
+  const openSection = (section: 'setups' | 'catalog' | 'formulas' | 'audio' | 'signals') => {
     setCatalogOpen(section === 'catalog');
+    setFormulasOpen(section === 'formulas');
     setAudioOpen(section === 'audio');
     setSignalsOpen(section === 'signals');
     setSaveOk(false);
@@ -786,6 +849,13 @@ export default function Admin() {
           </button>
           <button
             type="button"
+            className={`page-menu-btn${formulasOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => openSection('formulas')}
+          >
+            Formulas
+          </button>
+          <button
+            type="button"
             className={`page-menu-btn${audioOpen ? ' admin-page__nav-btn--active' : ''}`}
             onClick={() => openSection('audio')}
           >
@@ -801,7 +871,18 @@ export default function Admin() {
         </div>
       </div>
 
-      {catalogOpen ? (
+      {formulasOpen ? (
+        <div className="admin-page__toolbar admin-page__toolbar--wrap">
+          <label className="admin-page__checkbox-label">
+            <input
+              type="checkbox"
+              checked={formulasJsonMode}
+              onChange={() => setFormulasJsonMode((v) => !v)}
+            />
+            Raw JSON
+          </label>
+        </div>
+      ) : catalogOpen ? (
         <div className="admin-page__toolbar admin-page__toolbar--wrap">
           <label className="admin-page__checkbox-label">
             <input
@@ -1003,6 +1084,8 @@ export default function Admin() {
               ? 'Saved signals.'
               : catalogOpen
                 ? 'Saved catalog.'
+                : formulasOpen
+                  ? 'Saved formulas.'
                 : 'Saved. New games will use this data.'}
         </p>
       ) : null}
@@ -1098,6 +1181,8 @@ export default function Admin() {
           unitsByFaction={statsPreview.unitsByFaction}
           factionData={statsPreview.factionData}
           turnOrder={statsPreview.turnOrder}
+          extraColumns={formulaColumns}
+          extraKey={formulaKey}
           onClose={() => setUnitStatsOpen(false)}
         />
       )}

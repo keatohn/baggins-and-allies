@@ -771,6 +771,40 @@
   width: 40%;
 }
 
+/* Admin formula columns after SP */
+.unit-stats-modal .header-stats-table.header-stats-table--extra col.stats-units-col-name {
+  width: 20%;
+}
+
+.unit-stats-modal .header-stats-table.header-stats-table--extra col.stats-units-col-specials {
+  width: 26%;
+}
+
+.unit-stats-modal .header-stats-table.header-stats-table--extra col.stats-units-col-extra {
+  width: 7%;
+}
+
+.unit-stats-modal .header-stats-table th.stats-col-extra {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.unit-stats-modal .header-stats-table .stats-col-extra--formula {
+  color: #2a5ea8;
+}
+
+.unit-stats-modal .header-stats-table .stats-col-extra--diff {
+  font-weight: 600;
+}
+
+.unit-stats-modal .header-stats-table .stats-col-extra--pos {
+  color: #2e7d32;
+}
+
+.unit-stats-modal .header-stats-table .stats-col-extra--neg {
+  color: #b4332a;
+}
+
 .unit-stats-modal .header-stats-table.header-stats-table--units th.stats-col-num,
 .unit-stats-modal .header-stats-table.header-stats-table--units td.stats-col-num {
   min-width: 0;
@@ -1479,6 +1513,11 @@
   .modal-overlay > .modal.unit-stats-modal {
     width: min(960px, 97vw) !important;
     max-width: min(960px, 97vw) !important;
+  }
+
+  .modal-overlay > .modal.unit-stats-modal.unit-stats-modal--wide {
+    width: min(1180px, 97vw) !important;
+    max-width: min(1180px, 97vw) !important;
   }
 }
 

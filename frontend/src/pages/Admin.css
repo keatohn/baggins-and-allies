@@ -1569,6 +1569,218 @@
   color: inherit;
 }
 
+.admin-formulas {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.admin-formulas__intro {
+  margin: 0;
+}
+
+.admin-formulas__card {
+  padding: 0.85rem 1rem 1rem;
+  border: 1px solid var(--ink-faded);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.admin-formulas__card h3 {
+  margin: 0 0 0.25rem;
+  font-size: 1.05rem;
+}
+
+.admin-formulas__card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.admin-formulas__card-head h3 {
+  margin: 0;
+  margin-right: auto;
+}
+
+.admin-formulas__show {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.admin-formulas__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+
+.admin-formulas__name .admin-form__input {
+  width: 8rem;
+}
+
+.admin-formulas__checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.admin-formulas__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.6rem 0.2rem 0.4rem;
+  border: 1px solid var(--ink-faded);
+  border-radius: 999px;
+  background: #fffef8;
+  font-size: 0.88rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.admin-formulas__check--on {
+  border-color: #2a5ea8;
+  background: rgba(42, 94, 168, 0.1);
+}
+
+.admin-formulas__check--master {
+  border: 0;
+  background: transparent;
+  padding-left: 0;
+  font-weight: 600;
+}
+
+.admin-formulas__subhead {
+  margin: 0.75rem 0 0.35rem;
+}
+
+.admin-formulas__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.75rem;
+  margin-top: 0.6rem;
+}
+
+.admin-formulas__row-label {
+  flex: 0 0 5rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.admin-formulas__row .admin-form__micro {
+  margin: 0;
+}
+
+.admin-formulas__slider {
+  width: 12rem;
+}
+
+.admin-formulas__slider-value {
+  min-width: 2.25rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.admin-formulas__train {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-top: 0.85rem;
+}
+
+.admin-formulas__train .admin-form__micro {
+  margin: 0;
+}
+
+.admin-formulas__error {
+  margin: 0;
+}
+
+.admin-formulas__result {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-top: 0.85rem;
+}
+
+.admin-formulas__stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 1.25rem;
+  font-size: 0.92rem;
+}
+
+.admin-formulas__stats .admin-form__micro {
+  margin: 0;
+}
+
+.admin-formulas__formula {
+  display: block;
+  max-width: 100%;
+  margin: 0.4rem 0;
+  padding: 0.45rem 0.65rem;
+  border-radius: 6px;
+  background: rgba(42, 94, 168, 0.08);
+  color: #1f4a86;
+  font-size: 0.85rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.admin-formulas__weights {
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-formulas__weights td {
+  padding: 0.15rem 1.25rem 0.15rem 0;
+  border-bottom: 1px solid rgba(61, 41, 20, 0.08);
+}
+
+.admin-formulas__weights td:last-child {
+  text-align: right;
+  padding-right: 0;
+}
+
+.admin-formulas__neg {
+  color: #b4332a;
+}
+
+.admin-formulas__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.4rem 0.75rem;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.admin-formulas__cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.88rem;
+}
+
+.admin-formulas__cell--constant {
+  font-weight: 600;
+}
+
+.admin-formulas__weight {
+  width: 4.5rem;
+  padding: 0.25rem 0.4rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Narrow viewports: stack toolbar, full-width controls, safe areas, comfortable taps. */
 @media (max-width: 767px) {
   .admin-page {

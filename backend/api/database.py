@@ -170,10 +170,12 @@ def init_db():
         from backend.catalog import seed_catalog_if_empty
         from backend.setup_data import seed_setups_if_empty
         from backend.signals import seed_signals_if_empty
+        from backend.unit_formulas import seed_unit_formulas_if_empty
 
         seed_setups_if_empty(db)
         seed_catalog_if_empty(db)
         seed_audio_gains_if_empty(db)
         seed_signals_if_empty(db)
+        seed_unit_formulas_if_empty(db)
     finally:
         db.close()

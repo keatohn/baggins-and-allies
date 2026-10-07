@@ -688,6 +688,26 @@ export interface Catalog {
   archetypes: string[];
 }
 
+/** Feature key → weight. Keys: attack, defense, movement, dice, health, transport_capacity, is_naval, is_hero, special:<id>. */
+export type FormulaWeights = Record<string, number>;
+
+export interface FormulaFitStats {
+  n: number;
+  r2: number | null;
+  rmse: number | null;
+  mae: number | null;
+  trained_at?: string | null;
+}
+
+export interface UnitFormulas {
+  /** Features the regression trains on. */
+  features: string[];
+  training: { setup_ids: string[]; include_heroes: boolean; ridge: number };
+  regression: { label: string; show: boolean; intercept: number; weights: FormulaWeights; stats: FormulaFitStats };
+  custom: { label: string; show: boolean; intercept: number; weights: FormulaWeights };
+  diff_label: string;
+}
+
 export interface BalanceSide {
   id: string;
   display_name: string;
@@ -948,6 +968,17 @@ export const api = {
     fetchJson<{ ok: boolean; catalog: Catalog }>('/admin/catalog', {
       method: 'PUT',
       body: JSON.stringify(catalog),
+    }),
+  adminGetFormulas: () => fetchJson<UnitFormulas>('/admin/formulas'),
+  adminPutFormulas: (formulas: UnitFormulas) =>
+    fetchJson<{ ok: boolean; formulas: UnitFormulas }>('/admin/formulas', {
+      method: 'PUT',
+      body: JSON.stringify(formulas),
+    }),
+  adminTrainFormula: (body: { setup_ids: string[]; features: string[]; include_heroes: boolean; ridge: number }) =>
+    fetchJson<{ intercept: number; weights: FormulaWeights; stats: FormulaFitStats }>('/admin/formulas/train', {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
   adminPutSignals: (presets: SignalPreset[]) =>
     fetchJson<{ ok: boolean; presets: SignalPreset[] }>('/admin/signals', {

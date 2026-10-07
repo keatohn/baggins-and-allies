@@ -253,22 +253,55 @@ export function GameStatsModal({
   );
 }
 
+/** Admin-only numeric columns after SP. Missing values show as a dash. */
+export interface UnitStatsExtraColumn {
+  key: string;
+  label: string;
+  tone: 'formula' | 'diff';
+  values: Record<string, number | undefined>;
+}
+
+function roundExtra(value: number | undefined): number | undefined {
+  if (value == null || !Number.isFinite(value)) return undefined;
+  const rounded = Math.round(value * 10) / 10;
+  return rounded === 0 ? 0 : rounded;
+}
+
+function formatExtra(value: number | undefined, signed: boolean): string {
+  const rounded = roundExtra(value);
+  if (rounded == null) return '–';
+  return signed && rounded > 0 ? `+${rounded.toFixed(1)}` : rounded.toFixed(1);
+}
+
+function extraCellClass(col: UnitStatsExtraColumn, value: number | undefined): string {
+  const base = `stats-col-num stats-col-extra stats-col-extra--${col.tone}`;
+  if (col.tone !== 'diff') return base;
+  const rounded = roundExtra(value);
+  if (!rounded) return base;
+  return `${base} ${rounded > 0 ? 'stats-col-extra--pos' : 'stats-col-extra--neg'}`;
+}
+
 export function UnitStatsModal({
   unitsByFaction,
   factionData,
   turnOrder = [],
+  extraColumns = [],
+  extraKey,
   onClose,
 }: {
   unitsByFaction: Record<string, UnitForStats[]>;
   factionData: StatsFactionData;
   turnOrder?: string[];
+  extraColumns?: UnitStatsExtraColumn[];
+  extraKey?: string;
   onClose: () => void;
 }) {
   const order = unitStatsFactionOrder(unitsByFaction, factionData, turnOrder);
+  const wide = extraColumns.length > 0;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal unit-stats-modal" onClick={(e) => e.stopPropagation()}>
+      <div className={`modal unit-stats-modal${wide ? ' unit-stats-modal--wide' : ''}`} onClick={(e) => e.stopPropagation()}>
         <header className="modal-header">
           <h2>Unit Stats</h2>
           <button type="button" className="close-btn" onClick={onClose}>
@@ -277,13 +310,16 @@ export function UnitStatsModal({
         </header>
         <div className="unit-stats-modal-body">
           {Object.keys(unitsByFaction).length > 0 ? (
-            <table className="header-stats-table header-stats-table--units">
+            <table className={`header-stats-table header-stats-table--units${wide ? ' header-stats-table--extra' : ''}`}>
               <colgroup>
                 <col className="stats-units-col-name" />
                 {[1, 2, 3, 4, 5, 6].map((i) => (
                   <col key={i} className="stats-units-col-num" />
                 ))}
                 <col className="stats-units-col-specials" />
+                {extraColumns.map((col) => (
+                  <col key={col.key} className="stats-units-col-extra" />
+                ))}
               </colgroup>
               <thead>
                 <tr>
@@ -295,6 +331,11 @@ export function UnitStatsModal({
                   <th className="stats-col-num">M</th>
                   <th className="stats-col-num">HP</th>
                   <th className="stats-col-num stats-col-specials">SP</th>
+                  {extraColumns.map((col) => (
+                    <th key={col.key} className={`stats-col-num stats-col-extra stats-col-extra--${col.tone}`} title={col.label}>
+                      {col.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -303,7 +344,7 @@ export function UnitStatsModal({
                   const fd = factionData[fid];
                   return [
                     <tr key={`faction-${fid}`} className="unit-stats-faction-row">
-                      <td colSpan={8} className="stats-col-unit">
+                      <td colSpan={8 + extraColumns.length} className="stats-col-unit">
                         <div className="unit-stats-name-cell">
                           {fd?.icon && (fd?.alliance === 'good' || fd?.alliance === 'evil') && (
                             <img className="unit-stats-faction-icon" src={fd.icon} alt="" aria-hidden />
@@ -329,6 +370,11 @@ export function UnitStatsModal({
                         <td className="stats-col-num stats-col-specials">
                           {u.specials?.length ? u.specials.join(', ') : ''}
                         </td>
+                        {extraColumns.map((col) => (
+                          <td key={col.key} className={extraCellClass(col, col.values[u.id])}>
+                            {formatExtra(col.values[u.id], col.tone === 'diff')}
+                          </td>
+                        ))}
                       </tr>
                     )),
                   ];
@@ -341,6 +387,7 @@ export function UnitStatsModal({
         </div>
         <p className="unit-stats-modal-key">
           P = Power cost | A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points | SP = Specials
+          {extraKey ? ` | ${extraKey}` : ''}
         </p>
       </div>
     </div>

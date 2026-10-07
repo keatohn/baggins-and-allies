@@ -132,6 +132,7 @@ from backend.setup_data import (
     try_scenario_display,
 )
 from backend.catalog import CatalogError, load_catalog, rule_descriptions, save_catalog, specials_for_units
+from backend.unit_formulas import UnitFormulasError, load_unit_formulas, save_unit_formulas, train_regression
 from backend.setup_validation import validate_setup_payload
 from dataclasses import asdict
 from backend.engine.queries import (
@@ -1442,6 +1443,50 @@ def admin_put_catalog(
     except CatalogError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"ok": True, "catalog": catalog}
+
+
+@app.get("/admin/formulas")
+def admin_get_formulas(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Unit cost formulas (regression and custom) shown in the admin Unit Stats view."""
+    return load_unit_formulas(db)
+
+
+@app.put("/admin/formulas")
+def admin_put_formulas(
+    body: dict[str, Any],
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    return {"ok": True, "formulas": save_unit_formulas(db, body)}
+
+
+class AdminTrainFormulaBody(BaseModel):
+    setup_ids: list[str]
+    features: list[str]
+    include_heroes: bool = True
+    ridge: float = 1.0
+
+
+@app.post("/admin/formulas/train")
+def admin_train_formula(
+    body: AdminTrainFormulaBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Fit power cost on the chosen setups' purchasable units. Does not save."""
+    unit_sets = []
+    for setup_id in body.setup_ids:
+        bundle = get_admin_setup_bundle(db, setup_id)
+        if not bundle:
+            raise HTTPException(status_code=404, detail=f"Setup not found: {setup_id}")
+        unit_sets.append(bundle.get("units") or {})
+    try:
+        return train_regression(unit_sets, body.features, body.include_heroes, body.ridge)
+    except UnitFormulasError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 class AdminSetupPayload(BaseModel):
