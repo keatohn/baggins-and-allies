@@ -669,7 +669,7 @@ export function movementSfxCategoryFromUnitDef(
   const arch = unitDef.archetype ?? '';
   const tags = unitDef.tags ?? [];
   if (arch === 'aerial' || tags.includes('aerial')) return 'aerial';
-  if (arch === 'naval' || tags.includes('naval')) return 'naval';
+  if (arch === 'naval' || tags.includes('naval') || arch === 'river' || tags.includes('river')) return 'naval';
   return 'ground';
 }
 
@@ -680,7 +680,7 @@ function stemForMovementCategory(kind: 'ground' | 'aerial' | 'naval'): 'march' |
 }
 
 /**
- * Movement and mobilization feedback: ground → march, aerial → wings, naval → ship (assets/audio/sfx).
+ * Movement and mobilization feedback: ground → march, aerial → wings, naval and river → ship (assets/audio/sfx).
  */
 export function playMovementSfx(kind: 'ground' | 'aerial' | 'naval'): void {
   const now = performance.now();

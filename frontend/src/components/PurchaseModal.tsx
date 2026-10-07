@@ -355,9 +355,6 @@ function PurchaseModal({
           );
           if (!canAffordCostTotals(availableResources, tryCosts)) return prev;
 
-          const totalInCart = Object.values(tryState).reduce((s, q) => s + q, 0);
-          if (mobilizationCapacity != null && totalInCart > mobilizationCapacity) return prev;
-
           if (unit.isRiver && mobilizationRiverCapacity != null) {
             const newRiverInCart = allRiverUnits.reduce((s, u) => s + (tryState[u.id] || 0), 0);
             if (newRiverInCart > mobilizationRiverCapacity) return prev;
@@ -391,7 +388,6 @@ function PurchaseModal({
       campQuantity,
       campCost,
       repairCostTotal,
-      mobilizationCapacity,
       mobilizationSeaCapacity,
       mobilizationRiverCapacity,
       mobilizationLandCapacity,
@@ -403,16 +399,19 @@ function PurchaseModal({
   );
 
   const totalUnits = Object.values(quantities).reduce((sum, qty) => sum + qty, 0);
-  const atMobilizationCap =
-    mobilizationCapacity != null && totalUnits >= mobilizationCapacity;
+  const atLandCap = landInCart >= displayLandDenominator;
+  const atSeaCap = mobilizationSeaCapacity != null && seaInCart >= mobilizationSeaCapacity;
+  const atRiverCap = mobilizationRiverCapacity != null && riverInCart >= mobilizationRiverCapacity;
   const canAffordOneMoreCamp = campCost > 0 && (remainingResources.power ?? 0) >= campCost;
   const atCampCap = maxCamps !== undefined && maxCamps > 0 && campQuantity >= maxCamps;
 
   const plusDisabled = (unit: UnitPurchaseInfo, _qty: number, affordable: boolean) => {
-    if (!affordable || atMobilizationCap) return true;
+    if (!affordable) return true;
     if (unit.heroId && (heroFamilyInCart(availableUnits, quantities, unit.heroId) >= 1 || (unit.maxAffordable ?? 1) <= 0))
       return true;
-    return false;
+    if (unit.isRiver) return atRiverCap;
+    if (unit.isNaval) return atSeaCap;
+    return atLandCap;
   };
 
   /** Gray sibling versions (and any version already in play) so you cannot pick two of the same hero. */
@@ -472,7 +471,6 @@ function PurchaseModal({
   };
 
   const handleConfirm = () => {
-    if (mobilizationCapacity != null && totalUnits > mobilizationCapacity) return;
     if (landInCart > displayLandDenominator) return;
     if (mobilizationSeaCapacity != null && seaInCart > mobilizationSeaCapacity) return;
     if (mobilizationRiverCapacity != null && riverInCart > mobilizationRiverCapacity) return;
