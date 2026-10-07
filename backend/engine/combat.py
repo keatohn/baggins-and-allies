@@ -1516,6 +1516,29 @@ def get_terror_reroll_targets(
     return flat_indices, len(flat_indices)
 
 
+def prefire_stat_modifiers(
+    units: list[Unit],
+    unit_defs: dict[str, UnitDefinition],
+    is_attacker: bool,
+    prefire_penalty_delta: int,
+    extra: dict[str, int] | None = None,
+) -> dict[str, int]:
+    """
+    Per-unit stat modifier for stealth/archer prefire. The penalty never takes a
+    stat below 1, so a unit that would hit on 1 still hits on 1.
+    """
+    stat_name = "attack" if is_attacker else "defense"
+    extra = extra or {}
+    out: dict[str, int] = {}
+    for u in units:
+        bonus = extra.get(u.instance_id, 0)
+        base = getattr(unit_defs.get(u.unit_id), stat_name, 0) + bonus
+        penalized = base + prefire_penalty_delta
+        floor = min(base, 1)
+        out[u.instance_id] = max(penalized, floor) - base + bonus
+    return out
+
+
 def resolve_archer_prefire(
     attacker_units: list[Unit],
     defender_archer_units: list[Unit],
@@ -1535,11 +1558,9 @@ def resolve_archer_prefire(
     stat_modifiers_defender_extra: optional instance_id -> extra modifier (e.g. terrain bonus), merged with prefire penalty.
     prefire_penalty_delta: -1 when setup manifest enables prefire penalty; 0 when disabled.
     """
-    extra = stat_modifiers_defender_extra or {}
-    archer_penalty = prefire_penalty_delta
-    stat_modifiers = {
-        u.instance_id: archer_penalty + extra.get(u.instance_id, 0) for u in defender_archer_units
-    }
+    stat_modifiers = prefire_stat_modifiers(
+        defender_archer_units, unit_defs, False, prefire_penalty_delta, stat_modifiers_defender_extra,
+    )
     defender_hits = _count_hits(
         defender_archer_units, defender_rolls, unit_defs, is_attacker=False,
         stat_modifiers=stat_modifiers,
@@ -1714,10 +1735,9 @@ def resolve_stealth_prefire(
     Call when EVERY attacker has the stealth special. Modifies defender_units in place.
     prefire_penalty_delta: -1 when setup manifest enables prefire penalty; 0 when disabled.
     """
-    extra = stat_modifiers_attacker_extra or {}
-    stat_modifiers = {
-        u.instance_id: prefire_penalty_delta + extra.get(u.instance_id, 0) for u in attacker_units
-    }
+    stat_modifiers = prefire_stat_modifiers(
+        attacker_units, unit_defs, True, prefire_penalty_delta, stat_modifiers_attacker_extra,
+    )
     attacker_hits = _count_hits(
         attacker_units, attacker_rolls, unit_defs, is_attacker=True,
         stat_modifiers=stat_modifiers,

@@ -38,6 +38,7 @@ from backend.engine.combat import (
     get_siegework_round_defender_display_units,
     SIEGEWORK_SPECIAL_LADDER,
     resolve_combat_round,
+    prefire_stat_modifiers,
     resolve_archer_prefire,
     resolve_stealth_prefire,
     resolve_siegeworks_round,
@@ -2784,6 +2785,9 @@ def _handle_initiate_combat(
     )
     if all_attackers_have_stealth:
         pd_prefire = _prefire_stat_delta(state)
+        stealth_stat_modifiers = prefire_stat_modifiers(
+            attacker_units, unit_defs, True, pd_prefire, attacker_mods,
+        )
         spec_stealth = compute_battle_specials_and_modifiers(
             attacker_units,
             defender_units,
@@ -2796,7 +2800,7 @@ def _handle_initiate_combat(
         attacker_units_at_start_stealth = [
             _build_round_unit_display(
                 u, unit_defs.get(u.unit_id),
-                pd_prefire + attacker_mods.get(u.instance_id, 0), True, attacker_faction,
+                stealth_stat_modifiers.get(u.instance_id, 0), True, attacker_faction,
                 territory_def, spec_stealth,
                 passenger_aboard=_passengers_aboard_on_boat(u, passenger_lookup_units, unit_defs),
             )
@@ -2819,9 +2823,6 @@ def _handle_initiate_combat(
             hp_shield=ring_hp_shield,
             attacker_effective_dice_override=merge_ring_dice(None, attacker_units, unit_defs, ring_att_boosts),
         )
-        stealth_stat_modifiers = {
-            u.instance_id: pd_prefire + attacker_mods.get(u.instance_id, 0) for u in attacker_units
-        }
         attacker_dice_grouped_stealth = group_dice_by_stat(
             attacker_units, prefire_attacker_rolls, unit_defs, is_attacker=True,
             stat_modifiers=stealth_stat_modifiers,
@@ -3186,10 +3187,9 @@ def _handle_initiate_combat(
             defender_effective_dice_override=ring_def_dice,
         )
         # Group defender dice for UI (archers at defense-1 or defense+0, merged with terrain)
-        archer_stat_modifiers = {
-            u.instance_id: archer_prefire_penalty + defender_mods.get(u.instance_id, 0)
-            for u in defender_archer_units
-        }
+        archer_stat_modifiers = prefire_stat_modifiers(
+            defender_archer_units, unit_defs, False, archer_prefire_penalty, defender_mods,
+        )
         defender_dice_grouped = group_dice_by_stat(
             defender_archer_units, prefire_defender_rolls, unit_defs, is_attacker=False,
             stat_modifiers=archer_stat_modifiers,
@@ -3236,7 +3236,9 @@ def _handle_initiate_combat(
             _build_round_unit_display(
                 u,
                 unit_defs.get(u.unit_id),
-                archer_prefire_penalty + defender_mods.get(u.instance_id, 0),
+                archer_stat_modifiers.get(
+                    u.instance_id, archer_prefire_penalty + defender_mods.get(u.instance_id, 0)
+                ),
                 False,
                 defender_faction,
                 territory_def,
@@ -3989,10 +3991,9 @@ def _handle_continue_combat(
             hp_shield=ring_hp_shield,
             defender_effective_dice_override=ring_def_dice,
         )
-        archer_stat_modifiers_c = {
-            u.instance_id: archer_prefire_penalty_c + defender_mods.get(u.instance_id, 0)
-            for u in defender_archer_units_continue
-        }
+        archer_stat_modifiers_c = prefire_stat_modifiers(
+            defender_archer_units_continue, unit_defs, False, archer_prefire_penalty_c, defender_mods,
+        )
         defender_dice_grouped_ar = group_dice_by_stat(
             defender_archer_units_continue, prefire_defender_rolls_c, unit_defs, is_attacker=False,
             stat_modifiers=archer_stat_modifiers_c,
@@ -4035,7 +4036,9 @@ def _handle_continue_combat(
             _build_round_unit_display(
                 u,
                 unit_defs.get(u.unit_id),
-                archer_prefire_penalty_c + defender_mods.get(u.instance_id, 0),
+                archer_stat_modifiers_c.get(
+                    u.instance_id, archer_prefire_penalty_c + defender_mods.get(u.instance_id, 0)
+                ),
                 False,
                 defender_faction,
                 territory_def,

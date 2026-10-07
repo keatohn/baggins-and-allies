@@ -2199,7 +2199,10 @@ export default function CombatSimulatorPanel({
                                   {entries.map((e) => {
                                     const prefireDice =
                                       specialId === 'archer' && e.side === 'defender'
-                                        ? Math.max(0, (defenderUnitToEffectiveDef[e.unitId] ?? 0) - archerPrefireLabelThresholdDelta)
+                                        ? (() => {
+                                          const base = defenderUnitToEffectiveDef[e.unitId] ?? 0;
+                                          return Math.max(base - archerPrefireLabelThresholdDelta, Math.min(base, 1), 0);
+                                        })()
                                         : 0;
                                     return (
                                       <span key={`${e.side}-${e.unitId}`} className="combat-sim-special-unit">
