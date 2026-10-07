@@ -1197,10 +1197,85 @@ function GameMap({
       return;
     }
 
+    const terrainForId = (id: string): string | undefined => {
+      const direct = territoryData[id]?.terrain;
+      if (direct) return direct;
+      const lower = id.toLowerCase();
+      for (const [key, value] of Object.entries(territoryData)) {
+        if (key.toLowerCase() === lower) return value?.terrain;
+      }
+      return undefined;
+    };
+    const isRiverZone = (id: string) => terrainForId(id) === 'river';
+
     const computeCentroidsAndPositions = (): { centroids: Record<string, { x: number; y: number }>; positions: Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number }; center?: { x: number; y: number } }> } => {
       const centroids: Record<string, { x: number; y: number }> = {};
       const positions: Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number }; center?: { x: number; y: number } }> = {};
       const bboxCenter = (b: DOMRect) => ({ x: b.x + b.width / 2, y: b.y + b.height / 2 });
+
+      /** Middle of a long river. A bend is handled on the short axis, including a tight channel. */
+      const riverLengthCenter = (path: SVGPathElement, bbox: DOMRect): { x: number; y: number } => {
+        const cx = bbox.x + bbox.width / 2;
+        const cy = bbox.y + bbox.height / 2;
+        const fallback = { x: cx, y: cy };
+        const svg = path.ownerSVGElement;
+        if (!svg) return fallback;
+        const pt = svg.createSVGPoint();
+        const inside = (x: number, y: number) => {
+          pt.x = x;
+          pt.y = y;
+          try {
+            return path.isPointInFill(pt);
+          } catch {
+            return false;
+          }
+        };
+        const horizontal = bbox.width >= bbox.height;
+        const shortSpan = Math.max(1, horizontal ? bbox.height : bbox.width);
+        const crossSteps = Math.max(8, Math.ceil(shortSpan));
+        const bandAt = (along: number): { x: number; y: number }[] => {
+          const long = horizontal ? bbox.x + bbox.width * along : bbox.y + bbox.height * along;
+          const hits: { x: number; y: number; j: number }[] = [];
+          for (let j = 0; j <= crossSteps; j++) {
+            const cross = j / crossSteps;
+            const x = horizontal ? long : bbox.x + bbox.width * cross;
+            const y = horizontal ? bbox.y + bbox.height * cross : long;
+            if (inside(x, y)) hits.push({ x, y, j });
+          }
+          if (hits.length === 0) return [];
+          let best: { x: number; y: number }[] = [];
+          let run: { x: number; y: number }[] = [];
+          let prevJ = -2;
+          const finish = () => {
+            if (run.length > best.length) best = run;
+            run = [];
+          };
+          for (const hit of hits) {
+            if (hit.j !== prevJ + 1) finish();
+            run.push(hit);
+            prevJ = hit.j;
+          }
+          finish();
+          const mid = best[Math.floor((best.length - 1) / 2)];
+          return mid ? [mid] : [];
+        };
+        const midBand = bandAt(0.5);
+        if (midBand.length > 0) return midBand[0];
+        const longSpan = Math.max(1, horizontal ? bbox.width : bbox.height);
+        const alongSteps = Math.max(8, Math.ceil(longSpan / 2));
+        let bestDelta = Infinity;
+        let bestPoint: { x: number; y: number } | null = null;
+        for (let i = 0; i <= alongSteps; i++) {
+          const along = i / alongSteps;
+          const band = bandAt(along);
+          const delta = Math.abs(along - 0.5);
+          if (band.length > 0 && delta < bestDelta) {
+            bestDelta = delta;
+            bestPoint = band[0];
+          }
+        }
+        return bestPoint ?? fallback;
+      };
 
       const osgiliathForThisMap = osgiliathCentroidsForMap(mapBase);
 
@@ -1239,6 +1314,12 @@ function GameMap({
           }
           const area = bbox.width * bbox.height;
           const isSeaZone = /^sea_zone_?\d+$/i.test(territoryId);
+          if (isRiverZone(territoryId)) {
+            const center = riverLengthCenter(path, bbox);
+            centroids[territoryId] = center;
+            positions[territoryId] = { marker: center, unit: center };
+            return;
+          }
           const useTwoSpotsFirstPass =
             isSeaZone ||
             area >= TERRITORY_TWO_SPOT_AREA_THRESHOLD ||
@@ -1419,6 +1500,12 @@ function GameMap({
         try {
           if (path.getAttribute('transform')) return;
           const bbox = path.getBBox();
+          if (isRiverZone(id)) {
+            const center = riverLengthCenter(path, bbox);
+            centroids[id] = center;
+            positions[id] = { marker: center, unit: center };
+            return;
+          }
           const area = bbox.width * bbox.height;
           const cx = bbox.x + bbox.width / 2;
           const cy = bbox.y + bbox.height / 2;
@@ -1550,7 +1637,7 @@ function GameMap({
     const run = () => {
       const { centroids, positions } = computeCentroidsAndPositions();
       for (const [tid, h] of Object.entries(svgHintAnchors)) {
-        if (h.units && positions[tid]) {
+        if (h.units && positions[tid] && !isRiverZone(tid)) {
           positions[tid] = { ...positions[tid], unit: h.units };
           centroids[tid] = h.units;
         }
@@ -1567,7 +1654,7 @@ function GameMap({
       clearTimeout(timer1);
       if (timer2 != null) clearTimeout(timer2);
     };
-  }, [svgPaths, svgHintAnchors, SVG_VIEWBOX.width, SVG_VIEWBOX.height, mapBase]);
+  }, [svgPaths, svgHintAnchors, SVG_VIEWBOX.width, SVG_VIEWBOX.height, mapBase, territoryData]);
 
   // Compute move arrows to render - only for current phase moves
   const moveArrows = useMemo(() => {
@@ -3684,7 +3771,7 @@ function GameMap({
                           // Definitions may load after game state (e.g. create-game nav + getGame without embedded defs);
                           // missing faction palette must not yield undefined — glow/filter code calls .replace on color.
                           const color = isRiverZone
-                            ? '#3a6fa3'
+                            ? '#366896'
                             : isSeaZone
                             ? '#2d4258'
                             : owner
@@ -3786,12 +3873,12 @@ function GameMap({
                           {/* Darker troughs for depth */}
                           <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(15,30,45,0.52)" strokeWidth="2.75" strokeLinecap="round" />
                         </pattern>
-                        {/* River: same waves, lighter and bluer than sea so the two waters read apart. */}
+                        {/* River: slightly darker and grayer than the previous blue, still lighter than sea. */}
                         <pattern id="river-wave-pattern" x="0" y="0" width="120" height="60" patternUnits="userSpaceOnUse">
-                          <rect width="120" height="60" fill="#3a6fa3" />
-                          <path d="M0 20 Q30 12 60 20 T120 20 M0 45 Q30 37 60 45 T120 45" fill="none" stroke="rgba(186,220,255,0.55)" strokeWidth="3.5" strokeLinecap="round" />
-                          <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(210,232,255,0.4)" strokeWidth="2.25" strokeLinecap="round" />
-                          <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(18,48,92,0.4)" strokeWidth="2.75" strokeLinecap="round" />
+                          <rect width="120" height="60" fill="#366896" />
+                          <path d="M0 20 Q30 12 60 20 T120 20 M0 45 Q30 37 60 45 T120 45" fill="none" stroke="rgba(174,204,232,0.52)" strokeWidth="3.5" strokeLinecap="round" />
+                          <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(196,214,232,0.38)" strokeWidth="2.25" strokeLinecap="round" />
+                          <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(20,44,78,0.42)" strokeWidth="2.75" strokeLinecap="round" />
                         </pattern>
                         <marker id="arrowhead-combat" markerWidth="5" markerHeight="5" refX="3.5" refY="2.5" orient="auto">
                           <polygon points="0,0 5,2.5 0,5" fill="#c62828" />
@@ -4723,7 +4810,7 @@ function GameMap({
                                                   !navalCombatMoveMustResolveInstanceIdSet.has(id)
                                               )
                                             }
-                                            isNaval
+                                            isNaval={seaHullIds.has(unit_id)}
                                             passengerCount={passengerCount}
                                             instanceIds={instanceIds}
                                           />
@@ -4863,7 +4950,7 @@ function GameMap({
                                       showAerialMustMove={aerialMustMoveKeySet.has(`${territoryId}_${unit_id}`)}
                                       showNavalMustAttack={showNavalMustAttackStacked}
                                       showForcedNavalStandoff={showForcedNavalStandoffStacked}
-                                      isNaval={navalUnitIds.has(unit_id)}
+                                      isNaval={seaHullIds.has(unit_id)}
                                       isHero={Boolean(unitDefs[unit_id]?.hero_id)}
                                       instanceIds={instanceIdsForUnit.length > 0 ? instanceIdsForUnit : undefined}
                                     />
@@ -4896,6 +4983,7 @@ function GameMap({
                 activeMobilizationItem={activeMobilizationItem}
                 activeCampDrag={activeCampDrag}
                 factionColor={mobilizationTray?.factionColor}
+                riverUnitIds={riverUnitIds}
               />
 
               <div className={`map-controls ${mapControlsCollapsed ? 'map-controls--collapsed' : ''}`}>

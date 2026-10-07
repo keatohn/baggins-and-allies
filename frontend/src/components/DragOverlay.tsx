@@ -16,6 +16,8 @@ export interface BulkDragOverlayStack {
 
 interface DragOverlayProps {
   bulkDragOverlay?: { stacks: BulkDragOverlayStack[] } | null;
+  /** River craft stay the normal token size. `isNaval` still marks them for movement. */
+  riverUnitIds?: Set<string>;
   activeUnit: {
     unitId: string;
     count: number;
@@ -36,12 +38,17 @@ interface DragOverlayProps {
   factionColor?: string;
 }
 
+function largeNavalToken(isNaval: boolean | undefined, unitId: string, riverUnitIds?: Set<string>): boolean {
+  return Boolean(isNaval) && !riverUnitIds?.has(unitId);
+}
+
 function DragOverlay({
   bulkDragOverlay,
   activeUnit,
   activeMobilizationItem,
   activeCampDrag,
   factionColor,
+  riverUnitIds,
 }: DragOverlayProps) {
   if (activeCampDrag) {
     const style: CSSProperties = factionColor
@@ -83,7 +90,7 @@ function DragOverlay({
             return (
               <div
                 key={s.unitId}
-                className={`unit-token dragging-overlay${s.isNaval ? ' unit-token--naval' : ''}${s.isHero ? ' unit-token--hero' : ''}`}
+                className={`unit-token dragging-overlay${largeNavalToken(s.isNaval, s.unitId, riverUnitIds) ? ' unit-token--naval' : ''}${s.isHero ? ' unit-token--hero' : ''}`}
                 style={style}
               >
                 <img src={s.unitDef.icon} alt={s.unitDef.name} draggable={false} />
@@ -112,7 +119,7 @@ function DragOverlay({
   return (
     <DndDragOverlay dropAnimation={null} style={{ pointerEvents: 'none' }}>
       <div
-        className={`unit-token dragging-overlay${activeUnit.isNaval ? ' unit-token--naval' : ''}${activeUnit.isHero ? ' unit-token--hero' : ''}`}
+        className={`unit-token dragging-overlay${largeNavalToken(activeUnit.isNaval, activeUnit.unitId, riverUnitIds) ? ' unit-token--naval' : ''}${activeUnit.isHero ? ' unit-token--hero' : ''}`}
         style={style}
       >
         <img src={activeUnit.unitDef.icon} alt={activeUnit.unitDef.name} draggable={false} />
