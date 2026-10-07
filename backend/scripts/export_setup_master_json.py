@@ -3,7 +3,9 @@
 Build a single "master" JSON for admin **New setup → Import master JSON**.
 
 The object has the same keys as the per-file setup JSONs (no ``.json`` in the key names):
-  manifest, units, territories, factions, camps, ports, starting_setup, specials
+  manifest, units, territories, factions, camps, ports, starting_setup
+
+Specials live in the global catalog (backend/data/catalog.json), not in a setup.
 
 Run from the repository root (so ``import backend`` works)::
 
@@ -37,7 +39,6 @@ _MASTER_KEYS = (
     "camps",
     "ports",
     "starting_setup",
-    "specials",
 )
 
 

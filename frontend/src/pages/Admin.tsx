@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, getAuthToken, getResolvedApiBase, usesViteApiProxy } from '../services/api';
-import type { AdminSetupBundle, AdminSetupListItem, AuthPlayer } from '../services/api';
+import type { AdminSetupBundle, AdminSetupListItem, AuthPlayer, Catalog } from '../services/api';
 import {
   CampsPanel,
   FactionsPanel,
   JsonTabEditor,
   ManifestPanel,
   PortsPanel,
-  SpecialsPanel,
   StartingSetupPanel,
   TerritoriesPanel,
   UnitsPanel,
 } from './admin/SetupEditorPanels';
 import { AudioPanel } from './admin/AudioPanel';
+import { CatalogPanel } from './admin/CatalogPanel';
 import { SignalsPanel } from './admin/SignalsPanel';
 import type { SignalPreset } from '../territorySignals';
 import { isValidSetupId } from './admin/setupId';
@@ -32,10 +32,24 @@ const TAB_KEYS = [
   'camps',
   'ports',
   'starting_setup',
-  'specials',
 ] as const;
 
 type TabKey = (typeof TAB_KEYS)[number];
+
+const EMPTY_CATALOG: Catalog = { specials: [], special_rules: [], game_options: [], terrain_types: [], archetypes: [] };
+
+/** Raw JSON edits may drop keys; the panels need every list present. */
+function asCatalog(raw: unknown): Catalog {
+  const o = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const list = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+  return {
+    specials: list(o.specials),
+    special_rules: list(o.special_rules),
+    game_options: list(o.game_options),
+    terrain_types: list(o.terrain_types),
+    archetypes: list(o.archetypes),
+  };
+}
 
 function printedTerritoryPower(territories: AdminSetupBundle['territories'] | undefined): Record<string, number> {
   const out: Record<string, number> = {};
@@ -72,7 +86,6 @@ const TAB_LABELS: Record<TabKey, string> = {
   camps: 'Camps',
   ports: 'Ports',
   starting_setup: 'Starting setup',
-  specials: 'Specials',
 };
 
 const DELETE_SETUP_CONFIRM_PHRASE = 'DELETE SETUP';
@@ -87,7 +100,6 @@ const MASTER_BUNDLE_KEYS = [
   'camps',
   'ports',
   'starting_setup',
-  'specials',
 ] as const;
 
 /** Leading UTF-8 BOM from some editors breaks `JSON.parse` in the browser. */
@@ -325,6 +337,10 @@ export default function Admin() {
   const [signalsOpen, setSignalsOpen] = useState(false);
   const [signalsJsonMode, setSignalsJsonMode] = useState(false);
   const [signalPresets, setSignalPresets] = useState<SignalPreset[]>([]);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [catalogJsonMode, setCatalogJsonMode] = useState(false);
+  const [catalog, setCatalog] = useState<Catalog>(EMPTY_CATALOG);
+  const globalOpen = audioOpen || signalsOpen || catalogOpen;
   const [unitStatsOpen, setUnitStatsOpen] = useState(false);
   const [gameStatsOpen, setGameStatsOpen] = useState(false);
   const [balanceOpen, setBalanceOpen] = useState(false);
@@ -332,8 +348,8 @@ export default function Admin() {
   const signalsJson = useMemo(() => ({ presets: signalPresets }), [signalPresets]);
   const [statsWithRings, setStatsWithRings] = useState(true);
   const statsPreview = useMemo(
-    () => previewStatsFromBundle(bundle, { rings: statsWithRings }),
-    [bundle, statsWithRings],
+    () => previewStatsFromBundle(bundle, { rings: statsWithRings, specials: catalog.specials }),
+    [bundle, statsWithRings, catalog.specials],
   );
   const ringsToggle = statsPreview?.ringsMode === 'optional' ? (
     <label>
@@ -389,6 +405,10 @@ export default function Admin() {
       .getSignals()
       .then((r) => setSignalPresets(r.presets ?? []))
       .catch(() => setSignalPresets([]));
+    api
+      .getCatalog()
+      .then((c) => setCatalog(asCatalog(c)))
+      .catch(() => setCatalog(EMPTY_CATALOG));
   }, [player?.is_admin]);
 
   const loadBundle = useCallback((id: string) => {
@@ -447,6 +467,19 @@ export default function Admin() {
       }
       return;
     }
+    if (catalogOpen) {
+      setSaving(true);
+      try {
+        const res = await api.adminPutCatalog(catalog);
+        setCatalog(asCatalog(res.catalog));
+        setSaveOk(true);
+      } catch (e) {
+        setSaveError(e instanceof Error ? e.message : 'Save failed');
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     if (!selectedId || !bundle) return;
     const body = {
       manifest: { ...(bundle.manifest as Record<string, unknown>), id: selectedId },
@@ -456,7 +489,6 @@ export default function Admin() {
       camps: bundle.camps as DictEntityMap,
       ports: bundle.ports as DictEntityMap,
       starting_setup: bundle.starting_setup as Record<string, unknown>,
-      specials: bundle.specials as Record<string, unknown>,
     };
     setSaving(true);
     try {
@@ -481,7 +513,6 @@ export default function Admin() {
       camps,
       ports,
       starting_setup,
-      specials: bundle.specials as Record<string, unknown>,
     };
     try {
       await api.adminPutSetup(selectedId, body);
@@ -558,6 +589,12 @@ export default function Admin() {
   };
 
   const renderTabBody = () => {
+    if (catalogOpen) {
+      if (catalogJsonMode) {
+        return <JsonTabEditor value={catalog} onChange={(p) => setCatalog(asCatalog(p))} />;
+      }
+      return <CatalogPanel catalog={catalog} onChange={setCatalog} />;
+    }
     if (signalsOpen) {
       if (signalsJsonMode) {
         return (
@@ -641,8 +678,6 @@ export default function Admin() {
           return j(bundle.ports, (p) => setBundle((b) => (b ? { ...b, ports: p as typeof b.ports } : null)));
         case 'starting_setup':
           return j(bundle.starting_setup, (p) => setBundle((b) => (b ? { ...b, starting_setup: p as typeof b.starting_setup } : null)));
-        case 'specials':
-          return j(bundle.specials, (p) => setBundle((b) => (b ? { ...b, specials: p as typeof b.specials } : null)));
         default:
           return null;
       }
@@ -665,6 +700,7 @@ export default function Admin() {
           <UnitsPanel
             units={(bundle.units as DictEntityMap) ?? {}}
             factionIds={factionAndSubfactionIds(bundle.factions)}
+            archetypes={catalog.archetypes}
             setupId={selectedId}
             setups={setups}
             onChange={(next) => setBundle((b) => (b ? { ...b, units: next as typeof b.units } : null))}
@@ -674,6 +710,7 @@ export default function Admin() {
         return (
           <TerritoriesPanel
             territories={(bundle.territories as DictEntityMap) ?? {}}
+            terrainTypes={catalog.terrain_types}
             onChange={(next) => setBundle((b) => (b ? { ...b, territories: next as typeof b.territories } : null))}
           />
         );
@@ -705,16 +742,17 @@ export default function Admin() {
             onChange={(ss) => setBundle((b) => (b ? { ...b, starting_setup: ss as typeof b.starting_setup } : null))}
           />
         );
-      case 'specials':
-        return (
-          <SpecialsPanel
-            specials={bundle.specials as Record<string, unknown>}
-            onChange={(sp) => setBundle((b) => (b ? { ...b, specials: sp as typeof b.specials } : null))}
-          />
-        );
       default:
         return null;
     }
+  };
+
+  const openSection = (section: 'setups' | 'catalog' | 'audio' | 'signals') => {
+    setCatalogOpen(section === 'catalog');
+    setAudioOpen(section === 'audio');
+    setSignalsOpen(section === 'signals');
+    setSaveOk(false);
+    setSaveError(null);
   };
 
   if (loading) {
@@ -734,44 +772,47 @@ export default function Admin() {
         <div className="admin-page__nav-tools">
           <button
             type="button"
-            className={`page-menu-btn${!audioOpen && !signalsOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => {
-              setAudioOpen(false);
-              setSignalsOpen(false);
-              setSaveOk(false);
-              setSaveError(null);
-            }}
+            className={`page-menu-btn${!globalOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => openSection('setups')}
           >
             Setups
           </button>
           <button
             type="button"
+            className={`page-menu-btn${catalogOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => openSection('catalog')}
+          >
+            Catalog
+          </button>
+          <button
+            type="button"
             className={`page-menu-btn${audioOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => {
-              setAudioOpen(true);
-              setSignalsOpen(false);
-              setSaveOk(false);
-              setSaveError(null);
-            }}
+            onClick={() => openSection('audio')}
           >
             Audio
           </button>
           <button
             type="button"
             className={`page-menu-btn${signalsOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => {
-              setSignalsOpen(true);
-              setAudioOpen(false);
-              setSaveOk(false);
-              setSaveError(null);
-            }}
+            onClick={() => openSection('signals')}
           >
             Signals
           </button>
         </div>
       </div>
 
-      {signalsOpen ? (
+      {catalogOpen ? (
+        <div className="admin-page__toolbar admin-page__toolbar--wrap">
+          <label className="admin-page__checkbox-label">
+            <input
+              type="checkbox"
+              checked={catalogJsonMode}
+              onChange={() => setCatalogJsonMode((v) => !v)}
+            />
+            Raw JSON
+          </label>
+        </div>
+      ) : signalsOpen ? (
         <div className="admin-page__toolbar admin-page__toolbar--wrap">
           <label className="admin-page__checkbox-label">
             <input
@@ -862,7 +903,7 @@ export default function Admin() {
         </div>
       ) : null}
 
-      {setups.length === 0 && !loadError && !loadingBundle && !audioOpen && !signalsOpen ? (
+      {setups.length === 0 && !loadError && !loadingBundle && !globalOpen ? (
         <p className="admin-page__empty">
           No setups in the database. Restart the API once so it can create the <code>setups</code> table and seed from{' '}
           <code>backend/data/setups</code> (only runs when the table is empty). Then use <strong>New setup</strong> to add
@@ -870,7 +911,7 @@ export default function Admin() {
         </p>
       ) : null}
 
-      {audioOpen || signalsOpen ? (
+      {globalOpen ? (
         <div className="admin-page__panel">{renderTabBody()}</div>
       ) : (
       <>
@@ -928,7 +969,7 @@ export default function Admin() {
         <button
           type="button"
           className="admin-page__btn admin-page__btn--primary"
-          disabled={(audioOpen || signalsOpen ? false : !bundle) || saving}
+          disabled={(globalOpen ? false : !bundle) || saving}
           onClick={handleSave}
         >
           {saving ? 'Saving…' : 'Save'}
@@ -936,7 +977,7 @@ export default function Admin() {
         <button
           type="button"
           className="admin-page__btn admin-page__btn--danger"
-          disabled={!bundle || saving || deleting || audioOpen || signalsOpen}
+          disabled={!bundle || saving || deleting || globalOpen}
           onClick={openDeleteDialog}
         >
           Delete setup
@@ -956,12 +997,18 @@ export default function Admin() {
       ) : null}
       {saveOk ? (
         <p className="admin-page__success">
-          {audioOpen ? 'Saved audio mix.' : signalsOpen ? 'Saved signals.' : 'Saved. New games will use this data.'}
+          {audioOpen
+            ? 'Saved audio mix.'
+            : signalsOpen
+              ? 'Saved signals.'
+              : catalogOpen
+                ? 'Saved catalog.'
+                : 'Saved. New games will use this data.'}
         </p>
       ) : null}
 
       <CreateSetupDialog open={createOpen} onClose={() => setCreateOpen(false)} setups={setups} onCreated={onCreatedSetup} />
-      {mapViewOpen && bundle && !audioOpen && !signalsOpen ? (
+      {mapViewOpen && bundle && !globalOpen ? (
         <MapViewPane
           mapAsset={typeof bundle.manifest?.map_asset === 'string' ? bundle.manifest.map_asset : undefined}
           manifest={(bundle.manifest as Record<string, unknown>) ?? {}}

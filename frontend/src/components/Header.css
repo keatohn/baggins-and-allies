@@ -861,7 +861,38 @@
 }
 
 .stats-modal .stats-faction-row.stats-subfaction-row .stats-col-faction {
-  padding-left: 1.9em;
+  padding-left: 2.3em;
+}
+
+.stats-modal .stats-faction-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1em;
+  height: 1em;
+  margin-right: -0.15rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--ink-faded);
+  font-size: 0.85em;
+  font-style: normal;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.stats-modal .stats-faction-caret:hover {
+  color: var(--ink);
+}
+
+.stats-modal .stats-faction-caret--open {
+  transform: rotate(90deg);
+}
+
+.stats-modal .stats-faction-caret--blank {
+  cursor: default;
 }
 
 .stats-modal .stats-faction-row.stats-subfaction-row td {

@@ -417,6 +417,7 @@ def test_stats_list_each_subfaction_share_of_its_parent():
     stats = get_faction_stats(pooled, territories, factions, unit_defs)
     parent = stats["factions"]["numenor"]
     sub = stats["subfactions"]["faithful"]
+    assert sub["economy"] == "pool"
     land = sum(territories[t].produces.get("power", 0) for t in ("andustar", "romenna"))
     assert (sub["territories"], sub["units"], sub["unit_power"]) == (2, 1, 12)
     assert sub["power_per_turn"] == land + 8
@@ -425,7 +426,10 @@ def test_stats_list_each_subfaction_share_of_its_parent():
 
     kept, unit_defs, factions = _ring_state("none")
     stats = get_faction_stats(kept, territories, factions, unit_defs)
-    assert "subfactions" not in stats
+    kept_sub = stats["subfactions"]["faithful"]
+    assert kept_sub["economy"] == "none"
+    assert (kept_sub["territories"], kept_sub["units"], kept_sub["power_per_turn"]) == (2, 1, 0)
+    assert stats["subfactions"]["andunie"]["territories"] == 0
     assert stats["factions"]["numenor"]["territories"] == 3
 
 

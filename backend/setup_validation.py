@@ -27,10 +27,6 @@ def _as_obj(raw: str | dict[str, Any] | None, label: str) -> tuple[dict[str, Any
     return None, f"{label} must be an object or JSON string"
 
 
-def _parse_specials_defs(specials_root: dict[str, Any]) -> dict[str, Any]:
-    return {k: v for k, v in specials_root.items() if k != "order" and isinstance(v, dict)}
-
-
 def _faction_capital_territory_id(raw: Any) -> str | None:
     """If set, capital must reference a real territory. None = no capital (e.g. neutral / meta factions)."""
     if raw is None:
@@ -54,10 +50,16 @@ def validate_setup_documents(
     camps: dict[str, Any],
     ports: dict[str, Any],
     starting_setup: dict[str, Any],
-    specials: dict[str, Any],
+    catalog: dict[str, Any] | None = None,
 ) -> list[str]:
-    """Return a list of human-readable errors; empty means valid."""
+    """Return a list of human-readable errors; empty means valid.
+
+    With a catalog, unit specials, unit archetypes, and territory terrain types must come from it.
+    """
     errors: list[str] = []
+    known_specials = {e["id"] for e in catalog.get("specials") or []} if catalog else None
+    known_terrain = set(catalog.get("terrain_types") or []) if catalog else None
+    known_archetypes = set(catalog.get("archetypes") or []) if catalog else None
 
     mid = manifest.get("id")
     if not isinstance(mid, str) or not mid.strip():
@@ -75,6 +77,9 @@ def validate_setup_documents(
             continue
         if t.get("id") != tid:
             errors.append(f'territory "{tid}" id field must match key')
+        terrain = t.get("terrain_type")
+        if known_terrain is not None and terrain not in known_terrain:
+            errors.append(f'territory "{tid}" terrain_type "{terrain}" is not in the catalog terrain types')
         for label, key in (
             ("adjacent", "adjacent"),
             ("aerial_adjacent", "aerial_adjacent"),
@@ -132,6 +137,9 @@ def validate_setup_documents(
         for key in ("display_name", "archetype"):
             if key not in u:
                 errors.append(f'unit "{uid}" needs {key}')
+        archetype = u.get("archetype")
+        if known_archetypes is not None and "archetype" in u and archetype not in known_archetypes:
+            errors.append(f'unit "{uid}" archetype "{archetype}" is not in the catalog archetypes')
         for key in ("attack", "defense", "movement", "health"):
             if isinstance(u.get(key), bool) or not isinstance(u.get(key), int):
                 errors.append(f'unit "{uid}" {key} must be a whole number')
@@ -144,8 +152,6 @@ def validate_setup_documents(
             if not isinstance(hid, str) or not hid.strip():
                 errors.append(f'unit "{uid}" hero_id must be a non-empty string when set')
 
-    spec_defs = _parse_specials_defs(specials)
-    spec_keys = set(spec_defs.keys())
     for uid, u in units.items():
         if uid == "":
             continue
@@ -159,8 +165,8 @@ def validate_setup_documents(
             if not isinstance(s, str):
                 errors.append(f'unit "{uid}".specials must contain strings')
                 break
-            if s and s not in spec_keys:
-                errors.append(f'unit "{uid}" references unknown special "{s}"')
+            if s and known_specials is not None and s not in known_specials:
+                errors.append(f'unit "{uid}" references special "{s}", which is not in the catalog')
 
     for fid, f in factions.items():
         if not isinstance(f, dict):
@@ -386,6 +392,8 @@ def _validate_special_rule_option(rule: dict[str, Any], index: int, errors: list
     elif "name" in rule and name not in (None, ""):
         if not isinstance(name, str) or not name.strip():
             errors.append(f"{prefix}.name must be a non-empty string when set")
+    if "description" in rule and not isinstance(rule.get("description"), (str, type(None))):
+        errors.append(f"{prefix}.description must be a string when set")
 
 
 def _printed_territory_power(territory: Any) -> int:
@@ -448,9 +456,12 @@ def _validate_rings_of_power(
                 errors.append(f"{row_prefix}.{key} must be an integer >= 0")
 
 
-def validate_setup_payload(payload: dict[str, Any]) -> list[str]:
-    """Validate a dict with keys manifest, units, territories, factions, camps, ports, starting_setup, specials."""
-    keys = ("manifest", "units", "territories", "factions", "camps", "ports", "starting_setup", "specials")
+def validate_setup_payload(payload: dict[str, Any], catalog: dict[str, Any] | None = None) -> list[str]:
+    """Validate a dict with keys manifest, units, territories, factions, camps, ports, starting_setup.
+
+    A leftover specials key from an older export is ignored; the catalog holds specials.
+    """
+    keys = ("manifest", "units", "territories", "factions", "camps", "ports", "starting_setup")
     for k in keys:
         if k not in payload:
             return [f'missing key "{k}"']
@@ -475,9 +486,6 @@ def validate_setup_payload(payload: dict[str, Any]) -> list[str]:
     s, e = _as_obj(payload["starting_setup"], "starting_setup")
     if e:
         return [e]
-    sp, e = _as_obj(payload["specials"], "specials")
-    if e:
-        return [e]
     assert m is not None and u is not None and t is not None and f is not None
-    assert c is not None and p is not None and s is not None and sp is not None
-    return validate_setup_documents(m, u, t, f, c, p, s, sp)
+    assert c is not None and p is not None and s is not None
+    return validate_setup_documents(m, u, t, f, c, p, s, catalog)

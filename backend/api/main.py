@@ -128,10 +128,10 @@ from backend.setup_data import (
     save_setup_bundle,
     try_list_setups_menu,
     try_load_setup,
-    try_load_specials,
     try_load_static_definitions,
     try_scenario_display,
 )
+from backend.catalog import CatalogError, load_catalog, rule_descriptions, save_catalog, specials_for_units
 from backend.setup_validation import validate_setup_payload
 from dataclasses import asdict
 from backend.engine.queries import (
@@ -763,7 +763,6 @@ def generate_game_code(db: Session) -> str:
 
 def _build_definitions_snapshot(
     ud=None, td=None, fd=None, cd=None, pd=None, start=None,
-    specials=None, specials_order=None,
 ) -> dict:
     """Snapshot of definitions + starting_setup for storing in game config. Uses provided defs or module fallback."""
     ud = ud if ud is not None else unit_defs
@@ -779,10 +778,6 @@ def _build_definitions_snapshot(
         "camps": {k: asdict(v) for k, v in cd.items()},
         "ports": {k: asdict(v) for k, v in pd.items()},
     }
-    if specials is not None:
-        defs["specials"] = specials
-    if specials_order is not None:
-        defs["specials_order"] = specials_order
     return {
         "definitions": defs,
         "starting_setup": start,
@@ -1380,7 +1375,7 @@ def update_profile(
 @app.get("/setups")
 def get_setups(db: Session = Depends(get_db)):
     """List available game setups (id, display_name, map_asset, timeline_image). Use setup_id in POST /games/create."""
-    return {"setups": try_list_setups_menu(db)}
+    return {"setups": try_list_setups_menu(db), "rule_descriptions": rule_descriptions(load_catalog(db))}
 
 
 @app.get("/audio/gains")
@@ -1429,6 +1424,26 @@ def admin_put_signals(
     return {"ok": True, "presets": presets}
 
 
+@app.get("/catalog")
+def get_catalog(db: Session = Depends(get_db)):
+    """Specials, special rule types, game options, terrain types, and archetypes shared by every setup."""
+    return load_catalog(db)
+
+
+@app.put("/admin/catalog")
+def admin_put_catalog(
+    body: dict[str, Any],
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Replace the global catalog. Entries a setup still uses cannot be removed."""
+    try:
+        catalog = save_catalog(db, body)
+    except CatalogError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True, "catalog": catalog}
+
+
 class AdminSetupPayload(BaseModel):
     manifest: dict[str, Any]
     units: dict[str, Any]
@@ -1437,7 +1452,6 @@ class AdminSetupPayload(BaseModel):
     camps: dict[str, Any]
     ports: dict[str, Any]
     starting_setup: dict[str, Any]
-    specials: dict[str, Any]
 
 
 class AdminCreateSetupBody(BaseModel):
@@ -1448,7 +1462,7 @@ class AdminCreateSetupBody(BaseModel):
     bundle: dict[str, Any] | None = Field(
         default=None,
         description=(
-            "Master JSON object: keys manifest, units, territories, factions, camps, ports, starting_setup, specials"
+            "Master JSON object: keys manifest, units, territories, factions, camps, ports, starting_setup"
         ),
     )
     bundle_json: str | None = Field(
@@ -1540,7 +1554,7 @@ def admin_put_setup(
     manifest = dict(payload["manifest"])
     manifest["id"] = setup_id
     payload["manifest"] = manifest
-    errs = validate_setup_payload(payload)
+    errs = validate_setup_payload(payload, load_catalog(db))
     if errs:
         raise HTTPException(status_code=400, detail={"validation_errors": errs})
     try:
@@ -1576,7 +1590,6 @@ def create_game(
         raise HTTPException(status_code=400, detail=f"Setup not found: {setup_id}")
     try:
         ud, td, fd, cd, port_d = try_load_static_definitions(setup_id, db)
-        specials_defs, specials_order = try_load_specials(setup_id, db)
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=str(e))
     victory_criteria = setup.get("victory_criteria")
@@ -1629,10 +1642,7 @@ def create_game(
     players_list = [{"player_id": str(player.id), "faction_id": None}]
     status = "lobby"
     players_json = json.dumps(players_list)
-    config_snapshot = _build_definitions_snapshot(
-        ud, td, fd, cd, port_d, setup["starting_setup"],
-        specials=specials_defs, specials_order=specials_order,
-    )
+    config_snapshot = _build_definitions_snapshot(ud, td, fd, cd, port_d, setup["starting_setup"])
     # Always persist resolved setup (including default) so list/meta can show scenario name.
     config_snapshot["setup_id"] = setup_id
     config_snapshot["heroes_enabled"] = bool(getattr(state, "heroes_enabled", True))
@@ -1891,7 +1901,7 @@ def get_definitions(db: Session = Depends(get_db)):
     """Get all static game definitions (default setup). Never raises."""
     try:
         ud, td, fd, cd, pd = try_load_static_definitions(DEFAULT_SETUP_ID, db)
-        specials_defs, specials_order = try_load_specials(DEFAULT_SETUP_ID, db)
+        specials_defs, specials_order = specials_for_units(load_catalog(db), ud.values())
         return {
             "units": _safe_asdict_map(ud),
             "territories": _safe_asdict_map(td),
@@ -2122,19 +2132,8 @@ def get_game_state(
         "camps": _safe_asdict_map(cd),
         "ports": _safe_asdict_map(port_d),
     }
+    definitions["specials"], definitions["specials_order"] = specials_for_units(load_catalog(db), ud.values())
     row = db.query(GameModel).filter(GameModel.id == game_id).first()
-    if row and row.config:
-        try:
-            config = json.loads(row.config) if isinstance(row.config, str) else row.config
-            defs_snapshot = config.get("definitions") or {}
-            definitions["specials"] = defs_snapshot.get("specials", {})
-            definitions["specials_order"] = defs_snapshot.get("specials_order", [])
-        except (TypeError, json.JSONDecodeError):
-            definitions["specials"] = {}
-            definitions["specials_order"] = []
-    else:
-        definitions["specials"] = {}
-        definitions["specials_order"] = []
     setup_id: str | None = None
     event_log: list = []
     if row and row.config:

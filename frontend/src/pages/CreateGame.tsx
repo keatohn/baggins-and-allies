@@ -1,8 +1,55 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { api, type SetupInfo } from '../services/api';
 import ScenarioTimeline from '../components/ScenarioTimeline';
 import './CreateGame.css';
+
+function RuleLabel({ name, description }: { name: string; description?: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  const hovering = useRef(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: PointerEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [open]);
+
+  return (
+    <span className="create-game-form__field-label create-game-form__rule-label" ref={ref}>
+      {name}
+      {description && (
+        <>
+          <button
+            type="button"
+            className="create-game-form__rule-info"
+            aria-label={`What is ${name}?`}
+            aria-expanded={open}
+            onClick={() => setOpen((prev) => hovering.current || !prev)}
+            onPointerEnter={(e) => {
+              if (e.pointerType !== 'mouse') return;
+              hovering.current = true;
+              setOpen(true);
+            }}
+            onPointerLeave={(e) => {
+              if (e.pointerType !== 'mouse') return;
+              hovering.current = false;
+              setOpen(false);
+            }}
+          >
+            ?
+          </button>
+          {open && (
+            <span className="create-game-form__rule-tip" role="tooltip">{description}</span>
+          )}
+        </>
+      )}
+    </span>
+  );
+}
 
 export default function CreateGame() {
   const navigate = useNavigate();
@@ -12,6 +59,7 @@ export default function CreateGame() {
   const [shadowOfWar, setShadowOfWar] = useState(false);
   const [optionalRules, setOptionalRules] = useState<Record<string, boolean>>({});
   const [setups, setSetups] = useState<SetupInfo[]>([]);
+  const [ruleDescriptions, setRuleDescriptions] = useState<Record<string, string>>({});
   const [selectedSetupId, setSelectedSetupId] = useState<string | null>(null);
   const [loadingSetups, setLoadingSetups] = useState(true);
   const [setupsError, setSetupsError] = useState<string | null>(null);
@@ -27,9 +75,10 @@ export default function CreateGame() {
   useEffect(() => {
     let cancelled = false;
     setSetupsError(null);
-    api.getSetups().then(({ setups: list }) => {
+    api.getSetups().then(({ setups: list, rule_descriptions: descriptions }) => {
       if (!cancelled) {
         setSetups(Array.isArray(list) ? list : []);
+        setRuleDescriptions(descriptions ?? {});
         const withContext = (Array.isArray(list) ? list : []).filter(
           (s) => s.context && typeof s.context === 'object' && Object.keys(s.context).length > 0
         );
@@ -193,7 +242,7 @@ export default function CreateGame() {
             const enabled = optionalRules[rule.type] !== false;
             return (
               <div key={rule.type} className="create-game-form__field">
-                <span className="create-game-form__field-label">{rule.name}</span>
+                <RuleLabel name={rule.name} description={rule.description ?? ruleDescriptions[rule.type]} />
                 <div className="create-game-form__picker" role="group" aria-label={`${rule.name} on or off`}>
                   <button
                     type="button"
@@ -217,7 +266,7 @@ export default function CreateGame() {
             );
           })}
           <div className="create-game-form__field">
-            <span className="create-game-form__field-label">Shadow of War</span>
+            <RuleLabel name="Shadow of War" description={ruleDescriptions.shadow_of_war} />
             <div className="create-game-form__picker" role="group" aria-label="Shadow of War on or off">
               <button
                 type="button"

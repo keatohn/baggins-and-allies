@@ -59,6 +59,27 @@ def alliance_counts(context: dict[str, Any], factions: dict[str, Any]) -> tuple[
     return good, evil
 
 
+def scenario_subfactions(factions: dict[str, Any]) -> list[dict[str, str]]:
+    """Each subfaction's display name with its parent's, in faction order."""
+    out: list[dict[str, str]] = []
+    for fid, raw in factions.items():
+        if not isinstance(raw, dict):
+            continue
+        parent_name = raw.get("display_name")
+        parent_name = parent_name.strip() if isinstance(parent_name, str) and parent_name.strip() else str(fid)
+        subs = raw.get("subfactions")
+        for sub in subs if isinstance(subs, list) else []:
+            if not isinstance(sub, dict):
+                continue
+            sid = sub.get("id")
+            if not isinstance(sid, str) or not sid.strip():
+                continue
+            name = sub.get("display_name")
+            name = name.strip() if isinstance(name, str) and name.strip() else sid.strip()
+            out.append({"name": name, "parent_name": parent_name})
+    return out
+
+
 def scenario_menu_entry(
     manifest: dict[str, Any],
     folder_id: str,
@@ -84,6 +105,9 @@ def scenario_menu_entry(
     image = timeline_image_filename(manifest)
     if image is not None:
         entry["timeline_image"] = image
+    subfactions = scenario_subfactions(factions or {})
+    if subfactions:
+        entry["subfactions"] = subfactions
     from backend.engine.special_rules import optional_rule_menu, rings_rule_is_mandatory
     optional = optional_rule_menu(manifest.get("special_rules"))
     if optional:
@@ -746,52 +770,6 @@ def definitions_from_snapshot(snapshot: dict) -> tuple[
         )
 
     return units, territories, factions, camps, ports
-
-
-def load_specials(
-    data_dir: Path | str | None = None,
-    setup_id: str | None = None,
-) -> tuple[dict[str, dict], list[str]]:
-    """
-    Load specials.json from a setup directory. Returns (definitions, order).
-
-    definitions: id -> { "name": str, "description": str }
-    order: list of special ids for display order (from file "order" key, or sorted keys if missing).
-
-    If specials.json is missing or invalid, returns ({}, []).
-    """
-    if data_dir is not None:
-        path = Path(data_dir) / "specials.json"
-    elif setup_id is not None:
-        path = _setup_dir(setup_id) / "specials.json"
-    else:
-        path = _setup_dir(_default_setup_id()) / "specials.json"
-    if not path.exists():
-        return {}, []
-    try:
-        with open(path, "r") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return {}, []
-    if not isinstance(data, dict):
-        return {}, []
-    order = data.get("order")
-    if isinstance(order, list):
-        order = [k for k in order if isinstance(k, str)]
-    else:
-        order = None
-    definitions = {
-        k: {
-            "name": v.get("name", k),
-            "description": v.get("description", ""),
-            "display_code": v.get("display_code", ""),
-        }
-        for k, v in data.items()
-        if k != "order" and isinstance(v, dict)
-    }
-    if not order:
-        order = sorted(definitions.keys())
-    return definitions, order
 
 
 def load_starting_setup(data_dir: Path | str | None = None, setup_id: str | None = None) -> dict:

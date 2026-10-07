@@ -65,7 +65,6 @@ export function BalanceModal({
       camps: bundle.camps,
       ports: bundle.ports,
       starting_setup: bundle.starting_setup,
-      specials: bundle.specials,
     };
     api
       .adminBalance(payload, withRings)

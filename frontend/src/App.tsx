@@ -2,6 +2,8 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import type { GameState, GamePhase, FactionId, GameEvent, SelectedUnit, DeclaredBattle } from './types/game';
 import { boostingRingsFromRules, highestPowerHeroUnitId, ringHoldingFactionId, ringsOnUnit } from './ringsDisplay';
 import Header from './components/Header';
+import type { UnitForStats } from './components/StatsModals';
+import { compareUnitsForStats } from './unitStatsOrder';
 import GameMap, { type PendingMoveConfirm } from './components/GameMap';
 import Sidebar from './components/Sidebar';
 import CombatSimulatorPanel from './components/CombatSimulatorPanel';
@@ -1252,7 +1254,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     return [...out];
   }, []);
 
-  /** Unit Stats modal SP column: only ids defined in setup specials.json; labels use catalog `name`. Home → "Home (…)" when provided. */
+  /** Unit Stats modal SP column: only ids defined in the specials catalog; labels use catalog `name`. Home → "Home (…)" when provided. */
   const getUnitSpecials = useCallback((
     u: { specials?: string[] },
     opts?: { homeTerritoryDisplayNames?: string[] }
@@ -1287,11 +1289,11 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     return ids.map(tid => territories[tid]?.display_name ?? tid).filter(Boolean);
   }, []);
 
-  // All units grouped by faction (for Unit Stats modal): cost, dice, attack, specials count, then name.
+  // All units grouped by faction (for Unit Stats modal): heroes last, then cost, dice, attack, specials count, name.
   const unitsByFaction = useMemo(() => {
     if (!definitions?.units || !unitDefs) return {};
     const territories = definitions.territories ?? {};
-    const byFaction: Record<string, Array<{ id: string; name: string; icon: string; cost: number; attack: number; defense: number; dice: number; movement: number; health: number; specials: string[] }>> = {};
+    const byFaction: Record<string, UnitForStats[]> = {};
     for (const [id, u] of Object.entries(definitions.units)) {
       const faction = u.faction;
       if (!byFaction[faction]) byFaction[faction] = [];
@@ -1308,20 +1310,12 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         movement: u.movement,
         health: u.health,
         specials: getUnitSpecials(u, homeNames.length ? { homeTerritoryDisplayNames: homeNames } : undefined),
+        purchasable: u.purchasable !== false,
+        hero: typeof u.hero_id === 'string' && u.hero_id.trim() !== '',
       });
     }
     for (const fid of Object.keys(byFaction)) {
-      byFaction[fid].sort((a, b) => {
-        if (a.cost !== b.cost) return a.cost - b.cost;
-        if (a.dice !== b.dice) return a.dice - b.dice;
-        if (a.attack !== b.attack) return a.attack - b.attack;
-        const lenA = a.specials.length;
-        const lenB = b.specials.length;
-        if (lenA !== lenB) return lenA - lenB;
-        const byName = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
-        if (byName !== 0) return byName;
-        return a.id.localeCompare(b.id);
-      });
+      byFaction[fid].sort(compareUnitsForStats);
     }
     return byFaction;
   }, [definitions, unitDefs, getUnitSpecials, getHomeTerritoryDisplayNames]);
@@ -1439,7 +1433,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     return availableActions.purchasable_units.map(u => {
       const def = definitions?.units?.[u.unit_id] as { specials?: string[]; hero_id?: string | null } | undefined;
       const specialsDefs = definitions?.specials as Record<string, unknown> | undefined;
-      // Only ids with an entry in setup specials.json (object defs). Drops naval/land/transportable/siegework etc.
+      // Only ids with an entry in the specials catalog (object defs). Drops naval/land/transportable/siegework etc.
       const specIds = (Array.isArray(def?.specials) ? def.specials : []).filter((sid) => {
         if (typeof sid !== 'string' || !sid || !specialsDefs) return false;
         const entry = specialsDefs[sid];

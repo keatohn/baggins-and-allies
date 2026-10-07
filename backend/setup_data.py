@@ -20,7 +20,6 @@ from backend.engine.definitions import (
     SETUPS_DIR,
     definitions_from_snapshot,
     load_setup as load_setup_from_files,
-    load_specials as load_specials_from_files,
     load_static_definitions as load_static_definitions_from_files,
     list_setups as list_setups_from_files,
     lobby_music_filenames,
@@ -56,8 +55,14 @@ def _read_json_file(path: Path) -> dict[str, Any]:
     return data
 
 
-def _default_empty_specials() -> dict[str, Any]:
-    return {"order": []}
+# Setups no longer hold specials (see backend/catalog.py). The column stays for old rows.
+EMPTY_SPECIALS_JSON = "{}"
+
+
+def _catalog(db: Session | None) -> dict[str, Any]:
+    from backend.catalog import load_catalog
+
+    return load_catalog(db)
 
 
 def import_setup_folder_to_dicts(setup_dir: Path) -> dict[str, Any] | None:
@@ -79,8 +84,6 @@ def import_setup_folder_to_dicts(setup_dir: Path) -> dict[str, Any] | None:
     ports_path = setup_dir / "ports.json"
     ports = _read_json_file(ports_path) if ports_path.is_file() else {}
     starting_setup = _read_json_file(starting_path)
-    specials_path = setup_dir / "specials.json"
-    specials = _read_json_file(specials_path) if specials_path.is_file() else _default_empty_specials()
     return {
         "id": setup_id,
         "manifest": manifest,
@@ -90,7 +93,6 @@ def import_setup_folder_to_dicts(setup_dir: Path) -> dict[str, Any] | None:
         "camps": camps,
         "ports": ports,
         "starting_setup": starting_setup,
-        "specials": specials,
     }
 
 
@@ -116,7 +118,7 @@ def seed_setups_if_empty(db: Session) -> int:
             camps_json=json.dumps(bundle["camps"], ensure_ascii=False),
             ports_json=json.dumps(bundle["ports"], ensure_ascii=False),
             starting_setup_json=json.dumps(bundle["starting_setup"], ensure_ascii=False),
-            specials_json=json.dumps(bundle["specials"], ensure_ascii=False),
+            specials_json=EMPTY_SPECIALS_JSON,
             updated_at=datetime.utcnow(),
         )
         db.add(row)
@@ -135,7 +137,6 @@ def _row_to_parsed(row: Setup) -> dict[str, Any]:
         "camps": json.loads(row.camps_json),
         "ports": json.loads(row.ports_json),
         "starting_setup": json.loads(row.starting_setup_json),
-        "specials": json.loads(row.specials_json),
     }
 
 
@@ -182,32 +183,6 @@ def load_static_definitions_from_db(db: Session, setup_id: str):
         "ports": p["ports"],
     }
     return definitions_from_snapshot(snap)
-
-
-def load_specials_from_db(db: Session, setup_id: str) -> tuple[dict[str, dict], list[str]] | None:
-    row = db.query(Setup).filter(Setup.id == setup_id).first()
-    if not row:
-        return None
-    data = json.loads(row.specials_json)
-    if not isinstance(data, dict):
-        return {}, []
-    order = data.get("order")
-    if isinstance(order, list):
-        order = [k for k in order if isinstance(k, str)]
-    else:
-        order = None
-    definitions = {
-        k: {
-            "name": v.get("name", k),
-            "description": v.get("description", ""),
-            "display_code": v.get("display_code", ""),
-        }
-        for k, v in data.items()
-        if k != "order" and isinstance(v, dict)
-    }
-    if not order:
-        order = sorted(definitions.keys())
-    return definitions, order
 
 
 def list_setups_menu_from_db(db: Session) -> list[dict[str, Any]]:
@@ -290,7 +265,6 @@ def get_admin_setup_bundle(db: Session, setup_id: str) -> dict[str, Any] | None:
         "camps": p["camps"],
         "ports": p["ports"],
         "starting_setup": p["starting_setup"],
-        "specials": p["specials"],
     }
 
 
@@ -315,7 +289,6 @@ def empty_setup_payload(new_id: str) -> dict[str, Any]:
             "territory_owners": {},
             "starting_units": {},
         },
-        "specials": {"order": []},
     }
 
 
@@ -351,12 +324,11 @@ def create_setup(
             "camps": dict(p["camps"]),
             "ports": dict(p["ports"]),
             "starting_setup": dict(p["starting_setup"]),
-            "specials": dict(p["specials"]),
         }
     else:
         payload = empty_setup_payload(new_id)
 
-    v_errs = validate_setup_payload(payload)
+    v_errs = validate_setup_payload(payload, _catalog(db))
     if v_errs:
         raise ValueError("; ".join(v_errs[:12]))
 
@@ -369,7 +341,7 @@ def create_setup(
         camps_json=json.dumps(payload["camps"], ensure_ascii=False),
         ports_json=json.dumps(payload["ports"], ensure_ascii=False),
         starting_setup_json=json.dumps(payload["starting_setup"], ensure_ascii=False),
-        specials_json=json.dumps(payload["specials"], ensure_ascii=False),
+        specials_json=EMPTY_SPECIALS_JSON,
         updated_at=datetime.utcnow(),
     )
     db.add(row)
@@ -394,7 +366,7 @@ def create_setup_from_bundle(db: Session, new_id: str, bundle: dict[str, Any]) -
     manifest["id"] = new_id
     payload["manifest"] = manifest
 
-    v_errs = validate_setup_payload(payload)
+    v_errs = validate_setup_payload(payload, _catalog(db))
     if v_errs:
         raise ValueError("; ".join(v_errs[:12]))
 
@@ -407,7 +379,7 @@ def create_setup_from_bundle(db: Session, new_id: str, bundle: dict[str, Any]) -
         camps_json=json.dumps(payload["camps"], ensure_ascii=False),
         ports_json=json.dumps(payload["ports"], ensure_ascii=False),
         starting_setup_json=json.dumps(payload["starting_setup"], ensure_ascii=False),
-        specials_json=json.dumps(payload["specials"], ensure_ascii=False),
+        specials_json=EMPTY_SPECIALS_JSON,
         updated_at=datetime.utcnow(),
     )
     db.add(row)
@@ -436,7 +408,7 @@ def save_setup_bundle(db: Session, setup_id: str, payload: dict[str, Any]) -> No
     row.camps_json = json.dumps(payload["camps"], ensure_ascii=False)
     row.ports_json = json.dumps(payload["ports"], ensure_ascii=False)
     row.starting_setup_json = json.dumps(payload["starting_setup"], ensure_ascii=False)
-    row.specials_json = json.dumps(payload["specials"], ensure_ascii=False)
+    row.specials_json = EMPTY_SPECIALS_JSON
     row.updated_at = datetime.utcnow()
     db.commit()
 
@@ -479,17 +451,6 @@ def try_load_static_definitions(setup_id: str, db: Session | None):
             raise FileNotFoundError(f"Setup not found in database: {setup_id}")
         return hit
     return load_static_definitions_from_files(setup_id=setup_id)
-
-
-def try_load_specials(setup_id: str, db: Session | None):
-    if is_files_setup_source():
-        return load_specials_from_files(setup_id=setup_id)
-    if db is not None and db_has_any_setup(db):
-        hit = load_specials_from_db(db, setup_id)
-        if hit is None:
-            raise FileNotFoundError(f"Setup not found in database: {setup_id}")
-        return hit
-    return load_specials_from_files(setup_id=setup_id)
 
 
 def try_list_setups_menu(db: Session | None) -> list[dict[str, Any]]:

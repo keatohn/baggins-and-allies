@@ -167,10 +167,12 @@ def init_db():
     db = SessionLocal()
     try:
         from backend.audio_gains import seed_audio_gains_if_empty
+        from backend.catalog import seed_catalog_if_empty
         from backend.setup_data import seed_setups_if_empty
         from backend.signals import seed_signals_if_empty
 
         seed_setups_if_empty(db)
+        seed_catalog_if_empty(db)
         seed_audio_gains_if_empty(db)
         seed_signals_if_empty(db)
     finally:

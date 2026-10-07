@@ -1,5 +1,6 @@
-import type { AdminSetupBundle, ApiFactionStats, FactionStatEntry } from '../../services/api';
+import type { AdminSetupBundle, ApiFactionStats, CatalogSpecial, FactionStatEntry } from '../../services/api';
 import type { StatsFactionData, StatsRingMark, UnitForStats } from '../../components/StatsModals';
+import { compareUnitsForStats } from '../../unitStatsOrder';
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -103,14 +104,14 @@ function ringsRuleFromManifest(manifest: Record<string, unknown>): { mode: Rings
 /** Match-start preview from the current (possibly unsaved) admin setup bundle. */
 export function previewStatsFromBundle(
   bundle: AdminSetupBundle | null,
-  options: { rings?: boolean } = {},
+  options: { rings?: boolean; specials?: CatalogSpecial[] } = {},
 ): AdminStatsPreview | null {
   if (!bundle) return null;
 
   const units = asRecord(bundle.units);
   const territories = asRecord(bundle.territories);
   const factions = asRecord(bundle.factions);
-  const specials = asRecord(bundle.specials);
+  const specials: Record<string, unknown> = Object.fromEntries((options.specials ?? []).map((s) => [s.id, s]));
   const starting = asRecord(bundle.starting_setup);
   const owners = asRecord(starting.territory_owners);
   const startingUnits = asRecord(starting.starting_units);
@@ -171,20 +172,12 @@ export function previewStatsFromBundle(
       movement: asNumber(u.movement),
       health: asNumber(u.health),
       specials: unitSpecialLabels(u.specials, specials, homeNames),
+      purchasable: u.purchasable !== false,
+      hero: asString(u.hero_id).trim() !== '',
     });
   }
   for (const fid of Object.keys(unitsByFaction)) {
-    unitsByFaction[fid].sort((a, b) => {
-      if (a.cost !== b.cost) return a.cost - b.cost;
-      if (a.dice !== b.dice) return a.dice - b.dice;
-      if (a.attack !== b.attack) return a.attack - b.attack;
-      const lenA = a.specials.length;
-      const lenB = b.specials.length;
-      if (lenA !== lenB) return lenA - lenB;
-      const byName = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
-      if (byName !== 0) return byName;
-      return a.id.localeCompare(b.id);
-    });
+    unitsByFaction[fid].sort(compareUnitsForStats);
   }
 
   const factionStatsMap: Record<string, FactionStatEntry> = {};
@@ -205,7 +198,7 @@ export function previewStatsFromBundle(
   const subfactionStatsMap: Record<string, FactionStatEntry> = {};
   for (const sid of Object.keys(parentOf)) {
     const economy = asString(asRecord(subfactionRules[sid]).economy) || 'none';
-    if (economy !== 'none') subfactionStatsMap[sid] = emptyStat();
+    subfactionStatsMap[sid] = { ...emptyStat(), economy };
   }
   /** Parent row plus, for subfaction-owned things, the subfaction's own row. */
   const rowsFor = (fid: string): FactionStatEntry[] =>

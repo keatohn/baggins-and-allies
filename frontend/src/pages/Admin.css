@@ -1499,6 +1499,76 @@
   font-size: 0.82rem;
 }
 
+.admin-catalog-section {
+  margin-bottom: 1.5rem;
+}
+
+.admin-catalog-section h3 {
+  margin: 0.5rem 0 0.25rem;
+  font-size: 1.05rem;
+}
+
+.admin-catalog-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.admin-catalog-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.admin-catalog-fields > .admin-form__label {
+  flex: 1 1 12rem;
+}
+
+.admin-catalog-fields > .admin-catalog-code {
+  flex: 0 0 6rem;
+}
+
+.admin-catalog-section .admin-form__label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.4rem;
+}
+
+.admin-catalog-add {
+  margin-top: 0.75rem;
+}
+
+.admin-catalog-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-catalog-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--ink-faded);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.4);
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+}
+
+.admin-catalog-chip button {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  color: inherit;
+}
+
 /* Narrow viewports: stack toolbar, full-width controls, safe areas, comfortable taps. */
 @media (max-width: 767px) {
   .admin-page {

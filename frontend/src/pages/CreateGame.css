@@ -91,6 +91,49 @@
   color: var(--ink);
 }
 
+.create-game-form__rule-label {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.create-game-form__rule-info {
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  border: 1.5px solid var(--ink-faded);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-faded);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+}
+
+.create-game-form__rule-info:hover,
+.create-game-form__rule-info[aria-expanded='true'] {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.create-game-form__rule-tip {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  right: 0;
+  z-index: 10;
+  padding: 0.55rem 0.7rem;
+  border: 1.5px solid var(--gold-dark, #8b7355);
+  border-radius: 6px;
+  background: var(--parchment-light);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
 .create-game-form__hint {
   font-size: 0.9rem;
   color: var(--ink-faded);

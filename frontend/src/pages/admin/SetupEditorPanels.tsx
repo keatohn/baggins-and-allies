@@ -26,6 +26,31 @@ function fieldRow(label: string, children: React.ReactNode) {
   );
 }
 
+function CatalogSelect({
+  value,
+  options,
+  placeholder,
+  onChange,
+}: {
+  value: unknown;
+  options: string[];
+  placeholder: string;
+  onChange: (next: string) => void;
+}) {
+  const current = typeof value === 'string' ? value : '';
+  return (
+    <select className="admin-form__input" value={current} onChange={(e) => onChange(e.target.value)}>
+      <option value="">{placeholder}</option>
+      {options.map((o) => (
+        <option key={o} value={o}>{o}</option>
+      ))}
+      {current && !options.includes(current) ? (
+        <option value={current}>{current} (not in catalog)</option>
+      ) : null}
+    </select>
+  );
+}
+
 function JsonObjectField({ value, onApply }: { value: unknown; onApply: (o: unknown) => void }) {
   const [t, setT] = useState('');
   useEffect(() => {
@@ -358,25 +383,30 @@ function evolvingRowsFromManifest(manifest: Record<string, unknown>): EvolvingTe
   return rows;
 }
 
-function specialRuleMeta(manifest: Record<string, unknown>, type: string): { name: string; is_optional: boolean } {
+type RuleMeta = { name: string; description: string; is_optional: boolean };
+
+function specialRuleMeta(manifest: Record<string, unknown>, type: string): RuleMeta {
   const rules = Array.isArray(manifest.special_rules) ? manifest.special_rules : [];
   for (const rule of rules) {
     if (!rule || typeof rule !== 'object' || (rule as { type?: string }).type !== type) continue;
-    const rec = rule as { name?: unknown; is_optional?: unknown };
+    const rec = rule as { name?: unknown; description?: unknown; is_optional?: unknown };
     return {
       name: typeof rec.name === 'string' ? rec.name : '',
+      description: typeof rec.description === 'string' ? rec.description : '',
       is_optional: rec.is_optional === true,
     };
   }
-  return { name: '', is_optional: false };
+  return { name: '', description: '', is_optional: false };
 }
 
 function withRuleMeta(
   rule: Record<string, unknown>,
-  meta: { name: string; is_optional: boolean },
+  meta: RuleMeta,
 ): Record<string, unknown> {
   const name = meta.name.trim();
   if (name) rule.name = name;
+  const description = meta.description.trim();
+  if (description) rule.description = description;
   rule.is_optional = meta.is_optional;
   return rule;
 }
@@ -385,8 +415,8 @@ function RuleOptionFields({
   meta,
   onChange,
 }: {
-  meta: { name: string; is_optional: boolean };
-  onChange: (next: { name: string; is_optional: boolean }) => void;
+  meta: RuleMeta;
+  onChange: (next: RuleMeta) => void;
 }) {
   return (
     <>
@@ -398,6 +428,16 @@ function RuleOptionFields({
           placeholder="Shown as Special Mode"
           value={meta.name}
           onChange={(e) => onChange({ ...meta, name: e.target.value })}
+        />,
+      )}
+      {fieldRow(
+        'Description',
+        <textarea
+          className="admin-form__input"
+          rows={3}
+          placeholder="Shown when players tap ? in create game. Blank uses the catalog description."
+          value={meta.description}
+          onChange={(e) => onChange({ ...meta, description: e.target.value })}
         />,
       )}
       {fieldRow(
@@ -418,7 +458,7 @@ function RuleOptionFields({
 function manifestWithEvolvingRows(
   manifest: Record<string, unknown>,
   rows: EvolvingTerritoryRow[],
-  meta: { name: string; is_optional: boolean },
+  meta: RuleMeta,
 ): Record<string, unknown> {
   const rules = Array.isArray(manifest.special_rules) ? manifest.special_rules : [];
   const others = rules.filter((rule) => {
@@ -951,7 +991,7 @@ function ringsFromManifest(manifest: Record<string, unknown>): RingRow[] {
 function manifestWithRings(
   manifest: Record<string, unknown>,
   rows: RingRow[],
-  meta: { name: string; is_optional: boolean },
+  meta: RuleMeta,
 ): Record<string, unknown> {
   const rules = Array.isArray(manifest.special_rules) ? manifest.special_rules : [];
   const others = rules.filter(
@@ -1616,12 +1656,14 @@ function AddUnitDialog({
 export function UnitsPanel({
   units,
   factionIds,
+  archetypes,
   setupId,
   setups,
   onChange,
 }: {
   units: Record<string, Record<string, unknown>>;
   factionIds: string[];
+  archetypes: string[];
   setupId: string;
   setups: AdminSetupListItem[];
   onChange: (next: Record<string, Record<string, unknown>>) => void;
@@ -1681,7 +1723,12 @@ export function UnitsPanel({
           )}
           {fieldRow(
             'Archetype',
-            <input type="text" className="admin-form__input" value={String(u.archetype ?? '')} onChange={(e) => patch({ archetype: e.target.value })} />,
+            <CatalogSelect
+              value={u.archetype}
+              options={archetypes}
+              placeholder="Select archetype"
+              onChange={(archetype) => patch({ archetype: archetype || undefined })}
+            />,
           )}
           {fieldRow(
             'Tags (comma-separated)',
@@ -1788,9 +1835,11 @@ function powerFromProduces(produces: unknown): number {
 
 export function TerritoriesPanel({
   territories,
+  terrainTypes,
   onChange,
 }: {
   territories: Record<string, Record<string, unknown>>;
+  terrainTypes: string[];
   onChange: (next: Record<string, Record<string, unknown>>) => void;
 }) {
   return (
@@ -1811,7 +1860,12 @@ export function TerritoriesPanel({
           )}
           {fieldRow(
             'Terrain type',
-            <input type="text" className="admin-form__input" value={String(t.terrain_type ?? '')} onChange={(e) => patch({ terrain_type: e.target.value })} />,
+            <CatalogSelect
+              value={t.terrain_type}
+              options={terrainTypes}
+              placeholder="Select terrain type"
+              onChange={(terrain_type) => patch({ terrain_type })}
+            />,
           )}
           {fieldRow(
             'Adjacent (one id per line or comma-separated)',
@@ -2231,106 +2285,6 @@ export function StartingSetupPanel({
       <button type="button" className="admin-page__btn" onClick={addStack} disabled={!selTer}>
         Add stack in {selTer || '…'}
       </button>
-    </div>
-  );
-}
-
-function SpecialOrderField({ order, onApply }: { order: string[]; onApply: (ids: string[]) => void }) {
-  const [draft, setDraft] = useState('');
-  const sig = order.join('|');
-  useEffect(() => {
-    setDraft(order.join(', '));
-  }, [sig]);
-  return (
-    <>
-      <input
-        type="text"
-        className="admin-form__input"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() =>
-          onApply(
-            draft
-              .split(',')
-              .map((x) => x.trim())
-              .filter(Boolean),
-          )
-        }
-      />
-      <p className="admin-form__micro">Comma-separated ids. Blur to apply.</p>
-    </>
-  );
-}
-
-export function SpecialsPanel({
-  specials,
-  onChange,
-}: {
-  specials: Record<string, unknown>;
-  onChange: (next: Record<string, unknown>) => void;
-}) {
-  const order = Array.isArray(specials.order) ? ([...specials.order] as string[]) : [];
-  const defs = { ...specials };
-  delete (defs as { order?: unknown }).order;
-  const keys = Object.keys(defs).sort();
-
-  const patchDef = (id: string, patch: Record<string, unknown>) => {
-    onChange({ ...specials, [id]: { ...(typeof defs[id] === 'object' ? (defs[id] as object) : {}), ...patch } });
-  };
-
-  const addSpecial = () => {
-    const raw = window.prompt('New special id:');
-    if (!raw) return;
-    const id = raw.trim();
-    if (!id || id === 'order' || specials[id] != null) {
-      window.alert('Invalid or duplicate id');
-      return;
-    }
-    onChange({ ...specials, [id]: { name: id, description: '', display_code: '' } });
-  };
-
-  const removeSpecial = (id: string) => {
-    if (!window.confirm(`Remove special "${id}"?`)) return;
-    const next = { ...specials };
-    delete next[id];
-    next.order = (Array.isArray(next.order) ? next.order : []).filter((x) => x !== id);
-    onChange(next);
-  };
-
-  return (
-    <div className="admin-form">
-      {fieldRow(
-        'Display order',
-        <SpecialOrderField order={order} onApply={(ids) => onChange({ ...specials, order: ids })} />,
-      )}
-      <button type="button" className="admin-page__btn" onClick={addSpecial}>
-        Add special
-      </button>
-      {keys.map((id) => {
-        const row = (typeof defs[id] === 'object' && defs[id] !== null ? defs[id] : {}) as Record<string, unknown>;
-        return (
-          <div key={id} className="admin-special-card">
-            <div className="admin-special-card__head">
-              <strong>{id}</strong>
-              <button type="button" className="admin-page__btn" onClick={() => removeSpecial(id)}>
-                Remove
-              </button>
-            </div>
-            {fieldRow(
-              'Name',
-              <input type="text" className="admin-form__input" value={String(row.name ?? '')} onChange={(e) => patchDef(id, { name: e.target.value })} />,
-            )}
-            {fieldRow(
-              'Description',
-              <textarea className="admin-form__textarea" value={String(row.description ?? '')} onChange={(e) => patchDef(id, { description: e.target.value })} />,
-            )}
-            {fieldRow(
-              'Display code',
-              <input type="text" className="admin-form__input" value={String(row.display_code ?? '')} onChange={(e) => patchDef(id, { display_code: e.target.value })} />,
-            )}
-          </div>
-        );
-      })}
     </div>
   );
 }

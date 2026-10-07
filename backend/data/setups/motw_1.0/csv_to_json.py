@@ -22,7 +22,7 @@ If no terr.csv / territories.csv / motw_terr.csv is present, only units.json is 
 
 Writes (when territory CSV exists): units.json, territories.json, starting_setup.json, factions.json
 Always writes units.json when a units CSV exists.
-Does not overwrite: manifest.json, specials.json, camps.json, ports.json (edit those by hand).
+Does not overwrite: manifest.json, camps.json, ports.json (edit those by hand). Specials live in backend/data/catalog.json.
 """
 from __future__ import annotations
 

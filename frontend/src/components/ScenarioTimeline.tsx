@@ -247,6 +247,12 @@ function ScenarioChoice({
       {Array.isArray(factions) && factions.length > 0 && (
         <span className="chronicle__option-factions">{factions.join(', ')}</span>
       )}
+      {scenario.subfactions && scenario.subfactions.length > 0 && (
+        <span className="chronicle__option-mode">
+          {scenario.subfactions.length === 1 ? 'Subfaction' : 'Subfactions'}:{' '}
+          {scenario.subfactions.map((sub) => `${sub.name} (${sub.parent_name})`).join(', ')}
+        </span>
+      )}
       {scenario.optional_rules?.map((rule) => (
         <span key={rule.type} className="chronicle__option-mode">Special Mode: {rule.name}</span>
       ))}

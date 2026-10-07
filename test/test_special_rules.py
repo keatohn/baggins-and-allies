@@ -118,9 +118,10 @@ def test_end_turn_income_uses_faded_power():
 
 def test_manifest_validation_accepts_evolving_rule_and_message():
     unit_defs, territory_defs, faction_defs, camp_defs, ports = load_static_definitions(setup_id="wotr_1.1")
-    from backend.engine.definitions import load_starting_setup, load_specials
+    from backend.catalog import load_catalog
+    from backend.engine.definitions import load_starting_setup
     starting = load_starting_setup(setup_id="wotr_1.1")
-    specials, order = load_specials()
+    catalog = load_catalog(None)
     capital = next(iter(faction_defs.values())).capital
     printed = int(territory_defs[capital].produces.get("power", 0) or 0)
     assert printed >= 1
@@ -140,7 +141,7 @@ def test_manifest_validation_accepts_evolving_rule_and_message():
         {c: {"territory_id": camp_defs[c].territory_id} for c in camp_defs},
         {p: {"territory_id": ports[p].territory_id} for p in ports},
         starting,
-        {"order": order, **specials},
+        catalog,
     )
     assert not any("special_rules" in e or "starting_message" in e for e in errors)
 
@@ -155,7 +156,7 @@ def test_manifest_validation_accepts_evolving_rule_and_message():
             {c: {"territory_id": camp_defs[c].territory_id} for c in camp_defs},
             {p: {"territory_id": ports[p].territory_id} for p in ports},
             starting,
-            {"order": order, **specials},
+            catalog,
         )
 
     bad_errors = errors_for(_rules("not_a_territory", -1, 0))
@@ -225,9 +226,17 @@ def test_scenario_card_lists_only_optional_rules():
     unnamed = optional_rule_menu([{
         "type": "evolving_territory",
         "is_optional": True,
+        "description": "  Osgiliath crumbles.  ",
         "territories": [{"territory_id": "a", "step": 1, "stop_at": 4}],
     }])
-    assert unnamed == [{"type": "evolving_territory", "name": "Evolving Territory"}]
+    assert unnamed == [{
+        "type": "evolving_territory",
+        "name": "Evolving Territory",
+        "description": "Osgiliath crumbles.",
+    }]
+
+    unknown = optional_rule_menu([{"type": "mystery", "name": "Mystery", "is_optional": True}])
+    assert unknown == [{"type": "mystery", "name": "Mystery"}]
 
     mandatory = scenario_menu_entry(
         {
@@ -240,3 +249,23 @@ def test_scenario_card_lists_only_optional_rules():
     )
     assert mandatory["rings_of_power"] is True
     assert "optional_rules" not in mandatory
+    assert "subfactions" not in mandatory
+
+
+def test_scenario_card_lists_subfactions_with_their_parent():
+    entry = scenario_menu_entry(
+        {"id": "x", "display_name": "X", "map_asset": "m"},
+        "x",
+        {
+            "noldor": {
+                "display_name": "Noldor Elves",
+                "alliance": "good",
+                "subfactions": [{"id": "silvan", "display_name": "Silvan Elves"}, {"id": "bare"}],
+            },
+            "mordor": {"display_name": "Mordor", "alliance": "evil"},
+        },
+    )
+    assert entry["subfactions"] == [
+        {"name": "Silvan Elves", "parent_name": "Noldor Elves"},
+        {"name": "bare", "parent_name": "Noldor Elves"},
+    ]

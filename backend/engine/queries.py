@@ -2958,7 +2958,7 @@ def get_faction_stats(
     """
     unit_defs = unit_defs or {}
     factions: dict[str, dict[str, int]] = {}
-    subfactions: dict[str, dict[str, int]] = {}
+    subfactions: dict[str, dict[str, Any]] = {}
     for faction_id in faction_defs:
         territories_count = 0
         strongholds_count = 0
@@ -2989,10 +2989,11 @@ def get_faction_stats(
         pays = faction_owns_capital(state, faction_id, faction_defs)
         for sub_id in child_ids(faction_defs, faction_id):
             economy = rule_for(state, sub_id)["economy"]
-            if economy == "none":
-                continue
             sub_pays = pays and economy == "pool"
-            sub = {"territories": 0, "strongholds": 0, "power": 0, "power_per_turn": 0, "units": 0, "unit_power": 0}
+            sub = {
+                "territories": 0, "strongholds": 0, "power": 0, "power_per_turn": 0, "units": 0, "unit_power": 0,
+                "economy": economy,
+            }
             for tid, ts in state.territories.items():
                 if ts.owner != sub_id:
                     continue

@@ -54,13 +54,14 @@ def parse_special_rules(raw: Any) -> list[dict[str, Any]]:
 
 
 def _with_rule_meta(rule: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
-    """Every rule carries is_optional. A name is kept only when it is non-empty."""
+    """Every rule carries is_optional. A name or description is kept only when it is non-empty."""
     rule["is_optional"] = source.get("is_optional") is True
-    name = source.get("name")
-    if isinstance(name, str) and name.strip():
-        rule["name"] = name.strip()
-    else:
-        rule.pop("name", None)
+    for key in ("name", "description"):
+        text = source.get(key)
+        if isinstance(text, str) and text.strip():
+            rule[key] = text.strip()
+        else:
+            rule.pop(key, None)
     return rule
 
 
@@ -78,7 +79,10 @@ def rule_display_name(rule: dict[str, Any]) -> str:
 
 
 def optional_rule_menu(raw: Any) -> list[dict[str, str]]:
-    """Optional rules a create-game scenario card and settings step should offer."""
+    """Optional rules a create-game scenario card and settings step should offer.
+
+    A description here is the scenario's own override; the catalog holds each type's default.
+    """
     menu: list[dict[str, str]] = []
     for rule in parse_special_rules(raw):
         if rule.get("is_optional") is not True:
@@ -86,7 +90,10 @@ def optional_rule_menu(raw: Any) -> list[dict[str, str]]:
         typ = rule.get("type")
         if not isinstance(typ, str) or not typ:
             continue
-        menu.append({"type": typ, "name": rule_display_name(rule)})
+        entry = {"type": typ, "name": rule_display_name(rule)}
+        if rule.get("description"):
+            entry["description"] = rule["description"]
+        menu.append(entry)
     return menu
 
 

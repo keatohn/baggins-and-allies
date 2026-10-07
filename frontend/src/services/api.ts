@@ -108,12 +108,14 @@ export interface FactionStatEntry {
   units?: number;
   /** Sum of power cost for all active units (UP = Unit power) */
   unit_power?: number;
+  /** Subfaction rows only: "pool" pays the parent, "none" earns nothing. */
+  economy?: string;
 }
 
 export interface ApiFactionStats {
   factions: Record<string, FactionStatEntry>;
   alliances: Record<string, FactionStatEntry>;
-  /** Each subfaction's share of its parent's row; power_per_turn is only what it pays the parent. */
+  /** Each subfaction's share of its parent's row, for every economy; power_per_turn is only what it pays the parent. */
   subfactions?: Record<string, FactionStatEntry>;
   /** Strongholds with no owner (e.g. Moria). Shown as gray segment in header bar. */
   neutral_strongholds?: number;
@@ -663,10 +665,28 @@ export interface AdminSetupBundle {
   camps: Record<string, unknown>;
   ports: Record<string, unknown>;
   starting_setup: Record<string, unknown>;
-  specials: Record<string, unknown>;
 }
 
 export type AdminSetupSavePayload = Omit<AdminSetupBundle, 'id'>;
+
+export interface CatalogEntry {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export interface CatalogSpecial extends CatalogEntry {
+  display_code: string;
+}
+
+/** Shared by every setup: specials, rule types, game options, and the allowed terrain types and archetypes. */
+export interface Catalog {
+  specials: CatalogSpecial[];
+  special_rules: CatalogEntry[];
+  game_options: CatalogEntry[];
+  terrain_types: string[];
+  archetypes: string[];
+}
 
 export interface BalanceSide {
   id: string;
@@ -850,7 +870,8 @@ export interface SetupInfo {
   /** Present when Rings of Power is part of the scenario and not a player choice. */
   rings_of_power?: boolean;
   /** Special rules the player can turn on or off. They start on. */
-  optional_rules?: { type: string; name: string }[];
+  optional_rules?: { type: string; name: string; description?: string }[];
+  subfactions?: { name: string; parent_name: string }[];
 }
 
 async function authFetchJson<T>(url: string, body: object): Promise<T> {
@@ -922,6 +943,12 @@ export const api = {
     return r;
   },
   getSignals: () => fetchJson<{ presets: SignalPreset[] }>('/signals'),
+  getCatalog: () => fetchJson<Catalog>('/catalog'),
+  adminPutCatalog: (catalog: Catalog) =>
+    fetchJson<{ ok: boolean; catalog: Catalog }>('/admin/catalog', {
+      method: 'PUT',
+      body: JSON.stringify(catalog),
+    }),
   adminPutSignals: (presets: SignalPreset[]) =>
     fetchJson<{ ok: boolean; presets: SignalPreset[] }>('/admin/signals', {
       method: 'PUT',
@@ -974,7 +1001,7 @@ export const api = {
 
   // Games (create, list, join)
   getSetups: () =>
-    fetchJson<{ setups: SetupInfo[] }>('/setups'),
+    fetchJson<{ setups: SetupInfo[]; rule_descriptions?: Record<string, string> }>('/setups'),
   createGame: (
     name: string,
     isMultiplayer: boolean,

@@ -530,7 +530,6 @@ def test_admin_balance_endpoint_returns_the_report():
                 "camps": bundle["camps"],
                 "ports": bundle["ports"],
                 "starting_setup": bundle["starting_setup"],
-                "specials": bundle["specials"],
             },
         )
     finally:

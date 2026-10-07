@@ -14,6 +14,8 @@ export interface UnitForStats {
   movement: number;
   health: number;
   specials: string[];
+  purchasable: boolean;
+  hero: boolean;
 }
 
 export type StatsFactionData = Record<
@@ -79,21 +81,66 @@ export function GameStatsModal({
   const factionStatEntries = factionStats?.factions ?? {};
   const subfactionStatEntries = factionStats?.subfactions ?? {};
   const allianceOrder = ['good', 'evil'].filter((a) => a in alliances);
+  const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set());
 
-  const ringsByRow: Record<string, StatsRingMark[]> = {};
-  for (const [fid, rings] of Object.entries(ringsByFaction ?? {})) {
-    const parent = factionData[fid]?.parent;
-    const row = parent && !subfactionStatEntries[fid] ? parent : fid;
-    (ringsByRow[row] ??= []).push(...rings);
-  }
+  const toggle = (fid: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(fid)) next.delete(fid);
+      else next.add(fid);
+      return next;
+    });
+  };
 
-  const renderRow = (fid: string, st: FactionStatEntry, isSub: boolean) => {
+  const childIds = (fid: string) =>
+    Object.keys(factionData).filter((sid) => factionData[sid]?.parent === fid && subfactionStatEntries[sid]);
+  const anyCaret = Object.keys(factionData).some((sid) => {
+    const parent = factionData[sid]?.parent;
+    return Boolean(parent && subfactionStatEntries[sid] && factionStatEntries[parent]);
+  });
+
+  const ownShare = (st: FactionStatEntry, subIds: string[]): FactionStatEntry => {
+    const own: FactionStatEntry = { ...st, units: st.units ?? 0, unit_power: st.unit_power ?? 0 };
+    for (const sid of subIds) {
+      const sub = subfactionStatEntries[sid];
+      own.strongholds -= sub.strongholds;
+      own.territories -= sub.territories;
+      own.power_per_turn -= sub.power_per_turn;
+      own.units = (own.units ?? 0) - (sub.units ?? 0);
+      own.unit_power = (own.unit_power ?? 0) - (sub.unit_power ?? 0);
+    }
+    return own;
+  };
+
+  const renderRow = (
+    key: string,
+    fid: string,
+    st: FactionStatEntry,
+    options: { nested?: boolean; sub?: boolean; rings?: StatsRingMark[]; caret?: { open: boolean } } = {},
+  ) => {
     const fd = factionData[fid];
-    const rings = ringsByRow[fid] ?? [];
+    const rings = options.rings ?? [];
+    const className = ['stats-faction-row', options.nested && 'stats-subfaction-row', options.caret && 'stats-faction-row--parent']
+      .filter(Boolean)
+      .join(' ');
     return (
-      <tr key={fid} className={isSub ? 'stats-faction-row stats-subfaction-row' : 'stats-faction-row'}>
+      <tr key={key} className={className}>
         <td className="stats-col-faction">
           <span className="stats-faction-cell-inner">
+            {!options.caret && !options.nested && anyCaret && (
+              <span className="stats-faction-caret stats-faction-caret--blank" aria-hidden />
+            )}
+            {options.caret && (
+              <button
+                type="button"
+                className={`stats-faction-caret${options.caret.open ? ' stats-faction-caret--open' : ''}`}
+                aria-expanded={options.caret.open}
+                aria-label={`${options.caret.open ? 'Hide' : 'Show'} ${fd?.name ?? fid} subfactions`}
+                onClick={() => toggle(fid)}
+              >
+                ▸
+              </button>
+            )}
             {fd?.icon && <img className="stats-faction-icon" src={fd.icon} alt="" aria-hidden />}
             <span>{fd?.name ?? fid}</span>
             {rings.length > 0 && (
@@ -107,11 +154,32 @@ export function GameStatsModal({
         </td>
         <td className="stats-col-num">{st.strongholds}</td>
         <td className="stats-col-num">{st.territories}</td>
-        <td className="stats-col-num">{st.power_per_turn}</td>
-        <td className="stats-col-num">{isSub ? '–' : st.power}</td>
+        <td className="stats-col-num">{options.sub && st.economy === 'none' ? '–' : st.power_per_turn}</td>
+        <td className="stats-col-num">{options.sub ? '–' : st.power}</td>
         <td className="stats-col-num">{st.units ?? 0}</td>
         <td className="stats-col-num">{st.unit_power ?? 0}</td>
       </tr>
+    );
+  };
+
+  const renderFaction = (fid: string) => {
+    const st = factionStatEntries[fid];
+    if (!st) return null;
+    const subIds = childIds(fid);
+    const ownRings = ringsByFaction?.[fid] ?? [];
+    if (subIds.length === 0) return renderRow(fid, fid, st, { rings: ownRings });
+    const open = expanded.has(fid);
+    const familyRings = [...ownRings, ...subIds.flatMap((sid) => ringsByFaction?.[sid] ?? [])];
+    return (
+      <React.Fragment key={fid}>
+        {renderRow(fid, fid, st, { rings: open ? [] : familyRings, caret: { open } })}
+        {open && renderRow(`${fid}-own`, fid, ownShare(st, subIds), { nested: true, rings: ownRings })}
+        {open && subIds.map((sid) => renderRow(sid, sid, subfactionStatEntries[sid], {
+          nested: true,
+          sub: true,
+          rings: ringsByFaction?.[sid] ?? [],
+        }))}
+      </React.Fragment>
     );
   };
 
@@ -167,19 +235,7 @@ export function GameStatsModal({
                         <td className="stats-col-num">{tot.units ?? 0}</td>
                         <td className="stats-col-num">{tot.unit_power ?? 0}</td>
                       </tr>
-                      {factionIds.map((fid) => {
-                        const st = factionStatEntries[fid];
-                        if (!st) return null;
-                        const subIds = Object.keys(factionData).filter(
-                          (sid) => factionData[sid]?.parent === fid && subfactionStatEntries[sid],
-                        );
-                        return (
-                          <React.Fragment key={fid}>
-                            {renderRow(fid, st, false)}
-                            {subIds.map((sid) => renderRow(sid, subfactionStatEntries[sid], true))}
-                          </React.Fragment>
-                        );
-                      })}
+                      {factionIds.map(renderFaction)}
                     </React.Fragment>
                   );
                 })}
@@ -264,7 +320,7 @@ export function UnitStatsModal({
                             <span className="unit-name-text">{u.name}</span>
                           </div>
                         </td>
-                        <td className="stats-col-num">{u.cost}</td>
+                        <td className="stats-col-num">{u.purchasable ? u.cost : '–'}</td>
                         <td className="stats-col-num">{u.attack}</td>
                         <td className="stats-col-num">{u.defense}</td>
                         <td className="stats-col-num">{u.dice}</td>

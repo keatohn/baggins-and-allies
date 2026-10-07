@@ -1,0 +1,165 @@
+{
+  "specials": [
+    {
+      "id": "aerial",
+      "name": "Aerial",
+      "display_code": "",
+      "description": "Fly over mountains, rivers, sea zones, and enemy territories"
+    },
+    {
+      "id": "anti_cavalry",
+      "name": "Anti-Cavalry",
+      "display_code": "AC",
+      "description": "For each enemy cavalry unit, one anti-cavalry unit gains +1 attack/defense"
+    },
+    {
+      "id": "archer",
+      "name": "Archer",
+      "display_code": "AR",
+      "description": "Defending archers pre-fire before round 1 of combat, with a -1 defense penalty except when defending a stronghold or fortress"
+    },
+    {
+      "id": "bombikazi",
+      "name": "Bombikazi",
+      "display_code": "B",
+      "description": "Ignite a bomb and self-destruct"
+    },
+    {
+      "id": "captain",
+      "name": "Captain",
+      "display_code": "C",
+      "description": "Grant +1 attack/defense boost to up to 3 units of the same faction and unit type (infantry, archer, cavalry, etc.)"
+    },
+    {
+      "id": "charging",
+      "name": "Charging",
+      "display_code": "",
+      "description": "Conquer multiple territories in combat path"
+    },
+    {
+      "id": "fearless",
+      "name": "Fearless",
+      "display_code": "FL",
+      "description": "Immune to terror"
+    },
+    {
+      "id": "ford_crosser",
+      "name": "Ford Crosser",
+      "display_code": "",
+      "description": "Can cross rivers at a ford and bring up to 2 units with it"
+    },
+    {
+      "id": "forest",
+      "name": "Forest",
+      "display_code": "FR",
+      "description": "+1 attack/defense in forest terrain"
+    },
+    {
+      "id": "home",
+      "name": "Home",
+      "display_code": "HM",
+      "description": "Deploy up to 1 unit per turn in its home territory without a camp"
+    },
+    {
+      "id": "hope",
+      "name": "Hope",
+      "display_code": "HP",
+      "description": "Cancels 1 terror"
+    },
+    {
+      "id": "king",
+      "name": "King",
+      "display_code": "K",
+      "description": "Grant +1 attack/defense boost to up to 5 units of the same faction. Same unit type first; leftover slots go to other unit types, lowest values first"
+    },
+    {
+      "id": "ladder",
+      "name": "Ladder",
+      "display_code": "L",
+      "description": "Allows up to 2 attacking infantry to bypass stronghold HP and direct hits at defending units"
+    },
+    {
+      "id": "light",
+      "name": "Light",
+      "display_code": "LT",
+      "description": "Cancels all terror in the opposing ranks"
+    },
+    {
+      "id": "mountain",
+      "name": "Mountain",
+      "display_code": "M",
+      "description": "+1 attack/defense in mountain terrain"
+    },
+    {
+      "id": "ram",
+      "name": "Ram",
+      "display_code": "R",
+      "description": "Roll against stronghold HP with siegeworks before standard combat rounds"
+    },
+    {
+      "id": "sea_raider",
+      "name": "Sea Raider",
+      "display_code": "SR",
+      "description": "+1 attack in sea raids"
+    },
+    {
+      "id": "stealth",
+      "name": "Stealth",
+      "display_code": "ST",
+      "description": "If everyone in attack has stealth, they pre-fire and cancel any defensive archer pre-fire"
+    },
+    {
+      "id": "terror",
+      "name": "Terror",
+      "display_code": "T",
+      "description": "Force 1 defending hit in round 1 of combat to re-roll (capped at 3 applied per battle)"
+    }
+  ],
+  "special_rules": [
+    {
+      "id": "rings_of_power",
+      "name": "Rings of Power",
+      "description": "Rings of Power sit in territories on the map. Each ring adds its power to the income of whoever holds it. A hero can carry a ring with them, and some rings boost the hero bearing them in battle."
+    },
+    {
+      "id": "evolving_territory",
+      "name": "Evolving Territory",
+      "description": "Some territories change the power they produce each turn, rising or falling until they reach a set amount."
+    }
+  ],
+  "game_options": [
+    {
+      "id": "shadow_of_war",
+      "name": "Shadow of War",
+      "description": "Fog of war. You see units only in your alliance's territories and the territories one step away. Battles and moves elsewhere stay hidden."
+    }
+  ],
+  "terrain_types": [
+    "city",
+    "desert",
+    "forest",
+    "fortress",
+    "grassland",
+    "hills",
+    "ice",
+    "lake",
+    "marsh",
+    "mountains",
+    "plains",
+    "river",
+    "sea",
+    "valley",
+    "volcano",
+    "wasteland"
+  ],
+  "archetypes": [
+    "aerial",
+    "archer",
+    "captain",
+    "cavalry",
+    "infantry",
+    "monster",
+    "naval",
+    "siegework"
+  ]
+}

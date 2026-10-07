@@ -354,6 +354,16 @@ button.chronicle__option--active {
   color: var(--ink);
 }
 
+@media (max-width: 767px) {
+  .chronicle__age-full {
+    display: none;
+  }
+
+  .chronicle__age-short {
+    display: block;
+  }
+}
+
 @media (max-width: 640px) {
   .chronicle {
     --frame-w: 68px;
