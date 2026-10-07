@@ -13,12 +13,15 @@
   touch-action: none;
 }
 
-.unit-token-ring {
+/* Beat `.unit-token img` (100% size). A ring is a corner mark, not a second portrait. */
+.unit-token img.unit-token-ring {
   position: absolute;
-  top: -5px;
-  right: -5px;
+  top: 0;
+  right: 0;
   width: 16px;
   height: 16px;
+  max-width: 16px;
+  max-height: 16px;
   object-fit: contain;
   pointer-events: none;
   z-index: 2;

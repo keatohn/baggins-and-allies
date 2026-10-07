@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 from backend.engine.definitions import FactionDefinition, TerritoryDefinition
+from backend.engine.queries import get_faction_stats
 from backend.engine.rings import (
     apply_carried_ring,
     expand_rolls_for_bonus,
@@ -157,6 +158,49 @@ def test_applied_move_leaves_the_ring_in_the_heros_destination():
 def test_ring_power_uses_the_value_on_that_ring():
     state, _, _, _ = _carry_state()
     assert power_for_faction(state, "noldor") == 7
+
+
+def test_game_stats_pp_includes_ring_power():
+    state, defs, _, _ = _carry_state()
+    stats = get_faction_stats(state, _territories(), _faction(), {})
+    # Mithlond 10 + Ost-in-Edhil 10, plus Narya 3 and The Nine 4.
+    assert stats["factions"]["noldor"]["power_per_turn"] == 27
+    assert stats["alliances"]["good"]["power_per_turn"] == 27
+
+    factions = _faction()
+    factions["mordor"] = FactionDefinition(
+        id="mordor",
+        display_name="Mordor",
+        alliance="evil",
+        capital="barad_dur",
+        color="#4a1c1c",
+    )
+    state.rings.append(spawn_rings([{
+        "type": "rings_of_power",
+        "rings": [{
+            "id": "the_one",
+            "name": "The One",
+            "territory_id": "mithlond",
+            "power": 4,
+            "bearer_hero_id": "sauron",
+        }],
+    }])[0])
+    state.territories["mithlond"].units.append(Unit(
+        instance_id="sauron_001",
+        unit_id="sauron",
+        remaining_movement=1,
+        remaining_health=2,
+        base_movement=1,
+        base_health=2,
+    ))
+    defs = {
+        **defs,
+        "sauron": SimpleNamespace(hero_id="sauron", faction="mordor", cost={"power": 18}),
+    }
+    stats = get_faction_stats(state, _territories(), factions, defs)
+    assert stats["factions"]["noldor"]["power_per_turn"] == 27
+    assert stats["factions"]["mordor"]["power_per_turn"] == 4
+    assert stats["alliances"]["evil"]["power_per_turn"] == 4
 
 
 def test_required_bearer_death_sends_the_ring_home_and_others_stay():

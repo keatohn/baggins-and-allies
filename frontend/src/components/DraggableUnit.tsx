@@ -91,7 +91,7 @@ function DraggableUnit({
       {...attributes}
     >
       <img src={unitDef.icon} alt={unitDef.name} draggable={false} />
-      {ringIcons.map((ring) => (
+      {ringIcons.map((ring, index) => (
         <img
           key={ring.id}
           className="unit-token-ring"
@@ -99,6 +99,7 @@ function DraggableUnit({
           alt={ring.name}
           title={ring.name}
           draggable={false}
+          style={index > 0 ? { right: index * 14 } : undefined}
         />
       ))}
       <span className={`count ${count === 1 && passengerCount === 0 ? 'single' : ''}`}>{count}</span>

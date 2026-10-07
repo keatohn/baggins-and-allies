@@ -14,13 +14,14 @@ function RingMarks({ unitType }: { unitType: string }) {
   const rings = byType[unitType] ?? [];
   return (
     <>
-      {rings.map((ring) => (
+      {rings.map((ring, index) => (
         <img
           key={ring.id}
           className="combat-ring-badge"
           src={`/assets/rings/${ring.id}.png`}
           alt={ring.name}
           title={ring.name}
+          style={index > 0 ? { right: index * 12 } : undefined}
         />
       ))}
     </>

@@ -4710,9 +4710,14 @@ function GameMap({
                           : (territoryUnits[ring.territory_id] ?? []);
                         if (ringHostUnitId(ring, present, unitDefs)) return null;
                         const layout = territoryPositions[ring.territory_id];
-                        const anchor = layout?.marker ?? layout?.center ?? territoryCentroids[ring.territory_id];
+                        const territory = territoryData[ring.territory_id];
+                        const hintLogo = svgHintAnchors[ring.territory_id]?.logo;
+                        const markerAnchor = layout?.marker ?? layout?.center ?? territoryCentroids[ring.territory_id];
+                        const anchor = hintLogo ?? markerAnchor;
                         if (!anchor) return null;
-                        const screenPos = clampToMap(svgToScreen(anchor.x, anchor.y));
+                        const screenPos = hintLogo
+                          ? svgHintPointToOverlay(hintLogo)
+                          : clampToMap(svgToScreen(anchor.x, anchor.y));
                         const siblings = rings.filter((other) => {
                           if (other.territory_id !== ring.territory_id) return false;
                           const otherPresent = territoryUnitsFull?.[other.territory_id]?.length
@@ -4721,6 +4726,30 @@ function GameMap({
                           return !ringHostUnitId(other, otherPresent, unitDefs);
                         });
                         const index = siblings.findIndex((other) => other.id === ring.id);
+                        const isCapital =
+                          territory?.isCapital === true ||
+                          Object.values(factionData).some((f) => f.capital === ring.territory_id);
+                        const besideLogo = territory?.stronghold === true;
+                        const step = 26;
+                        const ringRadius = 11;
+                        let left = screenPos.x;
+                        let top = screenPos.y + 36;
+                        if (besideLogo) {
+                          const halfLogo = isCapital ? 34 : 26;
+                          const gap = 10;
+                          const hpExtra = territory?.owner ? 16 : 0;
+                          const rightmost = screenPos.x - halfLogo - gap - ringRadius;
+                          const leftmost = rightmost - (siblings.length - 1) * step;
+                          const useLeft = leftmost - ringRadius >= 8;
+                          if (useLeft) {
+                            left = rightmost - (siblings.length - 1 - index) * step;
+                          } else {
+                            left = screenPos.x + halfLogo + gap + ringRadius + hpExtra + index * step;
+                          }
+                          top = screenPos.y;
+                        } else if (siblings.length > 1) {
+                          left = screenPos.x + (index - (siblings.length - 1) / 2) * step;
+                        }
                         return (
                           <img
                             key={ring.id}
@@ -4728,7 +4757,7 @@ function GameMap({
                             src={ringIconSrc(ring.id)}
                             alt={ring.name}
                             title={`${ring.name} (+${ring.power})`}
-                            style={{ left: screenPos.x, top: screenPos.y + 14 + index * 18 }}
+                            style={{ left, top }}
                           />
                         );
                       })}

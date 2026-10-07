@@ -19,6 +19,7 @@ from backend.engine.definitions import (
     is_transportable,
 )
 from backend.engine.utils import effective_territory_owner, faction_owns_capital
+from backend.engine.rings import power_for_faction
 from backend.engine.special_rules import territory_current_power
 from backend.engine.movement import (
     _is_river_unit,
@@ -2927,7 +2928,7 @@ def get_faction_stats(
 ) -> dict[str, Any]:
     """
     Get per-faction and per-alliance stats for the UI (territories, strongholds, power, power_per_turn, units, unit_power).
-    power = faction_resources (income is credited when a faction ends their turn); power_per_turn = sum of produces across owned territories.
+    power = faction_resources (income is credited when a faction ends their turn); power_per_turn = owned territory production plus ring power credited to this faction.
     unit_power = sum of power cost for all active units for that faction.
     """
     unit_defs = unit_defs or {}
@@ -2948,6 +2949,7 @@ def get_faction_stats(
             # Subfaction land is controlled here. It pays only when its economy rule is pool and the capital is held.
             if tdef and (owner == faction_id or tid in pool_ids):
                 power_per_turn += territory_current_power(state, tid, tdef)
+        power_per_turn += power_for_faction(state, faction_id, unit_defs)
         power = state.faction_resources.get(faction_id, {}).get("power", 0)
         factions[faction_id] = {
             "territories": territories_count,

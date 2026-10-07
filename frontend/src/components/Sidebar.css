@@ -1556,12 +1556,14 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
   gap: 0.2rem;
 }
 
-.territory-unit-ring {
+.territory-unit-icon-wrap img.territory-unit-ring {
   position: absolute;
-  top: -5px;
-  right: -5px;
-  width: 14px;
-  height: 14px;
+  top: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  max-width: 12px;
+  max-height: 12px;
   object-fit: contain;
   pointer-events: none;
 }
