@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import MUSIC_M4A from 'virtual:music-m4a';
 import UNIT_ICON_PNG from 'virtual:unit-icon-png';
 import FACTION_ICON_PNG from 'virtual:faction-icon-png';
 import TERRITORY_IMAGE_PNG from 'virtual:territory-image-png';
 import SCENARIO_IMAGE from 'virtual:scenario-image';
 import { TerritoryGraphPane } from './TerritoryGraphPane';
-import type { AdminSetupBundle } from '../../services/api';
+import { api, type AdminSetupBundle, type AdminSetupListItem } from '../../services/api';
 
 function linesToList(s: string): string[] {
   return s
@@ -708,11 +708,13 @@ function EntityDictPanel({
   data,
   onChange,
   renderEditor,
+  onAdd,
 }: {
   title: string;
   data: Record<string, Record<string, unknown>>;
   onChange: (next: Record<string, Record<string, unknown>>) => void;
   renderEditor: (id: string, obj: Record<string, unknown>, patch: (p: Record<string, unknown>) => void) => React.ReactNode;
+  onAdd?: (select: (id: string) => void) => void;
 }) {
   const keys = useMemo(() => Object.keys(data).sort(), [data]);
   const [filter, setFilter] = useState('');
@@ -734,6 +736,10 @@ function EntityDictPanel({
   };
 
   const addId = () => {
+    if (onAdd) {
+      onAdd(setSelected);
+      return;
+    }
     const raw = window.prompt(`New ${title} id (key):`);
     if (!raw) return;
     const id = raw.trim();
@@ -785,11 +791,234 @@ function EntityDictPanel({
   );
 }
 
+function unitMap(raw: unknown): Record<string, Record<string, unknown>> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const [id, value] of Object.entries(raw)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) out[id] = value as Record<string, unknown>;
+  }
+  return out;
+}
+
+function AddUnitDialog({
+  open,
+  units,
+  setupId,
+  setups,
+  onClose,
+  onCreate,
+}: {
+  open: boolean;
+  units: Record<string, Record<string, unknown>>;
+  setupId: string;
+  setups: AdminSetupListItem[];
+  onClose: () => void;
+  onCreate: (id: string, def: Record<string, unknown>) => void;
+}) {
+  const [mode, setMode] = useState<'empty' | 'copy'>('empty');
+  const [newId, setNewId] = useState('');
+  const [sourceSetup, setSourceSetup] = useState('');
+  const [sourceUnitId, setSourceUnitId] = useState('');
+  const [sourceUnits, setSourceUnits] = useState<Record<string, Record<string, unknown>>>({});
+  const [loadingUnits, setLoadingUnits] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setMode('empty');
+    setNewId('');
+    setSourceSetup('');
+    setSourceUnitId('');
+    setSourceUnits({});
+    setLoadingUnits(false);
+    setErr(null);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || mode !== 'copy') return;
+    if (!sourceSetup) {
+      setSourceUnits({});
+      setLoadingUnits(false);
+      return;
+    }
+    if (sourceSetup === setupId) {
+      setSourceUnits(units);
+      setLoadingUnits(false);
+      return;
+    }
+    let cancelled = false;
+    setLoadingUnits(true);
+    setErr(null);
+    api
+      .adminGetSetup(sourceSetup)
+      .then((bundle) => {
+        if (cancelled) return;
+        setSourceUnits(unitMap(bundle.units));
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setSourceUnits({});
+        setErr(e instanceof Error ? e.message : 'Could not load that setup');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingUnits(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, mode, sourceSetup, setupId, units]);
+
+  if (!open) return null;
+
+  const sourceUnitIds = Object.keys(sourceUnits).sort((a, b) => a.localeCompare(b));
+
+  const submit = () => {
+    const id = newId.trim();
+    if (!id) {
+      setErr('Enter a unit id.');
+      return;
+    }
+    if (units[id]) {
+      setErr('That id already exists.');
+      return;
+    }
+    if (mode === 'copy') {
+      const src = sourceUnits[sourceUnitId];
+      if (!sourceSetup || !src) {
+        setErr('Choose a setup and a unit to copy.');
+        return;
+      }
+      const copy = JSON.parse(JSON.stringify(src)) as Record<string, unknown>;
+      copy.id = id;
+      onCreate(id, copy);
+      return;
+    }
+    onCreate(id, { id });
+  };
+
+  return (
+    <div className="admin-modal-overlay" role="presentation" onClick={onClose}>
+      <div
+        className="admin-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="admin-add-unit-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="admin-add-unit-title" className="admin-modal__title">
+          Add unit
+        </h2>
+        <div className="admin-form__row admin-form__row--radio-row">
+          <span className="admin-form__label">Source</span>
+          <div className="admin-form__radio-group admin-form__radio-group--create-setup">
+            <label className="admin-form__radio-label">
+              <input type="radio" name="admin-add-unit-mode" checked={mode === 'empty'} onChange={() => setMode('empty')} />
+              Empty
+            </label>
+            <label
+              className={`admin-form__radio-label${setups.length === 0 ? ' admin-form__radio-label--disabled' : ''}`}
+              title={setups.length === 0 ? 'No setups to copy yet' : undefined}
+            >
+              <input
+                type="radio"
+                name="admin-add-unit-mode"
+                checked={mode === 'copy'}
+                disabled={setups.length === 0}
+                onChange={() => setMode('copy')}
+              />
+              Copy
+            </label>
+          </div>
+        </div>
+        {mode === 'copy' ? (
+          <>
+            <div className="admin-form__row">
+              <label className="admin-form__label" htmlFor="admin-copy-unit-setup">
+                Copy from
+              </label>
+              <select
+                id="admin-copy-unit-setup"
+                className="admin-page__select admin-page__select--full"
+                value={sourceSetup}
+                onChange={(e) => {
+                  setSourceSetup(e.target.value);
+                  setSourceUnitId('');
+                  setNewId('');
+                }}
+              >
+                <option value="">Select a setup…</option>
+                {setups.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.display_name} ({s.id}){s.id === setupId ? ' — this setup' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="admin-form__row">
+              <label className="admin-form__label" htmlFor="admin-copy-unit-id">
+                Unit
+              </label>
+              <select
+                id="admin-copy-unit-id"
+                className="admin-page__select admin-page__select--full"
+                value={sourceUnitId}
+                disabled={!sourceSetup || loadingUnits}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setSourceUnitId(id);
+                  setNewId(id);
+                }}
+              >
+                <option value="">{loadingUnits ? 'Loading units…' : 'Select a unit…'}</option>
+                {sourceUnitIds.map((id) => {
+                  const name = sourceUnits[id]?.display_name;
+                  const label = typeof name === 'string' && name.trim() && name !== id ? `${name} (${id})` : id;
+                  return (
+                    <option key={id} value={id}>
+                      {label}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          </>
+        ) : null}
+        <div className="admin-form__row">
+          <label className="admin-form__label" htmlFor="admin-new-unit-id">
+            Unit id
+          </label>
+          <input
+            id="admin-new-unit-id"
+            className="admin-form__input"
+            autoComplete="off"
+            value={newId}
+            onChange={(e) => setNewId(e.target.value)}
+            placeholder="e.g. gondor_infantry"
+          />
+        </div>
+        {err ? <div className="admin-page__error">{err}</div> : null}
+        <div className="admin-modal__actions">
+          <button type="button" className="admin-page__btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="admin-page__btn admin-page__btn--primary" onClick={submit}>
+            Add
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function UnitsPanel({
   units,
+  setupId,
+  setups,
   onChange,
 }: {
   units: Record<string, Record<string, unknown>>;
+  setupId: string;
+  setups: AdminSetupListItem[];
   onChange: (next: Record<string, Record<string, unknown>>) => void;
 }) {
   const knownHeroIds = useMemo(() => {
@@ -801,11 +1030,19 @@ export function UnitsPanel({
     return [...ids].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
   }, [units]);
 
+  const [addOpen, setAddOpen] = useState(false);
+  const selectRef = useRef<(id: string) => void>(() => {});
+
   return (
+    <>
     <EntityDictPanel
       title="unit"
       data={units}
       onChange={onChange}
+      onAdd={(select) => {
+        selectRef.current = select;
+        setAddOpen(true);
+      }}
       renderEditor={(id, u, patch) => (
         <div className="admin-form">
           {fieldRow('Unit id', <input type="text" className="admin-form__input admin-form__input--readonly" readOnly disabled value={id} />)}
@@ -909,6 +1146,19 @@ export function UnitsPanel({
         </div>
       )}
     />
+    <AddUnitDialog
+      open={addOpen}
+      units={units}
+      setupId={setupId}
+      setups={setups}
+      onClose={() => setAddOpen(false)}
+      onCreate={(id, def) => {
+        onChange({ ...units, [id]: def });
+        selectRef.current(id);
+        setAddOpen(false);
+      }}
+    />
+    </>
   );
 }
 

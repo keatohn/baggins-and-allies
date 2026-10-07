@@ -618,6 +618,8 @@ export default function Admin() {
         return (
           <UnitsPanel
             units={(bundle.units as DictEntityMap) ?? {}}
+            setupId={selectedId}
+            setups={setups}
             onChange={(next) => setBundle((b) => (b ? { ...b, units: next as typeof b.units } : null))}
           />
         );
