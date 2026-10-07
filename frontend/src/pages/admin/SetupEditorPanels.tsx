@@ -4,7 +4,6 @@ import UNIT_ICON_PNG from 'virtual:unit-icon-png';
 import FACTION_ICON_PNG from 'virtual:faction-icon-png';
 import TERRITORY_IMAGE_PNG from 'virtual:territory-image-png';
 import SCENARIO_IMAGE from 'virtual:scenario-image';
-import { TerritoryGraphPane } from './TerritoryGraphPane';
 import { api, type AdminSetupBundle, type AdminSetupListItem } from '../../services/api';
 
 function linesToList(s: string): string[] {
@@ -1789,37 +1788,18 @@ function powerFromProduces(produces: unknown): number {
 
 export function TerritoriesPanel({
   territories,
-  mapAsset,
   onChange,
-  onSave,
 }: {
   territories: Record<string, Record<string, unknown>>;
-  mapAsset?: string;
   onChange: (next: Record<string, Record<string, unknown>>) => void;
-  onSave: (next: Record<string, Record<string, unknown>>) => Promise<void>;
 }) {
-  const [graphOpen, setGraphOpen] = useState(false);
   return (
-    <>
-      {graphOpen ? (
-        <TerritoryGraphPane
-          mapAsset={mapAsset}
-          territories={territories}
-          onClose={() => setGraphOpen(false)}
-          onSave={onSave}
-        />
-      ) : null}
       <EntityDictPanel
         title="territory"
         data={territories}
         onChange={onChange}
         renderEditor={(id, t, patch) => (
           <div className="admin-form">
-            <div className="admin-form__graph-row">
-              <button type="button" className="admin-page__btn" onClick={() => setGraphOpen(true)}>
-                View as Graph
-              </button>
-            </div>
             {fieldRow('Territory id', <input type="text" className="admin-form__input admin-form__input--readonly" readOnly disabled value={id} />)}
           {fieldRow(
             'Display name',
@@ -1884,7 +1864,6 @@ export function TerritoriesPanel({
           </div>
         )}
       />
-    </>
   );
 }
 

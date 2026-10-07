@@ -365,10 +365,6 @@
   box-sizing: border-box;
 }
 
-.admin-form__graph-row {
-  margin: 0 0 0.85rem;
-}
-
 .admin-modal--balance {
   width: min(100%, 72rem);
   max-height: min(92vh, 52rem);
@@ -571,8 +567,55 @@
 
 .admin-graph__header .admin-modal__title {
   margin: 0;
+}
+
+.admin-graph__title-row {
   grid-column: 1;
   grid-row: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
+.admin-mapview__toggle {
+  display: inline-flex;
+  border: 1px solid var(--ink-faded);
+  border-radius: 999px;
+  overflow: hidden;
+  background: #fffef8;
+}
+
+.admin-mapview__toggle-btn {
+  min-height: 2rem;
+  padding: 0.25rem 0.95rem;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.admin-mapview__toggle-btn + .admin-mapview__toggle-btn {
+  border-left: 1px solid var(--ink-faded);
+}
+
+.admin-mapview__toggle-btn--active {
+  background: var(--ink);
+  color: #fffef8;
+}
+
+.admin-mapview__game {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--ink-faded);
+  border-radius: 8px;
 }
 
 .admin-graph__header .admin-form__micro {
@@ -628,12 +671,94 @@
   align-self: start;
 }
 
-.admin-graph__types {
+.admin-graph__toolbar {
   grid-column: 1 / -1;
   grid-row: 2;
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem 1.25rem;
+}
+
+.admin-graph__types {
+  display: flex;
   justify-content: center;
   gap: 0.25rem;
+}
+
+.admin-graph__props {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 1rem;
+}
+
+.admin-graph__prop {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.admin-graph__check {
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.admin-graph__owner {
+  max-width: 13rem;
+  font-size: 0.85rem;
+}
+
+.admin-graph__power,
+.admin-graph__count {
+  width: 3.75rem;
+  padding: 0.25rem 0.4rem;
+}
+
+.admin-graph__stacks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.admin-graph__stack {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.15rem 0.2rem 0.15rem 0.25rem;
+  border: 1px solid var(--ink-faded);
+  border-radius: 8px;
+  background: #fffef8;
+}
+
+.admin-graph__unit {
+  max-width: 11rem;
+  font-size: 0.85rem;
+}
+
+.admin-graph__stack-remove {
+  border: 0;
+  background: transparent;
+  color: var(--ink-faded);
+  font-size: 1.05rem;
+  line-height: 1;
+  padding: 0 0.25rem;
+  cursor: pointer;
+}
+
+.admin-graph__stack-remove:hover {
+  color: var(--ink);
+}
+
+.admin-graph__stack-add {
+  min-height: 2rem;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.85rem;
 }
 
 .admin-graph__type {
@@ -675,13 +800,34 @@
   overflow: hidden;
 }
 
-.admin-graph__list {
+.admin-graph__side {
   flex: 0 0 15rem;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.admin-graph__search {
+  flex: 0 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.admin-graph__list {
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   border: 1px solid var(--ink-faded);
   border-radius: 8px;
   background: #fffef8;
+}
+
+.admin-graph__list-empty {
+  margin: 0;
+  padding: 0.55rem 0.65rem;
+  font-size: 0.85rem;
+  color: var(--ink-faded);
 }
 
 .admin-graph__list-item {
@@ -827,6 +973,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.admin-graph__status--info {
+  margin-top: 0.2rem;
+  color: var(--ink);
 }
 
 .admin-modal__title {
@@ -1437,7 +1588,7 @@
     max-height: min(94dvh, 920px);
   }
 
-  .admin-graph__list {
+  .admin-graph__side {
     flex-basis: 9.5rem;
   }
 }

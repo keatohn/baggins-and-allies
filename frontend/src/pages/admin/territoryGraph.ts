@@ -392,3 +392,74 @@ export function territoriesWithEdgeEdits(
   }
   return next;
 }
+
+export type StartingStack = { unit_id: string; count: number };
+
+export function territoryPower(def: Record<string, unknown> | undefined): number {
+  const produces = def?.produces;
+  if (!produces || typeof produces !== 'object' || Array.isArray(produces)) return 0;
+  const raw = (produces as Record<string, unknown>).power;
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function hasSiteAt(sites: Record<string, Record<string, unknown>>, tid: string): boolean {
+  return Object.values(sites).some(
+    (site) => isTerritory(site) && typeof site.territory_id === 'string' && sameTerritoryId(site.territory_id, tid),
+  );
+}
+
+/** Camps and ports: drop every entry on the territory, then add one `<tid>_<kind>` entry when turning on. */
+export function sitesWithToggle(
+  sites: Record<string, Record<string, unknown>>,
+  tid: string,
+  on: boolean,
+  kind: 'camp' | 'port',
+): Record<string, Record<string, unknown>> {
+  const next: Record<string, Record<string, unknown>> = {};
+  for (const [id, site] of Object.entries(sites)) {
+    const here = isTerritory(site) && typeof site.territory_id === 'string' && sameTerritoryId(site.territory_id, tid);
+    if (!here) next[id] = site;
+  }
+  if (!on) return next;
+  let id = `${tid}_${kind}`;
+  for (let n = 2; id in next; n++) id = `${tid}_${kind}_${n}`;
+  next[id] = { id, territory_id: tid };
+  return next;
+}
+
+export function startingUnitsOf(startingSetup: Record<string, unknown>): Record<string, StartingStack[]> {
+  const raw = startingSetup.starting_units;
+  if (!isTerritory(raw)) return {};
+  const out: Record<string, StartingStack[]> = {};
+  for (const [tid, list] of Object.entries(raw)) {
+    if (!Array.isArray(list)) continue;
+    out[tid] = list
+      .filter((s): s is Record<string, unknown> => isTerritory(s))
+      .map((s) => ({ unit_id: String(s.unit_id ?? ''), count: Number(s.count) || 0 }));
+  }
+  return out;
+}
+
+export function stacksForTerritory(startingUnits: Record<string, StartingStack[]>, tid: string): StartingStack[] {
+  const key = resolveTerritoryKey(startingUnits, tid);
+  return key ? startingUnits[key] : [];
+}
+
+/** Replace each edited territory's stacks. An empty list removes that territory from starting_units. */
+export function startingSetupWithUnitEdits(
+  startingSetup: Record<string, unknown>,
+  unitEdits: Record<string, StartingStack[]>,
+): Record<string, unknown> {
+  const keys = Object.keys(unitEdits);
+  if (!keys.length) return startingSetup;
+  const raw = isTerritory(startingSetup.starting_units) ? startingSetup.starting_units : {};
+  const next: Record<string, unknown> = { ...raw };
+  for (const tid of keys) {
+    const existing = resolveTerritoryKey(next, tid);
+    if (existing) delete next[existing];
+    const stacks = unitEdits[tid].filter((s) => s.unit_id && s.count > 0);
+    if (stacks.length) next[existing ?? tid] = stacks;
+  }
+  return { ...startingSetup, starting_units: next };
+}

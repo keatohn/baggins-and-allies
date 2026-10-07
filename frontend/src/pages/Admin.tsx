@@ -20,6 +20,7 @@ import { isValidSetupId } from './admin/setupId';
 import { BalanceModal } from './admin/BalanceModal';
 import { previewStatsFromBundle } from './admin/previewStats';
 import { completeTerritoryAsymmetries } from './admin/territoryGraph';
+import { MapViewPane, type MapSetupDraft } from './admin/MapViewPane';
 import { GameStatsModal, UnitStatsModal } from '../components/StatsModals';
 import './Admin.css';
 
@@ -310,6 +311,7 @@ export default function Admin() {
   const [saveOk, setSaveOk] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadingBundle, setLoadingBundle] = useState(false);
+  const [mapViewOpen, setMapViewOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [resolveAsymmetriesOpen, setResolveAsymmetriesOpen] = useState(false);
@@ -469,21 +471,27 @@ export default function Admin() {
     }
   };
 
-  const saveSetupTerritories = async (territories: DictEntityMap) => {
+  const saveSetupFromMap = async ({ territories, starting_setup, camps, ports }: MapSetupDraft) => {
     if (!selectedId || !bundle) throw new Error('No setup loaded');
     const body = {
       manifest: { ...(bundle.manifest as Record<string, unknown>), id: selectedId },
       units: bundle.units as DictEntityMap,
       territories,
       factions: bundle.factions as DictEntityMap,
-      camps: bundle.camps as DictEntityMap,
-      ports: bundle.ports as DictEntityMap,
-      starting_setup: bundle.starting_setup as Record<string, unknown>,
+      camps,
+      ports,
+      starting_setup,
       specials: bundle.specials as Record<string, unknown>,
     };
     try {
       await api.adminPutSetup(selectedId, body);
-      setBundle({ ...bundle, territories });
+      setBundle({
+        ...bundle,
+        territories,
+        camps,
+        ports,
+        starting_setup: starting_setup as typeof bundle.starting_setup,
+      });
       setSaveError(null);
       setSaveOk(true);
       await refreshList();
@@ -666,9 +674,7 @@ export default function Admin() {
         return (
           <TerritoriesPanel
             territories={(bundle.territories as DictEntityMap) ?? {}}
-            mapAsset={typeof bundle.manifest?.map_asset === 'string' ? bundle.manifest.map_asset : undefined}
             onChange={(next) => setBundle((b) => (b ? { ...b, territories: next as typeof b.territories } : null))}
-            onSave={saveSetupTerritories}
           />
         );
       case 'factions':
@@ -811,6 +817,9 @@ export default function Admin() {
         <button type="button" className="admin-page__btn" onClick={() => setCreateOpen(true)}>
           New setup
         </button>
+        <button type="button" className="admin-page__btn" disabled={!bundle} onClick={() => setMapViewOpen(true)}>
+          Map View
+        </button>
         <label className="admin-page__checkbox-label">
           <input
             type="checkbox"
@@ -952,6 +961,20 @@ export default function Admin() {
       ) : null}
 
       <CreateSetupDialog open={createOpen} onClose={() => setCreateOpen(false)} setups={setups} onCreated={onCreatedSetup} />
+      {mapViewOpen && bundle && !audioOpen && !signalsOpen ? (
+        <MapViewPane
+          mapAsset={typeof bundle.manifest?.map_asset === 'string' ? bundle.manifest.map_asset : undefined}
+          manifest={(bundle.manifest as Record<string, unknown>) ?? {}}
+          territories={(bundle.territories as DictEntityMap) ?? {}}
+          startingSetup={(bundle.starting_setup as Record<string, unknown>) ?? {}}
+          camps={(bundle.camps as DictEntityMap) ?? {}}
+          ports={(bundle.ports as DictEntityMap) ?? {}}
+          factions={(bundle.factions as DictEntityMap) ?? {}}
+          units={(bundle.units as DictEntityMap) ?? {}}
+          onClose={() => setMapViewOpen(false)}
+          onSave={saveSetupFromMap}
+        />
+      ) : null}
       {resolveAsymmetriesOpen && (
         <div className="admin-modal-overlay" role="presentation" onClick={() => setResolveAsymmetriesOpen(false)}>
           <div
