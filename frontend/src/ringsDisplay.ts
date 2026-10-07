@@ -4,6 +4,7 @@ export type RingView = {
   power: number;
   territory_id: string;
   bearer_hero_id?: string | null;
+  carried_in_by?: string | null;
   returns_to?: string | null;
   attack_boost?: number;
   defense_boost?: number;
@@ -52,13 +53,26 @@ export function highestPowerHeroUnitId(
   return heroes.reduce((best, id) => (heroPower(unitDefs[id]) > heroPower(unitDefs[best]) ? id : best));
 }
 
-/** Unit type this ring sits on, or null when it stands alone. */
+/**
+ * Unit type this ring sits on, or null when it stands alone.
+ * With `attackerIds` (a battle), attackers hold only the ring they carried in.
+ */
 export function ringHostUnitId(
   ring: RingView,
-  units: { unit_id: string }[],
+  units: { unit_id: string; instance_id?: string }[],
   unitDefs: Record<string, UnitDefLike | undefined>,
+  attackerIds?: ReadonlySet<string>,
 ): string | null {
-  const present = units.filter((unit) => heroIdOf(unitDefs[unit.unit_id]));
+  let pool = units;
+  if (attackerIds && attackerIds.size > 0) {
+    const carrier = (ring.carried_in_by || '').trim();
+    if (carrier && attackerIds.has(carrier)) {
+      const unit = units.find((u) => u.instance_id === carrier && heroIdOf(unitDefs[u.unit_id]));
+      return unit?.unit_id ?? null;
+    }
+    pool = units.filter((u) => !u.instance_id || !attackerIds.has(u.instance_id));
+  }
+  const present = pool.filter((unit) => heroIdOf(unitDefs[unit.unit_id]));
   const required = (ring.bearer_hero_id || '').trim();
   if (required) {
     const match = present.find((unit) => heroIdOf(unitDefs[unit.unit_id]) === required);
@@ -77,11 +91,12 @@ export function ringsOnUnit(
   rings: RingView[],
   territoryId: string,
   unitId: string,
-  units: { unit_id: string }[],
+  units: { unit_id: string; instance_id?: string }[],
   unitDefs: Record<string, UnitDefLike | undefined>,
+  attackerIds?: ReadonlySet<string>,
 ): RingView[] {
   return rings.filter(
-    (ring) => ring.territory_id === territoryId && ringHostUnitId(ring, units, unitDefs) === unitId,
+    (ring) => ring.territory_id === territoryId && ringHostUnitId(ring, units, unitDefs, attackerIds) === unitId,
   );
 }
 

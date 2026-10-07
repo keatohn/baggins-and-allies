@@ -86,6 +86,7 @@ from backend.engine.movement import (
 from backend.engine.rings import (
     apply_carried_ring,
     claim_ring,
+    clear_ring_carriers,
     combat_boosts,
     expand_rolls_for_bonus,
     hero_instance_for_carry,
@@ -155,8 +156,9 @@ def _apply_ring_combat(
     attacker_mods: dict[str, int],
     defender_mods: dict[str, int],
 ):
-    att_b = combat_boosts(state, attacker_units, unit_defs, territory_id)
-    def_b = combat_boosts(state, defender_units, unit_defs, territory_id)
+    attacker_ids = {unit.instance_id for unit in attacker_units}
+    att_b = combat_boosts(state, attacker_units, unit_defs, territory_id, attacker_ids)
+    def_b = combat_boosts(state, defender_units, unit_defs, territory_id, attacker_ids)
     return (
         merge_ring_stat_mods(attacker_mods, att_b, attacking=True),
         merge_ring_stat_mods(defender_mods, def_b, attacking=False),
@@ -5170,6 +5172,7 @@ def _handle_end_turn(
             events.append(income_collected(old_faction, pending_income, new_totals))
 
     events.append(turn_ended(state.turn_number, old_faction))
+    clear_ring_carriers(state)
 
     # Determine next faction (use state.turn_order from setup if set, else alphabetical)
     faction_ids = state.turn_order if state.turn_order else sorted(faction_defs.keys())

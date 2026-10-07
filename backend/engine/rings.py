@@ -143,12 +143,30 @@ def _heroes_in(units: list[Unit], unit_defs: dict) -> list[Unit]:
     return [unit for unit in units if _hero_id_of(unit_defs.get(unit.unit_id))]
 
 
-def unit_bearing_ring(state: GameState, ring: Ring, unit_defs: dict) -> Unit | None:
-    """The hero this ring sits on. A required bearer wins over a stronger bystander."""
+def unit_bearing_ring(
+    state: GameState,
+    ring: Ring,
+    unit_defs: dict,
+    attacker_ids: set[str] | None = None,
+) -> Unit | None:
+    """The hero this ring sits on. A required bearer wins over a stronger bystander.
+
+    In a battle, attackers have not won the territory's rings yet. An attacker holds
+    only the ring he carried in himself.
+    """
     terr = state.territories.get(ring.territory_id)
     if terr is None:
         return None
-    heroes = _heroes_in(list(terr.units), unit_defs)
+    units = list(terr.units)
+    if attacker_ids:
+        carrier = ring.carried_in_by
+        if carrier and carrier in attacker_ids:
+            for unit in units:
+                if unit.instance_id == carrier and _hero_id_of(unit_defs.get(unit.unit_id)):
+                    return unit
+            return None
+        units = [unit for unit in units if unit.instance_id not in attacker_ids]
+    heroes = _heroes_in(units, unit_defs)
     required = (ring.bearer_hero_id or "").strip()
     if required:
         for unit in heroes:
@@ -198,6 +216,7 @@ def on_bearer_destroyed(state: GameState, unit: Unit, territory_id: str, unit_de
             continue
         ring.territory_id = home
         ring.bearer_instance_id = None
+        ring.carried_in_by = None
 
 
 def combat_boosts(
@@ -205,6 +224,7 @@ def combat_boosts(
     units: list[Unit],
     unit_defs: dict,
     territory_id: str,
+    attacker_ids: set[str] | None = None,
 ) -> dict[str, tuple[int, int, int, int]]:
     """instance_id -> (attack, defense, extra dice, extra hp) while the ring is on that hero."""
     if not getattr(state, "rings_of_power", False):
@@ -214,7 +234,7 @@ def combat_boosts(
     for ring in getattr(state, "rings", None) or []:
         if ring.territory_id != territory_id:
             continue
-        bearer = unit_bearing_ring(state, ring, unit_defs)
+        bearer = unit_bearing_ring(state, ring, unit_defs, attacker_ids)
         if bearer is None or bearer.instance_id not in present:
             continue
         atk, dfn, dice, hp = out.get(bearer.instance_id, (0, 0, 0, 0))
@@ -385,8 +405,18 @@ def apply_carried_ring(state: GameState, move: PendingMove, to_id: str) -> None:
     ring = _ring_by_id(state, ring_id)
     if ring is None:
         return
+    carrier = ring.bearer_instance_id
+    if carrier not in (move.unit_instance_ids or []):
+        carrier = None
     ring.territory_id = to_id
     ring.bearer_instance_id = None
+    ring.carried_in_by = carrier
+
+
+def clear_ring_carriers(state: GameState) -> None:
+    """A carry only decides battles in the turn it happened."""
+    for ring in getattr(state, "rings", None) or []:
+        ring.carried_in_by = None
 
 
 def hero_instance_for_carry(unit_defs: dict, units_to_move: list) -> str | None:

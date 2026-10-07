@@ -4097,9 +4097,10 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         const territoryId = effectiveCombat.territory;
         const rings = backendState.rings ?? [];
         const present = backendState.territories[territoryId]?.units ?? [];
+        const attackerIds = new Set(initialAttackerUnits.map((unit) => unit.id));
         const byType: Record<string, { id: string; name: string }[]> = {};
         for (const unitId of new Set(present.map((unit) => unit.unit_id))) {
-          const on = ringsOnUnit(rings, territoryId, unitId, present, unitDefs);
+          const on = ringsOnUnit(rings, territoryId, unitId, present, unitDefs, attackerIds);
           if (on.length > 0) byType[unitId] = on.map((ring) => ({ id: ring.id, name: ring.name }));
         }
         return byType;

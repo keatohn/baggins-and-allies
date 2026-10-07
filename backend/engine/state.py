@@ -623,6 +623,8 @@ class Ring:
     rolls_boost: int = 0
     hp_boost: int = 0
     moves_boost: int = 0
+    # Hero instance that carried this ring into its territory this turn. An attacker holds a ring in battle only through this.
+    carried_in_by: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -633,6 +635,8 @@ class Ring:
         }
         if self.bearer_instance_id:
             out["bearer_instance_id"] = self.bearer_instance_id
+        if self.carried_in_by:
+            out["carried_in_by"] = self.carried_in_by
         if self.bearer_hero_id:
             out["bearer_hero_id"] = self.bearer_hero_id
         if self.returns_to:
@@ -658,6 +662,7 @@ class Ring:
         except (TypeError, ValueError):
             power = 0
         bearer = data.get("bearer_instance_id")
+        carried = data.get("carried_in_by")
         required = data.get("bearer_hero_id")
         returns = data.get("returns_to")
 
@@ -680,6 +685,7 @@ class Ring:
             rolls_boost=_boost("rolls_boost"),
             hp_boost=_boost("hp_boost"),
             moves_boost=_boost("moves_boost"),
+            carried_in_by=str(carried).strip() if isinstance(carried, str) and carried.strip() else None,
         )
 
 

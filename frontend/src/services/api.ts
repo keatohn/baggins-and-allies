@@ -176,6 +176,7 @@ export interface ApiRing {
   power: number;
   territory_id: string;
   bearer_instance_id?: string | null;
+  carried_in_by?: string | null;
   bearer_hero_id?: string | null;
   returns_to?: string | null;
   attack_boost?: number;

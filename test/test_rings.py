@@ -6,6 +6,9 @@ from backend.engine.definitions import FactionDefinition, TerritoryDefinition
 from backend.engine.queries import get_faction_stats
 from backend.engine.rings import (
     apply_carried_ring,
+    claim_ring,
+    clear_ring_carriers,
+    combat_boosts,
     expand_rolls_for_bonus,
     mode_declared,
     on_bearer_destroyed,
@@ -153,6 +156,64 @@ def test_applied_move_leaves_the_ring_in_the_heros_destination():
     assert narya.territory_id == "lune"
     assert narya.bearer_instance_id is None
     assert power_for_faction(state, "noldor") == 4
+
+
+def test_attacker_holds_only_the_ring_he_carried_into_battle():
+    state, defs, gil_galad, _ = _carry_state()
+    one, vilya = spawn_rings([{
+        "type": "rings_of_power",
+        "rings": [
+            {"id": "the_one", "name": "The One", "territory_id": "mithlond", "power": 4,
+             "bearer_hero_id": "sauron", "attack_boost": 1, "defense_boost": 1},
+            {"id": "vilya", "name": "Vilya", "territory_id": "east_eriador", "power": 3,
+             "attack_boost": 2},
+        ],
+    }])
+    state.rings.extend([one, vilya])
+    sauron = Unit(
+        instance_id="sauron_001",
+        unit_id="sauron",
+        remaining_movement=1,
+        remaining_health=2,
+        base_movement=1,
+        base_health=2,
+    )
+    state.territories["east_eriador"] = TerritoryState(owner="mordor", original_owner="mordor", units=[sauron])
+    defs["sauron"] = SimpleNamespace(hero_id="sauron", faction="mordor", cost={"power": 18})
+    defs["gil_galad"] = SimpleNamespace(hero_id="gil_galad", faction="noldor", cost={"power": 12})
+
+    # Sauron attacks Mithlond, where The One and Narya already sit with Gil-galad.
+    state.territories["east_eriador"].units.remove(sauron)
+    state.territories["mithlond"].units.append(sauron)
+    attackers = {"sauron_001"}
+    att = combat_boosts(state, [sauron], defs, "mithlond", attackers)
+    dfn = combat_boosts(state, [gil_galad], defs, "mithlond", attackers)
+    assert att == {}
+    # Narya (no boost) stays with the defender. The One waits for Sauron to win.
+    assert dfn == {gil_galad.instance_id: (0, 0, 0, 0)}
+
+    # Gil-galad carries Vilya into Mithlond's battle as the attacker instead.
+    state.territories["mithlond"].units.remove(sauron)
+    state.territories["east_eriador"].units.append(sauron)
+    state.territories["east_eriador"].units.append(gil_galad)
+    state.territories["mithlond"].units.remove(gil_galad)
+    claim_ring(state, "vilya", gil_galad.instance_id)
+    apply_carried_ring(state, PendingMove(
+        from_territory="east_eriador",
+        to_territory="mithlond",
+        unit_instance_ids=[gil_galad.instance_id],
+        phase="combat_move",
+        ring_id="vilya",
+    ), "mithlond")
+    state.territories["east_eriador"].units.remove(gil_galad)
+    state.territories["mithlond"].units.append(gil_galad)
+    assert vilya.carried_in_by == gil_galad.instance_id
+    att = combat_boosts(state, [gil_galad], defs, "mithlond", {gil_galad.instance_id})
+    assert att == {gil_galad.instance_id: (2, 0, 0, 0)}
+
+    clear_ring_carriers(state)
+    assert vilya.carried_in_by is None
+    assert combat_boosts(state, [gil_galad], defs, "mithlond", {gil_galad.instance_id}) == {}
 
 
 def test_ring_power_uses_the_value_on_that_ring():
