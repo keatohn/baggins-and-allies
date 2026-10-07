@@ -215,11 +215,23 @@ export function TerritoryGraphPane({
   const isAerialNeighborTid = (tid: string) => aerialNeighborIds.some((n) => sameTerritoryId(n, tid));
   const isFordNeighborTid = (tid: string) => fordNeighborIds.some((n) => sameTerritoryId(n, tid));
   const isSelectedTid = (tid: string) => focusId != null && sameTerritoryId(tid, focusId);
-  const activeKind = EDGE_TYPES.find((type) => type.field === edgeField)?.kind ?? 'land';
-  const activeNeighborTid = (tid: string) => {
-    if (edgeField === 'adjacent') return isLandNeighborTid(tid);
-    if (edgeField === 'aerial_adjacent') return isAerialNeighborTid(tid);
-    return isFordNeighborTid(tid);
+  const neighborPathClass = (tid: string) => {
+    const isLandN = isLandNeighborTid(tid);
+    const isAerialN = isAerialNeighborTid(tid);
+    const isFordN = isFordNeighborTid(tid);
+    if (isFordN && isAerialN) return ' admin-graph__path--neighbor-ford';
+    if (isLandN && isAerialN) return ' admin-graph__path--neighbor-both';
+    if (isLandN) return ' admin-graph__path--neighbor-land';
+    if (isFordN) return ' admin-graph__path--neighbor-ford';
+    if (isAerialN) return ' admin-graph__path--neighbor-aerial';
+    return '';
+  };
+  const neighborNodeClass = (tid: string) => {
+    if (isFordNeighborTid(tid) && isAerialNeighborTid(tid)) return 'admin-graph__node admin-graph__node--ford';
+    if (isLandNeighborTid(tid)) return 'admin-graph__node admin-graph__node--land';
+    if (isFordNeighborTid(tid)) return 'admin-graph__node admin-graph__node--ford';
+    if (isAerialNeighborTid(tid)) return 'admin-graph__node admin-graph__node--aerial';
+    return 'admin-graph__node';
   };
 
   const territoryChoices = useMemo(() => {
@@ -516,18 +528,7 @@ export function TerritoryGraphPane({
               >
               {Array.from(paths.entries()).map(([tid, pathData]) => {
                 const isSel = isSelectedTid(tid);
-                const isLandN = !isSel && isLandNeighborTid(tid);
-                const isAerialN = !isSel && isAerialNeighborTid(tid);
-                const isFordN = !isSel && isFordNeighborTid(tid);
-                let cls = 'admin-graph__path';
-                if (isSel) cls += ' admin-graph__path--selected';
-                else if (editing) {
-                  if (activeNeighborTid(tid)) cls += ` admin-graph__path--neighbor-${activeKind}`;
-                } else if (isFordN && isAerialN) cls += ' admin-graph__path--neighbor-ford';
-                else if (isLandN && isAerialN) cls += ' admin-graph__path--neighbor-both';
-                else if (isLandN) cls += ' admin-graph__path--neighbor-land';
-                else if (isFordN) cls += ' admin-graph__path--neighbor-ford';
-                else if (isAerialN) cls += ' admin-graph__path--neighbor-aerial';
+                const cls = `admin-graph__path${isSel ? ' admin-graph__path--selected' : neighborPathClass(tid)}`;
                 return (
                   <path
                     key={tid}
@@ -574,19 +575,7 @@ export function TerritoryGraphPane({
                   className={
                     isSelectedTid(tid)
                       ? 'admin-graph__node admin-graph__node--selected'
-                      : editing
-                        ? activeNeighborTid(tid)
-                          ? `admin-graph__node admin-graph__node--${activeKind}`
-                          : 'admin-graph__node'
-                        : isFordNeighborTid(tid) && isAerialNeighborTid(tid)
-                          ? 'admin-graph__node admin-graph__node--ford'
-                          : isLandNeighborTid(tid)
-                            ? 'admin-graph__node admin-graph__node--land'
-                            : isFordNeighborTid(tid)
-                              ? 'admin-graph__node admin-graph__node--ford'
-                              : isAerialNeighborTid(tid)
-                                ? 'admin-graph__node admin-graph__node--aerial'
-                                : 'admin-graph__node'
+                      : neighborNodeClass(tid)
                   }
                   pointerEvents="none"
                 />
