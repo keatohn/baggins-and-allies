@@ -1023,6 +1023,16 @@
   gap: 0.5rem;
 }
 
+.admin-form__card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.15rem 0;
+  padding: 0.75rem 0.75rem 0.6rem;
+  border: 1px solid var(--line, rgba(0, 0, 0, 0.15));
+  border-radius: 6px;
+}
+
 .admin-form__inline-label {
   display: inline-flex;
   align-items: center;

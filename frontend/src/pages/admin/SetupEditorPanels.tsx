@@ -477,6 +477,556 @@ function FadingTerritoryFields({
   );
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? { ...(value as Record<string, unknown>) } : {};
+}
+
+function intField(value: unknown, fallback = 0): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? Math.trunc(n) : fallback;
+}
+
+function ContextFields({
+  manifest,
+  onManifestChange,
+}: {
+  manifest: Record<string, unknown>;
+  onManifestChange: (next: Record<string, unknown>) => void;
+}) {
+  const context = asRecord(manifest.context);
+  const factions = Array.isArray(context.factions)
+    ? context.factions.filter((name): name is string => typeof name === 'string')
+    : [];
+
+  const write = (patch: Record<string, unknown>) => {
+    onManifestChange({ ...manifest, context: { ...context, ...patch } });
+  };
+
+  return (
+    <>
+      {fieldRow(
+        'Year',
+        <input
+          type="text"
+          className="admin-form__input"
+          value={typeof context.year === 'string' ? context.year : ''}
+          onChange={(e) => write({ year: e.target.value })}
+        />,
+      )}
+      {fieldRow(
+        'Map',
+        <input
+          type="text"
+          className="admin-form__input"
+          value={typeof context.map === 'string' ? context.map : ''}
+          onChange={(e) => write({ map: e.target.value })}
+        />,
+      )}
+      {fieldRow(
+        'Faction count',
+        <input
+          type="number"
+          min={0}
+          className="admin-form__input admin-form__input--narrow"
+          value={context.faction_count != null ? String(intField(context.faction_count)) : ''}
+          onChange={(e) => {
+            if (e.target.value === '') {
+              const next = { ...context };
+              delete next.faction_count;
+              onManifestChange({ ...manifest, context: next });
+              return;
+            }
+            write({ faction_count: Math.max(0, intField(e.target.value)) });
+          }}
+        />,
+      )}
+      {fieldRow(
+        'Factions',
+        <>
+          {factions.length > 0 && (
+            <div className="admin-form__rule-list">
+              {factions.map((name, index) => (
+                <div key={index} className="admin-form__rule-row">
+                  <input
+                    type="text"
+                    className="admin-form__input"
+                    aria-label="Faction name"
+                    value={name}
+                    onChange={(e) => {
+                      const next = factions.slice();
+                      next[index] = e.target.value;
+                      write({ factions: next });
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="admin-page__btn"
+                    onClick={() => write({ factions: factions.filter((_, i) => i !== index) })}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <button type="button" className="admin-page__btn" onClick={() => write({ factions: [...factions, ''] })}>
+            Add faction
+          </button>
+          <p className="admin-form__micro">Names shown for this scenario on the create-game timeline.</p>
+        </>,
+      )}
+    </>
+  );
+}
+
+function VictoryFields({
+  manifest,
+  onManifestChange,
+}: {
+  manifest: Record<string, unknown>;
+  onManifestChange: (next: Record<string, unknown>) => void;
+}) {
+  const criteria = asRecord(manifest.victory_criteria);
+  const strongholds = asRecord(criteria.strongholds);
+
+  const writeStronghold = (side: 'good' | 'evil', raw: string) => {
+    const nextStrongholds = { ...strongholds };
+    if (raw === '') delete nextStrongholds[side];
+    else nextStrongholds[side] = Math.max(0, intField(raw));
+    onManifestChange({
+      ...manifest,
+      victory_criteria: { ...criteria, strongholds: nextStrongholds },
+    });
+  };
+
+  return (
+    <>
+      {fieldRow(
+        'Good strongholds',
+        <input
+          type="number"
+          min={0}
+          className="admin-form__input admin-form__input--narrow"
+          value={strongholds.good != null ? String(intField(strongholds.good)) : ''}
+          onChange={(e) => writeStronghold('good', e.target.value)}
+        />,
+      )}
+      {fieldRow(
+        'Evil strongholds',
+        <input
+          type="number"
+          min={0}
+          className="admin-form__input admin-form__input--narrow"
+          value={strongholds.evil != null ? String(intField(strongholds.evil)) : ''}
+          onChange={(e) => writeStronghold('evil', e.target.value)}
+        />,
+      )}
+      <p className="admin-form__micro">Strongholds an alliance must hold at the end of a full turn cycle to win.</p>
+    </>
+  );
+}
+
+type SubfactionRuleRow = {
+  id: string;
+  economy: string;
+  mobilization: string;
+  capture: string;
+  movement: string;
+  purchasable_by_parent: boolean;
+  recruitMode: '' | 'fixed' | 'per_territory';
+  recruitUnitId: string;
+  recruitCount: number;
+};
+
+function subfactionRowsFromManifest(manifest: Record<string, unknown>): SubfactionRuleRow[] {
+  const raw = asRecord(manifest.subfaction_rules);
+  return Object.entries(raw).map(([id, rule]) => {
+    const rec = asRecord(rule);
+    const recruitment = asRecord(rec.recruitment);
+    const mode = recruitment.mode === 'fixed' || recruitment.mode === 'per_territory' ? recruitment.mode : '';
+    return {
+      id,
+      economy: rec.economy === 'pool' ? 'pool' : 'none',
+      mobilization: rec.mobilization === 'any_home' ? 'any_home' : 'camps',
+      capture: rec.capture === 'unit_faction' ? 'unit_faction' : 'liberate_else_parent',
+      movement: rec.movement === 'home_only' ? 'home_only' : 'with_parent',
+      purchasable_by_parent: rec.purchasable_by_parent === true,
+      recruitMode: mode,
+      recruitUnitId: typeof recruitment.unit_id === 'string' ? recruitment.unit_id : '',
+      recruitCount: Math.max(1, intField(recruitment.count, 1)),
+    };
+  });
+}
+
+function manifestWithSubfactionRows(
+  manifest: Record<string, unknown>,
+  rows: SubfactionRuleRow[],
+): Record<string, unknown> {
+  const next = { ...manifest };
+  const rules: Record<string, unknown> = {};
+  for (const row of rows) {
+    const id = row.id.trim();
+    if (!id) continue;
+    const rule: Record<string, unknown> = {
+      economy: row.economy === 'pool' ? 'pool' : 'none',
+      mobilization: row.mobilization === 'any_home' ? 'any_home' : 'camps',
+      capture: row.capture === 'unit_faction' ? 'unit_faction' : 'liberate_else_parent',
+      movement: row.movement === 'home_only' ? 'home_only' : 'with_parent',
+      purchasable_by_parent: row.purchasable_by_parent,
+    };
+    if (row.recruitMode) {
+      rule.recruitment = {
+        mode: row.recruitMode,
+        unit_id: row.recruitUnitId.trim(),
+        count: Math.max(1, row.recruitCount),
+      };
+    }
+    rules[id] = rule;
+  }
+  if (Object.keys(rules).length) next.subfaction_rules = rules;
+  else delete next.subfaction_rules;
+  return next;
+}
+
+function SubfactionRulesFields({
+  manifest,
+  onManifestChange,
+}: {
+  manifest: Record<string, unknown>;
+  onManifestChange: (next: Record<string, unknown>) => void;
+}) {
+  const [rows, setRows] = useState<SubfactionRuleRow[]>(() => subfactionRowsFromManifest(manifest));
+
+  const write = (nextRows: SubfactionRuleRow[]) => {
+    setRows(nextRows);
+    onManifestChange(manifestWithSubfactionRows(manifest, nextRows));
+  };
+
+  const patch = (index: number, partial: Partial<SubfactionRuleRow>) => {
+    write(rows.map((row, i) => (i === index ? { ...row, ...partial } : row)));
+  };
+
+  return (
+    <>
+      {rows.length > 0 && (
+        <div className="admin-form__rule-list">
+          {rows.map((row, index) => (
+            <div key={index} className="admin-form__card">
+              {fieldRow(
+                'Subfaction id',
+                <input
+                  type="text"
+                  className="admin-form__input"
+                  value={row.id}
+                  onChange={(e) => patch(index, { id: e.target.value.trim() })}
+                />,
+              )}
+              {fieldRow(
+                'Economy',
+                <select className="admin-form__input" value={row.economy} onChange={(e) => patch(index, { economy: e.target.value })}>
+                  <option value="none">None</option>
+                  <option value="pool">Pool with parent</option>
+                </select>,
+              )}
+              {fieldRow(
+                'Mobilization',
+                <select className="admin-form__input" value={row.mobilization} onChange={(e) => patch(index, { mobilization: e.target.value })}>
+                  <option value="camps">Camps and ports</option>
+                  <option value="any_home">Subfaction land only</option>
+                </select>,
+              )}
+              {fieldRow(
+                'Capture',
+                <select className="admin-form__input" value={row.capture} onChange={(e) => patch(index, { capture: e.target.value })}>
+                  <option value="liberate_else_parent">Liberate, else parent</option>
+                  <option value="unit_faction">Subfaction keeps its own captures</option>
+                </select>,
+              )}
+              {fieldRow(
+                'Movement',
+                <select className="admin-form__input" value={row.movement} onChange={(e) => patch(index, { movement: e.target.value })}>
+                  <option value="with_parent">With parent</option>
+                  <option value="home_only">Home territories only</option>
+                </select>,
+              )}
+              {fieldRow(
+                'Parent can purchase',
+                <input
+                  type="checkbox"
+                  checked={row.purchasable_by_parent}
+                  onChange={(e) => patch(index, { purchasable_by_parent: e.target.checked })}
+                />,
+              )}
+              {fieldRow(
+                'Recruitment',
+                <select
+                  className="admin-form__input"
+                  value={row.recruitMode}
+                  onChange={(e) => {
+                    const mode = e.target.value;
+                    patch(index, { recruitMode: mode === 'fixed' || mode === 'per_territory' ? mode : '' });
+                  }}
+                >
+                  <option value="">None</option>
+                  <option value="fixed">Fixed</option>
+                  <option value="per_territory">Per territory</option>
+                </select>,
+              )}
+              {row.recruitMode && (
+                <>
+                  {fieldRow(
+                    'Recruit unit id',
+                    <input
+                      type="text"
+                      className="admin-form__input"
+                      value={row.recruitUnitId}
+                      onChange={(e) => patch(index, { recruitUnitId: e.target.value })}
+                    />,
+                  )}
+                  {fieldRow(
+                    'Recruit count',
+                    <input
+                      type="number"
+                      min={1}
+                      className="admin-form__input admin-form__input--narrow"
+                      value={String(row.recruitCount)}
+                      onChange={(e) => patch(index, { recruitCount: Math.max(1, intField(e.target.value, 1)) })}
+                    />,
+                  )}
+                </>
+              )}
+              <button type="button" className="admin-page__btn" onClick={() => write(rows.filter((_, i) => i !== index))}>
+                Remove subfaction
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <button
+        type="button"
+        className="admin-page__btn"
+        onClick={() => write([...rows, {
+          id: '',
+          economy: 'none',
+          mobilization: 'camps',
+          capture: 'liberate_else_parent',
+          movement: 'with_parent',
+          purchasable_by_parent: false,
+          recruitMode: '',
+          recruitUnitId: '',
+          recruitCount: 1,
+        }])}
+      >
+        Add subfaction
+      </button>
+      <p className="admin-form__micro">
+        The id must match a subfaction on its parent faction. A lost parent capital stops pooled production, recruitment, and subfaction mobilization.
+      </p>
+    </>
+  );
+}
+
+type RingRow = {
+  id: string;
+  name: string;
+  territory_id: string;
+  power: number;
+  bearer_hero_id: string;
+  returns_to: string;
+  attack_boost: string;
+  defense_boost: string;
+  rolls_boost: string;
+  hp_boost: string;
+  moves_boost: string;
+};
+
+function ringsFromManifest(manifest: Record<string, unknown>): RingRow[] {
+  const rules = Array.isArray(manifest.special_rules) ? manifest.special_rules : [];
+  const rows: RingRow[] = [];
+  for (const rule of rules) {
+    if (!rule || typeof rule !== 'object' || (rule as { type?: string }).type !== 'rings_of_power') continue;
+    const rings = (rule as { rings?: unknown }).rings;
+    if (!Array.isArray(rings)) continue;
+    for (const ring of rings) {
+      if (!ring || typeof ring !== 'object') continue;
+      const rec = ring as Record<string, unknown>;
+      const boost = (key: string) => (rec[key] == null || rec[key] === '' ? '' : String(intField(rec[key])));
+      rows.push({
+        id: typeof rec.id === 'string' ? rec.id : '',
+        name: typeof rec.name === 'string' ? rec.name : '',
+        territory_id: typeof rec.territory_id === 'string' ? rec.territory_id : '',
+        power: Math.max(0, intField(rec.power)),
+        bearer_hero_id: typeof rec.bearer_hero_id === 'string' ? rec.bearer_hero_id : '',
+        returns_to: typeof rec.returns_to === 'string' ? rec.returns_to : '',
+        attack_boost: boost('attack_boost'),
+        defense_boost: boost('defense_boost'),
+        rolls_boost: boost('rolls_boost'),
+        hp_boost: boost('hp_boost'),
+        moves_boost: boost('moves_boost'),
+      });
+    }
+  }
+  return rows;
+}
+
+function manifestWithRings(manifest: Record<string, unknown>, rows: RingRow[]): Record<string, unknown> {
+  const rules = Array.isArray(manifest.special_rules) ? manifest.special_rules : [];
+  const others = rules.filter(
+    (rule) => !rule || typeof rule !== 'object' || (rule as { type?: string }).type !== 'rings_of_power',
+  );
+  const rings = rows.map((row) => {
+    const out: Record<string, unknown> = {
+      id: row.id.trim(),
+      name: row.name,
+      territory_id: row.territory_id,
+      power: Math.max(0, row.power),
+    };
+    const bearer = row.bearer_hero_id.trim();
+    const home = row.returns_to.trim();
+    if (bearer) out.bearer_hero_id = bearer;
+    if (home) out.returns_to = home;
+    for (const key of ['attack_boost', 'defense_boost', 'rolls_boost', 'hp_boost', 'moves_boost'] as const) {
+      if (row[key] === '') continue;
+      out[key] = Math.max(0, intField(row[key]));
+    }
+    return out;
+  });
+  const nextRules = rings.length ? [...others, { type: 'rings_of_power', rings }] : others;
+  const next = { ...manifest };
+  if (nextRules.length) next.special_rules = nextRules;
+  else delete next.special_rules;
+  return next;
+}
+
+function RingFields({
+  manifest,
+  territoryIds,
+  onManifestChange,
+}: {
+  manifest: Record<string, unknown>;
+  territoryIds: string[];
+  onManifestChange: (next: Record<string, unknown>) => void;
+}) {
+  const rows = ringsFromManifest(manifest);
+  const write = (nextRows: RingRow[]) => onManifestChange(manifestWithRings(manifest, nextRows));
+  const patch = (index: number, partial: Partial<RingRow>) => {
+    write(rows.map((row, i) => (i === index ? { ...row, ...partial } : row)));
+  };
+  const boost = (index: number, key: keyof RingRow, raw: string) => {
+    if (raw === '') {
+      patch(index, { [key]: '' });
+      return;
+    }
+    patch(index, { [key]: String(Math.max(0, intField(raw))) });
+  };
+
+  return (
+    <>
+      {rows.length > 0 && (
+        <div className="admin-form__rule-list">
+          {rows.map((row, index) => (
+            <div key={index} className="admin-form__card">
+              {fieldRow(
+                'Ring id',
+                <input type="text" className="admin-form__input" value={row.id} onChange={(e) => patch(index, { id: e.target.value })} />,
+              )}
+              {fieldRow(
+                'Name',
+                <input type="text" className="admin-form__input" value={row.name} onChange={(e) => patch(index, { name: e.target.value })} />,
+              )}
+              {fieldRow(
+                'Territory',
+                <select className="admin-form__input" value={row.territory_id} onChange={(e) => patch(index, { territory_id: e.target.value })}>
+                  <option value="">Territory</option>
+                  {territoryIds.map((id) => (
+                    <option key={id} value={id}>{id}</option>
+                  ))}
+                </select>,
+              )}
+              {fieldRow(
+                'Power',
+                <input
+                  type="number"
+                  min={0}
+                  className="admin-form__input admin-form__input--narrow"
+                  value={String(row.power)}
+                  onChange={(e) => patch(index, { power: Math.max(0, intField(e.target.value)) })}
+                />,
+              )}
+              {fieldRow(
+                'Bearer hero id',
+                <input
+                  type="text"
+                  className="admin-form__input"
+                  placeholder="Optional"
+                  value={row.bearer_hero_id}
+                  onChange={(e) => patch(index, { bearer_hero_id: e.target.value })}
+                />,
+              )}
+              {fieldRow(
+                'Returns to',
+                <select className="admin-form__input" value={row.returns_to} onChange={(e) => patch(index, { returns_to: e.target.value })}>
+                  <option value="">None</option>
+                  {territoryIds.map((id) => (
+                    <option key={id} value={id}>{id}</option>
+                  ))}
+                </select>,
+              )}
+              <div className="admin-form__rule-row">
+                {([
+                  ['attack_boost', 'Attack'],
+                  ['defense_boost', 'Defense'],
+                  ['rolls_boost', 'Rolls'],
+                  ['hp_boost', 'HP'],
+                  ['moves_boost', 'Moves'],
+                ] as const).map(([key, label]) => (
+                  <label key={key} className="admin-form__inline-label">
+                    {label}
+                    <input
+                      type="number"
+                      min={0}
+                      className="admin-form__input admin-form__input--narrow"
+                      aria-label={`${label} boost`}
+                      value={row[key]}
+                      placeholder="0"
+                      onChange={(e) => boost(index, key, e.target.value)}
+                    />
+                  </label>
+                ))}
+              </div>
+              <button type="button" className="admin-page__btn" onClick={() => write(rows.filter((_, i) => i !== index))}>
+                Remove ring
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <button
+        type="button"
+        className="admin-page__btn"
+        onClick={() => write([...rows, {
+          id: '',
+          name: '',
+          territory_id: territoryIds[0] ?? '',
+          power: 0,
+          bearer_hero_id: '',
+          returns_to: '',
+          attack_boost: '',
+          defense_boost: '',
+          rolls_boost: '',
+          hp_boost: '',
+          moves_boost: '',
+        }])}
+      >
+        Add ring
+      </button>
+      <p className="admin-form__micro">
+        A bearer hero id sends that ring home when that hero is destroyed in its territory, and its power follows that hero&apos;s faction while they stand together. Boosts are optional.
+      </p>
+    </>
+  );
+}
+
 export function ManifestPanel({
   setupId,
   manifest,
@@ -488,42 +1038,6 @@ export function ManifestPanel({
   territoryIds: string[];
   onManifestChange: (next: Record<string, unknown>) => void;
 }) {
-  const [ctxDraft, setCtxDraft] = useState('');
-  const [vcDraft, setVcDraft] = useState('');
-
-  useEffect(() => {
-    setCtxDraft(JSON.stringify(manifest.context ?? {}, null, 2));
-    setVcDraft(JSON.stringify(manifest.victory_criteria ?? {}, null, 2));
-  }, [setupId]);
-
-  useEffect(() => {
-    setCtxDraft(JSON.stringify(manifest.context ?? {}, null, 2));
-  }, [manifest.context]);
-
-  useEffect(() => {
-    setVcDraft(JSON.stringify(manifest.victory_criteria ?? {}, null, 2));
-  }, [manifest.victory_criteria]);
-
-  const applyContext = () => {
-    try {
-      const o = JSON.parse(ctxDraft || '{}');
-      if (typeof o !== 'object' || o === null) throw new Error('not an object');
-      onManifestChange({ ...manifest, context: o });
-    } catch {
-      setCtxDraft(JSON.stringify(manifest.context ?? {}, null, 2));
-    }
-  };
-
-  const applyVc = () => {
-    try {
-      const o = JSON.parse(vcDraft || '{}');
-      if (typeof o !== 'object' || o === null) throw new Error('not an object');
-      onManifestChange({ ...manifest, victory_criteria: o });
-    } catch {
-      setVcDraft(JSON.stringify(manifest.victory_criteria ?? {}, null, 2));
-    }
-  };
-
   return (
     <div className="admin-form">
       {fieldRow(
@@ -677,25 +1191,16 @@ export function ManifestPanel({
           </p>
         </>,
       )}
+      <h3 className="admin-form__subtitle">Context</h3>
+      <ContextFields manifest={manifest} onManifestChange={onManifestChange} />
+      <h3 className="admin-form__subtitle">Victory criteria</h3>
+      <VictoryFields manifest={manifest} onManifestChange={onManifestChange} />
+      <h3 className="admin-form__subtitle">Subfactions</h3>
+      <SubfactionRulesFields key={setupId} manifest={manifest} onManifestChange={onManifestChange} />
+      <h3 className="admin-form__subtitle">Special rules</h3>
       {fieldRow(
-        'Subfaction rules (JSON)',
-        <>
-          <JsonObjectField
-            value={manifest.subfaction_rules ?? {}}
-            onApply={(o) => {
-              if (!o || typeof o !== 'object' || Array.isArray(o) || Object.keys(o as object).length === 0) {
-                const next = { ...manifest };
-                delete next.subfaction_rules;
-                onManifestChange(next);
-                return;
-              }
-              onManifestChange({ ...manifest, subfaction_rules: o });
-            }}
-          />
-          <p className="admin-form__micro">
-            Optional. Keys are subfaction ids. economy is "none" or "pool". recruitment is omitted, or an object with mode "fixed" or "per_territory", unit_id, and count. purchasable_by_parent lets the parent buy that subfaction's units. mobilization is "any_home" (only that subfaction's land, no capacity; a sea zone next to that land counts, port or not) or "camps" (parent and subfaction camps and ports, with the usual limits). A lost parent capital stops pooled production, grants, and subfaction mobilization. Grants count territories the subfaction owned at the start of the parent's turn. capture is "liberate_else_parent" (credit the parent, then restore an allied original owner) or "unit_faction" (the subfaction keeps land taken only by its own units; a stack mixed with the parent stays with the parent). movement is "with_parent" or "home_only" (those units may only move to that subfaction's original territories).
-          </p>
-        </>,
+        'Rings of Power',
+        <RingFields manifest={manifest} territoryIds={territoryIds} onManifestChange={onManifestChange} />,
       )}
       {fieldRow(
         'Fading territories',
@@ -704,20 +1209,6 @@ export function ManifestPanel({
           territoryIds={territoryIds}
           onManifestChange={onManifestChange}
         />,
-      )}
-      {fieldRow(
-        'Context (JSON)',
-        <>
-          <textarea className="admin-form__textarea admin-form__textarea--json" spellCheck={false} value={ctxDraft} onChange={(e) => setCtxDraft(e.target.value)} onBlur={applyContext} />
-          <p className="admin-form__micro">Blur to apply. Required when Active is checked.</p>
-        </>,
-      )}
-      {fieldRow(
-        'Victory criteria (JSON)',
-        <>
-          <textarea className="admin-form__textarea admin-form__textarea--json" spellCheck={false} value={vcDraft} onChange={(e) => setVcDraft(e.target.value)} onBlur={applyVc} />
-          <p className="admin-form__micro">Blur to apply.</p>
-        </>,
       )}
     </div>
   );
