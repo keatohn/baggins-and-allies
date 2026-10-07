@@ -4,7 +4,7 @@ import { mergeGroupedEventLogForDisplay } from '../utils/eventLogDisplay';
 import { compareUnitStacksByMapOrder } from '../utils/unitStackSort';
 import { inferSignalAlliance, presetMatchesRelation, territorySignalRelation, type SignalPreset, type TerritorySignalMap } from '../territorySignals';
 import type { PendingMoveConfirm } from './GameMap';
-import { highestPowerHeroUnitId, ringIconSrc, ringsOnUnit, standaloneRings, type RingView } from '../ringsDisplay';
+import { highestPowerHeroUnitId, ringIconSrc, ringsOnUnit, type RingView } from '../ringsDisplay';
 import type { BulkMoveConfirmState, PendingMobilization, BulkMobilizeConfirmState } from '../App';
 import './Sidebar.css';
 
@@ -1465,9 +1465,9 @@ function Sidebar({
           </span>
         </h2>
 
-        {selectedTerritory && !shadowedTerritories?.has(selectedTerritory) && standaloneRings(rings, selectedTerritory, units, unitDefs).length > 0 ? (
+        {selectedTerritory && !shadowedTerritories?.has(selectedTerritory) && rings.some((ring) => ring.territory_id === selectedTerritory) ? (
           <ul className="territory-rings">
-            {standaloneRings(rings, selectedTerritory, units, unitDefs).map((ring) => (
+            {rings.filter((ring) => ring.territory_id === selectedTerritory).map((ring) => (
               <li key={ring.id}>
                 <img className="territory-rings__icon" src={ringIconSrc(ring.id)} alt="" />
                 {ring.name} <span className="territory-rings__power">+{ring.power}</span>
