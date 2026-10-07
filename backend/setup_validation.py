@@ -129,6 +129,12 @@ def validate_setup_documents(
         fac = u.get("faction")
         if not isinstance(fac, str) or not fac.strip():
             errors.append(f'unit "{uid}" faction must be a known faction id')
+        for key in ("display_name", "archetype"):
+            if key not in u:
+                errors.append(f'unit "{uid}" needs {key}')
+        for key in ("attack", "defense", "movement", "health"):
+            if isinstance(u.get(key), bool) or not isinstance(u.get(key), int):
+                errors.append(f'unit "{uid}" {key} must be a whole number')
         # Subfaction ids are collected below; a second pass checks the reference.
         dt = u.get("downgrade_to")
         if isinstance(dt, str) and dt.strip() and dt not in unit_ids:

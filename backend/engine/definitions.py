@@ -546,6 +546,12 @@ def _parse_hero_id(data: dict) -> Optional[str]:
     return _parse_optional_str(data.get("hero_id"))
 
 
+def _parse_unit_cost(data: dict) -> dict:
+    """Admin shows a missing cost as {"power": 0} without saving it."""
+    cost = data.get("cost")
+    return cost if isinstance(cost, dict) else {"power": 0}
+
+
 def _parse_home_territories(data: dict) -> dict:
     """Return home_territory_ids from unit data (list only; supports legacy home_territory_id single key)."""
     ids = data.get("home_territory_ids")
@@ -601,7 +607,7 @@ def load_static_definitions(
             defense=data["defense"],
             movement=data["movement"],
             health=data["health"],
-            cost=data["cost"],
+            cost=_parse_unit_cost(data),
             dice=data.get("dice", 1),
             purchasable=data.get("purchasable", True),
             unique=data.get("unique", False),
@@ -695,7 +701,7 @@ def definitions_from_snapshot(snapshot: dict) -> tuple[
             defense=data["defense"],
             movement=data["movement"],
             health=data["health"],
-            cost=data["cost"],
+            cost=_parse_unit_cost(data),
             dice=data.get("dice", 1),
             purchasable=data.get("purchasable", True),
             unique=data.get("unique", False),

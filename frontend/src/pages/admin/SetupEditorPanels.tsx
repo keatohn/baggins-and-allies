@@ -1497,7 +1497,7 @@ function AddUnitDialog({
       onCreate(id, copy);
       return;
     }
-    onCreate(id, { id });
+    onCreate(id, { id, cost: { power: 0 } });
   };
 
   return (
