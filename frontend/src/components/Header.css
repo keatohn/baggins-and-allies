@@ -1086,7 +1086,7 @@
   border: 2px solid var(--ink-faded);
   background: transparent;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
-  overflow: hidden;
+  overflow: visible;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -1121,12 +1121,80 @@
   }
 }
 
+.header-turn-ticker-logo {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
 .header-turn-ticker-icon {
   width: 100%;
   height: 100%;
   object-fit: cover;
   border-radius: 50%;
   display: block;
+}
+
+/* Subfaction icons sit on the parent logo. One is centered on the bottom-right rim,
+   two split across the bottom corners, three or more form a centered row on the bottom. */
+.header-turn-ticker-badge {
+  display: block;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1px solid #1c140c;
+  box-shadow: 0 0 0 1px rgba(255, 248, 230, 0.92);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.header-turn-ticker-badge img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.header-turn-ticker-badges--one .header-turn-ticker-badge,
+.header-turn-ticker-badges--two .header-turn-ticker-badge {
+  position: absolute;
+  width: 46%;
+  height: 46%;
+  top: 84%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+}
+
+.header-turn-ticker-badges--one .header-turn-ticker-badge {
+  left: 84%;
+}
+
+.header-turn-ticker-badges--two .header-turn-ticker-badge:first-child {
+  left: 16%;
+}
+
+.header-turn-ticker-badges--two .header-turn-ticker-badge:last-child {
+  left: 84%;
+}
+
+.header-turn-ticker-badges--row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 1px;
+  pointer-events: none;
+}
+
+.header-turn-ticker-badges--row .header-turn-ticker-badge {
+  width: calc((100% - (var(--sub-count) - 1) * 1px) / var(--sub-count));
+  max-width: 34%;
+  aspect-ratio: 1;
+  height: auto;
+  flex: 0 0 auto;
 }
 
 @media (max-width: 1280px) {

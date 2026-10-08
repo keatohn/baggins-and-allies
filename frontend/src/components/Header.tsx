@@ -51,6 +51,22 @@ function phaseLabel(phase: string): string {
   return `${formatPhase(phase)} (${current}/${n})`;
 }
 
+type FactionMark = { id: string; name: string; icon: string; color: string };
+
+/** Subfactions that have their own icon. A blank icon inherits the parent and is not badged. */
+function subfactionMarks(
+  parentId: string,
+  factionData: Record<string, { name: string; icon: string; color: string; parent?: string }>,
+): FactionMark[] {
+  const parentIcon = factionData[parentId]?.icon;
+  const marks: FactionMark[] = [];
+  for (const [id, fd] of Object.entries(factionData)) {
+    if (fd.parent !== parentId || !fd.icon || fd.icon === parentIcon) continue;
+    marks.push({ id, name: fd.name, icon: fd.icon, color: fd.color });
+  }
+  return marks;
+}
+
 function Header({ gameState, turnOrderForTicker, factionData, effectivePower, factionStats, ringsByFaction, unitsByFaction = {}, gameName = null, setupDisplayName = null, specials = {}, specialsOrder: _specialsOrder = [], unitsBySpecial = {}, onOpenCombatSim }: HeaderProps) {
   const [statsOpen, setStatsOpen] = useState(false);
   const [specialsOpen, setSpecialsOpen] = useState(false);
@@ -190,15 +206,43 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
             return order.map((fid) => {
               const fd = factionData[fid];
               const isCurrent = fid === gameState.current_faction;
+              const marks = subfactionMarks(fid, factionData);
+              const badgeMode = marks.length === 2 ? 'two' : marks.length >= 3 ? 'row' : 'one';
+              const baseName = fd?.name ?? fid;
+              const markNames = marks.map((mark) => mark.name).filter(Boolean).join(', ');
+              const title = markNames
+                ? `${baseName}${isCurrent ? ' (current turn)' : ''} — ${markNames}`
+                : isCurrent
+                  ? `${baseName} (current turn)`
+                  : baseName;
               return (
                 <div
                   key={fid}
                   className={`header-turn-ticker-slot ${isCurrent ? 'header-turn-ticker-slot--current' : ''}`}
-                  title={isCurrent ? `${fd?.name ?? fid} (current turn)` : fd?.name ?? fid}
+                  title={title}
                 >
-                  {fd?.icon && (
-                    <img src={fd.icon} alt="" className="header-turn-ticker-icon" aria-hidden />
-                  )}
+                  <div className="header-turn-ticker-logo">
+                    {fd?.icon && (
+                      <img src={fd.icon} alt="" className="header-turn-ticker-icon" aria-hidden />
+                    )}
+                    {marks.length > 0 && (
+                      <div
+                        className={`header-turn-ticker-badges header-turn-ticker-badges--${badgeMode}`}
+                        style={badgeMode === 'row' ? { ['--sub-count' as string]: String(marks.length) } : undefined}
+                        aria-hidden
+                      >
+                        {marks.map((mark) => (
+                          <span
+                            key={mark.id}
+                            className="header-turn-ticker-badge"
+                            style={{ background: mark.color }}
+                          >
+                            <img src={mark.icon} alt="" />
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               );
             });
