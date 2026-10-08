@@ -281,7 +281,7 @@ function sortEventLogFactions(factionIds: string[], turnOrder: string[] | undefi
   return [...factionIds].sort((a, b) => idx(a) - idx(b) || a.localeCompare(b));
 }
 
-/** True if this sea hex has enemy-alliance naval units (combat_move sea→sea = naval attack, not sail). */
+/** True if this water hex has enemy-alliance boats (combat_move water→water = attack, not sail). */
 function destinationSeaHasHostileEnemyNaval(
   seaTerritoryId: string,
   currentFaction: string,
@@ -295,10 +295,10 @@ function destinationSeaHasHostileEnemyNaval(
     if ((s.count ?? 0) <= 0) continue;
     const def = unitDefs[s.unit_id];
     if (!def) continue;
-    const naval =
-      def.archetype === 'naval' ||
-      (Array.isArray(def.tags) && def.tags.includes('naval'));
-    if (!naval) continue;
+    const arch = def.archetype ?? '';
+    const tags = Array.isArray(def.tags) ? def.tags : [];
+    const waterHull = arch === 'naval' || arch === 'river' || tags.includes('naval') || tags.includes('river');
+    if (!waterHull) continue;
     const uf = def.faction;
     if (!uf || uf === currentFaction) continue;
     const theirAlliance = factionData[uf]?.alliance;
@@ -736,11 +736,8 @@ function Sidebar({
             {bulkMoveConfirm && !pendingOffloadSeaChoice && (
               <div className="move-confirm">
                 {(() => {
-                  const fromTerrain = territoryData[bulkMoveConfirm.fromTerritory]?.terrain;
-                  const toTerrain = territoryData[bulkMoveConfirm.toTerritory]?.terrain;
-                  const fromSea =
-                    fromTerrain === 'sea' || /^sea_zone_?\d+$/i.test(bulkMoveConfirm.fromTerritory);
-                  const toSea = toTerrain === 'sea' || /^sea_zone_?\d+$/i.test(bulkMoveConfirm.toTerritory);
+                  const fromSea = isWaterTid(bulkMoveConfirm.fromTerritory, territoryData);
+                  const toSea = isWaterTid(bulkMoveConfirm.toTerritory, territoryData);
                   const allMovingAerial =
                     bulkMoveConfirm.stacks.length > 0 &&
                     bulkMoveConfirm.stacks.every((s) => unitIsAerial(s.unitId, unitDefs));
@@ -858,10 +855,8 @@ function Sidebar({
                     <button className="cancel-move-btn" onClick={onCancelMove}>Cancel</button>
                   </>
                 ) : (() => {
-                  const fromTerrain = territoryData[pendingMoveConfirm.fromTerritory]?.terrain;
-                  const toTerrain = territoryData[pendingMoveConfirm.toTerritory]?.terrain;
-                  const fromSea = fromTerrain === 'sea' || /^sea_zone_?\d+$/i.test(pendingMoveConfirm.fromTerritory);
-                  const toSea = toTerrain === 'sea' || /^sea_zone_?\d+$/i.test(pendingMoveConfirm.toTerritory);
+                  const fromSea = isWaterTid(pendingMoveConfirm.fromTerritory, territoryData);
+                  const toSea = isWaterTid(pendingMoveConfirm.toTerritory, territoryData);
                   const isAerialUnit = unitIsAerial(pendingMoveConfirm.unitId, unitDefs);
                   const isLoad = !fromSea && toSea && !isAerialUnit;
                   const isOffload =
@@ -922,7 +917,8 @@ function Sidebar({
                             (!fromSea && toSea && isAerialUnit) ||
                             combatNavalAttack);
                         const isNavalMove = isLoad || isOffload || isSail;
-                        const buttonLabel = isLoad ? 'Load' : isOffload ? 'Offload' : isSail ? 'Sail' : isSeaRaid ? 'Sea Raid' : isAttack ? 'Attack' : 'Move';
+                        const raidLabel = territoryData[pendingMoveConfirm.fromTerritory]?.terrain === 'river' ? 'Raid' : 'Sea Raid';
+                        const buttonLabel = isLoad ? 'Load' : isOffload ? 'Offload' : isSail ? 'Sail' : isSeaRaid ? raidLabel : isAttack ? 'Attack' : 'Move';
                         const confirmBtnClass = isAttack
                           ? 'confirm-move-btn attack-btn'
                           : isNavalMove
