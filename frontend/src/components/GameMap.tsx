@@ -4735,8 +4735,8 @@ function GameMap({
                           territory?.isCapital === true ||
                           Object.values(factionData).some((f) => f.capital === ring.territory_id);
                         const besideLogo = territory?.stronghold === true;
-                        const step = 26;
-                        const ringRadius = 11;
+                        const step = 32;
+                        const ringRadius = 14;
                         let left = screenPos.x;
                         let top = screenPos.y + 36;
                         if (besideLogo) {

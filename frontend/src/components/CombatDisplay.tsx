@@ -21,7 +21,7 @@ function RingMarks({ unitType }: { unitType: string }) {
           src={`/assets/rings/${ring.id}.png`}
           alt={ring.name}
           title={ring.name}
-          style={index > 0 ? { right: index * 12 } : undefined}
+          style={index > 0 ? { right: index * 16 } : undefined}
         />
       ))}
     </>

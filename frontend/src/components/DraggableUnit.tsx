@@ -99,7 +99,7 @@ function DraggableUnit({
           alt={ring.name}
           title={ring.name}
           draggable={false}
-          style={index > 0 ? { right: index * 14 } : undefined}
+          style={index > 0 ? { right: index * 18 } : undefined}
         />
       ))}
       <span className={`count ${count === 1 && passengerCount === 0 ? 'single' : ''}`}>{count}</span>

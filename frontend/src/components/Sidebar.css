@@ -1560,10 +1560,10 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
   position: absolute;
   top: 0;
   right: 0;
-  width: 12px;
-  height: 12px;
-  max-width: 12px;
-  max-height: 12px;
+  width: 16px;
+  height: 16px;
+  max-width: 16px;
+  max-height: 16px;
   object-fit: contain;
   pointer-events: none;
 }
