@@ -4,7 +4,7 @@ import { mergeGroupedEventLogForDisplay } from '../utils/eventLogDisplay';
 import { compareUnitStacksByMapOrder } from '../utils/unitStackSort';
 import { inferSignalAlliance, presetMatchesRelation, territorySignalRelation, type SignalPreset, type TerritorySignalMap } from '../territorySignals';
 import type { PendingMoveConfirm } from './GameMap';
-import { highestPowerHeroUnitId, ringIconSrc, ringsOnUnit, type RingView } from '../ringsDisplay';
+import { highestPowerHeroUnitId, ringCornerClass, ringIconSrc, ringsOnUnit, type RingView } from '../ringsDisplay';
 import type { BulkMoveConfirmState, PendingMobilization, BulkMobilizeConfirmState } from '../App';
 import './Sidebar.css';
 
@@ -1562,8 +1562,8 @@ function Sidebar({
                             style={factionColor ? { ['--faction-border' as string]: factionColor } : undefined}
                           >
                             <img src={icon} alt="" className="territory-unit-icon" />
-                            {selectedTerritory && ringsOnUnit(rings, selectedTerritory, row.unit_id, units, unitDefs).map((ring) => (
-                              <img key={ring.id} className="territory-unit-ring" src={ringIconSrc(ring.id)} alt={ring.name} title={ring.name} />
+                            {selectedTerritory && ringsOnUnit(rings, selectedTerritory, row.unit_id, units, unitDefs).map((ring, ringIndex) => (
+                              <img key={ring.id} className={`territory-unit-ring ${ringCornerClass(ringIndex)}`} src={ringIconSrc(ring.id)} alt={ring.name} title={ring.name} />
                             ))}
                           </span>
                         )}
@@ -1591,8 +1591,8 @@ function Sidebar({
                             style={factionColor ? { ['--faction-border' as string]: factionColor } : undefined}
                           >
                             <img src={icon} alt="" className="territory-unit-icon" />
-                            {selectedTerritory && ringsOnUnit(rings, selectedTerritory, unit_id, units, unitDefs).map((ring) => (
-                              <img key={ring.id} className="territory-unit-ring" src={ringIconSrc(ring.id)} alt={ring.name} title={ring.name} />
+                            {selectedTerritory && ringsOnUnit(rings, selectedTerritory, unit_id, units, unitDefs).map((ring, ringIndex) => (
+                              <img key={ring.id} className={`territory-unit-ring ${ringCornerClass(ringIndex)}`} src={ringIconSrc(ring.id)} alt={ring.name} title={ring.name} />
                             ))}
                           </span>
                         )}

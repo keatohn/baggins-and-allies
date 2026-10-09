@@ -279,8 +279,10 @@ export default function Profile() {
             <h2 id="profile-audio-heading" className="profile-page__audio-title">
               Audio
             </h2>
-            <label className="profile-page__audio-slider-label" htmlFor="profile-menu-music-volume">
-              Menu music volume
+            <div className="profile-page__audio-slider">
+              <label className="profile-page__audio-slider-label" htmlFor="profile-menu-music-volume">
+                Menu music volume
+              </label>
               <div className="profile-page__audio-slider-row">
                 <input
                   id="profile-menu-music-volume"
@@ -302,9 +304,11 @@ export default function Profile() {
                   {muted ? '—' : `${menuMusicVolumePct}%`}
                 </span>
               </div>
-            </label>
-            <label className="profile-page__audio-slider-label" htmlFor="profile-game-music-volume">
-              Game music volume
+            </div>
+            <div className="profile-page__audio-slider">
+              <label className="profile-page__audio-slider-label" htmlFor="profile-game-music-volume">
+                Game music volume
+              </label>
               <div className="profile-page__audio-slider-row">
                 <input
                   id="profile-game-music-volume"
@@ -326,9 +330,11 @@ export default function Profile() {
                   {muted ? '—' : `${gameMusicVolumePct}%`}
                 </span>
               </div>
-            </label>
-            <label className="profile-page__audio-slider-label" htmlFor="profile-sfx-volume">
-              Sound effect volume
+            </div>
+            <div className="profile-page__audio-slider">
+              <label className="profile-page__audio-slider-label" htmlFor="profile-sfx-volume">
+                Sound effect volume
+              </label>
               <div className="profile-page__audio-slider-row">
                 <input
                   id="profile-sfx-volume"
@@ -350,7 +356,7 @@ export default function Profile() {
                   {muted ? '—' : `${sfxVolumePct}%`}
                 </span>
               </div>
-            </label>
+            </div>
             <div className="profile-page__audio-actions">
               <label className="profile-page__audio-mute">
                 <input

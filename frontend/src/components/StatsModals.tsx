@@ -142,7 +142,7 @@ export function GameStatsModal({
               </button>
             )}
             {fd?.icon && <img className="stats-faction-icon" src={fd.icon} alt="" aria-hidden />}
-            <span>{fd?.name ?? fid}</span>
+            <span className="stats-faction-name">{fd?.name ?? fid}</span>
             {rings.length > 0 && (
               <span className="stats-faction-rings">
                 {rings.map((ring) => (
@@ -169,11 +169,14 @@ export function GameStatsModal({
     const ownRings = ringsByFaction?.[fid] ?? [];
     if (subIds.length === 0) return renderRow(fid, fid, st, { rings: ownRings });
     const open = expanded.has(fid);
+    const own = ownShare(st, subIds);
+    const showOwn = own.territories > 0;
     const familyRings = [...ownRings, ...subIds.flatMap((sid) => ringsByFaction?.[sid] ?? [])];
+    const headerRings = !open ? familyRings : showOwn ? [] : ownRings;
     return (
       <React.Fragment key={fid}>
-        {renderRow(fid, fid, st, { rings: open ? [] : familyRings, caret: { open } })}
-        {open && renderRow(`${fid}-own`, fid, ownShare(st, subIds), { nested: true, rings: ownRings })}
+        {renderRow(fid, fid, st, { rings: headerRings, caret: { open } })}
+        {open && showOwn && renderRow(`${fid}-own`, fid, own, { nested: true, rings: ownRings })}
         {open && subIds.map((sid) => renderRow(sid, sid, subfactionStatEntries[sid], {
           nested: true,
           sub: true,

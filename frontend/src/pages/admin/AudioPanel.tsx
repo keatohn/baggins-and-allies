@@ -3,6 +3,7 @@ import MUSIC_M4A from 'virtual:music-m4a';
 import SFX_M4A from 'virtual:sfx-m4a';
 import { GAME_AUDIO_BASE, startMenuAmbience, stopMenuAmbience } from '../../audio/gameAudio';
 import { MusicField } from './SetupEditorPanels';
+import { NumberField } from './NumberField';
 
 export type AudioKind = 'music' | 'sfx';
 
@@ -134,21 +135,21 @@ export function AudioPanel({
                       </td>
                       <td>
                         <label className="admin-audio-pct">
-                          <input
-                            type="number"
+                          <NumberField
                             min={0}
                             max={200}
                             className="admin-form__input admin-form__input--narrow"
                             value={String(pct)}
                             onChange={(e) => {
                               const v = e.target.value.trim();
-                              if (v === '') {
-                                setPct(rel, 100);
-                                return;
-                              }
+                              if (v === '' || v === '-') return;
                               const n = Number(v);
                               if (!Number.isFinite(n)) return;
                               setPct(rel, clampPct(n));
+                            }}
+                            onBlur={(e) => {
+                              const v = e.target.value.trim();
+                              if (v === '' || v === '-') setPct(rel, 100);
                             }}
                           />
                           <span>%</span>

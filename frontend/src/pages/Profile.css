@@ -53,13 +53,16 @@
   margin: 0 0 0.35rem;
 }
 
-.profile-page__audio-slider-label {
+.profile-page__audio-slider {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  margin-bottom: 0.65rem;
+}
+
+.profile-page__audio-slider-label {
   font-size: 0.95rem;
   color: var(--ink);
-  margin-bottom: 0.65rem;
 }
 
 .profile-page__audio-slider-row {
@@ -71,9 +74,16 @@
 .profile-page__audio-range {
   flex: 1;
   min-width: 0;
-  height: 1.25rem;
+  height: 1.75rem;
   accent-color: var(--gold-dark);
   cursor: pointer;
+  touch-action: pan-x;
+}
+
+@media (max-width: 767px) {
+  .profile-page__audio-range {
+    height: 2.25rem;
+  }
 }
 
 .profile-page__audio-range:disabled {

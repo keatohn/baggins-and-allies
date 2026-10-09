@@ -5,6 +5,7 @@ import {
   playSiegeworksRoundCommenceSound,
   stopSiegeworksRoundCommenceSound,
 } from '../audio/gameAudio';
+import { ringCornerClass } from '../ringsDisplay';
 import './CombatDisplay.css';
 
 const CombatRingContext = createContext<Record<string, { id: string; name: string }[]>>({});
@@ -17,11 +18,10 @@ function RingMarks({ unitType }: { unitType: string }) {
       {rings.map((ring, index) => (
         <img
           key={ring.id}
-          className="combat-ring-badge"
+          className={`combat-ring-badge ${ringCornerClass(index)}`}
           src={`/assets/rings/${ring.id}.png`}
           alt={ring.name}
           title={ring.name}
-          style={index > 0 ? { right: index * 16 } : undefined}
         />
       ))}
     </>

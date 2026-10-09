@@ -701,6 +701,7 @@
 
 .stats-modal .header-stats-table.header-stats-table--game thead th:first-child,
 .stats-modal .header-stats-table.header-stats-table--game tbody td:first-child {
+  overflow: hidden;
   overflow-wrap: break-word;
   word-break: normal;
 }
@@ -888,10 +889,19 @@
 }
 
 .stats-modal .stats-faction-row .stats-col-faction .stats-faction-cell-inner {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 0.4rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   white-space: nowrap;
+}
+
+.stats-modal .stats-faction-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .stats-modal .stats-faction-row.stats-subfaction-row .stats-col-faction {

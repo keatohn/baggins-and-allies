@@ -575,15 +575,19 @@
 
 .combat-unit-group img.combat-ring-badge {
   position: absolute;
-  top: 0;
-  right: 0;
-  width: 18px;
-  height: 18px;
-  max-width: 18px;
-  max-height: 18px;
+  width: 38%;
+  height: 38%;
+  max-width: 15px;
+  max-height: 15px;
   z-index: 2;
   pointer-events: none;
+  object-fit: contain;
 }
+
+.combat-unit-group img.combat-ring-badge.ring-corner-tl { top: 0; left: 0; }
+.combat-unit-group img.combat-ring-badge.ring-corner-tr { top: 0; right: 0; }
+.combat-unit-group img.combat-ring-badge.ring-corner-bl { bottom: 0; left: 0; }
+.combat-unit-group img.combat-ring-badge.ring-corner-br { bottom: 0; right: 0; }
 
 /* Top-left specials: T=Terror, M=Mountain, F=Forest, C=Captain */
 .unit-specials-badge {

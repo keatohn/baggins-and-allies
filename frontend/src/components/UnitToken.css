@@ -13,19 +13,22 @@
   touch-action: none;
 }
 
-/* Beat `.unit-token img` (100% size). A ring is a corner mark, not a second portrait. */
+/* Beat `.unit-token img` (100% size). Rings sit in the four corners, not a row across the top. */
 .unit-token img.unit-token-ring {
   position: absolute;
-  top: 0;
-  right: 0;
-  width: 20px;
-  height: 20px;
-  max-width: 20px;
-  max-height: 20px;
+  width: 38%;
+  height: 38%;
+  max-width: 15px;
+  max-height: 15px;
   object-fit: contain;
   pointer-events: none;
   z-index: 2;
 }
+
+.unit-token img.unit-token-ring.ring-corner-tl { top: 0; left: 0; }
+.unit-token img.unit-token-ring.ring-corner-tr { top: 0; right: 0; }
+.unit-token img.unit-token-ring.ring-corner-bl { bottom: 0; left: 0; }
+.unit-token img.unit-token-ring.ring-corner-br { bottom: 0; right: 0; }
 
 .unit-token[role='button']:not(.disabled) {
   cursor: grab !important;

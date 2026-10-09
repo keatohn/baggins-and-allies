@@ -5,6 +5,7 @@ import FACTION_ICON_PNG from 'virtual:faction-icon-png';
 import TERRITORY_IMAGE_PNG from 'virtual:territory-image-png';
 import SCENARIO_IMAGE from 'virtual:scenario-image';
 import { api, type AdminSetupBundle, type AdminSetupListItem } from '../../services/api';
+import { NumberField } from './NumberField';
 
 function linesToList(s: string): string[] {
   return s
@@ -536,8 +537,7 @@ function EvolvingTerritoryFields({
                 </select>
                 <label className="admin-form__inline-label">
                   Step / turn
-                  <input
-                    type="number"
+                  <NumberField
                     className="admin-form__input admin-form__input--narrow"
                     aria-label="Step per turn"
                     value={String(row.step)}
@@ -551,8 +551,7 @@ function EvolvingTerritoryFields({
                 </label>
                 <label className="admin-form__inline-label">
                   Stop at
-                  <input
-                    type="number"
+                  <NumberField
                     min={0}
                     className="admin-form__input admin-form__input--narrow"
                     aria-label="Stop at"
@@ -643,8 +642,7 @@ function ContextFields({
       )}
       {fieldRow(
         'Faction count',
-        <input
-          type="number"
+        <NumberField
           min={0}
           className="admin-form__input admin-form__input--narrow"
           value={context.faction_count != null ? String(intField(context.faction_count)) : ''}
@@ -722,8 +720,7 @@ function VictoryFields({
     <>
       {fieldRow(
         'Good strongholds',
-        <input
-          type="number"
+        <NumberField
           min={0}
           className="admin-form__input admin-form__input--narrow"
           value={strongholds.good != null ? String(intField(strongholds.good)) : ''}
@@ -732,8 +729,7 @@ function VictoryFields({
       )}
       {fieldRow(
         'Evil strongholds',
-        <input
-          type="number"
+        <NumberField
           min={0}
           className="admin-form__input admin-form__input--narrow"
           value={strongholds.evil != null ? String(intField(strongholds.evil)) : ''}
@@ -904,12 +900,19 @@ function SubfactionRulesFields({
                   )}
                   {fieldRow(
                     'Recruit count',
-                    <input
-                      type="number"
+                    <NumberField
                       min={1}
                       className="admin-form__input admin-form__input--narrow"
                       value={String(row.recruitCount)}
-                      onChange={(e) => patch(index, { recruitCount: Math.max(1, intField(e.target.value, 1)) })}
+                      onChange={(e) => {
+                        const raw = e.target.value.trim();
+                        if (raw === '' || raw === '-') return;
+                        patch(index, { recruitCount: Math.max(1, intField(raw, 1)) });
+                      }}
+                      onBlur={(e) => {
+                        const n = intField(e.target.value, 0);
+                        if (n < 1) patch(index, { recruitCount: 1 });
+                      }}
                     />,
                   )}
                 </>
@@ -1074,8 +1077,7 @@ function RingFields({
               )}
               {fieldRow(
                 'Power',
-                <input
-                  type="number"
+                <NumberField
                   min={0}
                   className="admin-form__input admin-form__input--narrow"
                   value={String(row.power)}
@@ -1111,8 +1113,7 @@ function RingFields({
                 ] as const).map(([key, label]) => (
                   <label key={key} className="admin-form__inline-label">
                     {label}
-                    <input
-                      type="number"
+                    <NumberField
                       min={0}
                       className="admin-form__input admin-form__input--narrow"
                       aria-label={`${label} boost`}
@@ -1239,8 +1240,7 @@ export function ManifestPanel({
       {fieldRow(
         'Create-game menu order',
         <>
-          <input
-            type="number"
+          <NumberField
             className="admin-form__input admin-form__input--narrow"
             placeholder="default 1000"
             value={manifest.menu_order != null && manifest.menu_order !== '' ? String(manifest.menu_order) : ''}
@@ -1264,8 +1264,7 @@ export function ManifestPanel({
       )}
       {fieldRow(
         'Camp cost',
-        <input
-          type="number"
+        <NumberField
           className="admin-form__input admin-form__input--narrow"
           value={manifest.camp_cost != null ? String(manifest.camp_cost) : ''}
           onChange={(e) =>
@@ -1278,8 +1277,7 @@ export function ManifestPanel({
       )}
       {fieldRow(
         'Stronghold repair cost',
-        <input
-          type="number"
+        <NumberField
           className="admin-form__input admin-form__input--narrow"
           value={manifest.stronghold_repair_cost != null ? String(manifest.stronghold_repair_cost) : ''}
           onChange={(e) =>
@@ -1736,24 +1734,43 @@ export function UnitsPanel({
           )}
           {fieldRow(
             'Attack',
-            <input type="number" className="admin-form__input admin-form__input--narrow" value={u.attack != null ? String(u.attack) : ''} onChange={(e) => patch({ attack: Number(e.target.value) })} />,
+            <NumberField className="admin-form__input admin-form__input--narrow" value={u.attack != null ? String(u.attack) : ''} onChange={(e) => {
+              const raw = e.target.value.trim();
+              if (raw === '' || raw === '-') return;
+              const n = Number(raw);
+              if (Number.isFinite(n)) patch({ attack: n });
+            }} />,
           )}
           {fieldRow(
             'Defense',
-            <input type="number" className="admin-form__input admin-form__input--narrow" value={u.defense != null ? String(u.defense) : ''} onChange={(e) => patch({ defense: Number(e.target.value) })} />,
+            <NumberField className="admin-form__input admin-form__input--narrow" value={u.defense != null ? String(u.defense) : ''} onChange={(e) => {
+              const raw = e.target.value.trim();
+              if (raw === '' || raw === '-') return;
+              const n = Number(raw);
+              if (Number.isFinite(n)) patch({ defense: n });
+            }} />,
           )}
           {fieldRow(
             'Movement',
-            <input type="number" className="admin-form__input admin-form__input--narrow" value={u.movement != null ? String(u.movement) : ''} onChange={(e) => patch({ movement: Number(e.target.value) })} />,
+            <NumberField className="admin-form__input admin-form__input--narrow" value={u.movement != null ? String(u.movement) : ''} onChange={(e) => {
+              const raw = e.target.value.trim();
+              if (raw === '' || raw === '-') return;
+              const n = Number(raw);
+              if (Number.isFinite(n)) patch({ movement: n });
+            }} />,
           )}
           {fieldRow(
             'Health',
-            <input type="number" className="admin-form__input admin-form__input--narrow" value={u.health != null ? String(u.health) : ''} onChange={(e) => patch({ health: Number(e.target.value) })} />,
+            <NumberField className="admin-form__input admin-form__input--narrow" value={u.health != null ? String(u.health) : ''} onChange={(e) => {
+              const raw = e.target.value.trim();
+              if (raw === '' || raw === '-') return;
+              const n = Number(raw);
+              if (Number.isFinite(n)) patch({ health: n });
+            }} />,
           )}
           {fieldRow(
             'Dice',
-            <input
-              type="number"
+            <NumberField
               min={1}
               className="admin-form__input admin-form__input--narrow"
               value={u.dice != null ? String(u.dice) : ''}
@@ -1761,9 +1778,9 @@ export function UnitsPanel({
                 const raw = e.target.value;
                 patch({ dice: raw === '' ? undefined : Number(raw) });
               }}
-              onBlur={() => {
-                const current = Number(u.dice);
-                if (!Number.isFinite(current) || current < 1) patch({ dice: 1 });
+              onBlur={(e) => {
+                const n = Number(e.target.value);
+                if (!Number.isFinite(n) || n < 1) patch({ dice: 1 });
               }}
             />,
           )}
@@ -1781,7 +1798,12 @@ export function UnitsPanel({
           )}
           {fieldRow(
             'Transport capacity',
-            <input type="number" className="admin-form__input admin-form__input--narrow" value={u.transport_capacity != null ? String(u.transport_capacity) : '0'} onChange={(e) => patch({ transport_capacity: Number(e.target.value) || 0 })} />,
+            <NumberField className="admin-form__input admin-form__input--narrow" value={u.transport_capacity != null ? String(u.transport_capacity) : '0'} onChange={(e) => {
+              const raw = e.target.value.trim();
+              if (raw === '' || raw === '-') return;
+              const n = Number(raw);
+              if (Number.isFinite(n)) patch({ transport_capacity: n });
+            }} />,
           )}
           {fieldRow(
             'Downgrade to unit id',
@@ -1881,20 +1903,21 @@ export function TerritoriesPanel({
           )}
           {fieldRow(
             'Power production',
-            <input
-              type="number"
+            <NumberField
               min={0}
               step={1}
               className="admin-form__input admin-form__input--narrow"
               value={String(powerFromProduces(t.produces))}
               onChange={(e) => {
-                const n = Number(e.target.value);
-                const power = Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0;
+                const raw = e.target.value.trim();
+                if (raw === '' || raw === '-') return;
+                const n = Number(raw);
+                if (!Number.isFinite(n)) return;
                 const prev =
                   t.produces && typeof t.produces === 'object' && !Array.isArray(t.produces)
                     ? (t.produces as Record<string, unknown>)
                     : {};
-                patch({ produces: { ...prev, power } });
+                patch({ produces: { ...prev, power: Math.max(0, Math.trunc(n)) } });
               }}
             />,
           )}
@@ -1904,11 +1927,16 @@ export function TerritoriesPanel({
           )}
           {fieldRow(
             'Stronghold base health',
-            <input
-              type="number"
+            <NumberField
               className="admin-form__input admin-form__input--narrow"
               value={t.stronghold_base_health != null ? String(t.stronghold_base_health) : t.stronghold_health != null ? String(t.stronghold_health) : '0'}
-              onChange={(e) => patch({ stronghold_base_health: Number(e.target.value) || 0, stronghold_health: undefined })}
+              onChange={(e) => {
+                const raw = e.target.value.trim();
+                if (raw === '' || raw === '-') return;
+                const n = Number(raw);
+                if (!Number.isFinite(n)) return;
+                patch({ stronghold_base_health: n, stronghold_health: undefined });
+              }}
             />,
           )}
           {fieldRow(
@@ -2264,8 +2292,7 @@ export function StartingSetupPanel({
               </option>
             ))}
           </select>
-          <input
-            type="number"
+          <NumberField
             min={1}
             className="admin-form__input admin-form__input--narrow"
             value={st.count <= 0 ? '' : st.count}
@@ -2273,8 +2300,9 @@ export function StartingSetupPanel({
               const raw = e.target.value;
               updateStack(i, { count: raw === '' ? 0 : Number(raw) });
             }}
-            onBlur={() => {
-              if (!Number.isFinite(st.count) || st.count < 1) updateStack(i, { count: 1 });
+            onBlur={(e) => {
+              const n = Number(e.target.value);
+              if (!Number.isFinite(n) || n < 1) updateStack(i, { count: 1 });
             }}
           />
           <button type="button" className="admin-page__btn" onClick={() => removeStack(i)}>

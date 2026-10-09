@@ -22,6 +22,13 @@ export function ringIconSrc(id: string): string {
   return `/assets/rings/${id}.png`;
 }
 
+const RING_CORNERS = ['ring-corner-tl', 'ring-corner-tr', 'ring-corner-bl', 'ring-corner-br'] as const;
+
+/** Corner mark for the nth ring on a unit icon: top-left, top-right, bottom-left, bottom-right. */
+export function ringCornerClass(index: number): string {
+  return RING_CORNERS[Math.min(Math.max(index, 0), RING_CORNERS.length - 1)];
+}
+
 export function ringHasBoost(ring: RingView): boolean {
   return (
     (ring.attack_boost ?? 0) > 0

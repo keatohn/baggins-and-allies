@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
+import { ringCornerClass } from '../ringsDisplay';
 import './UnitToken.css';
 
 interface DraggableUnitProps {
@@ -94,12 +95,11 @@ function DraggableUnit({
       {ringIcons.map((ring, index) => (
         <img
           key={ring.id}
-          className="unit-token-ring"
+          className={`unit-token-ring ${ringCornerClass(index)}`}
           src={`/assets/rings/${ring.id}.png`}
           alt={ring.name}
           title={ring.name}
           draggable={false}
-          style={index > 0 ? { right: index * 18 } : undefined}
         />
       ))}
       <span className={`count ${count === 1 && passengerCount === 0 ? 'single' : ''}`}>{count}</span>

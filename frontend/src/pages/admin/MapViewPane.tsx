@@ -22,6 +22,7 @@ import {
   type TerritoryEdgeField,
   type TerritoryPathData,
 } from './territoryGraph';
+import { NumberField } from './NumberField';
 
 type Pt = { x: number; y: number };
 type Dict = Record<string, Record<string, unknown>>;
@@ -778,15 +779,17 @@ export function MapViewPane({
                   ) : null}
                   <label className="admin-graph__prop">
                     Power
-                    <input
-                      type="number"
+                    <NumberField
                       min={0}
                       step={1}
                       className="admin-form__input admin-graph__power"
                       value={String(territoryPower(editDef))}
                       onChange={(e) => {
-                        const n = Number(e.target.value);
-                        setPower(editKey, Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0);
+                        const raw = e.target.value.trim();
+                        if (raw === '' || raw === '-') return;
+                        const n = Number(raw);
+                        if (!Number.isFinite(n)) return;
+                        setPower(editKey, Math.max(0, Math.trunc(n)));
                       }}
                     />
                   </label>
@@ -819,18 +822,29 @@ export function MapViewPane({
                       {editIsStronghold ? (
                         <label className="admin-graph__prop">
                           HP
-                          <input
-                            type="number"
+                          <NumberField
                             min={1}
                             step={1}
                             className="admin-form__input admin-graph__power"
                             value={String(strongholdHp(editDef))}
                             onChange={(e) => {
-                              const n = Number(e.target.value);
+                              const raw = e.target.value.trim();
+                              if (raw === '' || raw === '-') return;
+                              const n = Number(raw);
+                              if (!Number.isFinite(n)) return;
                               patchTerritory(editKey, {
-                                stronghold_base_health: Number.isFinite(n) ? Math.max(1, Math.trunc(n)) : 1,
+                                stronghold_base_health: Math.max(1, Math.trunc(n)),
                                 stronghold_health: undefined,
                               });
+                            }}
+                            onBlur={(e) => {
+                              const n = Number(e.target.value);
+                              if (!Number.isFinite(n) || n < 1) {
+                                patchTerritory(editKey, {
+                                  stronghold_base_health: 1,
+                                  stronghold_health: undefined,
+                                });
+                              }
                             }}
                           />
                         </label>
@@ -841,17 +855,25 @@ export function MapViewPane({
                     <span className="admin-graph__prop">Units</span>
                     {editStacks.map((stack, i) => (
                       <span key={i} className="admin-graph__stack">
-                        <input
-                          type="number"
+                        <NumberField
                           min={1}
                           step={1}
                           className="admin-form__input admin-graph__count"
                           aria-label="Unit count"
                           value={String(stack.count)}
                           onChange={(e) => {
-                            const n = Number(e.target.value);
-                            const count = Number.isFinite(n) ? Math.max(1, Math.trunc(n)) : 1;
+                            const raw = e.target.value.trim();
+                            if (raw === '' || raw === '-') return;
+                            const n = Number(raw);
+                            if (!Number.isFinite(n)) return;
+                            const count = Math.max(1, Math.trunc(n));
                             setStacks(editKey, editStacks.map((s, j) => (j === i ? { ...s, count } : s)));
+                          }}
+                          onBlur={(e) => {
+                            const n = Number(e.target.value);
+                            if (!Number.isFinite(n) || n < 1) {
+                              setStacks(editKey, editStacks.map((s, j) => (j === i ? { ...s, count: 1 } : s)));
+                            }
                           }}
                         />
                         <select

@@ -1343,6 +1343,15 @@
   width: auto;
 }
 
+@media (max-width: 767px) {
+  .admin-form__input--narrow,
+  .admin-graph__power,
+  .admin-graph__count {
+    font-size: 16px;
+    min-height: 2.25rem;
+  }
+}
+
 .admin-form__input--readonly {
   opacity: 0.85;
   background: rgba(255, 254, 248, 0.7);
