@@ -692,49 +692,23 @@
   text-align: right;
 }
 
-/* Game stats: fixed columns + tabular nums so thead aligns with every row */
+/* Game stats: size the faction column to the name and rings; number columns stay compact. */
 .stats-modal .header-stats-table.header-stats-table--game {
-  table-layout: fixed;
-  width: 100%;
+  table-layout: auto;
+  width: max-content;
+  min-width: 100%;
   font-variant-numeric: tabular-nums;
-}
-
-.stats-modal .header-stats-table.header-stats-table--game thead th:first-child,
-.stats-modal .header-stats-table.header-stats-table--game tbody td:first-child {
-  overflow: hidden;
-  overflow-wrap: break-word;
-  word-break: normal;
 }
 
 .stats-modal .header-stats-table.header-stats-table--game th.stats-col-num,
 .stats-modal .header-stats-table.header-stats-table--game td.stats-col-num {
-  min-width: 0;
   white-space: nowrap;
   vertical-align: middle;
   text-align: right;
 }
 
-/* Phone: roomier faction column + default 0.5rem/1rem cell padding from generic table rules */
-@media (max-width: 767px) {
-  .stats-modal .header-stats-table.header-stats-table--game col.stats-game-col-faction {
-    width: 38%;
-  }
-
-  .stats-modal .header-stats-table.header-stats-table--game col.stats-game-col-num {
-    width: 10.333333%;
-  }
-}
-
-/* Desktop / tablet: tight faction col; kill 1rem right padding gap before column S */
+/* Desktop / tablet: kill 1rem right padding gap before column S */
 @media (min-width: 768px) {
-  .stats-modal .header-stats-table.header-stats-table--game col.stats-game-col-faction {
-    width: 20%;
-  }
-
-  .stats-modal .header-stats-table.header-stats-table--game col.stats-game-col-num {
-    width: 13.333333%;
-  }
-
   .stats-modal .header-stats-table.header-stats-table--game thead th:first-child,
   .stats-modal .header-stats-table.header-stats-table--game tbody td:first-child {
     padding: 0.5rem 0.35rem 0.5rem 0.45rem;
@@ -892,16 +866,8 @@
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
+  width: max-content;
   white-space: nowrap;
-}
-
-.stats-modal .stats-faction-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .stats-modal .stats-faction-row.stats-subfaction-row .stats-col-faction {
@@ -1442,14 +1408,15 @@
 
 /* Game stats (≥768px: flex lock sets real width; these stay in sync) */
 .stats-modal {
-  max-width: min(680px, 98vw);
+  width: min(880px, 96vw);
+  max-width: min(880px, 96vw);
 }
 
 /* Tablet / desktop */
 @media (min-width: 768px) {
   .stats-modal {
-    width: auto;
-    max-width: min(680px, 96vw);
+    width: min(880px, 96vw);
+    max-width: min(880px, 96vw);
   }
 
   .unit-stats-modal {
@@ -1473,7 +1440,8 @@
   }
 
   .stats-modal {
-    max-width: min(720px, 95vw);
+    width: min(960px, 96vw);
+    max-width: min(960px, 96vw);
   }
 
   .unit-stats-modal {
@@ -1539,8 +1507,8 @@
 @media (min-width: 768px) {
   /* Same flex fix as before: explicit width so the modal doesn’t balloon to table intrinsic size */
   .modal-overlay > .modal.stats-modal {
-    width: min(680px, 96vw) !important;
-    max-width: min(680px, 96vw) !important;
+    width: min(880px, 96vw) !important;
+    max-width: min(880px, 96vw) !important;
     min-width: 0 !important;
     flex: 0 0 auto;
     box-sizing: border-box;
@@ -1584,8 +1552,8 @@
 
 @media (min-width: 1024px) {
   .modal-overlay > .modal.stats-modal {
-    width: min(720px, 95vw) !important;
-    max-width: min(720px, 95vw) !important;
+    width: min(960px, 96vw) !important;
+    max-width: min(960px, 96vw) !important;
   }
 
   .modal-overlay > .modal.unit-stats-modal {
@@ -1686,8 +1654,8 @@
   /* Game stats: readable on small screens (not full-bleed stretch) */
   .modal.stats-modal {
     min-width: 0 !important;
-    width: min(22rem, calc(100vw - 1rem)) !important;
-    max-width: min(22rem, calc(100vw - 1rem)) !important;
+    width: min(36rem, calc(100vw - 1rem)) !important;
+    max-width: min(36rem, calc(100vw - 1rem)) !important;
     max-height: min(90dvh, 92vh) !important;
     border-width: 2px;
     border-radius: 8px;
@@ -1758,7 +1726,8 @@
   }
 
   .stats-modal .header-stats-table {
-    width: 100%;
+    width: max-content;
+    min-width: 100%;
   }
 
   .unit-stats-modal .header-stats-table {
@@ -1836,7 +1805,6 @@
     padding: 0.28rem 0.4rem;
   }
 
-  .stats-modal .header-stats-table th.stats-col-faction,
   .unit-stats-modal .header-stats-table th.stats-col-unit {
     min-width: 0;
   }

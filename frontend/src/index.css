@@ -169,8 +169,8 @@ button.page-menu-btn:hover:not(:disabled) {
   /* Game stats: readable width — full bleed was stretching the table */
   .modal.stats-modal {
     min-width: 0 !important;
-    width: min(100%, 26rem) !important;
-    max-width: min(100%, 26rem) !important;
+    width: min(36rem, calc(100vw - 1rem)) !important;
+    max-width: min(36rem, calc(100vw - 1rem)) !important;
     max-height: min(92dvh, 92vh) !important;
     border-radius: 8px;
   }

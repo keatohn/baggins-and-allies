@@ -142,7 +142,7 @@ export function GameStatsModal({
               </button>
             )}
             {fd?.icon && <img className="stats-faction-icon" src={fd.icon} alt="" aria-hidden />}
-            <span className="stats-faction-name">{fd?.name ?? fid}</span>
+            <span>{fd?.name ?? fid}</span>
             {rings.length > 0 && (
               <span className="stats-faction-rings">
                 {rings.map((ring) => (
