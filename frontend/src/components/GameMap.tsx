@@ -3149,7 +3149,10 @@ function GameMap({
             setValidDropTargets(new Set());
             return;
           }
-          const effectiveSeaCap = backendReachLand ? Math.max(seaCap, availableLandInstanceIds!.length) : seaCap;
+          // Boats already in the zone: seaCap is onboard capacity minus pending loads.
+          // seaCap 0 with backend reach means boats arrive via a pending sail; those destinations
+          // are already limited to remaining slots, so do not raise the count to the whole stack.
+          const effectiveSeaCap = seaCap > 0 ? seaCap : availableLandInstanceIds!.length;
           moveMaxCount = Math.min(moveMaxCount, effectiveSeaCap);
           if (instanceIdsToUse && instanceIdsToUse.length > moveMaxCount) {
             instanceIdsToUse = instanceIdsToUse.slice(0, moveMaxCount);

@@ -273,7 +273,7 @@ def adjacent_enemy_land_unit_count(
     unit_defs: dict[str, "UnitDefinition"],
 ) -> int:
     """Enemy land units on territories adjacent to this one (local border pressure)."""
-    from backend.engine.queries import _is_naval_unit
+    from backend.engine.queries import _is_water_boat
 
     tdef = td.get(territory_id)
     if not tdef:
@@ -292,7 +292,7 @@ def adjacent_enemy_land_unit_count(
             ufd = fd.get(uf)
             if ufd and getattr(ufd, "alliance", "") == our_alliance:
                 continue
-            if _is_naval_unit(unit_defs.get(u.unit_id)):
+            if _is_water_boat(unit_defs.get(u.unit_id)):
                 continue
             total += 1
     return total
@@ -470,7 +470,7 @@ def count_our_land_units_on_territory(
     faction_defs: dict | None = None,
 ) -> int:
     """Our land units (non-naval) on this territory, including subfactions we command."""
-    from backend.engine.queries import _is_naval_unit
+    from backend.engine.queries import _is_water_boat
 
     terr = state.territories.get(territory_id)
     if not terr:
@@ -479,7 +479,7 @@ def count_our_land_units_on_territory(
     for u in getattr(terr, "units", []) or []:
         if not faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), faction_id):
             continue
-        if _is_naval_unit(unit_defs.get(u.unit_id)):
+        if _is_water_boat(unit_defs.get(u.unit_id)):
             continue
         n += 1
     return n

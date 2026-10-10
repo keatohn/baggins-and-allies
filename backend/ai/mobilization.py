@@ -59,7 +59,7 @@ def _remaining_land_capacity(state, territory_id: str, territory_info: dict, ud)
     if territory_info.get("home_unit_capacity"):
         return 0  # Home handled separately
     already = sum(
-        sum(u.get("count", 0) for u in pm.units if not _is_naval_unit(ud.get(u.get("unit_id"))))
+        sum(u.get("count", 0) for u in pm.units if not _is_naval_unit(ud.get(u.get("unit_id"))) and not _is_river_unit(ud.get(u.get("unit_id"))))
         for pm in (state.pending_mobilizations or [])
         if pm.destination == territory_id
     )
@@ -241,7 +241,7 @@ def _score_land_destination(
                 prox += float(w) / (1.0 + float(d))
         score += prox * MOBILIZATION_NEED_PROXIMITY_SCALE
 
-    if marginal_land_unit_id and not _is_naval_unit(ud.get(marginal_land_unit_id)):
+    if marginal_land_unit_id and not _is_naval_unit(ud.get(marginal_land_unit_id)) and not _is_river_unit(ud.get(marginal_land_unit_id)):
         tdef_m = td.get(territory_id)
         is_sh = bool(tdef_m and getattr(tdef_m, "is_stronghold", False))
         is_cap = is_faction_capital_territory(territory_id, fd)
@@ -374,7 +374,7 @@ def decide_mobilization(ctx: AIContext):
     for p in purchased or []:
         uid = p.get("unit_id")
         c = int(p.get("count", 0) or 0)
-        if c > 0 and uid and not _is_naval_unit(ud.get(uid)):
+        if c > 0 and uid and not _is_naval_unit(ud.get(uid)) and not _is_river_unit(ud.get(uid)):
             preview_land_uid = uid
             break
     mobilization_marginal_by_f_cache: dict[str, dict[str, list]] = {}

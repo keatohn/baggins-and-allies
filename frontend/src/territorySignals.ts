@@ -30,8 +30,8 @@ export function territorySignalRelation(
 ): Exclude<SignalAppliesTo, 'any'> | null {
   if (!myAlliance || !territory) return null;
   const terrain = (territory.terrain || '').toLowerCase();
-  const isSea = terrain === 'sea' || SEA_ZONE_ID.test(territoryId);
-  if (territory.ownable === false || isSea) return null;
+  const isWater = terrain === 'sea' || terrain === 'river' || SEA_ZONE_ID.test(territoryId);
+  if (territory.ownable === false || isWater) return null;
   const owner = (territory.owner || '').trim();
   if (!owner || owner.toLowerCase() === 'neutral') return 'neutral';
   const ownerAlliance = factionAlliance(owner);

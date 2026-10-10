@@ -20,7 +20,7 @@ from collections.abc import Callable
 from backend.engine.actions import Action, move_units, end_phase
 from backend.engine.definitions import faction_acts_as
 from backend.engine.movement import (
-    _is_sea_zone,
+    _is_water_zone,
     get_charge_max_gain_over_moves,
     resolve_territory_key_in_state,
 )
@@ -28,8 +28,7 @@ from backend.engine.queries import (
     get_movable_units,
     get_unit_move_targets,
     get_unit_faction,
-    _is_naval_unit,
-    _is_river_unit,
+    _is_water_boat,
     filter_unit_instances_that_can_reach,
     validate_action,
 )
@@ -294,7 +293,7 @@ def _pending_cavalry_count_to_territory(
             u = by_id.get(iid)
             if not u or not faction_acts_as(faction_defs, get_unit_faction(u, ud), faction_id):
                 continue
-            if _is_naval_unit(ud.get(u.unit_id)):
+            if _is_water_boat(ud.get(u.unit_id)):
                 continue
             if _is_cavalry_combat(ud, u.unit_id):
                 n += 1
@@ -365,9 +364,7 @@ def _prune_empty_open_space_move(
         return unit_ids[:1]
 
     def _land_movable(u) -> bool:
-        return not _is_naval_unit(ud.get(getattr(u, "unit_id", ""))) and not _is_river_unit(
-            ud.get(getattr(u, "unit_id", ""))
-        )
+        return not _is_water_boat(ud.get(getattr(u, "unit_id", "")))
 
     land_units = [u for u in units_here if _land_movable(u)]
     if not land_units:
@@ -444,7 +441,7 @@ def _land_unit_count_moving(
     for u in getattr(terr, "units", []) or []:
         if getattr(u, "instance_id", "") not in want:
             continue
-        if _is_naval_unit(ud.get(u.unit_id)):
+        if _is_water_boat(ud.get(u.unit_id)):
             continue
         n += 1
     return n
@@ -518,10 +515,10 @@ def _pick_must_attack_move(
         to_def = td.get(to_tid)
         if not from_def or not to_def:
             continue
-        if not _is_sea_zone(from_def):
+        if not _is_water_zone(from_def):
             continue
-        to_land = not _is_sea_zone(to_def)
-        to_enemy_sea = _is_sea_zone(to_def) and _is_enemy_territory(
+        to_land = not _is_water_zone(to_def)
+        to_enemy_sea = _is_water_zone(to_def) and _is_enemy_territory(
             state, to_tid, faction_id, fd, ud
         )
         if not (to_land or to_enemy_sea):
@@ -541,7 +538,7 @@ def _pick_must_attack_move(
             land_ids = [
                 u.instance_id
                 for u in (getattr(from_territory, "units", []) or [])
-                if u.instance_id in ids_set and not _is_naval_unit(ud.get(u.unit_id))
+                if u.instance_id in ids_set and not _is_water_boat(ud.get(u.unit_id))
             ]
             if not land_ids:
                 continue
@@ -617,7 +614,7 @@ def _last_resort_must_attack_move(
     # 1) Single-unit attempts (naval -> enemy sea, land -> land sea raid)
     for from_tid in sorted(sea_from):
         from_def = td.get(from_tid)
-        if not from_def or not _is_sea_zone(from_def):
+        if not from_def or not _is_water_zone(from_def):
             continue
         from_territory = state.territories.get(from_tid)
         if not from_territory:
@@ -640,15 +637,15 @@ def _last_resort_must_attack_move(
                 to_def = td.get(to_tid)
                 if not to_def:
                     continue
-                to_land = not _is_sea_zone(to_def)
-                to_enemy_sea = _is_sea_zone(to_def) and _is_enemy_territory(
+                to_land = not _is_water_zone(to_def)
+                to_enemy_sea = _is_water_zone(to_def) and _is_enemy_territory(
                     state, to_tid, faction_id, fd, ud
                 )
                 if to_land:
-                    if _is_naval_unit(ud.get(u.unit_id)):
+                    if _is_water_boat(ud.get(u.unit_id)):
                         continue
                 elif to_enemy_sea:
-                    if not _is_naval_unit(ud.get(u.unit_id)):
+                    if not _is_water_boat(ud.get(u.unit_id)):
                         continue
                 else:
                     continue
@@ -684,7 +681,7 @@ def _last_resort_must_attack_move(
     # 2) Batch sea raid: all movable land on this sea hex that share a charge path to to_tid
     for from_tid in sorted(sea_from):
         from_def = td.get(from_tid)
-        if not from_def or not _is_sea_zone(from_def):
+        if not from_def or not _is_water_zone(from_def):
             continue
         from_territory = state.territories.get(from_tid)
         if not from_territory:
@@ -700,7 +697,7 @@ def _last_resort_must_attack_move(
             if getattr(u, "instance_id", "")
             and u.instance_id not in pending_unit_ids
             and u.instance_id in movable_iids
-            and not _is_naval_unit(ud.get(u.unit_id))
+            and not _is_water_boat(ud.get(u.unit_id))
         ]
         if len(land_iids) < 2:
             continue
@@ -713,7 +710,7 @@ def _last_resort_must_attack_move(
                 if not t or t == from_tid:
                     continue
                 tdf = td.get(t)
-                if not tdf or _is_sea_zone(tdf):
+                if not tdf or _is_water_zone(tdf):
                     continue
                 target_sets.setdefault(t, set()).add(iid)
         for to_tid in sorted(target_sets.keys()):
@@ -1277,7 +1274,7 @@ def decide_combat_move(ctx: AIContext):
         for u in getattr(terr_from_ms, "units", []) or []:
             if getattr(u, "instance_id", "") not in ids_ms:
                 continue
-            if _is_naval_unit(ud.get(u.unit_id)):
+            if _is_water_boat(ud.get(u.unit_id)):
                 continue
             land_moving += 1
             pc = get_unit_power_cost(ud.get(u.unit_id)) or 0
@@ -1376,12 +1373,12 @@ def decide_combat_move(ctx: AIContext):
     # Sea -> land (offload/sea raid): only land units may move; naval units cannot go on land (backend rule)
     from_def = td.get(from_tid)
     to_def = td.get(to_tid)
-    if from_def and to_def and _is_sea_zone(from_def) and not _is_sea_zone(to_def):
+    if from_def and to_def and _is_water_zone(from_def) and not _is_water_zone(to_def):
         terr = state.territories.get(from_tid)
         ids_set = set(unit_ids)
         unit_ids = [
             u.instance_id for u in (getattr(terr, "units", []) or [])
-            if u.instance_id in ids_set and not _is_naval_unit(ud.get(u.unit_id))
+            if u.instance_id in ids_set and not _is_water_boat(ud.get(u.unit_id))
         ]
         if not unit_ids:
             if can_end_phase:

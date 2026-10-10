@@ -3876,9 +3876,9 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         ...(specials?.ram && { hasRam: true }),
         ...(archetype === 'siegework' && { siegeworkArchetype: true }),
       };
+      const combatTerrain = currentTerritoryData[effectiveCombat.territory]?.terrain;
       if (
-        currentTerritoryData[effectiveCombat.territory]?.terrain === 'sea'
-        || currentTerritoryData[effectiveCombat.territory]?.terrain === 'river'
+        (combatTerrain === 'sea' || combatTerrain === 'river')
         && isNavalUnitId(unit.unit_id)
         && backendTerritory?.units?.length
       ) {

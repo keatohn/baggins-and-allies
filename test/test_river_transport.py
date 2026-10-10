@@ -1,6 +1,6 @@
 """River zones use the ship transport path with a separate hull and a shared bank power pool."""
 
-from backend.engine.actions import mobilize_units, move_units, purchase_units
+from backend.engine.actions import initiate_combat, mobilize_units, move_units, purchase_units
 from backend.engine.definitions import (
     CampDefinition,
     FactionDefinition,
@@ -14,10 +14,13 @@ from backend.engine.movement import (
 )
 from backend.engine.queries import (
     get_forced_naval_combat_instance_ids,
+    get_movable_units,
+    get_unit_move_targets,
+    limit_embark_destinations_to_capacity,
     river_mobilization_capacity_total,
     validate_action,
 )
-from backend.engine.reducer import _apply_pending_mobilizations
+from backend.engine.reducer import _apply_pending_mobilizations, apply_action
 from backend.engine.state import GameState, PendingMobilization, TerritoryState, Unit, UnitStack
 from backend.signals import classify_territory_for_signal
 
@@ -273,6 +276,97 @@ def test_mobilizing_onto_hostile_river_forces_the_defender_to_fight_or_leave():
         state, "mordor", unit_defs, territory_defs, faction_defs
     )
     assert forced == ["enemy_1"]
+
+
+def test_river_raid_initiate_accepts_river_zone():
+    """A raid staged from a river uses the same initiate path as a sea raid."""
+    state, unit_defs, territory_defs, faction_defs, camps, ports = _board()
+    unit_defs = dict(unit_defs)
+    unit_defs["orc"] = _unit_def("orc", "mordor", "infantry")
+    boat = _piece("boat_1", "boat")
+    passenger = _piece("inf_1", "infantry")
+    passenger.loaded_onto = boat.instance_id
+    defender = _piece("orc_1", "orc")
+    state.territories["river_upper"].units.extend([boat, passenger])
+    state.territories["far_bank"].units.append(defender)
+    state.territories["far_bank"].owner = "mordor"
+    state.current_faction = "gondor"
+    state.phase = "combat"
+
+    state, _events = apply_action(
+        state,
+        initiate_combat(
+            "gondor",
+            "far_bank",
+            dice_rolls={"attacker": [1], "defender": [6]},
+            sea_zone_id="river_upper",
+        ),
+        unit_defs,
+        territory_defs,
+        faction_defs,
+        camps,
+        ports,
+    )
+
+    assert state.active_combat is None
+    assert any(u.instance_id == "inf_1" for u in state.territories["far_bank"].units)
+    assert any(u.instance_id == "boat_1" for u in state.territories["river_upper"].units)
+    assert all(u.instance_id != "boat_1" for u in state.territories["far_bank"].units)
+
+
+def test_embark_destinations_stop_at_rowboat_capacity():
+    """Seven capacity-1 rowboats can take 7 of 12 warriors, not the whole stack."""
+    state, unit_defs, territory_defs, faction_defs, camps, ports = _board()
+    unit_defs = dict(unit_defs)
+    unit_defs["skiff"] = _unit_def("skiff", "gondor", "river", transport=1)
+    state.phase = "non_combat_move"
+    state.current_faction = "gondor"
+    for i in range(7):
+        state.territories["river_anduin"].units.append(_piece(f"skiff_{i}", "skiff"))
+    infantry_ids = [f"inf_{i}" for i in range(12)]
+    for iid in infantry_ids:
+        state.territories["bank"].units.append(_piece(iid, "infantry"))
+
+    rows = []
+    for info in get_movable_units(state, "gondor", unit_defs, faction_defs):
+        targets, routes = get_unit_move_targets(
+            state, info["instance_id"], unit_defs, territory_defs, faction_defs,
+        )
+        rows.append({
+            "territory": info["territory_id"],
+            "unit": info,
+            "destinations": targets,
+            "charge_routes": routes,
+        })
+    offered_before = sum(
+        1 for row in rows
+        if row["unit"]["unit_id"] == "infantry" and "river_anduin" in row["destinations"]
+    )
+    assert offered_before == 12
+    limit_embark_destinations_to_capacity(
+        rows, state, "gondor", unit_defs, territory_defs, faction_defs, state.phase,
+    )
+    offered_after = sum(
+        1 for row in rows
+        if row["unit"]["unit_id"] == "infantry" and "river_anduin" in row["destinations"]
+    )
+    assert offered_after == 7
+
+    def load(ids: list[str]):
+        return validate_action(
+            state,
+            move_units("gondor", "bank", "river_anduin", ids, move_type="load"),
+            unit_defs,
+            territory_defs,
+            faction_defs,
+            camps,
+            ports,
+        )
+
+    assert load(infantry_ids[:7]).valid
+    too_many = load(infantry_ids[:8])
+    assert not too_many.valid
+    assert "transport capacity" in (too_many.error or "")
 
 
 def test_river_is_not_a_signal_target():

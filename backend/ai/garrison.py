@@ -8,7 +8,7 @@ the destination that themselves could reach the origin (threat relief).
 
 from backend.engine.movement import get_reachable_territories_for_unit
 from backend.engine.definitions import faction_acts_as
-from backend.engine.queries import _is_naval_unit, get_unit_faction
+from backend.engine.queries import _is_water_boat, get_unit_faction
 from backend.engine.state import Unit
 
 from backend.ai.formulas import get_unit_power_cost
@@ -46,7 +46,7 @@ def move_attacks_enemy_stack_that_threatens_origin(
                 continue
             if fd.get(uf) and getattr(fd.get(uf), "alliance", "") == our_alliance:
                 continue
-            if _is_naval_unit(ud.get(u.unit_id)):
+            if _is_water_boat(ud.get(u.unit_id)):
                 continue
             base_mov = getattr(u, "base_movement", 0) or 0
             if base_mov <= 0:
@@ -105,7 +105,7 @@ def prune_move_unit_ids_for_garrison_floor(
     for u in getattr(terr, "units", []) or []:
         if not faction_acts_as(fd, get_unit_faction(u, ud), faction_id):
             continue
-        if _is_naval_unit(ud.get(u.unit_id)):
+        if _is_water_boat(ud.get(u.unit_id)):
             continue
         land_ids.append(u.instance_id)
         by_iid[u.instance_id] = u

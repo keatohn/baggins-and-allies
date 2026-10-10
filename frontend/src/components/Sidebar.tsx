@@ -15,7 +15,9 @@ type UnitDefsSidebar = Record<string, {
 
 function isNavalUnitType(unitId: string, unitDefs: UnitDefsSidebar): boolean {
   const d = unitDefs[unitId];
-  return d?.archetype === 'naval' || !!(d?.tags && d.tags.includes('naval'));
+  const arch = d?.archetype;
+  const tags = d?.tags;
+  return arch === 'naval' || arch === 'river' || !!(tags && (tags.includes('naval') || tags.includes('river')));
 }
 
 /**

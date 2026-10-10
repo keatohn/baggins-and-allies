@@ -45,7 +45,7 @@ export function isFordCrosser(ud: { specials?: string[]; tags?: string[] } | und
 export function usesFordEscortBudget(ud: { archetype?: string; tags?: string[]; specials?: string[] } | undefined): boolean {
   if (!ud) return false;
   if (ud.archetype === 'aerial' || ud.tags?.includes('aerial')) return false;
-  if (ud.archetype === 'naval' || ud.tags?.includes('naval')) return false;
+  if (ud.archetype === 'naval' || ud.archetype === 'river' || ud.tags?.includes('naval') || ud.tags?.includes('river')) return false;
   if (isFordCrosser(ud)) return false;
   if (!ud.tags?.includes('transportable')) return false;
   return true;
@@ -128,7 +128,7 @@ export function directFordOnlyLandPair(
   if (!ta || !tb) return false;
   const isSeaId = (id: string) => {
     const d = territoryData[resolveTerritoryGraphKey(id, territoryData)];
-    return Boolean(d?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(id));
+    return Boolean(d?.terrain === 'sea' || d?.terrain === 'river' || /^sea_zone_?\d+$/i.test(id));
   };
   if (isSeaId(ak) || isSeaId(bk)) return false;
   const adjA = new Set(ta.adjacent || []);

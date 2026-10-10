@@ -8,7 +8,7 @@ from collections import Counter
 
 from backend.engine.actions import initiate_combat, continue_combat, retreat
 from backend.engine.combat_sim import SimOptions, SimResult, run_simulation
-from backend.engine.movement import _is_sea_zone
+from backend.engine.movement import _is_water_zone
 from backend.engine.queries import get_retreat_options, participates_in_sea_hex_naval_combat
 
 from backend.ai.context import AIContext
@@ -280,7 +280,7 @@ def decide_combat(ctx: AIContext):
     attackers = [u for u in (getattr(attacker_territory, "units", []) or []) if getattr(u, "instance_id", "") in attacker_ids]
     defenders = [u for u in territory.units if getattr(u, "instance_id", "") not in attacker_ids]
     tdef_combat = ctx.territory_defs.get(combat.territory_id)
-    if tdef_combat and _is_sea_zone(tdef_combat):
+    if tdef_combat and _is_water_zone(tdef_combat):
         ud = ctx.unit_defs
         attackers = [u for u in attackers if participates_in_sea_hex_naval_combat(u, ud.get(u.unit_id))]
         defenders = [u for u in defenders if participates_in_sea_hex_naval_combat(u, ud.get(u.unit_id))]

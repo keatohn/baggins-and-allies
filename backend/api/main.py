@@ -140,6 +140,7 @@ from backend.engine.queries import (
     get_purchasable_units,
     get_movable_units,
     get_unit_move_targets,
+    limit_embark_destinations_to_capacity,
     get_aerial_units_must_move,
     get_mobilization_territories,
     get_mobilization_river_zones,
@@ -184,7 +185,7 @@ from backend.engine.movement import (
     resolve_territory_key_in_state,
     water_transport_relation,
 )
-from backend.engine.queries import _is_naval_unit, get_valid_offload_sea_zones, participates_in_sea_hex_naval_combat
+from backend.engine.queries import _is_water_boat, get_valid_offload_sea_zones, participates_in_sea_hex_naval_combat
 from backend.engine.combat_sim import apply_sim_ring_boosts, run_simulation, SimOptions
 from backend.engine.combat_specials import (
     compute_battle_specials_and_modifiers,
@@ -2877,6 +2878,9 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                     "destinations": targets,
                     "charge_routes": charge_routes,
                 })
+            limit_embark_destinations_to_capacity(
+                actions["moveable_units"], slot_check_state, faction, ud, td, fd, phase,
+            )
             if phase == "combat_move":
                 # Use state after applying pending combat moves so boats that will receive a load (from a pending load move) are included
                 state_after_combat_moves = get_state_after_pending_moves(state, "combat_move", ud, td, fd)
@@ -2908,7 +2912,7 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                             units_by_iid = {u.instance_id: u for u in from_territory.units}
                             for iid in getattr(pm, "unit_instance_ids", []) or []:
                                 u = units_by_iid.get(iid)
-                                if u and _is_naval_unit(ud.get(u.unit_id)):
+                                if u and _is_water_boat(ud.get(u.unit_id)):
                                     boat_ids_declared_attack.add(iid)
                 effective_boat_ids = loaded_boat_ids - boat_ids_declared_attack
                 actions["loaded_naval_must_attack_instance_ids"] = list(effective_boat_ids)

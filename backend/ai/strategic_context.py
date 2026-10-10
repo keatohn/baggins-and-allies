@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from backend.engine.queries import get_mobilization_capacity, _is_naval_unit
+from backend.engine.queries import get_mobilization_capacity, _is_water_boat
 from backend.engine.queries import get_unit_faction
-from backend.engine.movement import _is_sea_zone
+from backend.engine.movement import _is_water_zone
 
 from backend.ai.context import AIContext
 from backend.ai.defense_sim import is_faction_capital_territory
@@ -97,7 +97,7 @@ def _naval_sea_zone_bonuses(
             if adj_id == zid:
                 continue
             adj_def = td.get(adj_id)
-            if adj_def and getattr(adj_def, "terrain_type", "").lower() == "sea":
+            if adj_def and _is_water_zone(adj_def):
                 continue
             terr = state.territories.get(adj_id)
             if not terr:
@@ -110,7 +110,7 @@ def _naval_sea_zone_bonuses(
                 continue
             for u in getattr(terr, "units", []) or []:
                 uf = get_unit_faction(u, ud)
-                if uf and not _is_naval_unit(ud.get(u.unit_id)):
+                if uf and not _is_water_boat(ud.get(u.unit_id)):
                     enemy_presence += 1
                     break
         if enemy_presence > 0:
@@ -231,7 +231,7 @@ def build_strategic_turn_context(ctx: AIContext) -> StrategicTurnContext:
             if not o_fd or getattr(o_fd, "alliance", "") != allied_tag:
                 continue
             tdef = td.get(tid)
-            if not tdef or _is_sea_zone(tdef):
+            if not tdef or _is_water_zone(tdef):
                 continue
             p_ally = _pressure_for_territory(tid, state, faction_id, fd, td, ud)
             adj_local = adjacent_enemy_land_unit_count(

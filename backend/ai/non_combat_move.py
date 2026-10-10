@@ -10,7 +10,7 @@ from collections import defaultdict
 
 from backend.engine.actions import Action, move_units, end_phase
 from backend.engine.movement import (
-    _is_sea_zone,
+    _is_water_zone,
     instance_allowed_in_new_move_from_territory,
     is_friendly_territory_for_landing,
 )
@@ -19,7 +19,7 @@ from backend.engine.queries import (
     get_movable_units,
     get_unit_move_targets,
     get_unit_faction,
-    _is_naval_unit,
+    _is_water_boat,
     filter_unit_instances_that_can_reach,
 )
 
@@ -132,7 +132,7 @@ def _count_our_land_units(state, territory_id: str, faction_id: str, ud, faction
     for u in getattr(terr, "units", []) or []:
         if not faction_acts_as(faction_defs, get_unit_faction(u, ud), faction_id):
             continue
-        if _is_naval_unit(ud.get(u.unit_id)):
+        if _is_water_boat(ud.get(u.unit_id)):
             continue
         n += 1
     return n
@@ -177,7 +177,7 @@ def _elite_into_undermanned_threat_penalty(
                 continue
             if not faction_acts_as(fd, get_unit_faction(u, ud), faction_id):
                 continue
-            if _is_naval_unit(ud.get(u.unit_id)):
+            if _is_water_boat(ud.get(u.unit_id)):
                 continue
             moving_land += 1
             if _unit_is_elite(ud, u.unit_id):
@@ -353,7 +353,7 @@ def _n_land_movers(
             continue
         if not faction_acts_as(faction_defs, get_unit_faction(u, ud), faction_id):
             continue
-        if _is_naval_unit(ud.get(u.unit_id)):
+        if _is_water_boat(ud.get(u.unit_id)):
             continue
         n += 1
     return n
@@ -615,8 +615,8 @@ def decide_non_combat_move(ctx: AIContext) -> Action | None:
         if (
             from_def
             and to_def
-            and _is_sea_zone(from_def)
-            and not _is_sea_zone(to_def)
+            and _is_water_zone(from_def)
+            and not _is_water_zone(to_def)
             and owner_to
             and owner_to != faction_id
             and _owner_is_allied_ally(owner_to, faction_id, fd)
@@ -641,12 +641,12 @@ def decide_non_combat_move(ctx: AIContext) -> Action | None:
     # Sea -> land (offload): only land units may move; naval units cannot go on land (backend rule)
     from_def = td.get(from_tid)
     to_def = td.get(to_tid)
-    if from_def and to_def and _is_sea_zone(from_def) and not _is_sea_zone(to_def):
+    if from_def and to_def and _is_water_zone(from_def) and not _is_water_zone(to_def):
         terr = state.territories.get(from_tid)
         ids_set = set(unit_ids)
         unit_ids = [
             u.instance_id for u in (getattr(terr, "units", []) or [])
-            if u.instance_id in ids_set and not _is_naval_unit(ud.get(u.unit_id))
+            if u.instance_id in ids_set and not _is_water_boat(ud.get(u.unit_id))
         ]
         if not unit_ids:
             return end_phase(faction_id) if can_end else None

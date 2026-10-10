@@ -7,12 +7,14 @@ export function canonicalSeaZoneId(tid: string): string {
   return m ? `sea_zone_${m[1]}` : tid.trim();
 }
 
-function isSeaTerrain(
+function waterDomain(
   tid: string,
   territoryData: Record<string, { terrain?: string; adjacent?: string[] } | undefined>,
-): boolean {
+): 'sea' | 'river' | null {
   const t = territoryData[tid];
-  return (t?.terrain === 'sea') || /^sea_zone_?\d+$/i.test(tid);
+  if (t?.terrain === 'river') return 'river';
+  if (t?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid)) return 'sea';
+  return null;
 }
 
 function resolveDataKey(
@@ -26,8 +28,8 @@ function resolveDataKey(
 }
 
 /**
- * Sea zones reachable by sailing from fromSeaId (BFS over sea only), mirroring backend
- * get_sea_zones_reachable_by_sail: cannot expand through enemy-occupied sea, but may end in one.
+ * Water zones reachable by sailing from fromSeaId, staying in that hull's domain
+ * (sea or river, never both). Mirrors backend get_sea_zones_reachable_by_sail.
  */
 export function seaZonesReachableBySailFrom(
   fromSeaId: string,
@@ -61,7 +63,8 @@ export function seaZonesReachableBySailFrom(
   };
 
   const startKey = resolveDataKey(fromSeaId, territoryData);
-  if (!startKey || !isSeaTerrain(startKey, territoryData)) {
+  const domain = startKey ? waterDomain(startKey, territoryData) : null;
+  if (!startKey || !domain) {
     return result;
   }
 
@@ -76,7 +79,7 @@ export function seaZonesReachableBySailFrom(
     if (!tdef) continue;
     for (const adjRaw of tdef.adjacent || []) {
       const adjKey = resolveDataKey(adjRaw, territoryData);
-      if (!adjKey || !isSeaTerrain(adjKey, territoryData)) continue;
+      if (!adjKey || waterDomain(adjKey, territoryData) !== domain) continue;
       const newSteps = steps + 1;
       if (newSteps > maxSteps) continue;
 

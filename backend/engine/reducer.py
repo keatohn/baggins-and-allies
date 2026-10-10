@@ -66,7 +66,6 @@ from backend.engine.movement import (
     land_move_ford_escort_cost_for_instances,
     pending_ford_crosser_lead_move_from_origin,
     remaining_ford_escort_slots,
-    _is_sea_zone,
     _is_water_zone,
     _water_domain,
     _is_transport_boat_for_zone,
@@ -2624,7 +2623,7 @@ def _handle_initiate_combat(
     if sea_zone_id:
         sea_zone = state.territories.get(sea_zone_id)
         sea_def = territory_defs.get(sea_zone_id)
-        if not sea_zone or not sea_def or getattr(sea_def, "terrain_type", "").lower() != "sea":
+        if not sea_zone or not sea_def or not _is_water_zone(sea_def):
             raise ValueError(f"Invalid sea zone: {sea_zone_id}")
         # Skip adjacency when this territory was recorded as sea-raided (offload already applied)
         sea_raid_from = getattr(state, "territory_sea_raid_from", None) or {}
@@ -3614,7 +3613,7 @@ def _handle_continue_combat(
         passenger_lookup_units = attacker_territory.units
 
     territory_def = territory_defs.get(combat.territory_id)
-    if territory_def and _is_sea_zone(territory_def):
+    if territory_def and _is_water_zone(territory_def):
         attacker_units = [
             u for u in attacker_units
             if participates_in_sea_hex_naval_combat(u, unit_defs.get(u.unit_id))

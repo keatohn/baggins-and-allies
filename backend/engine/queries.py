@@ -517,6 +517,11 @@ def _is_naval_unit(unit_def: UnitDefinition | None) -> bool:
     )
 
 
+def _is_water_boat(unit_def: UnitDefinition | None) -> bool:
+    """Ship or rowboat. Same combat and transport rules; the hull may not change domain."""
+    return _is_naval_unit(unit_def) or _is_river_unit(unit_def)
+
+
 def participates_in_sea_hex_naval_combat(unit, unit_def: UnitDefinition | None) -> bool:
     """
     Combat in a sea or river territory: hulls (not cargo) and aerial units that are not embarked
@@ -2211,6 +2216,57 @@ def get_unit_move_targets(
     return {}, {}  # Unit not found
 
 
+def limit_embark_destinations_to_capacity(
+    moveable_rows: list[dict[str, Any]],
+    slot_state: GameState,
+    faction_id: str,
+    unit_defs: dict[str, UnitDefinition],
+    territory_defs: dict[str, TerritoryDefinition],
+    faction_defs: dict[str, FactionDefinition],
+    phase: str,
+) -> None:
+    """
+    Keep a water zone as a load destination for at most the remaining passenger slots.
+
+    Pathfinding marks the zone for every transportable unit once any slot exists. The move
+    confirm treats that list as how many may board, so consume one slot per unit.
+    """
+    slots_left: dict[str, int] = {}
+    for row in moveable_rows:
+        unit = row.get("unit") or {}
+        origin = row.get("territory") or unit.get("territory_id")
+        ud = unit_defs.get(unit.get("unit_id")) if isinstance(unit, dict) else None
+        if not is_land_unit(ud) or not is_transportable(ud) or is_aerial_unit(ud):
+            continue
+        origin_def = territory_defs.get(origin) if isinstance(origin, str) else None
+        destinations = row.get("destinations")
+        if not isinstance(destinations, dict):
+            continue
+        charge_routes = row.get("charge_routes")
+        for dest_id in list(destinations.keys()):
+            if not isinstance(dest_id, str):
+                continue
+            dest_def = territory_defs.get(dest_id)
+            if water_transport_relation(origin_def, dest_def) != "load":
+                continue
+            if dest_id not in slots_left:
+                slots_left[dest_id] = remaining_sea_load_passenger_slots(
+                    slot_state,
+                    dest_id,
+                    faction_id,
+                    unit_defs,
+                    territory_defs,
+                    phase,
+                    faction_defs,
+                )
+            if slots_left[dest_id] <= 0:
+                destinations.pop(dest_id, None)
+                if isinstance(charge_routes, dict):
+                    charge_routes.pop(dest_id, None)
+            else:
+                slots_left[dest_id] -= 1
+
+
 def filter_unit_instances_that_can_reach(
     state: GameState,
     to_territory_id: str,
@@ -2546,7 +2602,7 @@ def _faction_has_sea_raid_passengers_in_sea_zone(
         if not faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), faction_id):
             continue
         ud = unit_defs.get(u.unit_id)
-        if not is_land_unit(ud) or _is_naval_unit(ud):
+        if not is_land_unit(ud) or _is_naval_unit(ud) or _is_river_unit(ud):
             continue
         return True
     return False
@@ -2580,15 +2636,15 @@ def get_contested_territories(
         attacker_units = []
         defender_units = []
 
-        is_sea = False
+        is_water = False
         if territory_defs:
             tdef = territory_defs.get(territory_id)
-            is_sea = tdef and getattr(tdef, "terrain_type", "").lower() == "sea"
+            is_water = bool(tdef and _is_water_zone(tdef))
 
         for unit in territory.units:
             unit_faction = get_unit_faction(unit, unit_defs)
             ud = unit_defs.get(unit.unit_id)
-            if is_sea and not participates_in_sea_hex_naval_combat(unit, ud):
+            if is_water and not participates_in_sea_hex_naval_combat(unit, ud):
                 continue
             if faction_acts_as(faction_defs, unit_faction, faction_id):
                 attacker_units.append(unit)
@@ -2628,21 +2684,6 @@ def get_contested_territories(
     return result
 
 
-def get_sea_zones_adjacent_to_land(
-    land_territory_id: str,
-    territory_defs: dict[str, TerritoryDefinition],
-) -> list[str]:
-    """Sea zone IDs that are adjacent to the given land territory (for offload targets)."""
-    land_def = territory_defs.get(land_territory_id)
-    if not land_def or _is_sea_zone(land_def):
-        return []
-    adj = getattr(land_def, "adjacent", []) or []
-    return [
-        tid for tid in adj
-        if territory_defs.get(tid) and _is_sea_zone(territory_defs.get(tid))
-    ]
-
-
 def get_valid_offload_sea_zones(
     from_territory: str,
     to_land_territory: str,
@@ -2670,15 +2711,17 @@ def get_valid_offload_sea_zones(
     drivers = sea_drivers or river_drivers
     if not drivers:
         return []
-    if sea_drivers:
-        adjacent_seas = set(get_sea_zones_adjacent_to_land(to_land_territory, territory_defs))
-    else:
-        land_def = territory_defs.get(to_land_territory)
-        adjacent_seas = set()
-        if land_def and not _is_water_zone(land_def):
-            for tid in getattr(land_def, "adjacent", []) or []:
-                if _is_river_zone(territory_defs.get(tid)):
-                    adjacent_seas.add(tid)
+    # Same offload graph for both hulls: water zones of this boat's domain that touch the land.
+    want_river = bool(river_drivers)
+    land_def = territory_defs.get(to_land_territory)
+    adjacent_seas: set[str] = set()
+    if land_def and not _is_water_zone(land_def):
+        for tid in getattr(land_def, "adjacent", []) or []:
+            adj_def = territory_defs.get(tid)
+            if want_river and _is_river_zone(adj_def):
+                adjacent_seas.add(tid)
+            elif not want_river and _is_sea_zone(adj_def):
+                adjacent_seas.add(tid)
     if not adjacent_seas:
         return []
     # Sea zones reachable by sail (BFS over sea only; ignores combat_move "must attack" so empty seas count for offload)

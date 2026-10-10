@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from backend.engine.combat_sim import SimOptions, run_simulation
 from backend.engine.movement import _is_water_zone, get_reachable_territories_for_unit
-from backend.engine.queries import _is_naval_unit
+from backend.engine.queries import _is_water_boat
 from backend.engine.state import Unit
 from backend.engine.definitions import faction_acts_as
 from backend.engine.utils import get_unit_faction
@@ -64,7 +64,7 @@ def _our_land_defender_units(state, territory_id: str, faction_id: str, ud, fact
     for u in getattr(terr, "units", []) or []:
         if not faction_acts_as(faction_defs, get_unit_faction(u, ud), faction_id):
             continue
-        if _is_naval_unit(ud.get(u.unit_id)):
+        if _is_water_boat(ud.get(u.unit_id)):
             continue
         out.append(u)
     return out
@@ -101,7 +101,7 @@ def _coalition_land_defender_units(
         uf = get_unit_faction(u, ud)
         if not uf:
             continue
-        if _is_naval_unit(ud.get(u.unit_id)):
+        if _is_water_boat(ud.get(u.unit_id)):
             continue
         if uf == faction_id or _same_alliance_non_empty(uf, faction_id, fd):
             out.append(u)
@@ -330,7 +330,7 @@ def defender_stacks_after_hypothetical_move(
                     continue
                 if not faction_acts_as(fd, get_unit_faction(u, ud), faction_id):
                     continue
-                if _is_naval_unit(ud.get(u.unit_id)):
+                if _is_water_boat(ud.get(u.unit_id)):
                     continue
                 extra.append(u)
     return _units_to_stacks(on_to + extra, ud)
@@ -586,7 +586,7 @@ def marginal_hold_delta_add_land_unit(
     tdef = td.get(territory_id)
     if not tdef or _is_water_zone(tdef):
         return 0.0
-    if _is_naval_unit(ud.get(extra_unit_id)):
+    if _is_water_boat(ud.get(extra_unit_id)):
         return 0.0
     if by_faction_cache is not None and territory_id not in by_faction_cache:
         by_faction_cache[territory_id] = enemy_units_reaching_by_faction(
