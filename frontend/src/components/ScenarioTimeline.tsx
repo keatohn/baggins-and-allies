@@ -138,7 +138,9 @@ export default function ScenarioTimeline({
           {events.map((event, index) => {
             const selected = event.scenarios.some((scenario) => scenario.id === selectedId);
             const count = event.scenarios.length;
+            const adminOnly = count > 0 && event.scenarios.every((scenario) => scenario.admin_only);
             const names = event.scenarios.map((scenario) => scenario.display_name).join(', ');
+            const adminNote = adminOnly ? ', admin only' : '';
             return (
               <div
                 key={event.key}
@@ -153,11 +155,12 @@ export default function ScenarioTimeline({
                   role="radio"
                   aria-checked={selected}
                   className="chronicle__marker"
-                  aria-label={count === 1 ? `${names}, ${event.label}` : `${event.label}, ${count} scenarios: ${names}`}
+                  aria-label={count === 1 ? `${names}, ${event.label}${adminNote}` : `${event.label}, ${count} scenarios: ${names}${adminNote}`}
                   onClick={() => chooseMoment(event)}
                 >
                   <span className="chronicle__frame-wrap">
                     <Frame key={event.image ?? event.age} image={event.image} age={event.age} />
+                    {adminOnly && <span className="chronicle__admin-tag">Admin</span>}
                     {count > 1 && <span className="chronicle__count">{count}</span>}
                   </span>
                   <span className="chronicle__pin-year">{event.label}</span>
@@ -239,9 +242,10 @@ function ScenarioChoice({
       type="button"
       role="radio"
       aria-checked={selected}
-      className={`chronicle__option${selected ? ' chronicle__option--active' : ''}`}
+      className={`chronicle__option${selected ? ' chronicle__option--active' : ''}${scenario.admin_only ? ' chronicle__option--admin' : ''}`}
       onClick={() => onSelect(scenario.id)}
     >
+      {scenario.admin_only && <span className="chronicle__admin-tag">Admin</span>}
       <span className="chronicle__option-name">{scenario.display_name}</span>
       <ScenarioMetaLine scenario={scenario} showYear={showYear} />
       {Array.isArray(factions) && factions.length > 0 && (

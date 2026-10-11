@@ -1375,9 +1375,19 @@ def update_profile(
 # ----- Games (create, list, join) -----
 
 @app.get("/setups")
-def get_setups(db: Session = Depends(get_db)):
-    """List available game setups (id, display_name, map_asset, timeline_image). Use setup_id in POST /games/create."""
-    return {"setups": try_list_setups_menu(db), "rule_descriptions": rule_descriptions(load_catalog(db))}
+def get_setups(
+    db: Session = Depends(get_db),
+    player: Player | None = Depends(get_current_player_optional),
+):
+    """List available game setups (id, display_name, map_asset, timeline_image). Use setup_id in POST /games/create.
+
+    Admin-only scenarios are included only for admin players, and those rows set ``admin_only``.
+    """
+    include_admin = bool(player and getattr(player, "is_admin", False))
+    return {
+        "setups": try_list_setups_menu(db, include_admin=include_admin),
+        "rule_descriptions": rule_descriptions(load_catalog(db)),
+    }
 
 
 @app.get("/audio/gains")
@@ -1634,6 +1644,8 @@ def create_game(
     setup = try_load_setup(setup_id, db)
     if not setup:
         raise HTTPException(status_code=400, detail=f"Setup not found: {setup_id}")
+    if setup.get("menu_visibility") == "admin" and not bool(getattr(player, "is_admin", False)):
+        raise HTTPException(status_code=403, detail="This scenario is available to admins only")
     try:
         ud, td, fd, cd, port_d = try_load_static_definitions(setup_id, db)
     except FileNotFoundError as e:

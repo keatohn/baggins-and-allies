@@ -114,7 +114,30 @@ def scenario_menu_entry(
         entry["optional_rules"] = optional
     if rings_rule_is_mandatory(manifest.get("special_rules")):
         entry["rings_of_power"] = True
+    if menu_visibility(manifest.get("is_active")) == "admin":
+        entry["admin_only"] = True
     return entry
+
+
+def menu_visibility(raw: Any) -> str:
+    """Create-game menu visibility: ``yes``, ``no``, or ``admin``.
+
+    ``True`` shows the scenario to everyone. The string ``"admin"`` shows it only to admins.
+    ``False``, a missing value, and anything else stay off the menu.
+    """
+    if raw is True:
+        return "yes"
+    if isinstance(raw, str) and raw.strip().lower() == "admin":
+        return "admin"
+    return "no"
+
+
+def shown_on_create_menu(manifest: dict[str, Any], *, include_admin: bool) -> bool:
+    """Whether this manifest belongs on the create-game menu for this viewer."""
+    visibility = menu_visibility(manifest.get("is_active"))
+    if visibility == "yes":
+        return True
+    return visibility == "admin" and include_admin
 
 
 def menu_order_sort_value(manifest: dict[str, Any]) -> int:
@@ -226,10 +249,11 @@ def scenario_display_from_setup_id(setup_id: str) -> dict[str, Any] | None:
     return out
 
 
-def list_setups() -> list[dict]:
-    """Return [{ id, display_name, map_asset, context, timeline_image? }, ...] for the create-game menu.
+def list_setups(*, include_admin: bool = False) -> list[dict]:
+    """Return create-game menu rows.
 
-    Requires manifest `is_active` to be exactly true (no default). Also requires non-empty context.
+    Public rows need ``is_active`` true. Admin-only rows (``is_active`` ``"admin"``) are included
+    when ``include_admin`` is true and are marked ``admin_only``. Also requires non-empty context.
     Sort order: ``manifest.menu_order`` (ascending, lower first), then setup id for stability.
     """
     rows: list[tuple[int, str, dict]] = []
@@ -249,7 +273,7 @@ def list_setups() -> list[dict]:
                 m = json.load(f)
         except (json.JSONDecodeError, OSError):
             continue
-        if m.get("is_active") is not True:
+        if not shown_on_create_menu(m, include_admin=include_admin):
             continue
         ctx = m.get("context")
         if not isinstance(ctx, dict) or not ctx:
@@ -306,6 +330,7 @@ def load_setup(setup_id: str) -> dict:
             except (TypeError, ValueError, KeyError):
                 pass
             result["prefire_penalty"] = parse_prefire_penalty_from_manifest(m.get("prefire_penalty"))
+            result["menu_visibility"] = menu_visibility(m.get("is_active"))
             from backend.engine.special_rules import attach_manifest_rules
             attach_manifest_rules(result, m)
             return result

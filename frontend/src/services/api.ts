@@ -651,7 +651,8 @@ export interface AuthPlayer {
 export interface AdminSetupListItem {
   id: string;
   display_name: string;
-  is_active?: boolean;
+  /** true = public menu, false = hidden, "admin" = create-game menu for admins only. */
+  is_active?: boolean | 'admin';
   updated_at: string | null;
 }
 
@@ -892,6 +893,8 @@ export interface SetupInfo {
   /** Special rules the player can turn on or off. They start on. */
   optional_rules?: { type: string; name: string; description?: string }[];
   subfactions?: { name: string; parent_name: string }[];
+  /** Listed on the create-game page for admins only. */
+  admin_only?: boolean;
 }
 
 async function authFetchJson<T>(url: string, body: object): Promise<T> {

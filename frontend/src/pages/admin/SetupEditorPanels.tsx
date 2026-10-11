@@ -18,6 +18,45 @@ function listToLines(arr: unknown): string {
   return Array.isArray(arr) ? (arr as string[]).join('\n') : '';
 }
 
+type MenuVisibility = 'yes' | 'no' | 'admin';
+
+function menuVisibility(raw: unknown): MenuVisibility {
+  if (raw === true) return 'yes';
+  if (typeof raw === 'string' && raw.trim().toLowerCase() === 'admin') return 'admin';
+  return 'no';
+}
+
+function MenuVisibilityPills({
+  value,
+  onChange,
+}: {
+  value: unknown;
+  onChange: (next: true | false | 'admin') => void;
+}) {
+  const current = menuVisibility(value);
+  const options: { id: MenuVisibility; label: string; stored: true | false | 'admin' }[] = [
+    { id: 'yes', label: 'Yes', stored: true },
+    { id: 'no', label: 'No', stored: false },
+    { id: 'admin', label: 'Admin only', stored: 'admin' },
+  ];
+  return (
+    <div className="admin-form__pills" role="radiogroup" aria-label="Show in create-game menu">
+      {options.map((opt) => (
+        <button
+          key={opt.id}
+          type="button"
+          role="radio"
+          aria-checked={current === opt.id}
+          className={`admin-form__pill${current === opt.id ? ' admin-form__pill--selected' : ''}`}
+          onClick={() => onChange(opt.stored)}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function fieldRow(label: string, children: React.ReactNode) {
   return (
     <div className="admin-form__row">
@@ -1230,12 +1269,16 @@ export function ManifestPanel({
         />,
       )}
       {fieldRow(
-        'Active in create-game menu',
-        <input
-          type="checkbox"
-          checked={manifest.is_active === true}
-          onChange={(e) => onManifestChange({ ...manifest, is_active: e.target.checked })}
-        />,
+        'Show in create-game menu',
+        <>
+          <MenuVisibilityPills
+            value={manifest.is_active}
+            onChange={(is_active) => onManifestChange({ ...manifest, is_active })}
+          />
+          <p className="admin-form__micro">
+            Admin only lists it for admins, with an Admin tag on the scenario card.
+          </p>
+        </>,
       )}
       {fieldRow(
         'Create-game menu order',

@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from backend.engine.definitions import timeline_image_filename
+from backend.engine.definitions import menu_visibility, timeline_image_filename
 from backend.engine.special_rules import parse_nonneg_int, parse_signed_int
 
 
@@ -294,10 +294,17 @@ def validate_setup_documents(
                     from backend.engine.subfaction_rules import subfaction_rule_errors
                     errors.extend(subfaction_rule_errors(sid, rule, units))
 
+    if "is_active" in manifest:
+        raw_active = manifest.get("is_active")
+        if raw_active is not True and raw_active is not False and not (
+            isinstance(raw_active, str) and raw_active.strip().lower() == "admin"
+        ):
+            errors.append('manifest.is_active must be true, false, or "admin"')
+
     ctx = manifest.get("context")
-    if manifest.get("is_active") is True:
+    if menu_visibility(manifest.get("is_active")) in ("yes", "admin"):
         if not isinstance(ctx, dict) or not ctx:
-            errors.append("manifest.context must be a non-empty object when is_active is true")
+            errors.append("manifest.context must be a non-empty object when the scenario is shown in the create-game menu")
 
     mo = manifest.get("menu_order")
     if mo is not None:

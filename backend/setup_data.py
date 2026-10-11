@@ -24,7 +24,9 @@ from backend.engine.definitions import (
     list_setups as list_setups_from_files,
     lobby_music_filenames,
     menu_order_sort_value,
+    menu_visibility,
     scenario_menu_entry,
+    shown_on_create_menu,
     parse_prefire_penalty_from_manifest,
     scenario_display_from_setup_id as scenario_display_from_files,
 )
@@ -165,6 +167,7 @@ def load_setup_dict_from_db(db: Session, setup_id: str) -> dict[str, Any] | None
     except (TypeError, ValueError, KeyError):
         pass
     result["prefire_penalty"] = parse_prefire_penalty_from_manifest(m.get("prefire_penalty"))
+    result["menu_visibility"] = menu_visibility(m.get("is_active"))
     from backend.engine.special_rules import attach_manifest_rules
     attach_manifest_rules(result, m)
     return result
@@ -185,9 +188,10 @@ def load_static_definitions_from_db(db: Session, setup_id: str):
     return definitions_from_snapshot(snap)
 
 
-def list_setups_menu_from_db(db: Session) -> list[dict[str, Any]]:
-    """Active setups with non-empty context (create-game menu).
+def list_setups_menu_from_db(db: Session, *, include_admin: bool = False) -> list[dict[str, Any]]:
+    """Setups with non-empty context for the create-game menu.
 
+    Public rows need ``is_active`` true. Admin-only rows are included when ``include_admin`` is true.
     Sorted by ``manifest.menu_order`` (asc), then setup id. See ``menu_order_sort_value`` in definitions.
     """
     rows: list[tuple[int, str, dict[str, Any]]] = []
@@ -196,7 +200,7 @@ def list_setups_menu_from_db(db: Session) -> list[dict[str, Any]]:
             m = json.loads(row.manifest_json)
         except json.JSONDecodeError:
             continue
-        if m.get("is_active") is not True:
+        if not shown_on_create_menu(m, include_admin=include_admin):
             continue
         ctx = m.get("context")
         if not isinstance(ctx, dict) or not ctx:
@@ -453,12 +457,12 @@ def try_load_static_definitions(setup_id: str, db: Session | None):
     return load_static_definitions_from_files(setup_id=setup_id)
 
 
-def try_list_setups_menu(db: Session | None) -> list[dict[str, Any]]:
+def try_list_setups_menu(db: Session | None, *, include_admin: bool = False) -> list[dict[str, Any]]:
     if is_files_setup_source():
-        return list_setups_from_files()
+        return list_setups_from_files(include_admin=include_admin)
     if db is not None and db_has_any_setup(db):
-        return list_setups_menu_from_db(db)
-    return list_setups_from_files()
+        return list_setups_menu_from_db(db, include_admin=include_admin)
+    return list_setups_from_files(include_admin=include_admin)
 
 
 def try_scenario_display(setup_id: str, db: Session | None) -> dict[str, Any] | None:

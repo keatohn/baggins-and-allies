@@ -67,7 +67,7 @@ export default function CreateGame() {
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<'scenario' | 'settings'>('scenario');
 
-  // Backend returns only is_active + context scenarios; frontend filter matches that contract
+  // Backend returns menu scenarios (public, plus admin-only for admins) that have context.
   const scenariosWithContext = setups.filter(
     (s) => s.context && typeof s.context === 'object' && Object.keys(s.context).length > 0
   );
