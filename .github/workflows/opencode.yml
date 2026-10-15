@@ -1,0 +1,32 @@
+
+name: OpenCode
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  opencode:
+    if: |
+      github.event.comment.user.login == github.repository_owner &&
+      startsWith(github.event.comment.body, '/opencode')
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+      issues: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Run OpenCode
+        uses: anomalyco/opencode/github@latest
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        with:
+          model: REPLACE_WITH_YOUR_FREE_MODEL_ID
