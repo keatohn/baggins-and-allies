@@ -29,4 +29,4 @@ jobs:
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
         with:
-          model: REPLACE_WITH_YOUR_FREE_MODEL_ID
+          model: opencode/mimo-v2.6-flash-free
