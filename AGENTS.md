@@ -52,6 +52,8 @@ When assigned a GitHub issue:
 
 ### GitHub Workflow
 - Use a dedicated feature branch for each issue.
+- Give the feature branch a reasonable and brief name based on the work.
+- Commit messages should also be brief and high-level.
 - Open a draft pull request linked to the issue.
 - Never push directly to main.
 - Never merge pull requests automatically.
@@ -72,3 +74,12 @@ When assigned a GitHub issue:
 - Do not ask for approval on routine technical decisions.
 - Escalate changes affecting core game mechanics,
   database migrations, security, or public APIs.
+
+## Efficient Issue Resolution
+- Start by identifying the most relevant files.
+- Avoid exploring unrelated parts of the repository.
+- Prefer targeted searches over broad codebase exploration.
+- For small bug fixes, aim for a minimal change.
+- If investigation exceeds 30 steps without identifying
+  the cause, summarize findings and report the blocker.
+- Avoid repeatedly searching the same files.
