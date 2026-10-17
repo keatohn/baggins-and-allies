@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ApiFactionStats, FactionStatEntry } from '../services/api';
+import type { ApiFactionStats, ApiRing, FactionStatEntry } from '../services/api';
 import { ringIconSrc } from '../ringsDisplay';
 import './Header.css';
 
@@ -250,6 +250,102 @@ export function GameStatsModal({
         </div>
         <p className="stats-modal-key">
           S = Strongholds | T = Territories | PP = Power production | P = Power | U = Units | UP = Unit power
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/** Rings of Power data for its modal: the game's rings plus display names for ids. */
+export interface RingsOfPowerData {
+  rings: ApiRing[];
+  /** Territory id -> display name (from setup definitions). */
+  territoryNames?: Record<string, string>;
+  /** Hero id -> unit display name (from setup definitions). */
+  heroNames?: Record<string, string>;
+}
+
+function ringBoostCell(value: number | undefined): string {
+  return (value ?? 0) > 0 ? `+${value}` : '–';
+}
+
+export function RingsOfPowerModal({
+  rings,
+  territoryNames = {},
+  heroNames = {},
+  onClose,
+}: RingsOfPowerData & { onClose: () => void }) {
+  const bearerLabel = (ring: ApiRing) => {
+    const bearer = (ring.bearer_hero_id ?? '').trim();
+    if (!bearer) return 'Any hero';
+    return heroNames[bearer] ?? bearer;
+  };
+  const returnLabel = (ring: ApiRing) => {
+    const territory = (ring.returns_to ?? '').trim();
+    if (!territory) return '–';
+    return territoryNames[territory] ?? territory;
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal rings-modal" onClick={(e) => e.stopPropagation()}>
+        <header className="modal-header">
+          <h2>Rings of Power</h2>
+          <button type="button" className="close-btn" onClick={onClose}>
+            ×
+          </button>
+        </header>
+        <div className="rings-modal-body">
+          {rings.length > 0 ? (
+            <table className="header-stats-table header-stats-table--rings">
+              <colgroup>
+                <col className="stats-rings-col-name" />
+                {[1, 2, 3, 4, 5, 6].map((i) => (
+                  <col key={i} className="stats-rings-col-num" />
+                ))}
+                <col className="stats-rings-col-text" />
+                <col className="stats-rings-col-text" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th className="stats-col-rings-name">Ring</th>
+                  <th className="stats-col-num" title="Power">P</th>
+                  <th className="stats-col-num" title="Attack boost">A</th>
+                  <th className="stats-col-num" title="Defense boost">D</th>
+                  <th className="stats-col-num" title="Extra rolls">R</th>
+                  <th className="stats-col-num" title="Hit point boost">HP</th>
+                  <th className="stats-col-num" title="Move boost">M</th>
+                  <th className="stats-col-text" title="Exclusive bearer">Bearer</th>
+                  <th className="stats-col-text" title="Territory the ring returns to">Return</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rings.map((ring) => (
+                  <tr key={ring.id}>
+                    <td className="stats-col-rings-name">
+                      <span className="rings-name-cell">
+                        <img className="rings-row-icon" src={ringIconSrc(ring.id)} alt="" aria-hidden />
+                        <span className="rings-name-text">{ring.name}</span>
+                      </span>
+                    </td>
+                    <td className="stats-col-num">{ring.power}</td>
+                    <td className="stats-col-num">{ringBoostCell(ring.attack_boost)}</td>
+                    <td className="stats-col-num">{ringBoostCell(ring.defense_boost)}</td>
+                    <td className="stats-col-num">{ringBoostCell(ring.rolls_boost)}</td>
+                    <td className="stats-col-num">{ringBoostCell(ring.hp_boost)}</td>
+                    <td className="stats-col-num">{ringBoostCell(ring.moves_boost)}</td>
+                    <td className="stats-col-text">{bearerLabel(ring)}</td>
+                    <td className="stats-col-text">{returnLabel(ring)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="stats-placeholder">No rings in this game.</p>
+          )}
+        </div>
+        <p className="rings-modal-key">
+          P = Power | A = Attack | D = Defense | R = Extra rolls | HP = Hit Points | M = Moves | Bearer = exclusive bearer | Return = return territory
         </p>
       </div>
     </div>
