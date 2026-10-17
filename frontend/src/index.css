@@ -191,6 +191,7 @@ button.page-menu-btn:hover:not(:disabled) {
   .stats-modal-body,
   .specials-modal-body,
   .unit-stats-modal-body,
+  .rings-modal-body,
   .help-modal-body {
     max-height: min(55dvh, 420px) !important;
   }

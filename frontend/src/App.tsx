@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import type { GameState, GamePhase, FactionId, GameEvent, SelectedUnit, DeclaredBattle } from './types/game';
 import { boostingRingsFromRules, highestPowerHeroUnitId, ringHoldingFactionId, ringsOnUnit } from './ringsDisplay';
 import Header from './components/Header';
-import type { UnitForStats } from './components/StatsModals';
+import type { RingsOfPowerData, UnitForStats } from './components/StatsModals';
 import { compareUnitsForStats } from './unitStatsOrder';
 import GameMap, { type PendingMoveConfirm } from './components/GameMap';
 import Sidebar from './components/Sidebar';
@@ -1002,6 +1002,22 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     }
     return out;
   }, [backendState?.rings, backendState?.territories, unitDefs]);
+
+  /** Rings of Power modal data: null when this game has no rings rule. */
+  const ringsOfPower = useMemo<RingsOfPowerData | null>(() => {
+    const rings = backendState?.rings ?? [];
+    const enabled = backendState?.rings_of_power === true || rings.length > 0;
+    if (!enabled) return null;
+    const territoryNames: Record<string, string> = {};
+    for (const [tid, t] of Object.entries(definitions?.territories ?? {})) {
+      if (t.display_name) territoryNames[tid] = t.display_name;
+    }
+    const heroNames: Record<string, string> = {};
+    for (const unit of Object.values(unitDefs)) {
+      if (unit.hero_id && !heroNames[unit.hero_id]) heroNames[unit.hero_id] = unit.name;
+    }
+    return { rings, territoryNames, heroNames };
+  }, [backendState?.rings_of_power, backendState?.rings, definitions?.territories, unitDefs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -4313,6 +4329,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         effectivePower={currentPower}
         factionStats={backendState?.faction_stats}
         ringsByFaction={ringsByFaction}
+        ringsOfPower={ringsOfPower}
         unitsByFaction={unitsByFaction}
         gameName={gameMeta?.name ?? null}
         setupDisplayName={gameMeta?.scenario?.display_name ?? null}

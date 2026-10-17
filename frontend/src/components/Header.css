@@ -307,6 +307,36 @@
   filter: brightness(0);
 }
 
+/* Rings of Power button - The One ring icon, blacked out like the unit stats icon */
+.header-rings-btn {
+  flex: 0 0 auto;
+  width: clamp(34px, 4.2vw, 40px);
+  height: clamp(34px, 4.2vw, 40px);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--parchment-dark);
+  border: 2px solid var(--ink-faded);
+  border-radius: 4px;
+  color: var(--ink);
+  cursor: pointer;
+  margin-right: 0.12rem;
+}
+
+.header-rings-btn:hover {
+  border-color: var(--ink);
+  background: var(--parchment);
+  box-shadow: 0 1px 4px var(--shadow);
+}
+
+.header-rings-icon {
+  width: clamp(24px, 3.2vw, 30px);
+  height: clamp(24px, 3.2vw, 30px);
+  object-fit: contain;
+  filter: brightness(0);
+}
+
 /* Stats button - top left, bar chart icon */
 .header-stats-btn {
   flex: 0 0 auto;
@@ -408,6 +438,7 @@
 .stats-modal .modal-header,
 .specials-modal .modal-header,
 .unit-stats-modal .modal-header,
+.rings-modal .modal-header,
 .help-modal .modal-header {
   display: flex;
   justify-content: space-between;
@@ -425,7 +456,8 @@
 }
 
 .stats-modal .modal-header h2,
-.unit-stats-modal .modal-header h2 {
+.unit-stats-modal .modal-header h2,
+.rings-modal .modal-header h2 {
   font-family: 'Cinzel', serif;
   font-size: 1.55rem;
   color: var(--ink);
@@ -445,6 +477,7 @@
 .stats-modal .close-btn,
 .specials-modal .close-btn,
 .unit-stats-modal .close-btn,
+.rings-modal .close-btn,
 .help-modal .close-btn {
   background: none;
   border: none;
@@ -462,6 +495,7 @@
 .stats-modal .close-btn:hover,
 .specials-modal .close-btn:hover,
 .unit-stats-modal .close-btn:hover,
+.rings-modal .close-btn:hover,
 .help-modal .close-btn:hover {
   color: var(--ink);
 }
@@ -469,6 +503,7 @@
 .stats-modal-body,
 .specials-modal-body,
 .unit-stats-modal-body,
+.rings-modal-body,
 .help-modal-body {
   padding: 1.75rem 2rem;
   background: var(--parchment-dark);
@@ -478,7 +513,8 @@
   min-width: 0;
 }
 
-.stats-modal-body {
+.stats-modal-body,
+.rings-modal-body {
   overflow-x: auto;
 }
 
@@ -627,6 +663,7 @@
 }
 
 .stats-modal-key,
+.rings-modal-key,
 .unit-stats-modal-key {
   margin: 0;
   padding: 0.6rem 1rem;
@@ -647,6 +684,7 @@
 }
 
 .stats-modal .header-stats-table,
+.rings-modal .header-stats-table,
 .unit-stats-modal .header-stats-table {
   border-collapse: collapse;
   font-family: var(--font-parchment);
@@ -655,6 +693,8 @@
 
 .stats-modal .header-stats-table th,
 .stats-modal .header-stats-table td,
+.rings-modal .header-stats-table th,
+.rings-modal .header-stats-table td,
 .unit-stats-modal .header-stats-table th,
 .unit-stats-modal .header-stats-table td {
   padding: 0.5rem 1rem;
@@ -663,6 +703,7 @@
 }
 
 .stats-modal .header-stats-table th,
+.rings-modal .header-stats-table th,
 .unit-stats-modal .header-stats-table th {
   font-weight: 700;
   color: var(--ink);
@@ -671,6 +712,7 @@
 
 /* Line above column titles (matches row dividers below) */
 .stats-modal .header-stats-table thead,
+.rings-modal .header-stats-table thead,
 .unit-stats-modal .header-stats-table thead {
   border-top: 1px solid var(--ink-faded);
 }
@@ -681,6 +723,7 @@
 }
 
 .stats-modal .header-stats-table th.stats-col-num,
+.rings-modal .header-stats-table th.stats-col-num,
 .unit-stats-modal .header-stats-table th.stats-col-num {
   text-align: right;
   min-width: 2.75rem;
@@ -721,8 +764,52 @@
   }
 }
 
+/* Rings of Power: icon + name column sized to content; numeric columns compact right-aligned */
+.rings-modal .header-stats-table.header-stats-table--rings {
+  table-layout: auto;
+  width: max-content;
+  min-width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+.rings-modal .header-stats-table.header-stats-table--rings th.stats-col-rings-name,
+.rings-modal .header-stats-table.header-stats-table--rings td.stats-col-rings-name {
+  min-width: 7rem;
+}
+
+.rings-modal .header-stats-table.header-stats-table--rings th.stats-col-text,
+.rings-modal .header-stats-table.header-stats-table--rings td.stats-col-text {
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.rings-modal .header-stats-table.header-stats-table--rings th.stats-col-num,
+.rings-modal .header-stats-table.header-stats-table--rings td.stats-col-num {
+  white-space: nowrap;
+  vertical-align: middle;
+  text-align: right;
+}
+
+/* Flex must stay inside the cell — display:flex on <td> breaks table column alignment */
+.rings-modal .rings-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  font-style: italic;
+}
+
+.rings-modal .rings-row-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  flex-shrink: 0;
+  background: transparent;
+}
+
 /* Zebra rows — easier to track faction / unit across wide stat columns */
 .stats-modal .header-stats-table.header-stats-table--game tbody tr:nth-child(even) td,
+.rings-modal .header-stats-table.header-stats-table--rings tbody tr:nth-child(even) td,
 .unit-stats-modal .header-stats-table.header-stats-table--units tbody tr:nth-child(even) td {
   background-color: rgba(55, 48, 40, 0.055);
 }
@@ -1000,11 +1087,13 @@
 }
 
 .stats-modal .stats-col-num,
+.rings-modal .stats-col-num,
 .unit-stats-modal .stats-col-num {
   text-align: right;
 }
 
-.stats-modal .stats-placeholder {
+.stats-modal .stats-placeholder,
+.rings-modal .stats-placeholder {
   margin: 0;
   font-size: 1.05rem;
   color: var(--ink-faded);
@@ -1277,7 +1366,8 @@
   .header-combat-sim-btn,
   .header-specials-btn,
   .header-unit-stats-btn,
-  .header-stats-btn {
+  .header-stats-btn,
+  .header-rings-btn {
     flex: 0 0 auto;
     width: 28px;
     height: 28px;
@@ -1290,7 +1380,8 @@
     height: 18px;
   }
 
-  .header-unit-stats-icon {
+  .header-unit-stats-icon,
+  .header-rings-icon {
     width: 20px;
     height: 20px;
   }
@@ -1388,6 +1479,7 @@
 .stats-modal,
 .specials-modal,
 .unit-stats-modal,
+.rings-modal,
 .help-modal {
   background: var(--parchment);
   border: 3px solid var(--ink-faded);
@@ -1402,7 +1494,8 @@
 
 /* Shared min-width:520px is too wide for stats modals — cap game/unit stats below */
 .stats-modal,
-.unit-stats-modal {
+.unit-stats-modal,
+.rings-modal {
   min-width: 0;
 }
 
@@ -1410,6 +1503,12 @@
 .stats-modal {
   width: min(880px, 96vw);
   max-width: min(880px, 96vw);
+}
+
+/* Rings of Power: room for the numeric stats + bearer / return columns */
+.rings-modal {
+  width: min(960px, 96vw);
+  max-width: min(960px, 96vw);
 }
 
 /* Tablet / desktop */
@@ -1426,6 +1525,8 @@
 
   .stats-modal .header-stats-table th,
   .stats-modal .header-stats-table td,
+  .rings-modal .header-stats-table th,
+  .rings-modal .header-stats-table td,
   .unit-stats-modal .header-stats-table th,
   .unit-stats-modal .header-stats-table td {
     padding-left: 0.45rem;
@@ -1449,6 +1550,7 @@
   }
 
   .stats-modal-body,
+  .rings-modal-body,
   .specials-modal-body {
     max-height: min(74vh, 680px);
   }
@@ -1459,7 +1561,10 @@
 
   .stats-modal .header-stats-table,
   .stats-modal .header-stats-table th,
-  .stats-modal .header-stats-table td {
+  .stats-modal .header-stats-table td,
+  .rings-modal .header-stats-table,
+  .rings-modal .header-stats-table th,
+  .rings-modal .header-stats-table td {
     font-size: 1.12rem;
   }
 
@@ -1524,17 +1629,29 @@
     overflow: hidden;
   }
 
+  .modal-overlay > .modal.rings-modal {
+    width: min(960px, 96vw) !important;
+    max-width: min(960px, 96vw) !important;
+    min-width: 0 !important;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+
   .modal.stats-modal .modal-header,
-  .modal.unit-stats-modal .modal-header {
+  .modal.unit-stats-modal .modal-header,
+  .modal.rings-modal .modal-header {
     padding: 0.85rem 1rem;
   }
 
   .modal.stats-modal .modal-header h2,
-  .modal.unit-stats-modal .modal-header h2 {
+  .modal.unit-stats-modal .modal-header h2,
+  .modal.rings-modal .modal-header h2 {
     font-size: 1.25rem;
   }
 
-  .modal.stats-modal .stats-modal-body {
+  .modal.stats-modal .stats-modal-body,
+  .modal.rings-modal .rings-modal-body {
     padding: 0.85rem 1rem;
   }
 
@@ -1544,6 +1661,7 @@
   }
 
   .modal.stats-modal .stats-modal-key,
+  .modal.rings-modal .rings-modal-key,
   .modal.unit-stats-modal .unit-stats-modal-key {
     padding: 0.55rem 0.75rem;
     font-size: 0.8rem;
@@ -1585,7 +1703,8 @@
   .header-combat-sim-btn,
   .header-specials-btn,
   .header-unit-stats-btn,
-  .header-stats-btn {
+  .header-stats-btn,
+  .header-rings-btn {
     width: 32px;
     height: 32px;
     min-width: 32px;
@@ -1593,6 +1712,7 @@
   }
 
   .header-unit-stats-icon,
+  .header-rings-icon,
   .header-help-icon {
     width: 24px;
     height: 24px;
@@ -1671,6 +1791,16 @@
     border-radius: 8px;
   }
 
+  /* Rings of Power: near full width on phone; body scrolls the wide table horizontally */
+  .modal.rings-modal {
+    min-width: 0 !important;
+    width: min(40rem, calc(100vw - 0.75rem)) !important;
+    max-width: calc(100vw - 0.75rem) !important;
+    max-height: min(90dvh, 92vh) !important;
+    border-width: 2px;
+    border-radius: 8px;
+  }
+
   .modal.specials-modal,
   .modal.help-modal {
     min-width: 0 !important;
@@ -1683,6 +1813,7 @@
 
   .stats-modal .modal-header,
   .unit-stats-modal .modal-header,
+  .rings-modal .modal-header,
   .specials-modal .modal-header,
   .help-modal .modal-header {
     padding: 0.38rem 0.5rem;
@@ -1690,6 +1821,7 @@
 
   .stats-modal .modal-header h2,
   .unit-stats-modal .modal-header h2,
+  .rings-modal .modal-header h2,
   .specials-modal .modal-header h2,
   .help-modal .modal-header h2 {
     font-size: clamp(0.65rem, 2.35vw, 0.78rem);
@@ -1699,6 +1831,7 @@
 
   .stats-modal .close-btn,
   .unit-stats-modal .close-btn,
+  .rings-modal .close-btn,
   .specials-modal .close-btn,
   .help-modal .close-btn {
     width: 28px;
@@ -1709,6 +1842,7 @@
   }
 
   .modal.stats-modal .stats-modal-body,
+  .modal.rings-modal .rings-modal-body,
   .modal.specials-modal .specials-modal-body,
   .modal.help-modal .help-modal-body {
     padding: 0.45rem 0.5rem !important;
@@ -1726,6 +1860,11 @@
   }
 
   .stats-modal .header-stats-table {
+    width: max-content;
+    min-width: 100%;
+  }
+
+  .rings-modal .header-stats-table {
     width: max-content;
     min-width: 100%;
   }
@@ -1789,6 +1928,7 @@
   }
 
   .stats-modal .header-stats-table,
+  .rings-modal .header-stats-table,
   .unit-stats-modal .header-stats-table {
     font-size: clamp(0.56rem, 2vw, 0.68rem);
   }
@@ -1800,6 +1940,8 @@
 
   .stats-modal .header-stats-table th,
   .stats-modal .header-stats-table td,
+  .rings-modal .header-stats-table th,
+  .rings-modal .header-stats-table td,
   .unit-stats-modal .header-stats-table th,
   .unit-stats-modal .header-stats-table td {
     padding: 0.28rem 0.4rem;
@@ -1810,6 +1952,7 @@
   }
 
   .stats-modal .header-stats-table th.stats-col-num,
+  .rings-modal .header-stats-table th.stats-col-num,
   .unit-stats-modal .header-stats-table th.stats-col-num {
     min-width: 1.75rem;
   }
@@ -1836,7 +1979,8 @@
     height: 15px;
   }
 
-  .stats-modal .stats-placeholder {
+  .stats-modal .stats-placeholder,
+  .rings-modal .stats-placeholder {
     font-size: clamp(0.58rem, 2vw, 0.7rem);
   }
 
@@ -1889,6 +2033,7 @@
   }
 
   .stats-modal-key,
+  .rings-modal-key,
   .unit-stats-modal-key {
     padding: 0.32rem 0.45rem;
     font-size: clamp(0.52rem, 1.85vw, 0.62rem);
