@@ -442,6 +442,16 @@ def initialize_game_state(
     if sync_ring_movement is not None and unit_defs:
         sync_ring_movement(state, unit_defs)
 
+    # Rings held at game start pay their power up front, like turn 1 territory production.
+    if state.rings_of_power:
+        from backend.engine.rings import power_for_faction
+        for fid in list(faction_resources):
+            ring_power = power_for_faction(state, fid, unit_defs or {}, faction_defs)
+            if ring_power > 0:
+                faction_resources[fid]["power"] = (
+                    faction_resources[fid].get("power", 0) + ring_power
+                )
+
     return state
 
 

@@ -92,6 +92,29 @@ def test_mode_spawns_only_when_enabled_and_heroes_are_on():
     assert no_heroes.rings == []
 
 
+def test_game_start_seeds_ring_power_into_starting_resources():
+    state = initialize_game_state(
+        _faction(),
+        _territories(),
+        starting_setup={"territory_owners": {"mithlond": "noldor", "ost_in_edhil": "noldor"}},
+        special_rules=RULES,
+        rings_of_power=True,
+        heroes_enabled=True,
+    )
+    # Territory production (10 + 10) plus Narya 3 and The Nine 4, paid up front on round 1.
+    assert state.faction_resources["noldor"]["power"] == 27
+
+    off = initialize_game_state(
+        _faction(),
+        _territories(),
+        starting_setup={"territory_owners": {"mithlond": "noldor", "ost_in_edhil": "noldor"}},
+        special_rules=RULES,
+        rings_of_power=False,
+        heroes_enabled=True,
+    )
+    assert off.faction_resources["noldor"]["power"] == 20
+
+
 def _carry_state():
     hero = Unit(
         instance_id="noldor_gil_galad_001",
