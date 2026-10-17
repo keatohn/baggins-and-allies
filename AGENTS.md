@@ -36,3 +36,39 @@ Turn-based LOTR strategy game: FastAPI + Python backend (`backend/`), React 19 +
 - Use user-provided commit messages **verbatim**: no added prefix, body, or rewording.
 - Stage/commit only changes produced in the current chat; if it's ambiguous whether a dirty file belongs to this chat, ask once before staging.
 - Start local dev servers with `SETUP_SOURCE=files`; never apply it to build/deploy/prod commands.
+
+## Autonomous Development Workflow
+
+When assigned a GitHub issue:
+
+1. Read the issue and relevant project documentation.
+2. Identify the affected components before editing.
+3. Implement the smallest complete solution.
+4. Add or update relevant automated tests.
+5. Run tests and fix failures caused by your changes.
+6. Run linting/type checks where configured.
+7. Review the final diff for bugs and unrelated changes.
+8. Summarize the implementation and test results.
+
+### GitHub Workflow
+- Use a dedicated feature branch for each issue.
+- Open a draft pull request linked to the issue.
+- Never push directly to main.
+- Never merge pull requests automatically.
+- Do not modify unrelated functionality.
+
+### Handling Problems
+- Fix obvious bugs discovered in the code being modified.
+- Do not undertake unrelated refactoring.
+- If requirements are ambiguous, ask a specific question
+  in the GitHub issue and stop implementation.
+- If blocked by missing credentials, dependencies, or
+  infrastructure, explain the blocker in the issue.
+- Never claim tests passed unless they actually ran.
+- If tests cannot run, document why.
+
+### Autonomy
+- Make reasonable implementation decisions independently.
+- Do not ask for approval on routine technical decisions.
+- Escalate changes affecting core game mechanics,
+  database migrations, security, or public APIs.
