@@ -40,7 +40,9 @@ git push heroku main
 ```bash
 cd /Users/keaton/projects/baggins-and-allies
 # Install Railway CLI once: npm i -g @railway/cli
-export RAILWAY_API_TOKEN="95c3398f-b8c7-4bc3-9354-32dcc5b9df59"
+# Paste your token into .env.railway (gitignored) and source it — never commit real tokens:
+#   set -a; source .env.railway; set +a
+set -a; source .env.railway; set +a
 railway link     # pick an existing project, or create one when prompted
 # If new project: add a service (Dashboard → New → Empty Project, then link again; or use railway init to create from CLI)
 railway variables set CORS_ORIGINS="https://bagginsandallies.com,https://www.bagginsandallies.com"
@@ -55,7 +57,7 @@ Copy the deployed backend URL (e.g. `https://baggins-and-allies-production.up.ra
 
 ---
 
-### Frontend (Vercel) and DNS — after backend is live (Heroku or Railway)
+### Frontend (Vercel) and DNS — after backend is live (Railway)
 
 **Frontend:** Set `VITE_API_URL` to your **backend** URL (Heroku app URL or Railway URL), then build and deploy:
 

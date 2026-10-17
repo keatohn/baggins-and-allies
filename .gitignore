@@ -25,6 +25,7 @@ build/
 # Environment variables
 .env
 .env.local
+.env.railway
 frontend/.env.production
 
 # Local SQLite (dev API; recreated on startup / migrations)
