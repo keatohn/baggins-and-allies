@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import type { GameState } from '../types/game';
 import type { ApiFactionStats, SpecialDefinition } from '../services/api';
 import StrongholdAllianceBar from './StrongholdAllianceBar';
-import { GameStatsModal, UnitStatsModal, type StatsRingMark, type UnitForStats } from './StatsModals';
+import { GameStatsModal, RingsOfPowerModal, UnitStatsModal, type RingsOfPowerData, type StatsRingMark, type UnitForStats } from './StatsModals';
 import './Header.css';
 
 export type { UnitForStats };
@@ -17,6 +17,8 @@ interface HeaderProps {
   factionStats?: ApiFactionStats | null;
   /** Rings held by each faction, shown beside the name in Game Stats. */
   ringsByFaction?: Record<string, StatsRingMark[]>;
+  /** Rings of Power game: rings + display names. Shows the Rings of Power modal button when set. */
+  ringsOfPower?: RingsOfPowerData | null;
   unitsByFaction?: Record<string, UnitForStats[]>;
   /** Current game name (created/loaded), shown under "Baggins & Allies" in the center */
   gameName?: string | null;
@@ -67,8 +69,9 @@ function subfactionMarks(
   return marks;
 }
 
-function Header({ gameState, turnOrderForTicker, factionData, effectivePower, factionStats, ringsByFaction, unitsByFaction = {}, gameName = null, setupDisplayName = null, specials = {}, specialsOrder: _specialsOrder = [], unitsBySpecial = {}, onOpenCombatSim }: HeaderProps) {
+function Header({ gameState, turnOrderForTicker, factionData, effectivePower, factionStats, ringsByFaction, ringsOfPower = null, unitsByFaction = {}, gameName = null, setupDisplayName = null, specials = {}, specialsOrder: _specialsOrder = [], unitsBySpecial = {}, onOpenCombatSim }: HeaderProps) {
   const [statsOpen, setStatsOpen] = useState(false);
+  const [ringsOpen, setRingsOpen] = useState(false);
   const [specialsOpen, setSpecialsOpen] = useState(false);
   const [unitStatsOpen, setUnitStatsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -162,6 +165,17 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
             <rect x="17" y="4" width="4" height="16" rx="1" />
           </svg>
         </button>
+        {ringsOfPower && (
+          <button
+            type="button"
+            className="header-rings-btn"
+            onClick={() => setRingsOpen(true)}
+            title="Rings of Power"
+            aria-label="Open Rings of Power"
+          >
+            <img src="/assets/rings/the_one.png" alt="" className="header-rings-icon" aria-hidden />
+          </button>
+        )}
 
         {/* Stronghold bar: Good (white) | Neutral (gray) | Evil (black); victory threshold markers from setup */}
         {allianceOrder.length > 0 && factionStats && (
@@ -269,6 +283,15 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
           turnOrder={turnOrder}
           ringsByFaction={ringsByFaction}
           onClose={() => setStatsOpen(false)}
+        />
+      )}
+
+      {ringsOpen && ringsOfPower && (
+        <RingsOfPowerModal
+          rings={ringsOfPower.rings}
+          territoryNames={ringsOfPower.territoryNames}
+          heroNames={ringsOfPower.heroNames}
+          onClose={() => setRingsOpen(false)}
         />
       )}
 
