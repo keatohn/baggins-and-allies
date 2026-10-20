@@ -54,9 +54,7 @@ Work through these in sequence; details are only in the sections below—this li
 
 ## 2. Environment variables (Railway dashboard)
 
-Variable **names** are listed in **`.env.railway.example`** (copy into the Railway UI; never commit secrets).
-
-Set these on the **API** service:
+Set these on the **API** service (enter values in the Railway dashboard; never commit secrets):
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -70,6 +68,8 @@ Optional:
 | Variable | Description |
 |----------|-------------|
 | `BCRYPT_ROUNDS` | Defaults to `10`; increase only if you want slower hashing. |
+| `ADMIN_PLAYER_EMAIL` | Login email(s) granted `is_admin` at every startup (comma-separated for several; aliases `ADMIN_EMAIL`, `ADMIN_EMAILS`). Everyone else's admin flag is cleared — admin is controlled by this env var, not the DB. |
+| `SETUP_SOURCE` | Leave **unset** in production (default `db`). `files` is local-dev only; startup fails if set alongside a production env var. |
 
 **Security:** Rotate `JWT_SECRET` if leaked; existing sessions invalidate.
 
@@ -152,7 +152,7 @@ On Heroku, set `DATABASE_URL` for Postgres; SQLite on Heroku’s ephemeral disk 
 ## Reference: config files
 
 - `railway.toml` — build/deploy/start, health check, **sleep when idle** (`sleepApplication`)
-- `.env.railway.example` — names only for Railway dashboard variables
+- `.env.railway` — local, gitignored Railway **CLI** token (for `railway up`; not dashboard variables)
 - `requirements.txt` — Python deps (includes `psycopg2-binary` for optional Postgres)
 - `backend/api/database.py` — `DATABASE_URL` vs `SQLITE_DATABASE_PATH` resolution
 - `frontend/.env.production.example` — `VITE_API_URL` (Railway API URL for production builds)

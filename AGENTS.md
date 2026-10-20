@@ -13,7 +13,7 @@ Turn-based LOTR strategy game: FastAPI + Python backend (`backend/`), React 19 +
 
 ## Wiring
 
-- API entrypoint: `backend/api/main.py` (`uvicorn backend.api.main:app`; all HTTP routes live in this one large file, port 8000 in dev). Root `main.py` is only an engine demo and `server.py` is a legacy static server — neither is the API.
+- API entrypoint: `backend/api/main.py` (`uvicorn backend.api.main:app`; all HTTP routes live in this one large file, port 8000 in dev). Root `main.py` is only an engine demo, not the API.
 - `backend/engine/` is a deterministic engine: actions go through `apply_action(state, action, ...) -> (state, events)`. AI opponent logic is in `backend/ai/`.
 - **Backend routes have no `/api` prefix.** The Vite dev proxy forwards only `/api/*` → `localhost:8000` with the prefix stripped. Frontend must always call `/api/...` (`frontend/src/services/api.ts` resolves the base: `/api` in dev, `VITE_API_URL` in prod). Don't add `/api` to backend routes; don't drop it from frontend calls.
 - Game data: `backend/data/setups/<setup_id>/` (manifest, units, territories, factions, camps, ports, starting_setup JSON) plus global `catalog.json` (unit specials), `signals.json`, `audio_gains.json`. Default setup id lives in `backend/config.py` (`DEFAULT_SETUP_ID`).
@@ -22,7 +22,7 @@ Turn-based LOTR strategy game: FastAPI + Python backend (`backend/`), React 19 +
 
 - Default is `SETUP_SOURCE=db`: on startup `init_db()` seeds the DB from files **only if empty** (`backend/api/database.py`). Editing `backend/data/setups/*.json` will **not** affect an existing dev DB (`backend/api/game.db`, gitignored, recreated if deleted).
 - For local dev use `SETUP_SOURCE=files` (`npm run dev:files`) so JSON edits affect newly created games. Never set it in production — startup raises if a production env var is set alongside files (`backend/api/main.py`).
-- `players.is_admin` is recomputed at every startup from `ADMIN_PLAYER_EMAIL` / `ADMIN_EMAIL(S)` env vars; DB edits to it are wiped. See `.env.railway.example` for all env vars (`JWT_SECRET`, `CORS_ORIGINS`, `SQLITE_DATABASE_PATH`, …).
+- `players.is_admin` is recomputed at every startup from `ADMIN_PLAYER_EMAIL` / `ADMIN_EMAIL(S)` env vars; DB edits to it are wiped. Other env vars (`JWT_SECRET`, `CORS_ORIGINS`, `SQLITE_DATABASE_PATH`, …) are documented in `docs/PRODUCTION_DEPLOYMENT.md` §2.
 - The backend refuses to start on Railway with the default (ephemeral) SQLite path unless `SQLITE_DATABASE_PATH` points at a volume.
 
 ## Deploy
