@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import MUSIC_M4A from 'virtual:music-m4a';
 import SFX_M4A from 'virtual:sfx-m4a';
-import { GAME_AUDIO_BASE, startMenuAmbience, stopMenuAmbience } from '../../audio/gameAudio';
+import {
+  GAME_AUDIO_BASE,
+  releaseAudioElement,
+  resumeGameAudioContext,
+  setAudioElementVolume,
+  startMenuAmbience,
+  stopMenuAmbience,
+} from '../../audio/gameAudio';
 import { MusicField } from './SetupEditorPanels';
 import { NumberField } from './NumberField';
 
@@ -41,7 +48,11 @@ export function AudioPanel({
 
   useEffect(() => {
     return () => {
-      previewRef.current?.pause();
+      const leftover = previewRef.current;
+      if (leftover) {
+        leftover.pause();
+        releaseAudioElement(leftover);
+      }
       previewRef.current = null;
       startMenuAmbience('menu');
     };
@@ -55,7 +66,11 @@ export function AudioPanel({
   };
 
   const stopPreview = (resumeMenu = true) => {
-    previewRef.current?.pause();
+    const prev = previewRef.current;
+    if (prev) {
+      prev.pause();
+      releaseAudioElement(prev);
+    }
     previewRef.current = null;
     setPlayingRel(null);
     if (resumeMenu) startMenuAmbience('menu');
@@ -69,24 +84,21 @@ export function AudioPanel({
     }
     stopPreview(false);
     stopMenuAmbience();
+    // Click handler: unlocks the AudioContext so the gain applies on iOS too.
+    resumeGameAudioContext();
     const audio = new Audio(`${GAME_AUDIO_BASE}/${rel}`);
-    audio.volume = Math.min(1, Math.max(0, pctFor(gains, rel) / 100));
-    audio.addEventListener('ended', () => {
-      if (previewRef.current === audio) {
-        previewRef.current = null;
-        setPlayingRel(null);
-        startMenuAmbience('menu');
-      }
-    });
+    setAudioElementVolume(audio, Math.min(1, Math.max(0, pctFor(gains, rel) / 100)));
+    const finish = () => {
+      releaseAudioElement(audio);
+      if (previewRef.current !== audio) return;
+      previewRef.current = null;
+      setPlayingRel(null);
+      startMenuAmbience('menu');
+    };
+    audio.addEventListener('ended', finish);
     previewRef.current = audio;
     setPlayingRel(rel);
-    void audio.play().catch(() => {
-      if (previewRef.current === audio) {
-        previewRef.current = null;
-        setPlayingRel(null);
-        startMenuAmbience('menu');
-      }
-    });
+    void audio.play().catch(finish);
   };
 
   return (

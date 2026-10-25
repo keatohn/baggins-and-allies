@@ -156,18 +156,146 @@ function withFileGain(userVolume: number, src: string | undefined): number {
   return clamp01(userVolume * fileGainFromUrl(src));
 }
 
+/* Web Audio gain layer.
+ * iOS Safari ignores HTMLAudioElement.volume, so admin per-file gains, profile
+ * sliders and fades were all no-ops on iPhone. Every audible element is routed
+ * through an AudioContext with its own GainNode (which iOS does honour), and
+ * falls back to element.volume where Web Audio is unavailable. */
+type ElementGainEntry = {
+  source: MediaElementAudioSourceNode;
+  gain: GainNode;
+  connected: boolean;
+};
+
+let audioContext: AudioContext | null = null;
+let audioContextUnavailable = false;
+const elementGains = new WeakMap<HTMLAudioElement, ElementGainEntry>();
+
+function getAudioContext(): AudioContext | null {
+  if (audioContext || audioContextUnavailable) return audioContext;
+  if (typeof window === 'undefined') return null;
+  const Ctor: typeof AudioContext | undefined =
+    window.AudioContext ??
+    (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctor) {
+    audioContextUnavailable = true;
+    return null;
+  }
+  try {
+    audioContext = new Ctor();
+  } catch {
+    audioContextUnavailable = true;
+    return null;
+  }
+  return audioContext;
+}
+
+/**
+ * iOS/Safari keep the context suspended until a user gesture (and may suspend it
+ * again when the tab is backgrounded). Call from pointerdown, visibilitychange
+ * and before starting playback; harmless when already running.
+ */
+export function resumeGameAudioContext(): void {
+  const ctx = getAudioContext();
+  if (!ctx || ctx.state !== 'suspended') return;
+  void ctx.resume().catch(() => {});
+}
+
+function elementGainNode(audio: HTMLAudioElement): GainNode | null {
+  const existing = elementGains.get(audio);
+  if (existing) {
+    if (!existing.connected) {
+      const ctx = getAudioContext();
+      if (ctx) {
+        try {
+          existing.source.connect(existing.gain);
+          existing.gain.connect(ctx.destination);
+          existing.connected = true;
+        } catch {
+          /* keep disconnected; volume writes still land on the node */
+        }
+      }
+    }
+    return existing.gain;
+  }
+  const ctx = getAudioContext();
+  if (!ctx) return null;
+  try {
+    const source = ctx.createMediaElementSource(audio);
+    const gain = ctx.createGain();
+    // Start silent: the caller writes the real level in the same task, so no
+    // unattenuated frame can slip through between attach and the first write.
+    gain.gain.value = 0;
+    source.connect(gain);
+    gain.connect(ctx.destination);
+    elementGains.set(audio, { source, gain, connected: true });
+    // The element must stay at 1 so element volume and GainNode gain do not stack.
+    try {
+      audio.volume = 1;
+    } catch {
+      /* detached element; GainNode still controls loudness */
+    }
+    resumeGameAudioContext();
+    return gain;
+  } catch {
+    return null;
+  }
+}
+
+/** Single write path for element loudness: GainNode when routed, element.volume otherwise. */
+export function setAudioElementVolume(audio: HTMLAudioElement, volume: number): void {
+  const v = clamp01(volume);
+  const gain = elementGainNode(audio);
+  if (gain) {
+    gain.gain.value = v;
+    return;
+  }
+  try {
+    audio.volume = v;
+  } catch {
+    /* detached element; nothing to write to */
+  }
+}
+
+export function getAudioElementVolume(audio: HTMLAudioElement): number {
+  const entry = elementGains.get(audio);
+  if (entry) return clamp01(entry.gain.gain.value);
+  try {
+    return clamp01(audio.volume);
+  } catch {
+    return 0;
+  }
+}
+
+/** Detach a finished element (one-shots, destroyed loops) from the audio graph so its nodes can be collected. */
+export function releaseAudioElement(audio: HTMLAudioElement): void {
+  const entry = elementGains.get(audio);
+  if (!entry || !entry.connected) return;
+  try {
+    entry.source.disconnect();
+  } catch {
+    /* already disconnected */
+  }
+  try {
+    entry.gain.disconnect();
+  } catch {
+    /* already disconnected */
+  }
+  entry.connected = false;
+}
+
 function applyTurnLoopMasterVolume(): void {
   if (!turnLoop || turnLoop.isCrossfading()) return;
   const active = turnLoop.getActiveElement();
-  active.volume = withFileGain(readGameMusicVolume(), active.src);
-  turnLoop.getIdleElement().volume = 0;
+  setAudioElementVolume(active, withFileGain(readGameMusicVolume(), active.src));
+  setAudioElementVolume(turnLoop.getIdleElement(), 0);
 }
 
 function applyMenuLoopMasterVolume(): void {
   if (!menuLoop || menuLoop.isCrossfading()) return;
   const active = menuLoop.getActiveElement();
-  active.volume = withFileGain(readMenuMusicVolume() * MENU_AMBIENCE_GAIN, active.src);
-  menuLoop.getIdleElement().volume = 0;
+  setAudioElementVolume(active, withFileGain(readMenuMusicVolume() * MENU_AMBIENCE_GAIN, active.src));
+  setAudioElementVolume(menuLoop.getIdleElement(), 0);
 }
 
 /** Replace the admin per-file mix. Values are percents (100 = unchanged). */
@@ -236,6 +364,16 @@ function smoothStep01(t: number): number {
   return x * x * (3 - 2 * x);
 }
 
+/**
+ * Fades run on timers, not requestAnimationFrame: rAF stops in a hidden tab while
+ * mobile browsers keep playing background audio, which froze crossfades mid-way and
+ * left the incoming track stuck at volume 0. Timers are throttled (not halted) in
+ * background tabs, so the fade still reaches its end state.
+ */
+function fadeStepDelay(durationMs: number): number {
+  return Math.min(50, Math.max(16, Math.round(durationMs / 16)));
+}
+
 function fadeGain(
   audio: HTMLAudioElement,
   fromG: number,
@@ -247,22 +385,23 @@ function fadeGain(
 ): void {
   if (durationMs <= 0) {
     const m = withFileGain(readGameMusicVolume(), audio.src);
-    audio.volume = m * Math.min(1, Math.max(0, toG));
+    setAudioElementVolume(audio, m * clamp01(toG));
     onDone?.();
     return;
   }
   const t0 = performance.now();
+  const delay = fadeStepDelay(durationMs);
   const step = () => {
     if (sessionId !== session.v) return;
     const m = withFileGain(readGameMusicVolume(), audio.src);
     const u = Math.min(1, (performance.now() - t0) / durationMs);
     const ue = smoothStep01(u);
     const g = fromG + (toG - fromG) * ue;
-    audio.volume = m * Math.min(1, Math.max(0, g));
-    if (u < 1) requestAnimationFrame(step);
+    setAudioElementVolume(audio, m * clamp01(g));
+    if (u < 1) window.setTimeout(step, delay);
     else onDone?.();
   };
-  requestAnimationFrame(step);
+  window.setTimeout(step, delay);
 }
 
 function fadeGainMenu(
@@ -277,21 +416,22 @@ function fadeGainMenu(
   const cap = MENU_AMBIENCE_GAIN;
   if (durationMs <= 0) {
     const m = withFileGain(readMenuMusicVolume(), audio.src);
-    audio.volume = m * cap * Math.min(1, Math.max(0, toG));
+    setAudioElementVolume(audio, m * cap * clamp01(toG));
     onDone?.();
     return;
   }
   const t0 = performance.now();
+  const delay = fadeStepDelay(durationMs);
   const step = () => {
     if (sessionId !== session.v) return;
     const m = withFileGain(readMenuMusicVolume(), audio.src);
     const u = Math.min(1, (performance.now() - t0) / durationMs);
     const g = fromG + (toG - fromG) * u;
-    audio.volume = m * cap * Math.min(1, Math.max(0, g));
-    if (u < 1) requestAnimationFrame(step);
+    setAudioElementVolume(audio, m * cap * clamp01(g));
+    if (u < 1) window.setTimeout(step, delay);
     else onDone?.();
   };
-  requestAnimationFrame(step);
+  window.setTimeout(step, delay);
 }
 
 class TurnPlaylistPair {
@@ -440,12 +580,15 @@ class TurnPlaylistPair {
     this.b.removeEventListener('ended', this.onEnded);
     this.a.pause();
     this.b.pause();
+    releaseAudioElement(this.a);
+    releaseAudioElement(this.b);
     this.a.src = '';
     this.b.src = '';
   }
 
   startFirstPlay(): Promise<void> {
-    this.a.volume = 0;
+    resumeGameAudioContext();
+    setAudioElementVolume(this.a, 0);
     return this.a.play().then(() => undefined);
   }
 }
@@ -589,12 +732,15 @@ class MenuLoopPair {
     this.b.removeEventListener('ended', this.onEnded);
     this.a.pause();
     this.b.pause();
+    releaseAudioElement(this.a);
+    releaseAudioElement(this.b);
     this.a.src = '';
     this.b.src = '';
   }
 
   startFirstPlay(): Promise<void> {
-    this.a.volume = 0;
+    resumeGameAudioContext();
+    setAudioElementVolume(this.a, 0);
     return this.a.play().then(() => undefined);
   }
 }
@@ -627,9 +773,19 @@ export function getGameSfxVolume(): number {
 }
 
 function fireOneShot(url: string): void {
+  resumeGameAudioContext();
   const a = new Audio(url);
-  a.volume = withFileGain(readSfxVolume(), url);
-  void a.play().catch(() => {});
+  setAudioElementVolume(a, withFileGain(readSfxVolume(), url));
+  const release = () => {
+    a.removeEventListener('ended', release);
+    a.removeEventListener('error', release);
+    releaseAudioElement(a);
+  };
+  a.addEventListener('ended', release);
+  a.addEventListener('error', release);
+  void a.play().catch(() => {
+    release();
+  });
 }
 
 /**
@@ -769,9 +925,10 @@ export function playSiegeworksRoundCommenceSound(): void {
 
   const startPlayback = (url: string) => {
     stopSiegeworksRoundCommenceSound();
+    resumeGameAudioContext();
     const maxVol = withFileGain(sfx, url);
     const audio = new Audio(url);
-    audio.volume = maxVol;
+    setAudioElementVolume(audio, maxVol);
 
     const onTimeUpdate = () => {
       const d = audio.duration;
@@ -779,9 +936,9 @@ export function playSiegeworksRoundCommenceSound(): void {
       const rem = d - audio.currentTime;
       const fadeLen = Math.min(SIEGWORKS_END_FADE_SEC, d);
       if (rem <= fadeLen) {
-        audio.volume = maxVol * Math.max(0, Math.min(1, rem / fadeLen));
+        setAudioElementVolume(audio, maxVol * Math.max(0, Math.min(1, rem / fadeLen)));
       } else {
-        audio.volume = maxVol;
+        setAudioElementVolume(audio, maxVol);
       }
     };
 
@@ -789,6 +946,7 @@ export function playSiegeworksRoundCommenceSound(): void {
       audio.removeEventListener('timeupdate', onTimeUpdate);
       audio.removeEventListener('ended', onEnded);
       audio.pause();
+      releaseAudioElement(audio);
       try {
         audio.removeAttribute('src');
         audio.load();
@@ -955,7 +1113,7 @@ export function stopTurnCue(): void {
   if (!prev) return;
   const active = prev.getActiveElement();
   const m = withFileGain(readGameMusicVolume(), active.src);
-  const av = active.volume;
+  const av = getAudioElementVolume(active);
   const g = m > 0.001 ? av / m : 0;
   fadeGain(active, g, 0, Math.min(380, TURN_SWITCH_CROSSFADE_MS), turnSession, s, () => {
     prev.destroy();
@@ -1149,17 +1307,21 @@ export function resumeTurnMusicIfPaused(): void {
   const sid = turnLoop.sessionId;
   void active.play().then(() => {
     if (sid !== turnSession.v || turnLoop?.getActiveElement() !== active) return;
-    const fromG = m > 0.001 && active.volume > 0.001 ? Math.min(1, active.volume / m) : 0;
+    const av = getAudioElementVolume(active);
+    const fromG = m > 0.001 && av > 0.001 ? Math.min(1, av / m) : 0;
     fadeGain(active, fromG, 1, Math.min(380, TURN_FADE_IN_MS), turnSession, sid);
   }).catch(() => {});
 }
 
-function attachTurnMusicVisibilityResume(): void {
+/** Tab visibility: background audio keeps playing, but playback pauses and fades stall while hidden. */
+function attachVisibilityResume(): void {
   if (typeof document === 'undefined') return;
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
+    resumeGameAudioContext();
     resumeTurnMusicIfPaused();
+    resumeMenuAmbienceIfPaused();
   });
 }
 
-attachTurnMusicVisibilityResume();
+attachVisibilityResume();

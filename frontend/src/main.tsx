@@ -14,6 +14,7 @@ import Admin from './pages/Admin.tsx'
 import api, { AUTH_CHANGED_EVENT, getAuthToken } from './services/api'
 import {
   playUiClickSound,
+  resumeGameAudioContext,
   resumeMenuAmbienceIfPaused,
   resumeTurnMusicIfPaused,
   setMenuRouteAmbienceAllowed,
@@ -75,6 +76,7 @@ if (typeof document !== 'undefined') {
   document.addEventListener(
     'pointerdown',
     (event) => {
+      resumeGameAudioContext()
       if (getAuthToken()) {
         resumeMenuAmbienceIfPaused()
         resumeTurnMusicIfPaused()
@@ -164,7 +166,51 @@ function MenuAmbienceController() {
   return null
 }
 
-void api.getAudioGains().catch(() => {})
+const GAINS_RETRY_MS = 15000
+const GAINS_REFRESH_MIN_MS = 30000
+let gainsFetching = false
+let gainsLastAttemptAt = 0
+let gainsRetryTimer: number | null = null
+
+/**
+ * Admin per-file gains and the menu playlist are fetched at boot and re-fetched
+ * whenever the tab becomes active again (or comes back online), so long-lived
+ * mobile tabs pick up admin saves instead of keeping the mix they loaded with.
+ * A failed fetch retries on a timer.
+ */
+async function refreshAudioGains(minIntervalMs: number): Promise<void> {
+  if (gainsFetching) return
+  if (minIntervalMs > 0 && Date.now() - gainsLastAttemptAt < minIntervalMs) return
+  gainsLastAttemptAt = Date.now()
+  gainsFetching = true
+  try {
+    await api.getAudioGains()
+    if (gainsRetryTimer !== null) {
+      window.clearTimeout(gainsRetryTimer)
+      gainsRetryTimer = null
+    }
+  } catch {
+    if (gainsRetryTimer === null) {
+      gainsRetryTimer = window.setTimeout(() => {
+        gainsRetryTimer = null
+        void refreshAudioGains(0)
+      }, GAINS_RETRY_MS)
+    }
+  } finally {
+    gainsFetching = false
+  }
+}
+
+void refreshAudioGains(0)
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return
+    void refreshAudioGains(GAINS_REFRESH_MIN_MS)
+  })
+}
+window.addEventListener('online', () => void refreshAudioGains(0))
+window.addEventListener('focus', () => void refreshAudioGains(GAINS_REFRESH_MIN_MS))
 
 const rootEl = document.getElementById('root')
 if (!rootEl) {
