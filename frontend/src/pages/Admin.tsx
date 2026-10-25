@@ -20,6 +20,7 @@ import { SignalsPanel } from './admin/SignalsPanel';
 import type { SignalPreset } from '../territorySignals';
 import { isValidSetupId } from './admin/setupId';
 import { BalanceModal } from './admin/BalanceModal';
+import { GamesReportModal } from './admin/GamesReportModal';
 import { previewStatsFromBundle } from './admin/previewStats';
 import { completeTerritoryAsymmetries } from './admin/territoryGraph';
 import { MapViewPane, type MapSetupDraft } from './admin/MapViewPane';
@@ -349,6 +350,7 @@ export default function Admin() {
   const [unitStatsOpen, setUnitStatsOpen] = useState(false);
   const [gameStatsOpen, setGameStatsOpen] = useState(false);
   const [balanceOpen, setBalanceOpen] = useState(false);
+  const [gamesOpen, setGamesOpen] = useState(false);
   const audioJson = useMemo(() => ({ gains: audioGains, menu_music: menuMusic }), [audioGains, menuMusic]);
   const signalsJson = useMemo(() => ({ presets: signalPresets }), [signalPresets]);
   const [statsWithRings, setStatsWithRings] = useState(true);
@@ -835,7 +837,7 @@ export default function Admin() {
         <div className="admin-page__nav-tools">
           <button
             type="button"
-            className={`page-menu-btn${!globalOpen ? ' admin-page__nav-btn--active' : ''}`}
+            className={`page-menu-btn${!globalOpen && !gamesOpen ? ' admin-page__nav-btn--active' : ''}`}
             onClick={() => openSection('setups')}
           >
             Setups
@@ -867,6 +869,13 @@ export default function Admin() {
             onClick={() => openSection('signals')}
           >
             Signals
+          </button>
+          <button
+            type="button"
+            className={`page-menu-btn${gamesOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => setGamesOpen(true)}
+          >
+            Games
           </button>
         </div>
       </div>
@@ -1205,6 +1214,7 @@ export default function Admin() {
           onClose={() => setBalanceOpen(false)}
         />
       )}
+      {gamesOpen && <GamesReportModal onClose={() => setGamesOpen(false)} />}
     </div>
   );
 }

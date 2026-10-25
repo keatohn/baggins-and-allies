@@ -165,6 +165,17 @@
   margin-top: 0.25rem;
 }
 
+/* Player names at the bottom of the card; long lists truncate with an ellipsis (title shows all). */
+.game-list__players {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--ink-faded);
+  margin-top: 0.15rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .game-list__card-actions {
   display: flex;
   flex-shrink: 0;
