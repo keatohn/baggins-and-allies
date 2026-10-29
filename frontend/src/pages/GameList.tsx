@@ -28,6 +28,15 @@ function truncateUsername(username: string, maxChars: number = 12): string {
   return `${username.slice(0, maxChars)}...`;
 }
 
+function playerNames(g: GameListItem): string | null {
+  const names = (g.players ?? [])
+    .map((p) => p.username?.trim())
+    .filter((n): n is string => Boolean(n));
+  if (names.length > 0) return names.join(', ');
+  if (g.current_player_username) return g.current_player_username;
+  return null;
+}
+
 export default function GameList() {
   const navigate = useNavigate();
   const [player, setPlayer] = useState<AuthPlayer | null>(null);
@@ -203,6 +212,11 @@ export default function GameList() {
                       {g.created_at && (
                         <span className="game-list__created">Created {formatCreatedAt(g.created_at)}</span>
                       )}
+                      {playerNames(g) && (
+                        <span className="game-list__players" title={playerNames(g) ?? undefined}>
+                          Players: {playerNames(g)}
+                        </span>
+                      )}
                     </div>
                   ) : (
                     <div className="game-list__turn-info">
@@ -235,6 +249,11 @@ export default function GameList() {
                       </span>
                       {g.created_at && (
                         <span className="game-list__created">Created {formatCreatedAt(g.created_at)}</span>
+                      )}
+                      {playerNames(g) && (
+                        <span className="game-list__players" title={playerNames(g) ?? undefined}>
+                          Players: {playerNames(g)}
+                        </span>
                       )}
                     </div>
                   )}

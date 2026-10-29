@@ -30,6 +30,7 @@ class Game(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     created_by = Column(String(36), ForeignKey("players.id"), nullable=True)  # creator player_id
     status = Column(String(32), nullable=False, default="lobby")  # lobby | active | finished
+    completed_at = Column(DateTime, nullable=True)  # set once when status becomes finished
     game_state = Column(Text, nullable=False)  # JSON string of full game state
     players = Column(Text, nullable=False)  # JSON array of { "player_id": str, "faction_id": str | null }
     config = Column(Text, nullable=True)  # JSON for future options

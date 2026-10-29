@@ -12,6 +12,7 @@ import uuid
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import asdict
+from datetime import datetime
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -907,8 +908,9 @@ def save_game(
     row = db.query(GameModel).filter(GameModel.id == game_id).first()
     if row:
         row.game_state = json.dumps(state.to_dict())
-        if state.winner is not None:
+        if state.winner is not None and row.status != "finished":
             row.status = "finished"
+            row.completed_at = datetime.utcnow()
         if events:
             try:
                 config = json.loads(row.config) if isinstance(row.config, str) else {}
@@ -1540,6 +1542,15 @@ def admin_balance(
     return compute_starting_strength(body.model_dump(), rings=rings)
 
 
+@app.get("/admin/games")
+def admin_list_games(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Every game (lobby, in progress, and finished) for the admin games report."""
+    return {"games": _build_games_list(_admin, db, include_all=True)}
+
+
 @app.get("/admin/setups")
 def admin_list_setups(
     _admin: Player = Depends(get_current_admin),
@@ -1775,9 +1786,18 @@ def _get_scenario_from_config(row, db: Session) -> dict[str, Any] | None:
     return None
 
 
-def _build_games_list(player: Player, db: Session) -> list[dict[str, Any]]:
-    """Build list of game dicts for the current player (with faction_stats and current_player_username). Excludes games the player has forfeited."""
-    rows = db.query(GameModel).filter(GameModel.status != "finished").all()
+def _build_games_list(player: Player, db: Session, *, include_all: bool = False) -> list[dict[str, Any]]:
+    """Build list of game dicts (with faction_stats and current_player_username).
+
+    Default: games the player is in, excluding finished and games they forfeited.
+    include_all=True: every game (admin report) — no membership/status/forfeit filter,
+    newest first.
+    """
+    query = db.query(GameModel)
+    if not include_all:
+        rows = query.filter(GameModel.status != "finished").all()
+    else:
+        rows = query.order_by(GameModel.created_at.desc()).all()
     mine = []
     player_ids = set()
     player_id_str = str(player.id)
@@ -1786,11 +1806,11 @@ def _build_games_list(player: Player, db: Session) -> list[dict[str, Any]]:
             pl = json.loads(r.players)
             if not isinstance(pl, list):
                 continue
-            if not any(str(p.get("player_id")) == player_id_str for p in pl):
-                continue
-            if player_id_str in _get_forfeited_player_ids(r):
-                continue
-            player_ids.add(player_id_str)
+            if not include_all:
+                if player_id_str not in {str(p.get("player_id")) for p in pl}:
+                    continue
+                if player_id_str in _get_forfeited_player_ids(r):
+                    continue
             for p in pl:
                 pid = p.get("player_id")
                 if pid is not None:
@@ -1809,10 +1829,11 @@ def _build_games_list(player: Player, db: Session) -> list[dict[str, Any]]:
             pl = json.loads(r.players)
             if not isinstance(pl, list):
                 continue
-            if not any(str(p.get("player_id")) == player_id_str for p in pl):
-                continue
-            if player_id_str in _get_forfeited_player_ids(r):
-                continue
+            if not include_all:
+                if player_id_str not in {str(p.get("player_id")) for p in pl}:
+                    continue
+                if player_id_str in _get_forfeited_player_ids(r):
+                    continue
         except (json.JSONDecodeError, TypeError):
             continue
 
@@ -1888,6 +1909,18 @@ def _build_games_list(player: Player, db: Session) -> list[dict[str, Any]]:
 
         scenario = _get_scenario_from_config(r, db)
 
+        players_out = [
+            {
+                "player_id": str(p.get("player_id")),
+                "username": players_by_id.get(str(p.get("player_id"))),
+                "faction_id": p.get("faction_id"),
+            }
+            for p in pl
+            if p.get("player_id") is not None
+        ]
+        raw_winner = state_dict.get("winner")
+        winner = str(raw_winner) if isinstance(raw_winner, str) and raw_winner else None
+
         # Username only from faction match or single-player lookup (no fallback to current user)
         item = {
             "id": str(r.id),
@@ -1896,6 +1929,7 @@ def _build_games_list(player: Player, db: Session) -> list[dict[str, Any]]:
             "status": r.status,
             "created_at": r.created_at.isoformat() if r.created_at else None,
             "created_by": str(r.created_by) if r.created_by else None,
+            "completed_at": r.completed_at.isoformat() if r.completed_at else None,
             "turn_number": turn_number,
             "phase": phase,
             "current_faction": current_faction,
@@ -1907,6 +1941,8 @@ def _build_games_list(player: Player, db: Session) -> list[dict[str, Any]]:
             "lobby_factions_claimed": lobby_factions_claimed,
             "lobby_factions_total": lobby_factions_total,
             "scenario": scenario,
+            "players": players_out,
+            "winner": winner,
         }
         mine.append(item)
     return mine

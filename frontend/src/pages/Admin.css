@@ -371,6 +371,98 @@
   overflow: auto;
 }
 
+.admin-modal--games {
+  width: min(100%, 72rem);
+  max-height: min(92vh, 52rem);
+  overflow: auto;
+}
+
+.games-report__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.games-report__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+
+.games-report__filter {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.7rem;
+  background: var(--parchment);
+  color: var(--ink);
+  border: 1px solid var(--ink-faded);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.games-report__filter:hover {
+  border-color: var(--ink);
+}
+
+.games-report__filter--active {
+  background: var(--ink);
+  color: var(--parchment);
+  border-color: var(--ink);
+}
+
+.games-report__table-scroll {
+  overflow-x: auto;
+}
+
+.games-report__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.games-report__table th,
+.games-report__table td {
+  text-align: left;
+  padding: 0.4rem 0.55rem;
+  border-bottom: 1px solid rgba(40, 32, 24, 0.18);
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.games-report__table th {
+  font-weight: 700;
+  border-bottom-width: 2px;
+}
+
+.games-report__name,
+.games-report__players {
+  white-space: normal;
+  min-width: 8rem;
+  max-width: 16rem;
+  overflow-wrap: anywhere;
+}
+
+.games-report__status {
+  display: inline-block;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--ink-faded);
+  background: var(--parchment);
+}
+
+.games-report__status--lobby {
+  border-style: dashed;
+}
+
+.games-report__status--finished {
+  background: var(--ink);
+  color: var(--parchment);
+  border-color: var(--ink);
+}
+
 .balance-modal__header {
   display: flex;
   justify-content: space-between;

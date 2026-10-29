@@ -844,12 +844,20 @@ export interface ForfeitOptionsResponse {
   assignees: { id: string; label: string }[];
 }
 
+export interface GameListPlayer {
+  player_id: string;
+  username: string | null;
+  faction_id: string | null;
+}
+
 export interface GameListItem {
   id: string;
   name: string;
   game_code: string | null;
   status: string;
   created_at: string | null;
+  /** Set once the game finishes (finished status only). */
+  completed_at?: string | null;
   /** Host (creator) player id; only they can delete the game. */
   created_by?: string | null;
   turn_number?: number | null;
@@ -866,6 +874,10 @@ export interface GameListItem {
   lobby_factions_claimed?: number | null;
   /** Lobby only: total factions (turn order length). */
   lobby_factions_total?: number | null;
+  /** Everyone in the game, with usernames. */
+  players?: GameListPlayer[];
+  /** Winning alliance ("good" | "evil") once the game is finished. */
+  winner?: string | null;
   /** Setup display name from manifest when game config has setup_id (same shape as lobby meta). */
   scenario?: {
     display_name: string;
@@ -959,6 +971,7 @@ export const api = {
 
   adminListSetups: () =>
     fetchJson<{ setups: AdminSetupListItem[] }>('/admin/setups'),
+  adminListGames: () => fetchJson<{ games: GameListItem[] }>('/admin/games'),
   getAudioGains: async () => {
     const r = await fetchJson<{ gains: AudioGainsMap; menu_music?: string[] }>('/audio/gains');
     setAudioFileGains(r.gains);

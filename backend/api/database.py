@@ -152,6 +152,19 @@ def _ensure_player_preferences_column():
             conn.execute(text("ALTER TABLE players ADD COLUMN IF NOT EXISTS preferences TEXT"))
 
 
+def _ensure_games_completed_at_column():
+    """Add games.completed_at if missing (existing SQLite/Postgres DBs before this column)."""
+    if DATABASE_URL.startswith("sqlite"):
+        with engine.begin() as conn:
+            rows = conn.execute(text("PRAGMA table_info(games)")).fetchall()
+            names = {row[1] for row in rows}
+            if "completed_at" not in names:
+                conn.execute(text("ALTER TABLE games ADD COLUMN completed_at DATETIME"))
+    else:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP"))
+
+
 def init_db():
     """Create all tables and apply additive schema patches.
 
@@ -163,6 +176,7 @@ def init_db():
 
     Base.metadata.create_all(bind=engine)
     _ensure_player_preferences_column()
+    _ensure_games_completed_at_column()
     _sync_admin_column_and_flags()
     db = SessionLocal()
     try:
