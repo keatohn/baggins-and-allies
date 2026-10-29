@@ -372,9 +372,12 @@
 }
 
 .admin-modal--games {
-  width: min(100%, 72rem);
-  max-height: min(92vh, 52rem);
-  overflow: auto;
+  width: min(100%, 76rem);
+  height: min(92vh, 54rem);
+  max-height: min(92vh, 54rem);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .games-report__header {
@@ -383,13 +386,16 @@
   align-items: flex-start;
   gap: 1rem;
   margin-bottom: 0.75rem;
+  flex-shrink: 0;
 }
 
 .games-report__filters {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   gap: 0.5rem;
   margin-bottom: 0.85rem;
+  flex-shrink: 0;
 }
 
 .games-report__filter {
@@ -413,13 +419,20 @@
   border-color: var(--ink);
 }
 
+/* Only the table body scrolls; header + filters stay pinned in the flex column. */
 .games-report__table-scroll {
-  overflow-x: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
+/* Fixed layout + colgroup widths: cell content can never resize columns or spill into neighbors.
+   border-collapse: separate keeps th borders visible on the sticky header while scrolling. */
 .games-report__table {
   width: 100%;
-  border-collapse: collapse;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 0.85rem;
 }
 
@@ -430,54 +443,99 @@
   border-bottom: 1px solid rgba(40, 32, 24, 0.18);
   vertical-align: top;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.games-report__table th {
+.games-report__table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--parchment-light);
   font-weight: 700;
   border-bottom-width: 2px;
 }
 
-.games-report__name {
-  white-space: normal;
-  min-width: 8rem;
-  max-width: 14rem;
-  overflow-wrap: anywhere;
+.games-report__col-name {
+  width: 16%;
 }
 
-/* max-width on a td is unreliable with auto table layout — constrain an inner block instead. */
-.games-report__players {
+.games-report__col-players {
+  width: 22%;
+}
+
+.games-report__col-scenario {
+  width: 16%;
+}
+
+.games-report__col-turn {
+  width: 12%;
+}
+
+.games-report__col-status {
+  width: 10%;
+}
+
+.games-report__col-winner {
+  width: 8%;
+}
+
+.games-report__col-created {
+  width: 8%;
+}
+
+.games-report__col-completed {
+  width: 8%;
+}
+
+/* Higher specificity than the .games-report__table td nowrap rule, or white-space: normal loses the cascade. */
+.games-report__table td.games-report__name {
   white-space: normal;
-  min-width: 8rem;
-  max-width: 16rem;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+}
+
+.games-report__table td.games-report__players {
+  white-space: normal;
+  overflow: hidden;
 }
 
 .games-report__players-text {
   display: block;
-  max-width: 15rem;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 
-.games-report__scenario {
+.games-report__table td.games-report__scenario {
   white-space: normal;
-  min-width: 8rem;
-  max-width: 14rem;
   overflow-wrap: anywhere;
+  overflow: hidden;
 }
 
+.games-report__table td.games-report__turn {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+}
+
+.games-report__error {
+  flex-shrink: 0;
+}
+
+/* In-flow filter panel (not absolute) so it can't overlay/split the sticky table header. */
 .games-report__dropdown {
-  position: relative;
-  display: inline-block;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 100%;
 }
 
 .games-report__dropdown-menu {
-  position: absolute;
-  top: calc(100% + 0.25rem);
-  left: 0;
-  z-index: 30;
   min-width: 14rem;
-  max-height: 16rem;
+  max-width: 100%;
+  max-height: 14rem;
   overflow-y: auto;
+  margin-top: 0.35rem;
   padding: 0.4rem;
   background: var(--parchment);
   border: 1px solid var(--ink);
