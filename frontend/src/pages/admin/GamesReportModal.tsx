@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../services/api';
 import type { GameListItem } from '../../services/api';
 
@@ -30,9 +30,13 @@ function formatDate(iso: string | null | undefined): string {
 }
 
 function playerNames(game: GameListItem): string {
-  const names = (game.players ?? [])
-    .map((p) => p.username?.trim())
-    .filter((n): n is string => Boolean(n));
+  const names: string[] = [];
+  for (const p of game.players ?? []) {
+    const n = p.username?.trim();
+    if (!n) continue;
+    const label = p.forfeited ? `${n} (forfeited)` : n;
+    if (!names.includes(label)) names.push(label);
+  }
   if (names.length > 0) return names.join(', ');
   if (game.current_player_username) return game.current_player_username;
   return '—';
@@ -54,10 +58,26 @@ function winnerLabel(game: GameListItem): string {
   return game.winner;
 }
 
+function scenarioKey(game: GameListItem): string {
+  return game.scenario?.id ?? game.scenario?.display_name ?? '__none__';
+}
+
+function scenarioOptionLabel(game: GameListItem): string {
+  const name = game.scenario?.display_name;
+  const id = game.scenario?.id;
+  if (!name && !id) return 'Unknown scenario';
+  if (name && id && name !== id) return `${name} (${id})`;
+  return name ?? id ?? 'Unknown scenario';
+}
+
 export function GamesReportModal({ onClose }: { onClose: () => void }) {
   const [games, setGames] = useState<GameListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterKey>('all');
+  const [selectedPlayers, setSelectedPlayers] = useState<Set<string>>(new Set());
+  const [selectedScenario, setSelectedScenario] = useState<string>('');
+  const [playersOpen, setPlayersOpen] = useState(false);
+  const playersMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,11 +94,61 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (!playersOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (playersMenuRef.current && !playersMenuRef.current.contains(e.target as Node)) {
+        setPlayersOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [playersOpen]);
+
+  const allPlayers = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const g of games ?? []) {
+      for (const p of g.players ?? []) {
+        const name = p.username?.trim();
+        if (p.player_id && name && !byId.has(p.player_id)) byId.set(p.player_id, name);
+      }
+    }
+    return [...byId.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [games]);
+
+  const scenarioOptions = useMemo(() => {
+    const byKey = new Map<string, { key: string; label: string }>();
+    for (const g of games ?? []) {
+      const key = scenarioKey(g);
+      if (!byKey.has(key)) byKey.set(key, { key, label: scenarioOptionLabel(g) });
+    }
+    return [...byKey.values()].sort((a, b) => {
+      if (a.key === '__none__') return 1;
+      if (b.key === '__none__') return -1;
+      return a.label.localeCompare(b.label);
+    });
+  }, [games]);
+
   const shown = useMemo(() => {
-    const all = games ?? [];
-    if (filter === 'all') return all;
-    return all.filter((g) => g.status === filter);
-  }, [games, filter]);
+    let list = games ?? [];
+    if (filter !== 'all') list = list.filter((g) => g.status === filter);
+    if (selectedScenario) {
+      list = list.filter((g) => scenarioKey(g) === selectedScenario);
+    }
+    if (selectedPlayers.size > 0) {
+      // AND logic: every selected player must be in the game.
+      list = list.filter((g) => {
+        const ids = new Set((g.players ?? []).map((p) => p.player_id));
+        for (const pid of selectedPlayers) {
+          if (!ids.has(pid)) return false;
+        }
+        return true;
+      });
+    }
+    return list;
+  }, [games, filter, selectedPlayers, selectedScenario]);
 
   const counts = useMemo(() => {
     const all = games ?? [];
@@ -89,6 +159,24 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
       finished: all.filter((g) => g.status === 'finished').length,
     };
   }, [games]);
+
+  const togglePlayer = (pid: string) => {
+    setSelectedPlayers((prev) => {
+      const next = new Set(prev);
+      if (next.has(pid)) next.delete(pid);
+      else next.add(pid);
+      return next;
+    });
+  };
+
+  const playersButtonLabel = useMemo(() => {
+    if (selectedPlayers.size === 0) return 'All players';
+    if (selectedPlayers.size === 1) {
+      const pid = [...selectedPlayers][0];
+      return allPlayers.find((p) => p.id === pid)?.name ?? '1 player';
+    }
+    return `${selectedPlayers.size} players`;
+  }, [selectedPlayers, allPlayers]);
 
   return (
     <div className="admin-modal-overlay" role="presentation" onClick={onClose}>
@@ -126,6 +214,51 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
           ))}
         </div>
 
+        <div className="games-report__filters" role="group" aria-label="Filter by player or scenario">
+          <div className="games-report__dropdown" ref={playersMenuRef}>
+            <button
+              type="button"
+              className={`games-report__filter${selectedPlayers.size > 0 ? ' games-report__filter--active' : ''}`}
+              aria-haspopup="listbox"
+              aria-expanded={playersOpen}
+              onClick={() => setPlayersOpen((o) => !o)}
+            >
+              {playersButtonLabel} ▾
+            </button>
+            {playersOpen ? (
+              <div className="games-report__dropdown-menu" role="listbox" aria-multiselectable="true">
+                {allPlayers.length === 0 ? (
+                  <p className="admin-form__micro games-report__dropdown-empty">No players found.</p>
+                ) : (
+                  allPlayers.map((p) => (
+                    <label key={p.id} className="games-report__dropdown-item" role="option" aria-selected={selectedPlayers.has(p.id)}>
+                      <input
+                        type="checkbox"
+                        checked={selectedPlayers.has(p.id)}
+                        onChange={() => togglePlayer(p.id)}
+                      />
+                      <span>{p.name}</span>
+                    </label>
+                  ))
+                )}
+              </div>
+            ) : null}
+          </div>
+          <select
+            className="games-report__filter games-report__select"
+            value={selectedScenario}
+            onChange={(e) => setSelectedScenario(e.target.value)}
+            aria-label="Filter by scenario"
+          >
+            <option value="">All scenarios</option>
+            {scenarioOptions.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {error ? <p className="admin-page__error">{error}</p> : null}
 
         {games != null && !error ? (
@@ -150,8 +283,10 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
                   {shown.map((g) => (
                     <tr key={g.id}>
                       <td className="games-report__name">{g.name}</td>
-                      <td className="games-report__players">{playerNames(g)}</td>
-                      <td>{g.scenario?.display_name ?? '—'}</td>
+                      <td className="games-report__players">
+                        <span className="games-report__players-text">{playerNames(g)}</span>
+                      </td>
+                      <td className="games-report__scenario">{scenarioOptionLabel(g)}</td>
                       <td>{turnPhase(g)}</td>
                       <td>
                         <span className={`games-report__status games-report__status--${g.status}`}>

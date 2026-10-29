@@ -1780,7 +1780,10 @@ def _get_scenario_from_config(row, db: Session) -> dict[str, Any] | None:
         if not setup_id or not isinstance(setup_id, str):
             return None
         # DB manifest when setups are in DB; inactive setups still resolve for game cards.
-        return try_scenario_display(setup_id, db)
+        display = try_scenario_display(setup_id, db)
+        if isinstance(display, dict):
+            display["id"] = setup_id
+        return display
     except (TypeError, json.JSONDecodeError):
         pass
     return None
@@ -1801,6 +1804,7 @@ def _build_games_list(player: Player, db: Session, *, include_all: bool = False)
     mine = []
     player_ids = set()
     player_id_str = str(player.id)
+    forfeited_by_game: dict[str, list[str]] = {}
     for r in rows:
         try:
             pl = json.loads(r.players)
@@ -1815,6 +1819,11 @@ def _build_games_list(player: Player, db: Session, *, include_all: bool = False)
                 pid = p.get("player_id")
                 if pid is not None:
                     player_ids.add(str(pid))
+            # Forfeited players are removed from `players` but we keep their ids so lists can still show them.
+            current_forfeited = _get_forfeited_player_ids(r)
+            if current_forfeited:
+                forfeited_by_game[str(r.id)] = current_forfeited
+                player_ids.update(current_forfeited)
         except (json.JSONDecodeError, TypeError):
             continue
 
@@ -1909,15 +1918,43 @@ def _build_games_list(player: Player, db: Session, *, include_all: bool = False)
 
         scenario = _get_scenario_from_config(r, db)
 
-        players_out = [
-            {
-                "player_id": str(p.get("player_id")),
-                "username": players_by_id.get(str(p.get("player_id"))),
-                "faction_id": p.get("faction_id"),
-            }
-            for p in pl
-            if p.get("player_id") is not None
-        ]
+        # Unique players in turn order: a user controlling multiple factions appears once,
+        # ranked by the earliest of their factions in turn_order (stable otherwise).
+        turn_order_list = state_dict.get("turn_order") if isinstance(state_dict.get("turn_order"), list) else []
+        faction_rank = {str(fid): i for i, fid in enumerate(turn_order_list) if fid is not None}
+        players_by_pid: dict[str, dict[str, Any]] = {}
+        player_rank: dict[str, int] = {}
+        for p in pl:
+            pid = p.get("player_id")
+            if pid is None:
+                continue
+            pid_s = str(pid)
+            if pid_s not in players_by_pid:
+                players_by_pid[pid_s] = {
+                    "player_id": pid_s,
+                    "username": players_by_id.get(pid_s),
+                    "faction_id": p.get("faction_id"),
+                }
+            fid = p.get("faction_id")
+            if fid is not None:
+                rank = faction_rank.get(str(fid))
+                if rank is not None and (pid_s not in player_rank or rank < player_rank[pid_s]):
+                    player_rank[pid_s] = rank
+        players_out = sorted(
+            players_by_pid.values(),
+            key=lambda e: player_rank.get(e["player_id"], len(faction_rank)),
+        )
+        # Forfeited players were dropped from `players` on leave; re-append them (flagged) so reports/cards keep the original roster.
+        for fid_pid in forfeited_by_game.get(str(r.id), []):
+            if fid_pid not in players_by_pid:
+                players_out.append(
+                    {
+                        "player_id": fid_pid,
+                        "username": players_by_id.get(fid_pid),
+                        "faction_id": None,
+                        "forfeited": True,
+                    }
+                )
         raw_winner = state_dict.get("winner")
         winner = str(raw_winner) if isinstance(raw_winner, str) and raw_winner else None
 

@@ -848,6 +848,8 @@ export interface GameListPlayer {
   player_id: string;
   username: string | null;
   faction_id: string | null;
+  /** True when this player left via forfeit; kept in the list so the original roster shows. */
+  forfeited?: boolean;
 }
 
 export interface GameListItem {
@@ -880,6 +882,8 @@ export interface GameListItem {
   winner?: string | null;
   /** Setup display name from manifest when game config has setup_id (same shape as lobby meta). */
   scenario?: {
+    /** Setup/scenario id (e.g. "fellowship"); present since the admin games report needs it for filtering. */
+    id?: string;
     display_name: string;
     context?: Record<string, unknown>;
     lobby_music?: string[];

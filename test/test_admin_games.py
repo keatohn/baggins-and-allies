@@ -96,6 +96,7 @@ def _add_game(
     state=None,
     completed_at=None,
     created_by=None,
+    config=None,
 ):
     game = Game(
         id=str(uuid.uuid4()),
@@ -105,7 +106,7 @@ def _add_game(
         created_by=created_by,
         game_state=json.dumps(state or {}),
         players=json.dumps(players_list),
-        config=None,
+        config=json.dumps(config) if config is not None else None,
     )
     session.add(game)
     session.commit()
@@ -210,6 +211,90 @@ def test_list_games_excludes_finished_and_includes_player_names(make_client, pla
     running = next(g for g in games if g["name"] == "Running game")
     assert [p["username"] for p in running["players"]] == ["normaluser", "adminuser"]
     assert running["winner"] is None
+
+
+def test_games_list_unique_players_ordered_by_turn_order(make_client, players, db_session):
+    """A user controlling multiple factions appears once, ordered by turn order (not players-list order)."""
+    admin, user = players
+    game = _add_game(
+        db_session,
+        name="Multi-faction game",
+        status="active",
+        players_list=[
+            {"player_id": user.id, "faction_id": "mordor"},
+            {"player_id": admin.id, "faction_id": "gondor"},
+            {"player_id": user.id, "faction_id": "isengard"},
+        ],
+        state={
+            "turn_number": 2,
+            "phase": "purchase",
+            "current_faction": "gondor",
+            "turn_order": ["gondor", "mordor", "isengard"],
+        },
+    )
+
+    admin_client = make_client(admin)
+    r = admin_client.get("/admin/games")
+    assert r.status_code == 200
+    admin_game = next(g for g in r.json()["games"] if g["id"] == game.id)
+    admin_names = [p["username"] for p in admin_game["players"]]
+    assert admin_names == ["adminuser", "normaluser"]  # gondor rank 0; user's earliest is mordor (rank 1)
+    assert [p["player_id"] for p in admin_game["players"]] == [admin.id, user.id]
+
+    user_client = make_client(user)
+    r = user_client.get("/games")
+    assert r.status_code == 200
+    mine = next(g for g in r.json()["games"] if g["id"] == game.id)
+    assert [p["username"] for p in mine["players"]] == ["adminuser", "normaluser"]
+
+
+def test_forfeited_players_stay_in_game_lists(make_client, players, db_session):
+    """Forfeited players are removed from `players` on leave but remain in list payloads, flagged."""
+    admin, user = players
+    game = _add_game(
+        db_session,
+        name="Forfeit game",
+        status="active",
+        players_list=[{"player_id": admin.id, "faction_id": "gondor"}],
+        state={"turn_number": 4, "phase": "purchase", "current_faction": "gondor"},
+        config={"forfeited_player_ids": [user.id]},
+    )
+
+    admin_client = make_client(admin)
+    r = admin_client.get("/admin/games")
+    assert r.status_code == 200
+    admin_game = next(g for g in r.json()["games"] if g["id"] == game.id)
+    by_id = {p["player_id"]: p for p in admin_game["players"]}
+    assert set(by_id) == {admin.id, user.id}
+    assert by_id[user.id]["username"] == "normaluser"
+    assert by_id[user.id]["forfeited"] is True
+    assert by_id[admin.id].get("forfeited") is not True
+
+    # Remaining player's own list also keeps the original roster.
+    r = admin_client.get("/games")
+    assert r.status_code == 200
+    mine = next(g for g in r.json()["games"] if g["id"] == game.id)
+    assert user.id in {p["player_id"] for p in mine["players"]}
+
+
+def test_scenario_includes_setup_id(make_client, players, db_session):
+    """Scenario payloads carry the setup id so the admin report can distinguish same-named setups."""
+    admin, _user = players
+    _add_game(
+        db_session,
+        name="Scenario game",
+        status="lobby",
+        players_list=[{"player_id": admin.id, "faction_id": None}],
+        state={"turn_order": ["good", "evil"]},
+        config={"setup_id": "wotr_exp_1.0"},
+    )
+
+    client = make_client(admin)
+    r = client.get("/admin/games")
+    assert r.status_code == 200
+    game = next(g for g in r.json()["games"] if g["name"] == "Scenario game")
+    assert game["scenario"]["id"] == "wotr_exp_1.0"
+    assert game["scenario"]["display_name"]
 
 
 def test_save_game_stamps_completed_at(db_session):
