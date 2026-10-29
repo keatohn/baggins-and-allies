@@ -76,6 +76,14 @@ def decide(ctx: AIContext) -> Action | None:
         return end_phase(ctx.faction_id)
 
     if phase == "combat_move":
+        if _mcts_enabled():
+            from backend.ai.mcts.combat_move import decide_combat_move_mcts
+
+            action = decide_combat_move_mcts(ctx)
+            if action is not None:
+                return action
+            # Fall through to heuristic if MCTS returned nothing (safety net).
+
         action = decide_combat_move(ctx)
         if action is not None:
             return action
