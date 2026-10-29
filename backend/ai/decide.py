@@ -17,8 +17,8 @@ from backend.ai.non_combat_move import decide_non_combat_move
 from backend.engine.special_rules import territory_defs_with_current_power
 
 
-def _mcts_enabled_for_purchase() -> bool:
-    """True when AI_ALGORITHM=mcts routes the purchase phase through MCTS."""
+def _mcts_enabled() -> bool:
+    """True when AI_ALGORITHM=mcts routes purchase and combat phases through MCTS."""
     return (os.environ.get("AI_ALGORITHM") or "heuristic").strip().lower() == "mcts"
 
 
@@ -39,7 +39,7 @@ def decide(ctx: AIContext) -> Action | None:
     phase = ctx.phase
 
     if phase == "purchase":
-        if _mcts_enabled_for_purchase():
+        if _mcts_enabled():
             from backend.ai.mcts.purchase import decide_purchase_mcts
 
             action = decide_purchase_mcts(ctx)
@@ -48,17 +48,25 @@ def decide(ctx: AIContext) -> Action | None:
             # Fall through to heuristic if MCTS returned nothing (safety net).
         return decide_purchase(ctx)
 
-    if phase == "combat" and ctx.state.active_combat:
-        action = decide_combat(ctx)
-        if action is not None:
-            return action
-        # end_phase is invalid while active_combat exists; advance the battle with empty dice (API fills for AI)
-        return continue_combat(
-            ctx.faction_id,
-            dice_rolls={"attacker": [], "defender": []},
-        )
-
     if phase == "combat":
+        if _mcts_enabled():
+            from backend.ai.mcts.combat import decide_combat_mcts
+
+            action = decide_combat_mcts(ctx)
+            if action is not None:
+                return action
+            # Fall through to heuristic if MCTS returned nothing (safety net).
+
+        if ctx.state.active_combat:
+            action = decide_combat(ctx)
+            if action is not None:
+                return action
+            # end_phase is invalid while active_combat exists; advance the battle with empty dice (API fills for AI)
+            return continue_combat(
+                ctx.faction_id,
+                dice_rolls={"attacker": [], "defender": []},
+            )
+
         # No active combat: must initiate one of the declared battles if any
         combat_territories = (ctx.available_actions or {}).get("combat_territories") or []
         if combat_territories:
