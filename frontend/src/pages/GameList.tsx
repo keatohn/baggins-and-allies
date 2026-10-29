@@ -32,7 +32,9 @@ function playerNames(g: GameListItem): string | null {
   const names: string[] = [];
   for (const p of g.players ?? []) {
     const n = p.username?.trim();
-    if (n && !names.includes(n)) names.push(n);
+    if (!n) continue;
+    const label = p.forfeited ? `${n} (forfeited)` : n;
+    if (!names.includes(label)) names.push(label);
   }
   if (names.length > 0) return names.join(', ');
   if (g.current_player_username) return g.current_player_username;
