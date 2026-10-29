@@ -30,9 +30,11 @@ function formatDate(iso: string | null | undefined): string {
 }
 
 function playerNames(game: GameListItem): string {
-  const names = (game.players ?? [])
-    .map((p) => p.username?.trim())
-    .filter((n): n is string => Boolean(n));
+  const names: string[] = [];
+  for (const p of game.players ?? []) {
+    const n = p.username?.trim();
+    if (n && !names.includes(n)) names.push(n);
+  }
   if (names.length > 0) return names.join(', ');
   if (game.current_player_username) return game.current_player_username;
   return '—';

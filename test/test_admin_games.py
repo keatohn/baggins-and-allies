@@ -212,6 +212,41 @@ def test_list_games_excludes_finished_and_includes_player_names(make_client, pla
     assert running["winner"] is None
 
 
+def test_games_list_unique_players_ordered_by_turn_order(make_client, players, db_session):
+    """A user controlling multiple factions appears once, ordered by turn order (not players-list order)."""
+    admin, user = players
+    game = _add_game(
+        db_session,
+        name="Multi-faction game",
+        status="active",
+        players_list=[
+            {"player_id": user.id, "faction_id": "mordor"},
+            {"player_id": admin.id, "faction_id": "gondor"},
+            {"player_id": user.id, "faction_id": "isengard"},
+        ],
+        state={
+            "turn_number": 2,
+            "phase": "purchase",
+            "current_faction": "gondor",
+            "turn_order": ["gondor", "mordor", "isengard"],
+        },
+    )
+
+    admin_client = make_client(admin)
+    r = admin_client.get("/admin/games")
+    assert r.status_code == 200
+    admin_game = next(g for g in r.json()["games"] if g["id"] == game.id)
+    admin_names = [p["username"] for p in admin_game["players"]]
+    assert admin_names == ["adminuser", "normaluser"]  # gondor rank 0; user's earliest is mordor (rank 1)
+    assert [p["player_id"] for p in admin_game["players"]] == [admin.id, user.id]
+
+    user_client = make_client(user)
+    r = user_client.get("/games")
+    assert r.status_code == 200
+    mine = next(g for g in r.json()["games"] if g["id"] == game.id)
+    assert [p["username"] for p in mine["players"]] == ["adminuser", "normaluser"]
+
+
 def test_save_game_stamps_completed_at(db_session):
     game = _add_game(
         db_session,

@@ -29,9 +29,11 @@ function truncateUsername(username: string, maxChars: number = 12): string {
 }
 
 function playerNames(g: GameListItem): string | null {
-  const names = (g.players ?? [])
-    .map((p) => p.username?.trim())
-    .filter((n): n is string => Boolean(n));
+  const names: string[] = [];
+  for (const p of g.players ?? []) {
+    const n = p.username?.trim();
+    if (n && !names.includes(n)) names.push(n);
+  }
   if (names.length > 0) return names.join(', ');
   if (g.current_player_username) return g.current_player_username;
   return null;

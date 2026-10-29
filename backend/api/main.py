@@ -1909,15 +1909,32 @@ def _build_games_list(player: Player, db: Session, *, include_all: bool = False)
 
         scenario = _get_scenario_from_config(r, db)
 
-        players_out = [
-            {
-                "player_id": str(p.get("player_id")),
-                "username": players_by_id.get(str(p.get("player_id"))),
-                "faction_id": p.get("faction_id"),
-            }
-            for p in pl
-            if p.get("player_id") is not None
-        ]
+        # Unique players in turn order: a user controlling multiple factions appears once,
+        # ranked by the earliest of their factions in turn_order (stable otherwise).
+        turn_order_list = state_dict.get("turn_order") if isinstance(state_dict.get("turn_order"), list) else []
+        faction_rank = {str(fid): i for i, fid in enumerate(turn_order_list) if fid is not None}
+        players_by_pid: dict[str, dict[str, Any]] = {}
+        player_rank: dict[str, int] = {}
+        for p in pl:
+            pid = p.get("player_id")
+            if pid is None:
+                continue
+            pid_s = str(pid)
+            if pid_s not in players_by_pid:
+                players_by_pid[pid_s] = {
+                    "player_id": pid_s,
+                    "username": players_by_id.get(pid_s),
+                    "faction_id": p.get("faction_id"),
+                }
+            fid = p.get("faction_id")
+            if fid is not None:
+                rank = faction_rank.get(str(fid))
+                if rank is not None and (pid_s not in player_rank or rank < player_rank[pid_s]):
+                    player_rank[pid_s] = rank
+        players_out = sorted(
+            players_by_pid.values(),
+            key=lambda e: player_rank.get(e["player_id"], len(faction_rank)),
+        )
         raw_winner = state_dict.get("winner")
         winner = str(raw_winner) if isinstance(raw_winner, str) and raw_winner else None
 
