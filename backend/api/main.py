@@ -133,6 +133,13 @@ from backend.setup_data import (
     try_scenario_display,
 )
 from backend.catalog import CatalogError, load_catalog, rule_descriptions, save_catalog, specials_for_units
+from backend.map_overrides import (
+    MapOverridesError,
+    list_map_bases,
+    load_map_overrides,
+    save_map_overrides,
+    validate_map_base,
+)
 from backend.unit_formulas import UnitFormulasError, load_unit_formulas, save_unit_formulas, train_regression
 from backend.setup_validation import validate_setup_payload
 from dataclasses import asdict
@@ -1456,6 +1463,47 @@ def admin_put_catalog(
     except CatalogError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"ok": True, "catalog": catalog}
+
+
+@app.get("/admin/maps")
+def admin_list_maps(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Distinct map asset names (map bases) known from setups, for the admin Maps editor."""
+    return {"maps": list_map_bases(db)}
+
+
+@app.get("/maps/{map_base}/overrides")
+def get_map_overrides(
+    map_base: str,
+    db: Session = Depends(get_db),
+):
+    """Icon/location overrides for a map (public read: every client renders with them).
+
+    Positions are SVG viewBox coordinates. Territories absent from the result (or with
+    focus "calculated") use the frontend's computed centroids.
+    """
+    try:
+        base = validate_map_base(map_base)
+    except MapOverridesError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"map_base": base, "overrides": load_map_overrides(db, base)}
+
+
+@app.put("/admin/maps/{map_base}/overrides")
+def admin_put_map_overrides(
+    map_base: str,
+    body: dict[str, Any],
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Replace a map's icon/location overrides (shared by every setup using that map)."""
+    try:
+        overrides = save_map_overrides(db, map_base, body)
+    except MapOverridesError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True, "map_base": map_base, "overrides": overrides}
 
 
 @app.get("/admin/formulas")
