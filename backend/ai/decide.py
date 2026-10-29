@@ -3,6 +3,8 @@ Decide one action for the current phase. Dispatches to phase-specific policies.
 Returns an Action (or end_phase / end_turn / skip_turn when appropriate).
 """
 
+import os
+
 from backend.engine.actions import Action, continue_combat, end_phase, mobilize_units
 
 from backend.ai.context import AIContext
@@ -13,6 +15,11 @@ from backend.ai.mobilization import decide_mobilization
 from backend.ai.combat_move import decide_combat_move
 from backend.ai.non_combat_move import decide_non_combat_move
 from backend.engine.special_rules import territory_defs_with_current_power
+
+
+def _mcts_enabled_for_purchase() -> bool:
+    """True when AI_ALGORITHM=mcts routes the purchase phase through MCTS."""
+    return (os.environ.get("AI_ALGORITHM") or "heuristic").strip().lower() == "mcts"
 
 
 def decide(ctx: AIContext) -> Action | None:
@@ -32,6 +39,13 @@ def decide(ctx: AIContext) -> Action | None:
     phase = ctx.phase
 
     if phase == "purchase":
+        if _mcts_enabled_for_purchase():
+            from backend.ai.mcts.purchase import decide_purchase_mcts
+
+            action = decide_purchase_mcts(ctx)
+            if action is not None:
+                return action
+            # Fall through to heuristic if MCTS returned nothing (safety net).
         return decide_purchase(ctx)
 
     if phase == "combat" and ctx.state.active_combat:
