@@ -216,6 +216,23 @@
   filter: drop-shadow(0 0 4px rgba(255, 215, 0, 0.5)) brightness(1.2);
 }
 
+.map-water-flow {
+  animation: map-water-flow-x 40s linear infinite;
+}
+
+.map-water-flow--river {
+  animation-duration: 25s;
+}
+
+@keyframes map-water-flow-x {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-120px);
+  }
+}
+
 /* Selected sea: gold halo on the stroke layer (Chrome/FF; Safari keeps stroke + pulse) */
 .territory-path-stroke.territory-path--sea.selected:not(.drop-target) {
   filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.8))
@@ -253,6 +270,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .map-water-flow {
+    animation: none;
+  }
   .territory-path-pulse {
     animation: none;
     stroke-opacity: 0.4;
@@ -753,6 +773,11 @@
   z-index: -5;
 }
 
+.territory-units--stacked .territory-units-token-row > span.unit-token-tap-wrapper:hover,
+.territory-units--stacked .territory-units-token-row > span.unit-token-tap-wrapper.unit-token-tap-wrapper--selected {
+  z-index: 30;
+}
+
 .territory-units--stacked:hover {
   gap: 4px;
   z-index: 40;
@@ -795,15 +820,10 @@
   vertical-align: top;
 }
 
-/* Tap-to-move selected stack: clearer feedback on touch (tray selection unchanged) */
-@media (pointer: coarse) {
-  .unit-token-tap-wrapper--selected {
-    position: relative;
-    z-index: 25;
-    transform: scale(1.12);
-    transform-origin: center bottom;
-    transition: transform 0.15s ease;
-  }
+/* Tap-to-move selected stack: paints above its row until clicked off (the enlarged size itself is set on the token) */
+.unit-token-tap-wrapper--selected {
+  position: relative;
+  z-index: 30;
 }
 
 /* Touch: keep comfortable targets; mouse/trackpad uses explicit smaller widths below */
