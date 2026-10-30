@@ -17,7 +17,7 @@
   },
   "fornost_camp": {
     "id": "fornost_camp",
-    "territory_id": "fornost"
+    "territory_id": "north_eriador"
   },
   "barad_dur_camp": {
     "id": "barad_dur_camp",
@@ -29,7 +29,7 @@
   },
   "the_black_gate_camp": {
     "id": "the_black_gate_camp",
-    "territory_id": "the_black_gate"
+    "territory_id": "morannon"
   },
   "ost_in_edhil_camp": {
     "id": "ost_in_edhil_camp",
@@ -37,7 +37,7 @@
   },
   "rivendell_camp": {
     "id": "rivendell_camp",
-    "territory_id": "rivendell"
+    "territory_id": "imladris"
   },
   "mithlond_camp": {
     "id": "mithlond_camp",
@@ -49,7 +49,7 @@
   },
   "lothlorien_camp": {
     "id": "lothlorien_camp",
-    "territory_id": "lothlorien"
+    "territory_id": "lorinand"
   },
   "amon_lanc_camp": {
     "id": "amon_lanc_camp",
