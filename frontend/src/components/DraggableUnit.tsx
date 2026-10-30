@@ -3,6 +3,7 @@ import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { ringCornerClass } from '../ringsDisplay';
 import './UnitToken.css';
+import './MapTooltip.css';
 
 interface DraggableUnitProps {
   id: string;
@@ -85,9 +86,9 @@ function DraggableUnit({
   return (
     <div
       ref={setNodeRef}
-      className={`unit-token ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${disabled ? 'disabled' : ''} ${showAerialMustMove ? 'aerial-must-move' : ''} ${showNavalMustAttack || showForcedNavalStandoff ? 'naval-must-attack' : ''} ${isNaval ? 'unit-token--naval' : ''} ${isHero ? 'unit-token--hero' : ''}`}
+      className={`unit-token map-tip ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${disabled ? 'disabled' : ''} ${showAerialMustMove ? 'aerial-must-move' : ''} ${showNavalMustAttack || showForcedNavalStandoff ? 'naval-must-attack' : ''} ${isNaval ? 'unit-token--naval' : ''} ${isHero ? 'unit-token--hero' : ''}`}
       style={style}
-      title={title}
+      data-tip={title}
       {...listeners}
       {...attributes}
     >
@@ -95,32 +96,24 @@ function DraggableUnit({
       {ringIcons.map((ring, index) => (
         <img
           key={ring.id}
-          className={`unit-token-ring ${ringCornerClass(index)}`}
+          className={`unit-token-ring map-tip ${ringCornerClass(index)}`}
           src={`/assets/rings/${ring.id}.png`}
           alt={ring.name}
-          title={ring.name}
+          data-tip={ring.name}
           draggable={false}
         />
       ))}
       <span className={`count ${count === 1 && passengerCount === 0 ? 'single' : ''}`}>{count}</span>
       {passengerCount > 0 && (
-        <span className="unit-token-passenger-badge" title={`${passengerCount} unit(s) aboard`}>{passengerCount}</span>
+        <span className="unit-token-passenger-badge map-tip" data-tip={`${passengerCount} unit(s) aboard`}>{passengerCount}</span>
       )}
       {showAerialMustMove && (
-        <span className="unit-token-caution" title="Must move to friendly territory" aria-hidden>
+        <span className="unit-token-caution" aria-hidden>
           ⚠️
         </span>
       )}
       {(showNavalMustAttack || showForcedNavalStandoff) && !showAerialMustMove && (
-        <span
-          className="unit-token-caution"
-          title={
-            showNavalMustAttack
-              ? 'Must attack (naval combat or sea raid) before ending phase'
-              : 'Enemy fleet mobilized here — fight in combat phase or sail away'
-          }
-          aria-hidden
-        >
+        <span className="unit-token-caution" aria-hidden>
           ⚠️
         </span>
       )}
