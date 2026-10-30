@@ -1194,6 +1194,162 @@
   color: var(--ink);
 }
 
+/* Map icon override editor (Admin → Maps) */
+.mapov-legend__swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  border: 1px solid rgba(61, 41, 20, 0.4);
+  flex: 0 0 auto;
+}
+
+.mapov-list-badge {
+  margin-left: 0.4rem;
+  color: #2563eb;
+  font-size: 0.7rem;
+  vertical-align: middle;
+}
+
+.mapov-inspector {
+  flex: 0 0 auto;
+  max-height: 52%;
+  overflow: auto;
+  padding: 0.5rem 0.55rem;
+  border: 1px solid var(--ink-faded);
+  border-radius: 8px;
+  background: #fffef8;
+}
+
+.mapov-inspector__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.mapov-inspector__head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mapov-kinds {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+}
+
+.mapov-kind {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid rgba(61, 41, 20, 0.18);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.mapov-kind--active {
+  border-color: var(--ink);
+  background: rgba(61, 41, 20, 0.1);
+}
+
+.mapov-kind--absent {
+  opacity: 0.72;
+}
+
+.mapov-kind__swatch {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  border: 1px solid rgba(61, 41, 20, 0.4);
+  flex: 0 0 auto;
+}
+
+.mapov-kind__label {
+  font-size: 0.85rem;
+  color: var(--ink);
+}
+
+.mapov-kind__pos {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--ink-faded);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mapov-kind--override .mapov-kind__pos {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.mapov-kind__btn {
+  min-height: 1.7rem;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.mapov-dots {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.mapov-dot {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  box-sizing: border-box;
+  border: 2px solid #fffef8;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(61, 41, 20, 0.6);
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+}
+
+.mapov-dot--override {
+  width: 17px;
+  height: 17px;
+  margin: -8.5px 0 0 -8.5px;
+  box-shadow: 0 0 0 2px var(--ink);
+}
+
+.mapov-dot--active,
+.mapov-dot--override.mapov-dot--active {
+  box-shadow: 0 0 0 2px var(--ink), 0 0 0 5px rgba(61, 41, 20, 0.32);
+}
+
+.mapov-dot:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.mapov-dot:active {
+  cursor: grabbing;
+}
+
+.mapov-oracle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+}
+
 .admin-modal__title {
   font-family: 'Cinzel', serif;
   font-size: 1.15rem;
