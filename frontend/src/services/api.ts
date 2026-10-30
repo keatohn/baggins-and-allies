@@ -3,6 +3,7 @@
  */
 
 import { syncAudioFromAuthPlayer, setAudioFileGains, setMenuMusicFiles } from '../audio/gameAudio';
+import type { MapOverridesData } from '../types/game';
 import type { SignalPreset, TerritorySignalMap } from '../territorySignals';
 
 /**
@@ -984,6 +985,20 @@ export const api = {
   },
   getSignals: () => fetchJson<{ presets: SignalPreset[] }>('/signals'),
   getCatalog: () => fetchJson<Catalog>('/catalog'),
+  /** Public read: icon/location overrides for a map (every client renders with them). */
+  getMapOverrides: (mapBase: string) =>
+    fetchJson<{ map_base: string; overrides: MapOverridesData }>(`/maps/${encodeURIComponent(mapBase)}/overrides`),
+  /** Admin: distinct map asset names known from setups, for the Maps editor. */
+  adminListMaps: () => fetchJson<{ maps: string[] }>('/admin/maps'),
+  /** Admin: replace a map's whole overrides blob (shared by every setup using that map). */
+  adminPutMapOverrides: (mapBase: string, overrides: MapOverridesData) =>
+    fetchJson<{ ok: boolean; map_base: string; overrides: MapOverridesData }>(
+      `/admin/maps/${encodeURIComponent(mapBase)}/overrides`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(overrides),
+      },
+    ),
   adminPutCatalog: (catalog: Catalog) =>
     fetchJson<{ ok: boolean; catalog: Catalog }>('/admin/catalog', {
       method: 'PUT',

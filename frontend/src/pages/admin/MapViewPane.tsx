@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
 import GameMap from '../../components/GameMap';
+import { api } from '../../services/api';
 import type { RingView } from '../../ringsDisplay';
-import type { GameState, PendingMove } from '../../types/game';
+import type { GameState, MapOverridesData, PendingMove } from '../../types/game';
 import {
   adjacencyEdges,
   computePathCentroids,
@@ -169,6 +170,7 @@ export function MapViewPane({
   const dragRef = useRef<{ x: number; y: number; tx: number; ty: number; id: number } | null>(null);
   const didDragRef = useRef(false);
   const [pngFailed, setPngFailed] = useState(false);
+  const [mapOverrides, setMapOverrides] = useState<MapOverridesData | null>(null);
   const [editing, setEditing] = useState(false);
   const [edgeField, setEdgeField] = useState<TerritoryEdgeField>('adjacent');
   const [editId, setEditId] = useState<string | null>(null);
@@ -415,6 +417,21 @@ export function MapViewPane({
         if (cancelled) return;
         setErr(e instanceof Error ? e.message : 'Failed to load map SVG');
         setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mapBase]);
+
+  // Map-level icon overrides: the preview must honor them so admins see what players see.
+  useEffect(() => {
+    let cancelled = false;
+    api.getMapOverrides(mapBase)
+      .then((r) => {
+        if (!cancelled) setMapOverrides(r?.overrides ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setMapOverrides(null);
       });
     return () => {
       cancelled = true;
@@ -1013,6 +1030,7 @@ export function MapViewPane({
                   unitDefs={unitDefs}
                   unitStats={unitStats}
                   factionData={factionData}
+                  mapOverrides={mapOverrides}
                   onTerritorySelect={onMapSelect}
                   onUnitSelect={NOOP}
                   onUnitMove={NOOP}

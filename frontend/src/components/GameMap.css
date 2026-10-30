@@ -53,15 +53,12 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
-  /* Middle fingertip of the 32px hand. Query avoids Chrome's per-URL cursor cache. */
-  cursor: url('/assets/cursor/frodos_hand.png?v=32') 16 2, grab;
+  cursor: grab;
   touch-action: none; /* Allow pinch-zoom and pan without browser zoom/scroll */
 }
 
-.map-wrapper:active,
-.map-wrapper:active .territory-path {
-  /* Top of the fist, so it stays under the same point as the open hand. */
-  cursor: url('/assets/cursor/frodos_hand_closed.png?v=32') 16 6, grabbing;
+.map-wrapper:active {
+  cursor: grabbing;
 }
 
 .map-inner {
@@ -113,7 +110,7 @@
 /* Territory stroke and glow. Fill path: no filter for svg-glow (glow is on stroke layer). */
 .territory-path {
   fill-opacity: 0.52;
-  cursor: url('/assets/cursor/frodos_hand.png?v=32') 16 2, pointer;
+  cursor: pointer;
   pointer-events: auto;
   transition: fill-opacity 0.2s ease, stroke 0.2s ease;
   stroke: var(--territory-stroke, #444);
