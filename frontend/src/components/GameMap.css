@@ -1010,6 +1010,12 @@
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .move-arrow {
+    animation: none;
+  }
+}
+
 @media (max-width: 900px) and (orientation: landscape) {
   .map-controls {
     top: 0.45rem;
