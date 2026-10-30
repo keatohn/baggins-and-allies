@@ -455,7 +455,7 @@
       "forodwaith",
       "imladris",
       "north_eregion",
-      "weather_hills"
+      "amon_sul"
     ],
     "aerial_adjacent": [
       "gundabad",
@@ -1094,7 +1094,7 @@
       "fornost",
       "old_forest",
       "south_eregion",
-      "weather_hills",
+      "amon_sul",
       "west_eriador"
     ],
     "aerial_adjacent": [],
@@ -1955,9 +1955,7 @@
     "id": "falls_of_rauros",
     "display_name": "Falls of Rauros",
     "terrain_type": "river",
-    "produces": {
-      "power": 0
-    },
+    "produces": {},
     "is_stronghold": false,
     "ownable": false,
     "adjacent": [
@@ -1984,7 +1982,7 @@
       "ettenmoors",
       "evendim_hills",
       "fornost",
-      "weather_hills"
+      "amon_sul"
     ],
     "aerial_adjacent": [],
     "ford_adjacent": []
@@ -2040,7 +2038,7 @@
       "evendim_hills",
       "forodwaith",
       "old_forest",
-      "weather_hills",
+      "amon_sul",
       "west_eriador"
     ],
     "aerial_adjacent": [],
@@ -2080,8 +2078,8 @@
     "aerial_adjacent": [],
     "ford_adjacent": []
   },
-  "weather_hills": {
-    "id": "weather_hills",
+  "amon_sul": {
+    "id": "amon_sul",
     "display_name": "Weather Hills",
     "terrain_type": "hills",
     "produces": {
