@@ -354,3 +354,70 @@ def test_host_forfeit_with_remaining_player_still_promotes(make_client, players,
     assert config.get("host_forfeited") is True
     remaining = json.loads(game.players)
     assert any(str(p.get("player_id")) == other.id for p in remaining)
+
+
+def test_sole_human_multiple_factions_forfeit_ends_game(make_client, players, db_session):
+    user, _other = players
+    client = make_client(user)
+    game = _add_game(
+        db_session,
+        players_list=[
+            {"player_id": user.id, "faction_id": "gondor"},
+            {"player_id": user.id, "faction_id": "rohan"},
+        ],
+        config={"ai_factions": ["mordor", "isengard", "elves", "erebor", "rhun", "harad"]},
+    )
+    r = client.get(f"/games/{game.id}/forfeit-options")
+    assert r.status_code == 200
+    assert r.json()["forfeit_ends_game"] is True
+
+    r = _forfeit(client, game.id, {"gondor": "computer", "rohan": "computer"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("game_over") is True
+    assert body.get("winner") == "evil"
+
+    db_session.refresh(game)
+    assert game.status == "finished"
+    assert json.loads(game.players) == []
+    state = json.loads(game.game_state)
+    assert state["winner"] == "evil"
+    config = json.loads(game.config)
+    ai = set(config.get("ai_factions") or [])
+    assert "gondor" in ai
+    assert "rohan" in ai
+    log = config.get("event_log") or []
+    victory_events = [e for e in log if e.get("type") == "victory"]
+    assert victory_events, "expected a victory event in the log"
+    assert victory_events[-1]["payload"]["winner"] == "evil"
+
+
+def test_forfeit_victory_event_payload_stronghold_counts(make_client, players, db_session):
+    user, _other = players
+    client = make_client(user)
+    game = _add_game(
+        db_session,
+        players_list=[{"player_id": user.id, "faction_id": "gondor"}],
+        config={"ai_factions": ["mordor", "isengard", "rohan", "elves", "erebor", "rhun", "harad"]},
+    )
+    r = _forfeit(client, game.id, {"gondor": "computer"})
+    assert r.status_code == 200
+    assert r.json().get("winner") == "evil"
+
+    db_session.refresh(game)
+    config = json.loads(game.config)
+    log = config.get("event_log") or []
+    victory_events = [e for e in log if e.get("type") == "victory"]
+    assert victory_events
+    payload = victory_events[-1]["payload"]
+    assert payload["stronghold_counts"] == {"good": 7, "evil": 7}
+    assert payload["strongholds_required"] == 6
+    assert sorted(payload["controlled_strongholds"]) == [
+        "barad_dur",
+        "dol_guldur",
+        "dorwinion",
+        "haradwaith",
+        "isengard",
+        "minas_morgul",
+        "the_black_gate",
+    ]
