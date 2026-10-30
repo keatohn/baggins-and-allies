@@ -784,39 +784,63 @@ function DroppableTerritory({
     ['--territory-glow-rgba-soft' as string]: glowVars.glowRgbaSoft,
   };
   return (
-    <g aria-hidden>
-      <path
-        ref={setNodeRef as React.Ref<SVGPathElement>}
-        id={`territory-${tid}`}
-        d={pathData.d}
-        transform={pathData.transform}
-        fill={waterKind === 'river' ? 'url(#river-wave-pattern)' : waterKind === 'sea' ? 'url(#sea-wave-pattern)' : safeColor}
-        stroke="none"
-        style={pathStyle}
-        className={`${pathClass} territory-path-fill`}
-        onClick={onClick}
-      />
-      {shadowed ? (
+    <>
+      {isSelected && !isSeaZone ? (
         <path
           d={pathData.d}
           transform={pathData.transform}
-          fill="#8a8a8a"
-          fillOpacity={0.72}
-          stroke="none"
+          fill="#000"
           pointerEvents="none"
-          className="territory-path-shadow"
+          className="territory-lift-shadow"
+          filter="url(#territory-lift-shadow)"
         />
       ) : null}
-      <path
-        d={pathData.d}
-        transform={pathData.transform}
-        fill="none"
-        style={pathStyle}
-        className={`${pathClass} territory-path-stroke`}
-        filter={glowFilterId ? `url(#${glowFilterId})` : undefined}
-        pointerEvents="none"
-      />
-    </g>
+      <g
+        aria-hidden
+        className={`territory-group${isSelected ? ' territory-group--selected' : ''}${isSeaZone ? ' territory-group--sea' : ''}`}
+      >
+        <path
+          ref={setNodeRef as React.Ref<SVGPathElement>}
+          id={`territory-${tid}`}
+          d={pathData.d}
+          transform={pathData.transform}
+          fill={waterKind === 'river' ? 'url(#river-wave-pattern)' : waterKind === 'sea' ? 'url(#sea-wave-pattern)' : safeColor}
+          stroke="none"
+          style={pathStyle}
+          className={`${pathClass} territory-path-fill`}
+          onClick={onClick}
+        />
+        {shadowed ? (
+          <path
+            d={pathData.d}
+            transform={pathData.transform}
+            fill="#8a8a8a"
+            fillOpacity={0.72}
+            stroke="none"
+            pointerEvents="none"
+            className="territory-path-shadow"
+          />
+        ) : null}
+        <path
+          d={pathData.d}
+          transform={pathData.transform}
+          fill="none"
+          style={pathStyle}
+          className={`${pathClass} territory-path-stroke`}
+          filter={isSelected && !isSeaZone ? 'url(#territory-glow-gold)' : glowFilterId ? `url(#${glowFilterId})` : undefined}
+          pointerEvents="none"
+        />
+        {isSelected ? (
+          <path
+            d={pathData.d}
+            transform={pathData.transform}
+            fill="none"
+            pointerEvents="none"
+            className="territory-path-pulse"
+          />
+        ) : null}
+      </g>
+    </>
   );
 }
 
@@ -3889,6 +3913,9 @@ function GameMap({
                           const defB = territoryData[idB] ?? territoryData[resolveTerritoryDropId(idB)];
                           const seaA = defA?.terrain === 'sea' || defA?.terrain === 'river' || /^sea_zone_?\d+$/i.test(String(idA));
                           const seaB = defB?.terrain === 'sea' || defB?.terrain === 'river' || /^sea_zone_?\d+$/i.test(String(idB));
+                          const selA = selectedTerritory === idA || selectedTerritory === resolveTerritoryDropId(idA);
+                          const selB = selectedTerritory === idB || selectedTerritory === resolveTerritoryDropId(idB);
+                          if (selA !== selB) return selA ? 1 : -1;
                           if (seaA === seaB) return 0;
                           return seaA ? 1 : -1;
                         })
@@ -4017,6 +4044,31 @@ function GameMap({
                             </filter>
                           );
                         })}
+                        {/* Gold halo for selected land territories (native filter so Safari shows it) */}
+                        <filter id="territory-glow-gold" x="-50%" y="-50%" width="200%" height="200%">
+                          <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur" />
+                          <feFlood floodColor="rgba(255,215,0,0.85)" result="flood" />
+                          <feComposite in2="blur" in="flood" operator="in" result="coloredBlur" />
+                          <feMerge>
+                            <feMergeNode in="coloredBlur" />
+                            <feMergeNode in="SourceGraphic" />
+                          </feMerge>
+                        </filter>
+                        {/* Cast shadow for selected-land lift: crescent below the shape only (fill stays clean) */}
+                        <filter
+                          id="territory-lift-shadow"
+                          x="-50%"
+                          y="-50%"
+                          width="200%"
+                          height="220%"
+                          colorInterpolationFilters="sRGB"
+                        >
+                          <feOffset in="SourceAlpha" dy="6" result="shifted" />
+                          <feComposite in="shifted" in2="SourceAlpha" operator="out" result="crescent" />
+                          <feGaussianBlur in="crescent" stdDeviation="4" result="blurred" />
+                          <feFlood floodColor="#000" floodOpacity="0.5" result="shadowColor" />
+                          <feComposite in="shadowColor" in2="blurred" operator="in" result="shadow" />
+                        </filter>
                         {/* Ocean wave texture for sea zones: base blue with repeating wave curves */}
                         <pattern id="sea-wave-pattern" x="0" y="0" width="120" height="60" patternUnits="userSpaceOnUse">
                           <rect width="120" height="60" fill="#2d4258" />
