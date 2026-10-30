@@ -17,14 +17,18 @@ type CalculatedSpots = {
   hints: Record<string, Partial<Record<HintKind, Pt>>>;
 };
 
-/** Dot colors per spot kind (issue scheme: blue units, yellow logo, red markers/power, green icons, …). */
+/**
+ * Dot colors per spot kind (issue scheme: blue units, red production / sea zone number,
+ * yellow faction logo, green territory type icon + signals/rings/other). Production and sea
+ * zone number share red because sea zones can never be owned or produce — they never coexist.
+ */
 const SPOT_KINDS: { kind: MapSpotKind; label: string; color: string }[] = [
   { kind: 'unit', label: 'Units', color: '#2563eb' },
-  { kind: 'marker', label: 'Markers / power', color: '#dc2626' },
-  { kind: 'center', label: 'Signal / ring', color: '#0d9488' },
-  { kind: 'number', label: 'Sea number', color: '#ea580c' },
-  { kind: 'icons', label: 'Territory icon', color: '#16a34a' },
-  { kind: 'logo', label: 'Faction logo', color: '#ca8a04' },
+  { kind: 'marker', label: 'Production / markers', color: '#dc2626' },
+  { kind: 'number', label: 'Sea zone number', color: '#dc2626' },
+  { kind: 'logo', label: 'Faction logo', color: '#eab308' },
+  { kind: 'icons', label: 'Territory type icon', color: '#16a34a' },
+  { kind: 'center', label: 'Signals / rings', color: '#16a34a' },
 ];
 const KIND_COLOR: Record<MapSpotKind, string> = Object.fromEntries(
   SPOT_KINDS.map((row) => [row.kind, row.color]),
@@ -32,9 +36,12 @@ const KIND_COLOR: Record<MapSpotKind, string> = Object.fromEntries(
 const KIND_LABEL: Record<MapSpotKind, string> = Object.fromEntries(
   SPOT_KINDS.map((row) => [row.kind, row.label]),
 ) as Record<MapSpotKind, string>;
-/** Kinds every territory can have; the rest only exist when an Inkscape hint (or an override) places them. */
-const ALWAYS_KINDS: MapSpotKind[] = ['unit', 'marker', 'center'];
-const EXTRA_KINDS: MapSpotKind[] = ['number', 'icons', 'logo'];
+/**
+ * Kinds every territory shows by default (blue + red). The rest (yellow / green) only appear
+ * when an Inkscape hint or special-case calculation places them, or when manually overridden.
+ */
+const ALWAYS_KINDS: MapSpotKind[] = ['unit', 'marker'];
+const EXTRA_KINDS: MapSpotKind[] = ['number', 'icons', 'logo', 'center'];
 
 const NOOP = () => {};
 
@@ -391,8 +398,12 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
       const out: Partial<Record<MapSpotKind, Pt>> = {};
       if (p?.unit) out.unit = p.unit;
       if (p?.marker) out.marker = p.marker;
+      // Center (signals/rings) only counts as calculated when it differs from the unit spot —
+      // the oracle defaults center = unit for every territory, which isn't a real anchor.
       const center = p?.center ?? p?.unit;
-      if (center) out.center = center;
+      if (center && (!p?.unit || center.x !== p.unit.x || center.y !== p.unit.y)) {
+        out.center = center;
+      }
       if (h?.number) out.number = h.number;
       if (h?.icons) out.icons = h.icons;
       if (h?.logo) out.logo = h.logo;
@@ -606,7 +617,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   const selectedOverride = selectedEntry?.focus === 'override' ? (selectedEntry.positions ?? {}) : {};
 
   const description = spots
-    ? 'Color dots show the spots the game calculates. Pick a territory, switch it to Override, then drag its dots inside the territory. Save applies to every setup using this map.'
+    ? 'Every territory starts with a blue (units) and red (production / sea number) dot. Yellow and green dots appear only when calculated or placed. Pick a territory, switch to Override, then drag its dots inside the territory. Save applies to every setup using this map.'
     : 'Loading calculated spots…';
 
   return (
