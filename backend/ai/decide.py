@@ -22,6 +22,16 @@ def _mcts_enabled() -> bool:
     return (os.environ.get("AI_ALGORITHM") or "heuristic").strip().lower() == "mcts"
 
 
+def _ensure_strategic(ctx: AIContext) -> None:
+    """Build the shared strategic context once, only when a policy that reads it runs.
+
+    Only the heuristic purchase/move/mobilization policies read ctx.strategic
+    (combat and all MCTS Problems do not), so MCTS paths skip the ~2s build.
+    """
+    if ctx.strategic is None:
+        ctx.strategic = build_strategic_turn_context(ctx)
+
+
 def decide(ctx: AIContext) -> Action | None:
     """
     Return the next action for the current faction and phase, or None if the AI
@@ -34,7 +44,6 @@ def decide(ctx: AIContext) -> Action | None:
         return None
 
     ctx.territory_defs = territory_defs_with_current_power(ctx.territory_defs, ctx.state)
-    ctx.strategic = build_strategic_turn_context(ctx)
 
     phase = ctx.phase
 
@@ -46,6 +55,7 @@ def decide(ctx: AIContext) -> Action | None:
             if action is not None:
                 return action
             # Fall through to heuristic if MCTS returned nothing (safety net).
+        _ensure_strategic(ctx)
         return decide_purchase(ctx)
 
     if phase == "combat":
@@ -84,6 +94,7 @@ def decide(ctx: AIContext) -> Action | None:
                 return action
             # Fall through to heuristic if MCTS returned nothing (safety net).
 
+        _ensure_strategic(ctx)
         action = decide_combat_move(ctx)
         if action is not None:
             return action
@@ -101,6 +112,7 @@ def decide(ctx: AIContext) -> Action | None:
                 return action
             # Fall through to heuristic if MCTS returned nothing (safety net).
 
+        _ensure_strategic(ctx)
         action = decide_non_combat_move(ctx)
         if action is not None:
             return action
@@ -123,6 +135,7 @@ def decide(ctx: AIContext) -> Action | None:
                 return action
             # Fall through to heuristic if MCTS returned nothing (safety net).
 
+        _ensure_strategic(ctx)
         action = decide_mobilization(ctx)
         if action is not None and action.type == "end_phase" and ctx.available_actions.get("can_end_phase") is False:
             fallback = _fallback_mobilize(ctx)
