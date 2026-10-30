@@ -554,6 +554,7 @@ const MAP_CONFIG: Record<string, { viewBox: { width: number; height: number }; d
   'wotr_map_1.2': { viewBox: { width: 3500, height: 2600 }, dimensions: { width: 3500, height: 2600 } },
   'motw_map_1.2': { viewBox: { width: 3500, height: 1650 }, dimensions: { width: 3500, height: 1650 } },
   'wotla_map_1.0': { viewBox: { width: 3500, height: 2600 }, dimensions: { width: 3500, height: 2600 } },
+  'wotla_map_1.1': { viewBox: { width: 3500, height: 2400 }, dimensions: { width: 3500, height: 2400 } },
   'woteas_map_1.0': { viewBox: { width: 3600, height: 1600 }, dimensions: { width: 3600, height: 1600 } },
 };
 /** Fallback when `map_asset` is missing or not listed above; must exist in `frontend/public/`. */
