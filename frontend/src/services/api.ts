@@ -842,6 +842,8 @@ export interface GameMeta {
 export interface ForfeitOptionsResponse {
   factions: { faction_id: string; display_name: string; alliance: string }[];
   assignees: { id: string; label: string }[];
+  /** True when this is the last human in an active game — forfeiting ends the game and loses for their alliance. */
+  forfeit_ends_game?: boolean;
 }
 
 export interface GameListPlayer {
@@ -1109,7 +1111,7 @@ export const api = {
   getForfeitOptions: (gameId: string) =>
     fetchJson<ForfeitOptionsResponse>(`/games/${gameId}/forfeit-options`),
   forfeitGame: (gameId: string, body: { faction_assignments: Record<string, string> }) =>
-    fetchJson<{ message: string }>(`/games/${gameId}/forfeit`, {
+    fetchJson<{ message: string; game_over?: boolean; winner?: string }>(`/games/${gameId}/forfeit`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

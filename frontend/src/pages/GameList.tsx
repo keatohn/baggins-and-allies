@@ -336,12 +336,27 @@ export default function GameList() {
         <div className="game-list__modal-overlay" onClick={handleForfeitCancel}>
           <div className="game-list__modal" onClick={(e) => e.stopPropagation()}>
             <h2 className="game-list__modal-title">Forfeit this game?</h2>
-            <p className="game-list__modal-text">
-              You will be removed from <strong>{forfeitingGame.name}</strong>. Choose who will control each of your
-              factions. Then type <strong>{FORFEIT_CONFIRM_PHRASE}</strong> to confirm.
-            </p>
+            {forfeitOptions?.forfeit_ends_game ? (
+              <p className="game-list__modal-text">
+                You are the last human player — forfeiting will immediately end{' '}
+                <strong>{forfeitingGame.name}</strong> and your alliance (
+                {forfeitOptions.factions[0]
+                  ? forfeitOptions.factions[0].alliance.charAt(0).toUpperCase() +
+                    forfeitOptions.factions[0].alliance.slice(1).toLowerCase()
+                  : 'your team'}
+                ) will lose the game. Type <strong>{FORFEIT_CONFIRM_PHRASE}</strong> to confirm.
+              </p>
+            ) : (
+              <p className="game-list__modal-text">
+                You will be removed from <strong>{forfeitingGame.name}</strong>. Choose who will control each of your
+                factions. Then type <strong>{FORFEIT_CONFIRM_PHRASE}</strong> to confirm.
+              </p>
+            )}
             {forfeitOptionsLoading && <p className="game-list__modal-text">Loading options…</p>}
-            {!forfeitOptionsLoading && forfeitOptions && forfeitOptions.factions.length > 0 && (
+            {!forfeitOptionsLoading &&
+              forfeitOptions &&
+              forfeitOptions.factions.length > 0 &&
+              !forfeitOptions.forfeit_ends_game && (
               <ul className="game-list__forfeit-faction-list">
                 {forfeitOptions.factions.map((f) => (
                   <li key={f.faction_id} className="game-list__forfeit-faction-row">
