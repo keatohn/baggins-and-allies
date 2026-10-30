@@ -45,12 +45,22 @@ function formatPhase(phase: string): string {
     .join(' ');
 }
 
-function phaseLabel(phase: string): string {
-  const phaseKey = phase === 'mobilize' ? 'mobilization' : phase;
-  const idx = PHASE_ORDER.indexOf(phaseKey);
-  const n = PHASE_ORDER.length;
-  const current = idx >= 0 ? idx + 1 : 1;
-  return `${formatPhase(phase)} (${current}/${n})`;
+/** Short pill labels shown for the active phase when the full stepper doesn't fit. */
+const PHASE_SHORT: Record<string, string> = {
+  purchase: 'Purchase',
+  combat_move: 'Combat Move',
+  combat: 'Combat',
+  non_combat_move: 'Non-Combat',
+  mobilization: 'Mobilize',
+};
+
+function phaseKey(phase: string): string {
+  return phase === 'mobilize' ? 'mobilization' : phase;
+}
+
+function currentPhaseIndex(phase: string): number {
+  const idx = PHASE_ORDER.indexOf(phaseKey(phase));
+  return idx >= 0 ? idx : 0;
 }
 
 type FactionMark = { id: string; name: string; icon: string; color: string };
@@ -83,6 +93,7 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
   const alliances = factionStats?.alliances ?? {};
   const allianceOrder = ['good', 'evil'].filter(a => a in alliances);
   const turnOrder = (turnOrderForTicker?.length ? turnOrderForTicker : gameState.turn_order) ?? [];
+  const activePhaseIndex = currentPhaseIndex(gameState.phase);
   return (
     <>
       <header
@@ -272,7 +283,25 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
         <div className="turn-status">
           <span className="turn-number">Turn {gameState.turn_number}</span>
           <span className="phase-divider">|</span>
-          <span className="current-phase">{phaseLabel(gameState.phase)}</span>
+          <ol className="phase-stepper" aria-label="Turn phases">
+            {PHASE_ORDER.map((key, i) => {
+              const isCurrent = i === activePhaseIndex;
+              const state = i < activePhaseIndex ? 'past' : isCurrent ? 'current' : 'future';
+              const fullName = formatPhase(key);
+              return (
+                <li
+                  key={key}
+                  className={`phase-step phase-step--${state}`}
+                  aria-current={isCurrent ? 'step' : undefined}
+                  aria-label={`${i + 1} of ${PHASE_ORDER.length}: ${fullName}`}
+                  title={fullName}
+                >
+                  <span className="phase-step-num" aria-hidden="true">{i + 1}</span>
+                  <span className="phase-step-name">{PHASE_SHORT[key] ?? fullName}</span>
+                </li>
+              );
+            })}
+          </ol>
           <span className="phase-divider">|</span>
           <span className="current-power">{power}P</span>
         </div>
