@@ -60,7 +60,9 @@ export default function GameList() {
   const [forfeitOptions, setForfeitOptions] = useState<ForfeitOptionsResponse | null>(null);
   const [forfeitOptionsLoading, setForfeitOptionsLoading] = useState(false);
   const [forfeitAssignments, setForfeitAssignments] = useState<Record<string, string>>({});
-  const [forfeitResult, setForfeitResult] = useState<{ gameName: string; allianceLabel: string } | null>(null);
+  const [forfeitResult, setForfeitResult] = useState<
+    { gameName: string; allianceLabel: string; winningLabel?: string } | null
+  >(null);
 
   const loadGames = () => {
     api.listGames()
@@ -167,6 +169,7 @@ export default function GameList() {
         setForfeitResult({
           gameName: endedName ?? 'The game',
           allianceLabel: allianceLabel(forfeitOptions.factions[0]?.alliance),
+          winningLabel: res.winner ? allianceLabel(res.winner) : undefined,
         });
       }
       setGames((prev) => prev.filter((g) => g.id !== gameToForfeit));
@@ -202,7 +205,8 @@ export default function GameList() {
         <div className="game-list__result" role="status">
           <p className="game-list__result-text">
             <strong>Game over</strong> — {forfeitResult.gameName} has ended. Your alliance (
-            {forfeitResult.allianceLabel}) lost the game.
+            {forfeitResult.allianceLabel}) lost the game
+            {forfeitResult.winningLabel ? ` to ${forfeitResult.winningLabel}` : ''}.
           </p>
           <button
             type="button"

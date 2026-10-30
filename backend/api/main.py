@@ -2824,7 +2824,8 @@ def forfeit_game(
     else:
         # Advance past this player's turn while they still appear as owners in the DB (skip-turn auth).
         # Skipped when this forfeit ends the game: no further turns, and cycle-wrap victory must not override the forced defeat.
-        if not forfeit_ends_game:
+        # Also skipped on already-finished games: turns are over, no skip-turn round-trips needed.
+        if row.status == "active" and not forfeit_ends_game:
             try:
                 raw = json.loads(row.game_state) if isinstance(row.game_state, str) else row.game_state
                 if isinstance(raw, dict):
@@ -2869,31 +2870,33 @@ def forfeit_game(
         config["ai_factions"] = list(ai_set)
 
     row.players = json.dumps(new_players)
-    # If host forfeited, promote first remaining player to host (by turn order in lobby, else first in list)
-    if str(row.created_by) == player_id_str and new_players:
+    # If host forfeited, record the flag (even a last-human forfeit that ends the game),
+    # then promote first remaining player to host (by turn order in lobby, else first in list)
+    if str(row.created_by) == player_id_str:
         config["host_forfeited"] = True
-        try:
-            state_dict = json.loads(row.game_state) if isinstance(row.game_state, str) else {}
-            turn_order = (state_dict or {}).get("turn_order") or []
-        except (TypeError, json.JSONDecodeError):
-            turn_order = []
-        remaining_ids = list(dict.fromkeys(str(p.get("player_id")) for p in new_players if p.get("player_id")))
-        new_host = None
-        if isinstance(turn_order, list) and turn_order and row.status == "lobby":
-            lobby_claims_after = config.get("lobby_claims") or {}
-            for fid in turn_order:
-                pid = lobby_claims_after.get(fid)
-                if (
-                    pid
-                    and str(pid) != LOBBY_COMPUTER_PLAYER_ID
-                    and str(pid) in remaining_ids
-                ):
-                    new_host = pid
-                    break
-        if new_host is None and remaining_ids:
-            new_host = remaining_ids[0]
-        if new_host:
-            row.created_by = new_host
+        if new_players:
+            try:
+                state_dict = json.loads(row.game_state) if isinstance(row.game_state, str) else {}
+                turn_order = (state_dict or {}).get("turn_order") or []
+            except (TypeError, json.JSONDecodeError):
+                turn_order = []
+            remaining_ids = list(dict.fromkeys(str(p.get("player_id")) for p in new_players if p.get("player_id")))
+            new_host = None
+            if isinstance(turn_order, list) and turn_order and row.status == "lobby":
+                lobby_claims_after = config.get("lobby_claims") or {}
+                for fid in turn_order:
+                    pid = lobby_claims_after.get(fid)
+                    if (
+                        pid
+                        and str(pid) != LOBBY_COMPUTER_PLAYER_ID
+                        and str(pid) in remaining_ids
+                    ):
+                        new_host = pid
+                        break
+            if new_host is None and remaining_ids:
+                new_host = remaining_ids[0]
+            if new_host:
+                row.created_by = new_host
     row.config = json.dumps(config)
     db.commit()
 

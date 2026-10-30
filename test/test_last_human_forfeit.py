@@ -290,3 +290,67 @@ def test_forfeit_on_finished_game_keeps_existing_winner(make_client, players, db
     config = json.loads(game.config)
     log = config.get("event_log") or []
     assert not [e for e in log if e.get("type") == "victory"]
+
+
+def test_host_last_human_forfeit_sets_host_forfeited_and_finishes(make_client, players, db_session):
+    user, _other = players
+    client = make_client(user)
+    game = _add_game(
+        db_session,
+        players_list=[{"player_id": user.id, "faction_id": "gondor"}],
+        config={"ai_factions": ["mordor", "isengard", "rohan", "elves", "erebor", "rhun", "harad"]},
+        created_by=user.id,
+    )
+    r = _forfeit(client, game.id, {"gondor": "computer"})
+    assert r.status_code == 200
+    assert r.json().get("game_over") is True
+
+    db_session.refresh(game)
+    assert game.status == "finished"
+    config = json.loads(game.config)
+    assert config.get("host_forfeited") is True
+
+
+def test_non_host_last_human_forfeit_leaves_host_flag_alone(make_client, players, db_session):
+    user, other = players
+    client = make_client(user)
+    game = _add_game(
+        db_session,
+        players_list=[{"player_id": user.id, "faction_id": "gondor"}],
+        config={"ai_factions": ["mordor", "isengard", "rohan", "elves", "erebor", "rhun", "harad"]},
+        created_by=other.id,
+    )
+    r = _forfeit(client, game.id, {"gondor": "computer"})
+    assert r.status_code == 200
+    assert r.json().get("game_over") is True
+
+    db_session.refresh(game)
+    assert game.status == "finished"
+    assert str(game.created_by) == other.id
+    config = json.loads(game.config)
+    assert not config.get("host_forfeited")
+
+
+def test_host_forfeit_with_remaining_player_still_promotes(make_client, players, db_session):
+    user, other = players
+    client = make_client(user)
+    game = _add_game(
+        db_session,
+        players_list=[
+            {"player_id": user.id, "faction_id": "gondor"},
+            {"player_id": other.id, "faction_id": "rohan"},
+        ],
+        config={"ai_factions": ["mordor", "isengard", "elves", "erebor", "rhun", "harad"]},
+        created_by=user.id,
+    )
+    r = _forfeit(client, game.id, {"gondor": "computer"})
+    assert r.status_code == 200
+    assert r.json().get("game_over") is not True
+
+    db_session.refresh(game)
+    assert game.status == "active"
+    assert str(game.created_by) == other.id
+    config = json.loads(game.config)
+    assert config.get("host_forfeited") is True
+    remaining = json.loads(game.players)
+    assert any(str(p.get("player_id")) == other.id for p in remaining)
