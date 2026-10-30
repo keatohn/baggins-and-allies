@@ -32,6 +32,7 @@ MAPS_DIR = DATA_DIR / "maps"
 KNOWN_MAP_BASES = (
     "motw_map_1.2",
     "wotla_map_1.0",
+    "wotla_map_1.1",
     "woteas_map_1.0",
     "wotr_map_1.0",
     "wotr_map_1.1",

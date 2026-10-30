@@ -125,6 +125,9 @@ def test_admin_maps_requires_admin(make_client, players):
     maps = r.json()["maps"]
     assert maps == sorted(maps)
     assert "wotr_map_1.2" in maps  # known-map fallback + file setups
+    # Fallback list covers every frontend MAP_CONFIG / asset map (incl. the live WotLA map).
+    for base in ("motw_map_1.2", "wotla_map_1.0", "wotla_map_1.1", "woteas_map_1.0", "wotr_map_1.0", "wotr_map_1.1", "wotr_map_1.2"):
+        assert base in maps
 
 
 def test_put_overrides_requires_admin(make_client, players):
