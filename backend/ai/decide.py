@@ -18,7 +18,7 @@ from backend.engine.special_rules import territory_defs_with_current_power
 
 
 def _mcts_enabled() -> bool:
-    """True when AI_ALGORITHM=mcts routes purchase and combat phases through MCTS."""
+    """True when AI_ALGORITHM=mcts routes purchase, combat, combat_move, and non_combat_move through MCTS."""
     return (os.environ.get("AI_ALGORITHM") or "heuristic").strip().lower() == "mcts"
 
 
@@ -93,6 +93,14 @@ def decide(ctx: AIContext) -> Action | None:
         return None
 
     if phase == "non_combat_move":
+        if _mcts_enabled():
+            from backend.ai.mcts.non_combat_move import decide_non_combat_move_mcts
+
+            action = decide_non_combat_move_mcts(ctx)
+            if action is not None:
+                return action
+            # Fall through to heuristic if MCTS returned nothing (safety net).
+
         action = decide_non_combat_move(ctx)
         if action is not None:
             return action
