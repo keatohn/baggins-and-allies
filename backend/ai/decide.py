@@ -18,7 +18,7 @@ from backend.engine.special_rules import territory_defs_with_current_power
 
 
 def _mcts_enabled() -> bool:
-    """True when AI_ALGORITHM=mcts routes purchase, combat, combat_move, and non_combat_move through MCTS."""
+    """True when AI_ALGORITHM=mcts routes purchase, combat, combat_move, non_combat_move, and mobilization through MCTS."""
     return (os.environ.get("AI_ALGORITHM") or "heuristic").strip().lower() == "mcts"
 
 
@@ -109,6 +109,20 @@ def decide(ctx: AIContext) -> Action | None:
         return None
 
     if phase == "mobilization":
+        if _mcts_enabled():
+            from backend.ai.mcts.mobilization import decide_mobilization_mcts
+
+            action = decide_mobilization_mcts(ctx)
+            if action is not None:
+                # Same anti-stuck guard as the heuristic path: if MCTS chose end_phase
+                # while the engine forbids ending, fall back to a remaining placement.
+                if action.type == "end_phase" and ctx.available_actions.get("can_end_phase") is False:
+                    fallback = _fallback_mobilize(ctx)
+                    if fallback is not None:
+                        return fallback
+                return action
+            # Fall through to heuristic if MCTS returned nothing (safety net).
+
         action = decide_mobilization(ctx)
         if action is not None and action.type == "end_phase" and ctx.available_actions.get("can_end_phase") is False:
             fallback = _fallback_mobilize(ctx)
