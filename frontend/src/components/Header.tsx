@@ -234,6 +234,8 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
                   key={fid}
                   className={`header-turn-ticker-slot ${isCurrent ? 'header-turn-ticker-slot--current' : ''}`}
                   title={title}
+                  /* Non-current: band matches the faction color. Current uses border:none + gold ring (CSS). */
+                  style={!isCurrent && fd?.color ? { borderColor: fd.color } : undefined}
                 >
                   <div className="header-turn-ticker-logo">
                     {fd?.icon && (

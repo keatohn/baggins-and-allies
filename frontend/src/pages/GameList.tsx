@@ -28,6 +28,11 @@ function truncateUsername(username: string, maxChars: number = 12): string {
   return `${username.slice(0, maxChars)}...`;
 }
 
+function allianceLabel(alliance: string | undefined): string {
+  if (!alliance) return 'your team';
+  return alliance.charAt(0).toUpperCase() + alliance.slice(1).toLowerCase();
+}
+
 function playerNames(g: GameListItem): string | null {
   const names: string[] = [];
   for (const p of g.players ?? []) {
@@ -55,6 +60,7 @@ export default function GameList() {
   const [forfeitOptions, setForfeitOptions] = useState<ForfeitOptionsResponse | null>(null);
   const [forfeitOptionsLoading, setForfeitOptionsLoading] = useState(false);
   const [forfeitAssignments, setForfeitAssignments] = useState<Record<string, string>>({});
+  const [forfeitResult, setForfeitResult] = useState<{ gameName: string; allianceLabel: string } | null>(null);
 
   const loadGames = () => {
     api.listGames()
@@ -122,6 +128,7 @@ export default function GameList() {
     setConfirmText('');
     setForfeitError(null);
     setDeleteError(null);
+    setForfeitResult(null);
   };
 
   const handleDeleteCancel = () => {
@@ -154,7 +161,14 @@ export default function GameList() {
     if (!forfeitOptions?.factions.length) return;
     setForfeitError(null);
     try {
-      await api.forfeitGame(gameToForfeit, { faction_assignments: forfeitAssignments });
+      const res = await api.forfeitGame(gameToForfeit, { faction_assignments: forfeitAssignments });
+      if (res.game_over) {
+        const endedName = games.find((g) => g.id === gameToForfeit)?.name;
+        setForfeitResult({
+          gameName: endedName ?? 'The game',
+          allianceLabel: allianceLabel(forfeitOptions.factions[0]?.alliance),
+        });
+      }
       setGames((prev) => prev.filter((g) => g.id !== gameToForfeit));
       setGameToForfeit(null);
       setConfirmText('');
@@ -184,6 +198,22 @@ export default function GameList() {
       <header className="game-list-page__header">
         <Link to="/" className="page-menu-btn">Menu</Link>
       </header>
+      {forfeitResult && (
+        <div className="game-list__result" role="status">
+          <p className="game-list__result-text">
+            <strong>Game over</strong> — {forfeitResult.gameName} has ended. Your alliance (
+            {forfeitResult.allianceLabel}) lost the game.
+          </p>
+          <button
+            type="button"
+            className="game-list__result-close"
+            onClick={() => setForfeitResult(null)}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {games.length === 0 ? (
         <p className="game-list__empty">No games yet.</p>
       ) : (
@@ -340,11 +370,8 @@ export default function GameList() {
               <p className="game-list__modal-text">
                 You are the last human player — forfeiting will immediately end{' '}
                 <strong>{forfeitingGame.name}</strong> and your alliance (
-                {forfeitOptions.factions[0]
-                  ? forfeitOptions.factions[0].alliance.charAt(0).toUpperCase() +
-                    forfeitOptions.factions[0].alliance.slice(1).toLowerCase()
-                  : 'your team'}
-                ) will lose the game. Type <strong>{FORFEIT_CONFIRM_PHRASE}</strong> to confirm.
+                {allianceLabel(forfeitOptions.factions[0]?.alliance)}) will lose the game. Type{' '}
+                <strong>{FORFEIT_CONFIRM_PHRASE}</strong> to confirm.
               </p>
             ) : (
               <p className="game-list__modal-text">
