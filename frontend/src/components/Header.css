@@ -331,8 +331,8 @@
 }
 
 .header-rings-icon {
-  width: clamp(24px, 3.2vw, 30px);
-  height: clamp(24px, 3.2vw, 30px);
+  width: clamp(20px, 2.6vw, 24px);
+  height: clamp(20px, 2.6vw, 24px);
   object-fit: contain;
   filter: brightness(0);
 }
@@ -781,6 +781,8 @@
 .rings-modal .header-stats-table.header-stats-table--rings td.stats-col-text {
   white-space: nowrap;
   vertical-align: middle;
+  /* Match other modals' descriptive text (unit names / keys) instead of inheriting the 1.2rem table size */
+  font-size: 0.95rem;
 }
 
 .rings-modal .header-stats-table.header-stats-table--rings th.stats-col-num,
@@ -958,7 +960,8 @@
 }
 
 .stats-modal .stats-faction-row.stats-subfaction-row .stats-col-faction {
-  padding-left: 2.3em;
+  /* Land the subfaction logo where the parent's name starts (parent cell has caret + icon before the name) */
+  padding-left: 3.2em;
 }
 
 .stats-modal .stats-faction-caret {
@@ -1148,6 +1151,8 @@
   justify-content: center;
   border-radius: 50%;
   padding: 2px;
+  /* Non-current slots get the faction color via inline style from Header.tsx;
+     current slot uses border:none below so the gold flaming ring shows instead. */
   border: 2px solid var(--ink-faded);
   background: transparent;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
@@ -1222,8 +1227,8 @@
 .header-turn-ticker-badges--one .header-turn-ticker-badge,
 .header-turn-ticker-badges--two .header-turn-ticker-badge {
   position: absolute;
-  width: 46%;
-  height: 46%;
+  width: 52%;
+  height: 52%;
   top: 84%;
   transform: translate(-50%, -50%);
   z-index: 1;
@@ -1256,7 +1261,7 @@
 
 .header-turn-ticker-badges--row .header-turn-ticker-badge {
   width: calc((100% - (var(--sub-count) - 1) * 1px) / var(--sub-count));
-  max-width: 34%;
+  max-width: 38%;
   aspect-ratio: 1;
   height: auto;
   flex: 0 0 auto;
@@ -1321,7 +1326,9 @@
     justify-content: flex-start;
     align-items: center;
     gap: 0.26rem;
-    padding: 0.38rem max(0.42rem, env(safe-area-inset-right, 0px)) 0.38rem max(0.42rem, env(safe-area-inset-left, 0px));
+    /* Top safe-area: with viewport-fit=cover the iOS status bar / Dynamic Island
+       sits over the header and blurs it; push content below the inset. */
+    padding: max(0.38rem, env(safe-area-inset-top, 0px)) max(0.42rem, env(safe-area-inset-right, 0px)) 0.38rem max(0.42rem, env(safe-area-inset-left, 0px));
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
@@ -1384,6 +1391,11 @@
   .header-rings-icon {
     width: 20px;
     height: 20px;
+  }
+
+  .header-rings-icon {
+    width: 17px;
+    height: 17px;
   }
 
   .header-combat-sim-emoji {
@@ -1501,8 +1513,8 @@
 
 /* Game stats (≥768px: flex lock sets real width; these stay in sync) */
 .stats-modal {
-  width: min(880px, 96vw);
-  max-width: min(880px, 96vw);
+  width: min(760px, 96vw);
+  max-width: min(760px, 96vw);
 }
 
 /* Rings of Power: room for the numeric stats + bearer / return columns */
@@ -1514,8 +1526,8 @@
 /* Tablet / desktop */
 @media (min-width: 768px) {
   .stats-modal {
-    width: min(880px, 96vw);
-    max-width: min(880px, 96vw);
+    width: min(760px, 96vw);
+    max-width: min(760px, 96vw);
   }
 
   .unit-stats-modal {
@@ -1541,8 +1553,8 @@
   }
 
   .stats-modal {
-    width: min(960px, 96vw);
-    max-width: min(960px, 96vw);
+    width: min(820px, 96vw);
+    max-width: min(820px, 96vw);
   }
 
   .unit-stats-modal {
@@ -1612,8 +1624,8 @@
 @media (min-width: 768px) {
   /* Same flex fix as before: explicit width so the modal doesn’t balloon to table intrinsic size */
   .modal-overlay > .modal.stats-modal {
-    width: min(880px, 96vw) !important;
-    max-width: min(880px, 96vw) !important;
+    width: min(760px, 96vw) !important;
+    max-width: min(760px, 96vw) !important;
     min-width: 0 !important;
     flex: 0 0 auto;
     box-sizing: border-box;
@@ -1670,8 +1682,8 @@
 
 @media (min-width: 1024px) {
   .modal-overlay > .modal.stats-modal {
-    width: min(960px, 96vw) !important;
-    max-width: min(960px, 96vw) !important;
+    width: min(820px, 96vw) !important;
+    max-width: min(820px, 96vw) !important;
   }
 
   .modal-overlay > .modal.unit-stats-modal {
@@ -1694,7 +1706,8 @@
 
 @media (max-width: 900px) and (orientation: landscape) {
   .header {
-    padding: 0.42rem 0.55rem;
+    /* Safe-area top+left: landscape notch / status bar can clip the header row */
+    padding: max(0.42rem, env(safe-area-inset-top, 0px)) 0.55rem 0.42rem max(0.55rem, env(safe-area-inset-left, 0px));
     gap: 0.3rem;
   }
 
@@ -1716,6 +1729,11 @@
   .header-help-icon {
     width: 24px;
     height: 24px;
+  }
+
+  .header-rings-icon {
+    width: 20px;
+    height: 20px;
   }
 
   .header-combat-sim-emoji {
@@ -1933,6 +1951,12 @@
     font-size: clamp(0.56rem, 2vw, 0.68rem);
   }
 
+  /* Bearer / Return text: scale with the table instead of the desktop 0.95rem */
+  .rings-modal .header-stats-table.header-stats-table--rings th.stats-col-text,
+  .rings-modal .header-stats-table.header-stats-table--rings td.stats-col-text {
+    font-size: clamp(0.55rem, 1.9vw, 0.68rem);
+  }
+
   /* Keep all Unit Stats header letters (including SP) the same size as the table scale */
   .unit-stats-modal .header-stats-table thead th {
     font-size: 1em;
@@ -1968,6 +1992,12 @@
 
   .stats-modal .stats-faction-row .stats-col-faction {
     padding-left: 0.4rem;
+  }
+
+  /* Parent cell is tighter on phones (smaller caret/icon/gap) — recompute so the sub
+     faction logo still lands under the parent's name, not left of it. */
+  .stats-modal .stats-faction-row.stats-subfaction-row .stats-col-faction {
+    padding-left: calc(0.95rem + 0.85em + 15px);
   }
 
   .stats-modal .stats-faction-row .stats-col-faction .stats-faction-cell-inner {
