@@ -3919,18 +3919,28 @@ function GameMap({
                         {/* Ocean wave texture for sea zones: base blue with repeating wave curves */}
                         <pattern id="sea-wave-pattern" x="0" y="0" width="120" height="60" patternUnits="userSpaceOnUse">
                           <rect width="120" height="60" fill="#2d4258" />
-                          {/* Lighter wave crests */}
-                          <path d="M0 20 Q30 12 60 20 T120 20 M0 45 Q30 37 60 45 T120 45" fill="none" stroke="rgba(120,160,200,0.42)" strokeWidth="3.5" strokeLinecap="round" />
-                          <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(160,195,220,0.32)" strokeWidth="2.25" strokeLinecap="round" />
-                          {/* Darker troughs for depth */}
-                          <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(15,30,45,0.52)" strokeWidth="2.75" strokeLinecap="round" />
+                          <g className="map-water-flow">
+                            <g id="sea-wave-crests">
+                              {/* Lighter wave crests */}
+                              <path d="M0 20 Q30 12 60 20 T120 20 M0 45 Q30 37 60 45 T120 45" fill="none" stroke="rgba(120,160,200,0.42)" strokeWidth="3.5" strokeLinecap="round" />
+                              <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(160,195,220,0.32)" strokeWidth="2.25" strokeLinecap="round" />
+                              {/* Darker troughs for depth */}
+                              <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(15,30,45,0.52)" strokeWidth="2.75" strokeLinecap="round" />
+                            </g>
+                            <use href="#sea-wave-crests" x="120" y="0" />
+                          </g>
                         </pattern>
                         {/* River: slightly darker and grayer than the previous blue, still lighter than sea. */}
                         <pattern id="river-wave-pattern" x="0" y="0" width="120" height="60" patternUnits="userSpaceOnUse">
                           <rect width="120" height="60" fill="#366896" />
-                          <path d="M0 20 Q30 12 60 20 T120 20 M0 45 Q30 37 60 45 T120 45" fill="none" stroke="rgba(174,204,232,0.52)" strokeWidth="3.5" strokeLinecap="round" />
-                          <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(196,214,232,0.38)" strokeWidth="2.25" strokeLinecap="round" />
-                          <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(20,44,78,0.42)" strokeWidth="2.75" strokeLinecap="round" />
+                          <g className="map-water-flow map-water-flow--river">
+                            <g id="river-wave-crests">
+                              <path d="M0 20 Q30 12 60 20 T120 20 M0 45 Q30 37 60 45 T120 45" fill="none" stroke="rgba(174,204,232,0.52)" strokeWidth="3.5" strokeLinecap="round" />
+                              <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(196,214,232,0.38)" strokeWidth="2.25" strokeLinecap="round" />
+                              <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(20,44,78,0.42)" strokeWidth="2.75" strokeLinecap="round" />
+                            </g>
+                            <use href="#river-wave-crests" x="120" y="0" />
+                          </g>
                         </pattern>
                         <marker id="arrowhead-combat" markerWidth="5" markerHeight="5" refX="3.5" refY="2.5" orient="auto">
                           <polygon points="0,0 5,2.5 0,5" fill="#c62828" />
