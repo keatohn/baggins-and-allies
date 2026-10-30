@@ -121,6 +121,71 @@ export interface MapTransform {
   scale: number;
 }
 
+// Map-level icon/location overrides (admin-edited, shared by every setup using the map).
+// Positions are SVG viewBox coordinates — the same space as the in-SVG hint_* circles.
+export type MapSpotKind = 'unit' | 'marker' | 'center' | 'number' | 'icons' | 'logo';
+export type MapOverrideFocus = 'calculated' | 'override';
+export type MapOverridePoint = { x: number; y: number };
+
+export interface MapOverrideTerritoryEntry {
+  /** "calculated" = ignore overrides for this territory; "override" = use the listed positions (omitted kinds keep calculated). */
+  focus: MapOverrideFocus;
+  positions?: Partial<Record<MapSpotKind, MapOverridePoint>>;
+}
+
+export interface MapOverridesData {
+  territories: Record<string, MapOverrideTerritoryEntry>;
+}
+
+/** Accept `[x, y]` or `{ x, y }`; anything else → null. */
+export function normalizeMapOverridePoint(raw: unknown): MapOverridePoint | null {
+  let x: unknown;
+  let y: unknown;
+  if (Array.isArray(raw) && raw.length === 2) {
+    [x, y] = raw;
+  } else if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const rec = raw as Record<string, unknown>;
+    x = rec.x;
+    y = rec.y;
+  } else {
+    return null;
+  }
+  if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
+}
+
+export function emptyMapOverrides(): MapOverridesData {
+  return { territories: {} };
+}
+
+/** Lenient read of a server payload into the canonical shape (drops malformed entries). */
+export function normalizeMapOverrides(raw: unknown): MapOverridesData {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return emptyMapOverrides();
+  const source = (raw as Record<string, unknown>).territories;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return emptyMapOverrides();
+  const out: Record<string, MapOverrideTerritoryEntry> = {};
+  for (const [tid, entryRaw] of Object.entries(source as Record<string, unknown>)) {
+    if (!entryRaw || typeof entryRaw !== 'object' || Array.isArray(entryRaw)) continue;
+    const entry = entryRaw as Record<string, unknown>;
+    if (entry.focus === 'calculated') {
+      out[tid] = { focus: 'calculated' };
+      continue;
+    }
+    if (entry.focus !== 'override') continue;
+    const positions: Partial<Record<MapSpotKind, MapOverridePoint>> = {};
+    if (entry.positions && typeof entry.positions === 'object' && !Array.isArray(entry.positions)) {
+      for (const [kind, ptRaw] of Object.entries(entry.positions as Record<string, unknown>)) {
+        const pt = normalizeMapOverridePoint(ptRaw);
+        if (pt && (kind === 'unit' || kind === 'marker' || kind === 'center' || kind === 'number' || kind === 'icons' || kind === 'logo')) {
+          positions[kind] = pt;
+        }
+      }
+    }
+    out[tid] = { focus: 'override', positions };
+  }
+  return { territories: out };
+}
+
 // Event types for logging (backend-enriched events include payload with turn_number, phase, faction, message)
 export interface GameEvent {
   id: string;

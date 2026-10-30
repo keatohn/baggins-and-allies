@@ -1,10 +1,10 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import type { GameState, GamePhase, FactionId, GameEvent, SelectedUnit, DeclaredBattle } from './types/game';
+import type { GameState, GamePhase, FactionId, GameEvent, SelectedUnit, DeclaredBattle, MapOverridesData } from './types/game';
 import { boostingRingsFromRules, highestPowerHeroUnitId, ringHoldingFactionId, ringsOnUnit } from './ringsDisplay';
 import Header from './components/Header';
 import type { RingsOfPowerData, UnitForStats } from './components/StatsModals';
 import { compareUnitsForStats } from './unitStatsOrder';
-import GameMap, { type PendingMoveConfirm } from './components/GameMap';
+import GameMap, { DEFAULT_MAP_BASE, type PendingMoveConfirm } from './components/GameMap';
 import Sidebar from './components/Sidebar';
 import CombatSimulatorPanel from './components/CombatSimulatorPanel';
 import PurchaseModal from './components/PurchaseModal';
@@ -644,6 +644,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   );
   const [territorySignals, setTerritorySignals] = useState<TerritorySignalMap>({});
   const [signalPresets, setSignalPresets] = useState<SignalPreset[]>([]);
+  const [mapOverrides, setMapOverrides] = useState<MapOverridesData | null>(null);
   const [signalBusy, setSignalBusy] = useState(false);
   const [availableActions, setAvailableActions] = useState<AvailableActionsResponse | null>(null);
   const [canAct, setCanAct] = useState(true);
@@ -1032,6 +1033,26 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       cancelled = true;
     };
   }, []);
+
+  /** Map base for override lookups: same normalization GameMap uses (strip extension, default map). */
+  const mapAssetBase = useMemo(() => {
+    const raw = (backendState?.map_asset ?? '').trim().replace(/\.(svg|png)$/i, '');
+    return raw || DEFAULT_MAP_BASE;
+  }, [backendState?.map_asset]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getMapOverrides(mapAssetBase)
+      .then((r) => {
+        if (!cancelled) setMapOverrides(r?.overrides ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setMapOverrides(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mapAssetBase]);
 
   const mySignalAlliances = useMemo(() => {
     if (!currentPlayerId || !gameMeta) return [];
@@ -4388,6 +4409,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               unitStats={unitStats}
               factionData={factionData}
               territorySignals={isMultiplayer ? territorySignals : {}}
+              mapOverrides={mapOverrides}
               onTerritorySelect={handleTerritorySelect}
               onSeaZoneStackClick={isMovementPhase ? handleSeaZoneStackClick : undefined}
               onUnitSelect={handleUnitSelect}

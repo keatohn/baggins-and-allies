@@ -3,7 +3,7 @@ import { DndContext, useDroppable, rectIntersection, pointerWithin, closestCente
 import type { CollisionDetection, DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import type { GameState, SelectedUnit, MapTransform, PendingMove } from '../types/game';
+import type { GameState, SelectedUnit, MapTransform, PendingMove, MapOverridesData, MapSpotKind } from '../types/game';
 import type { TerritorySignalMap } from '../territorySignals';
 import DraggableUnit from './DraggableUnit';
 import DragOverlay, { type BulkDragOverlayStack } from './DragOverlay';
@@ -11,6 +11,7 @@ import MobilizationTray from './MobilizationTray';
 import NavalTray, { type BoatInTray, type NavalTrayBoatTapMovePayload } from './NavalTray';
 import { applyPassengerReassignToAllocation } from '../utils/navalTrayAllocation';
 import { compareUnitStacksByMapOrder } from '../utils/unitStackSort';
+import { TERRITORY_UNIT_PIXEL_NUDGE } from './mapSpotNudge';
 import { ringHostUnitId, ringIconSrc, ringsOnUnit, type RingView } from '../ringsDisplay';
 import './GameMap.css';
 import { sortSeaZoneIdsByNumericSuffix, seaZonesReachableBySailFrom } from '../seaZoneSort';
@@ -512,6 +513,22 @@ interface GameMapProps {
   mobilizationPendingDestination?: string | null;
   /** Alliance-visible pins, keyed by territory id. */
   territorySignals?: TerritorySignalMap;
+  /**
+   * Map-level icon/location overrides (admin-edited, keyed by map base). Applied on top of the
+   * calculated spots and the in-SVG hint circles: DB override > SVG hint > calculated/special-case.
+   * Focus "calculated" (or an absent entry) leaves a territory untouched; omitted spot kinds keep
+   * their calculated position.
+   */
+  mapOverrides?: MapOverridesData | null;
+  /**
+   * Reports the calculated spot anchors (pre-override, viewBox coords) whenever they recompute.
+   * Used by the admin Maps editor as a hidden "oracle" so its dots match the game exactly.
+   */
+  onSpotsCalculated?: (spots: {
+    centroids: Record<string, { x: number; y: number }>;
+    positions: Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number }; center?: { x: number; y: number } }>;
+    hints: SvgHintAnchorsByTerritory;
+  }) => void;
 }
 
 const MAX_SCALE = 3;
@@ -558,7 +575,7 @@ const MAP_CONFIG: Record<string, { viewBox: { width: number; height: number }; d
   'woteas_map_1.0': { viewBox: { width: 3600, height: 1600 }, dimensions: { width: 3600, height: 1600 } },
 };
 /** Fallback when `map_asset` is missing or not listed above; must exist in `frontend/public/`. */
-const DEFAULT_MAP_BASE = 'wotr_map_1.2';
+export const DEFAULT_MAP_BASE = 'wotr_map_1.2';
 
 /** Semi-circle centroids in viewBox coords. Each path is half a circle; arc center after transform is shared, so we offset by 4r/(3π) along the bisector so east = right half, west = left half. r=90, 4*90/(3*π) ≈ 38.197. */
 const OSGILIATH_OFFSET = (4 * 90) / (3 * Math.PI);
@@ -933,6 +950,8 @@ function GameMap({
   forcedNavalCombatInstanceIds = [],
   seaZoneIdsEligibleForNavalTrayStackClick = EMPTY_ELIGIBLE_SEA_ZONES_FOR_TRAY,
   territorySignals = {},
+  mapOverrides = null,
+  onSpotsCalculated,
 }: GameMapProps) {
   const navalUnitIds = useMemo(
     () => new Set([...seaHullIds, ...riverUnitIds]),
@@ -964,6 +983,10 @@ function GameMap({
   const svgRef = useRef<SVGSVGElement>(null);
   const [svgPaths, setSvgPaths] = useState<Map<string, TerritoryPathData>>(new Map());
   const [svgHintAnchors, setSvgHintAnchors] = useState<SvgHintAnchorsByTerritory>({});
+  const spotsCallbackRef = useRef(onSpotsCalculated);
+  useEffect(() => {
+    spotsCallbackRef.current = onSpotsCalculated;
+  }, [onSpotsCalculated]);
   const [loadedSvgDimensions, setLoadedSvgDimensions] = useState<{
     viewBox: { width: number; height: number };
     dimensions: { width: number; height: number };
@@ -1234,6 +1257,44 @@ function GameMap({
       if (pathsUrl !== `/${DEFAULT_MAP_BASE}.svg`) loadSvg(`/${DEFAULT_MAP_BASE}.svg`);
     });
   }, [pathsUrl, mapConfig.viewBox, mapConfig.dimensions]);
+
+  /**
+   * In-SVG hint anchors with map-level override points layered on top (unit/number/icons/logo).
+   * Consumed wherever hints win over the computed spots (marker-row splitting, unit clamp-bypass,
+   * ring logo anchor) so an override behaves exactly like a hand-placed hint circle.
+   */
+  const effectiveHintAnchors = useMemo<SvgHintAnchorsByTerritory>(() => {
+    const out: SvgHintAnchorsByTerritory = { ...svgHintAnchors };
+    const entries = mapOverrides?.territories;
+    if (!entries) return out;
+    const KIND_TO_HINT: Partial<Record<MapSpotKind, SvgHintKind>> = {
+      unit: 'units',
+      number: 'number',
+      icons: 'icons',
+      logo: 'logo',
+    };
+    const resolveKey = (tid: string): string | null => {
+      if (out[tid]) return tid;
+      const lower = tid.toLowerCase();
+      if (out[lower]) return lower;
+      for (const key of Object.keys(out)) {
+        if (key.toLowerCase() === lower) return key;
+      }
+      return null;
+    };
+    for (const [tid, entry] of Object.entries(entries)) {
+      if (!entry || entry.focus !== 'override' || !entry.positions) continue;
+      let key: string | null = null;
+      for (const [kind, hintKind] of Object.entries(KIND_TO_HINT)) {
+        const pt = entry.positions[kind as MapSpotKind];
+        if (!pt) continue;
+        key ??= resolveKey(tid) ?? tid;
+        // Copy before writing: `out` is a shallow clone, its nested hint objects are shared state.
+        out[key] = { ...(out[key] ?? {}), [hintKind]: pt };
+      }
+    }
+    return out;
+  }, [svgHintAnchors, mapOverrides]);
 
   // Use two spots (marker + unit) when territory is large enough in any dimension: by area (big blobs) or by
   // width/height (long thin territories). Kept high so circular capitals stay single-spot.
@@ -1688,10 +1749,55 @@ function GameMap({
     let timer2: ReturnType<typeof setTimeout> | null = null;
     const run = () => {
       const { centroids, positions } = computeCentroidsAndPositions();
+      const resolvePositionKey = (rawTid: string): string | null => {
+        if (rawTid in positions) return rawTid;
+        const lower = rawTid.toLowerCase();
+        if (lower in positions) return lower;
+        for (const key of Object.keys(positions)) {
+          if (key.toLowerCase() === lower) return key;
+        }
+        return null;
+      };
       for (const [tid, h] of Object.entries(svgHintAnchors)) {
         if (h.units && positions[tid] && !isRiverZone(tid)) {
           positions[tid] = { ...positions[tid], unit: h.units };
           centroids[tid] = h.units;
+        }
+      }
+      // Report the calculated + hint baseline (before map-level overrides) so admin tooling can
+      // show exactly what the game would compute with no overrides in place.
+      if (svgPaths.size > 0 && Object.keys(centroids).length >= svgPaths.size) {
+        spotsCallbackRef.current?.({
+          centroids: { ...centroids },
+          positions: Object.fromEntries(Object.entries(positions).map(([k, v]) => [k, { ...v }])),
+          hints: svgHintAnchors,
+        });
+      }
+      // Map-level overrides sit on top of everything (hints, per-territory nudges, ring harbours,
+      // Osgiliath/river/sea-lobe special cases). Omitted kinds keep their calculated position.
+      const overrideEntries = mapOverrides?.territories;
+      if (overrideEntries) {
+        for (const [rawTid, entry] of Object.entries(overrideEntries)) {
+          if (!entry || entry.focus !== 'override' || !entry.positions) continue;
+          const ov = entry.positions;
+          if (!ov.unit && !ov.marker && !ov.center) continue;
+          const tid = resolvePositionKey(rawTid);
+          if (!tid) continue;
+          const base = positions[tid];
+          positions[tid] = base
+            ? {
+                ...base,
+                ...(ov.unit ? { unit: ov.unit } : {}),
+                ...(ov.marker ? { marker: ov.marker } : {}),
+                ...(ov.center ? { center: ov.center } : {}),
+              }
+            : {
+                unit: ov.unit ?? ov.marker ?? ov.center!,
+                marker: ov.marker ?? ov.unit ?? ov.center!,
+                center: ov.center ?? ov.unit ?? ov.marker!,
+              };
+          const anchor = ov.unit ?? ov.marker;
+          if (anchor) centroids[tid] = anchor;
         }
       }
       setTerritoryCentroids(centroids);
@@ -1706,7 +1812,7 @@ function GameMap({
       clearTimeout(timer1);
       if (timer2 != null) clearTimeout(timer2);
     };
-  }, [svgPaths, svgHintAnchors, SVG_VIEWBOX.width, SVG_VIEWBOX.height, mapBase, territoryData]);
+  }, [svgPaths, svgHintAnchors, SVG_VIEWBOX.width, SVG_VIEWBOX.height, mapBase, territoryData, mapOverrides]);
 
   // Compute move arrows to render - only for current phase moves
   const moveArrows = useMemo(() => {
@@ -3709,12 +3815,6 @@ function GameMap({
   const CLAMP_INSET_X = 80;
   const CLAMP_INSET_Y_TOP = 80;
   const CLAMP_INSET_Y_BOTTOM = 28;
-  /** Pixel nudge after centroid→screen (SVG geometry vs visible map art). */
-  const TERRITORY_UNIT_PIXEL_NUDGE: Record<string, { x?: number; y?: number }> = {
-    grey_havens: { y: 20 },
-    /* sea_zone_2 path bbox is very wide; pole can sit past the illustrated water — nudge east into the gulf (keep y tiny so stacks don’t read as sea zone 3) */
-    sea_zone_2: { x: 54, y: 45 },
-  };
   const clampToMap = (p: { x: number; y: number }) => ({
     x: Math.max(CLAMP_INSET_X, Math.min(IMG_DIMENSIONS.width - CLAMP_INSET_X, p.x)),
     y: Math.max(CLAMP_INSET_Y_TOP, Math.min(IMG_DIMENSIONS.height - CLAMP_INSET_Y_BOTTOM, p.y)),
@@ -4108,7 +4208,7 @@ function GameMap({
                         const powerAndMarkersInline = showPower && (showCamp || hasPort || hasHome || showTerrainIcon) && !showStronghold;
                         if (!showCamp && !showStronghold && !showPower && !hasPort && !hasHome && !(isSeaZone && seaZoneNum) && !showTerrainIcon) return null;
                         const clampedMarkerPos = clampToMap(screenPos);
-                        const h = svgHintAnchors[territoryId];
+                        const h = effectiveHintAnchors[territoryId];
                         const useSvgHintAnchors = !!(h?.number || h?.icons || h?.logo);
                         const hintScr = (p: { x: number; y: number }) => svgHintPointToOverlay(p);
                         /* Ring-harbor chrome must not run when Inkscape hints place power/icons/logo — otherwise we return early and skip _number / _icons / _logo entirely. */
@@ -4735,9 +4835,13 @@ function GameMap({
                     <div className="territory-signal-layer">
                       {Object.entries(territorySignals).map(([territoryId, signal]) => {
                         const layout = territoryPositions[territoryId];
-                        const anchor = layout?.center ?? layout?.marker ?? territoryCentroids[territoryId];
+                        // Green "other icons" anchor (override or hint) owns signals; else calculated center/marker.
+                        const iconsAnchor = effectiveHintAnchors[territoryId]?.icons;
+                        const anchor = iconsAnchor ?? layout?.center ?? layout?.marker ?? territoryCentroids[territoryId];
                         if (!anchor || !signal?.label) return null;
-                        const screenPos = clampToMap(svgToScreen(anchor.x, anchor.y));
+                        const screenPos = iconsAnchor
+                          ? svgHintPointToOverlay(iconsAnchor)
+                          : clampToMap(svgToScreen(anchor.x, anchor.y));
                         const flagColor = signal.color || '#6b5b4b';
                         return (
                           <button
@@ -4772,12 +4876,15 @@ function GameMap({
                         if (ringHostUnitId(ring, present, unitDefs)) return null;
                         const layout = territoryPositions[ring.territory_id];
                         const territory = territoryData[ring.territory_id];
-                        const hintLogo = svgHintAnchors[ring.territory_id]?.logo;
+                        // Green icons anchor owns rings (umbrella "other"); else logo, else marker/center.
+                        const greenAnchor =
+                          effectiveHintAnchors[ring.territory_id]?.icons ??
+                          effectiveHintAnchors[ring.territory_id]?.logo;
                         const markerAnchor = layout?.marker ?? layout?.center ?? territoryCentroids[ring.territory_id];
-                        const anchor = hintLogo ?? markerAnchor;
+                        const anchor = greenAnchor ?? markerAnchor;
                         if (!anchor) return null;
-                        const screenPos = hintLogo
-                          ? svgHintPointToOverlay(hintLogo)
+                        const screenPos = greenAnchor
+                          ? svgHintPointToOverlay(greenAnchor)
                           : clampToMap(svgToScreen(anchor.x, anchor.y));
                         const siblings = rings.filter((other) => {
                           if (other.territory_id !== ring.territory_id) return false;
@@ -4833,7 +4940,7 @@ function GameMap({
                         const territory = territoryData[territoryId];
                         const hasStrongholdMarker = territory?.stronghold === true;
                         const hasPowerBadge = Number(territory?.produces ?? 0) > 0;
-                        const hasSvgUnitsHint = !!svgHintAnchors[territoryId]?.units;
+                        const hasSvgUnitsHint = !!effectiveHintAnchors[territoryId]?.units;
                         const useSeparateUnitSpot =
                           hasSvgUnitsHint ||
                           !!(unitPos && markerPos && (unitPos.x !== markerPos.x || unitPos.y !== markerPos.y));
