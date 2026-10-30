@@ -1250,6 +1250,12 @@
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .header-turn-ticker-slot--current {
+    animation: none;
+  }
+}
+
 .header-turn-ticker-logo {
   position: relative;
   width: 100%;
