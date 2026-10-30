@@ -17,24 +17,53 @@ type CalculatedSpots = {
   hints: Record<string, Partial<Record<HintKind, Pt>>>;
 };
 
-/** Dot colors per spot kind (issue scheme: blue units, yellow logo, red markers/power, green icons, …). */
-const SPOT_KINDS: { kind: MapSpotKind; label: string; color: string }[] = [
+/**
+ * Editor shows exactly four color dots per territory (one per color):
+ * blue units, red production/sea-number, yellow faction logo, green "everything else"
+ * (territory type, homes, camps, ports, signals, rings). Red stores as `marker` on land
+ * and `number` on sea zones (they never coexist). Green stores as `icons` and anchors
+ * all non-logo/power/unit icons in GameMap.
+ */
+type UiKind = 'unit' | 'power' | 'logo' | 'icons';
+
+const SPOT_KINDS: { kind: UiKind; label: string; color: string; hint?: string }[] = [
   { kind: 'unit', label: 'Units', color: '#2563eb' },
-  { kind: 'marker', label: 'Markers / power', color: '#dc2626' },
-  { kind: 'center', label: 'Signal / ring', color: '#0d9488' },
-  { kind: 'number', label: 'Sea number', color: '#ea580c' },
-  { kind: 'icons', label: 'Territory icon', color: '#16a34a' },
-  { kind: 'logo', label: 'Faction logo', color: '#ca8a04' },
+  { kind: 'power', label: 'Production / sea number', color: '#dc2626' },
+  { kind: 'logo', label: 'Faction logo', color: '#eab308' },
+  {
+    kind: 'icons',
+    label: 'Other icons',
+    color: '#16a34a',
+    hint: 'Territory type, homes, camps, ports, signals, rings',
+  },
 ];
-const KIND_COLOR: Record<MapSpotKind, string> = Object.fromEntries(
+const KIND_COLOR: Record<UiKind, string> = Object.fromEntries(
   SPOT_KINDS.map((row) => [row.kind, row.color]),
-) as Record<MapSpotKind, string>;
-const KIND_LABEL: Record<MapSpotKind, string> = Object.fromEntries(
+) as Record<UiKind, string>;
+const KIND_LABEL: Record<UiKind, string> = Object.fromEntries(
   SPOT_KINDS.map((row) => [row.kind, row.label]),
-) as Record<MapSpotKind, string>;
-/** Kinds every territory can have; the rest only exist when an Inkscape hint (or an override) places them. */
-const ALWAYS_KINDS: MapSpotKind[] = ['unit', 'marker', 'center'];
-const EXTRA_KINDS: MapSpotKind[] = ['number', 'icons', 'logo'];
+) as Record<UiKind, string>;
+/** Kinds every territory shows; logo/icons only appear when calculated or manually placed. */
+const ALWAYS_KINDS: UiKind[] = ['unit', 'power'];
+const EXTRA_KINDS: UiKind[] = ['logo', 'icons'];
+
+/** Sea zones (terrain sea or sea_zone_N id) use the `number` storage kind for the red dot. */
+function isSeaTerritory(tid: string, territories: Dict): boolean {
+  const def = territories[resolveTid(territories, tid) ?? tid];
+  const terrain =
+    def && typeof def.terrain_type === 'string'
+      ? def.terrain_type
+      : def && typeof def.terrain === 'string'
+        ? def.terrain
+        : '';
+  return terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid);
+}
+
+/** Map a UI color kind to the MapSpotKind stored in the overrides blob. */
+function storageKindFor(tid: string, uiKind: UiKind, territories: Dict): MapSpotKind {
+  if (uiKind === 'power') return isSeaTerritory(tid, territories) ? 'number' : 'marker';
+  return uiKind;
+}
 
 const NOOP = () => {};
 
@@ -108,7 +137,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   const [pngFailed, setPngFailed] = useState(false);
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
   const [selected, setSelected] = useState<string | null>(null);
-  const [activeKind, setActiveKind] = useState<MapSpotKind>('unit');
+  const [activeKind, setActiveKind] = useState<UiKind>('unit');
   const [search, setSearch] = useState('');
   const [stored, setStored] = useState<MapOverridesData | null>(null);
   const [draft, setDraft] = useState<MapOverridesData | null>(null);
@@ -121,7 +150,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   const didDragRef = useRef(false);
   const dotDragRef = useRef<{
     tid: string;
-    kind: MapSpotKind;
+    kind: UiKind;
     id: number;
     sx: number;
     sy: number;
@@ -382,20 +411,18 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   // --- spots / overrides --------------------------------------------------
 
   const calculatedFor = useCallback(
-    (tid: string): Partial<Record<MapSpotKind, Pt>> => {
+    (tid: string): Partial<Record<UiKind, Pt>> => {
       if (!spots) return {};
       const pKey = resolveTid(spots.positions, tid);
       const hKey = resolveTid(spots.hints, tid);
       const p = pKey ? spots.positions[pKey] : undefined;
       const h = hKey ? spots.hints[hKey] : undefined;
-      const out: Partial<Record<MapSpotKind, Pt>> = {};
+      const out: Partial<Record<UiKind, Pt>> = {};
       if (p?.unit) out.unit = p.unit;
-      if (p?.marker) out.marker = p.marker;
-      const center = p?.center ?? p?.unit;
-      if (center) out.center = center;
-      if (h?.number) out.number = h.number;
-      if (h?.icons) out.icons = h.icons;
+      // Red = production (land / marker) or sea-zone number (sea / number hint, else marker).
+      out.power = isSeaTerritory(tid, territories) ? (h?.number ?? p?.marker) : p?.marker;
       if (h?.logo) out.logo = h.logo;
+      if (h?.icons) out.icons = h.icons;
       // Reproduce the render-time unit pixel nudge (viewBox ≈ screen px, 1:1 per MAP_CONFIG).
       // Skipped when an SVG units hint anchors the stack — those bypass the nudge in GameMap.
       if (out.unit && !h?.units) {
@@ -404,7 +431,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
       }
       return out;
     },
-    [spots],
+    [spots, territories],
   );
 
   const overridePositionsFor = useCallback(
@@ -416,13 +443,13 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   );
 
   const effectiveFor = useCallback(
-    (tid: string, kind: MapSpotKind): { pt: MapOverridePoint; isOverride: boolean } | null => {
-      const ovp = overridePositionsFor(tid)?.[kind];
+    (tid: string, kind: UiKind): { pt: MapOverridePoint; isOverride: boolean } | null => {
+      const ovp = overridePositionsFor(tid)?.[storageKindFor(tid, kind, territories)];
       if (ovp) return { pt: ovp, isOverride: true };
       const calc = calculatedFor(tid)[kind];
       return calc ? { pt: calc, isOverride: false } : null;
     },
-    [calculatedFor, overridePositionsFor],
+    [calculatedFor, overridePositionsFor, territories],
   );
 
   const updateEntry = useCallback((tid: string, entry: MapOverridesData['territories'][string] | null) => {
@@ -449,28 +476,31 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     const positions: Partial<Record<MapSpotKind, MapOverridePoint>> = {};
     for (const kind of [...ALWAYS_KINDS, ...EXTRA_KINDS]) {
       const pt = calc[kind];
-      if (pt) positions[kind] = pt;
+      if (pt) positions[storageKindFor(tid, kind, territories)] = pt;
     }
     updateEntry(tid, { focus: 'override', positions });
   };
 
-  const setKindPosition = (tid: string, kind: MapSpotKind, pt: MapOverridePoint) => {
+  const setKindPosition = (tid: string, kind: UiKind, pt: MapOverridePoint) => {
     const existing = entryFor(current, tid);
-    const positions = { ...(existing?.focus === 'override' ? existing.positions : {}), [kind]: pt };
+    const positions = {
+      ...(existing?.focus === 'override' ? existing.positions : {}),
+      [storageKindFor(tid, kind, territories)]: pt,
+    };
     updateEntry(tid, { focus: 'override', positions });
   };
 
-  const resetKind = (tid: string, kind: MapSpotKind) => {
+  const resetKind = (tid: string, kind: UiKind) => {
     const existing = entryFor(current, tid);
     if (existing?.focus !== 'override' || !existing.positions) return;
     const positions = { ...existing.positions };
-    delete positions[kind];
+    delete positions[storageKindFor(tid, kind, territories)];
     updateEntry(tid, { focus: 'override', positions });
   };
 
-  const addKind = (tid: string, kind: MapSpotKind) => {
+  const addKind = (tid: string, kind: UiKind) => {
     const calc = calculatedFor(tid);
-    const seed = calc[kind] ?? calc.marker ?? calc.unit ?? calc.center;
+    const seed = calc[kind] ?? calc.power ?? calc.unit;
     if (!seed) return;
     setKindPosition(tid, kind, seed);
     setActiveKind(kind);
@@ -478,7 +508,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
 
   // --- dot dragging (constrained to the territory) ------------------------
 
-  const onDotPointerDown = (e: ReactPointerEvent<HTMLDivElement>, tid: string, kind: MapSpotKind) => {
+  const onDotPointerDown = (e: ReactPointerEvent<HTMLDivElement>, tid: string, kind: UiKind) => {
     e.stopPropagation();
     e.preventDefault();
     if (e.button !== 0) return;
@@ -571,7 +601,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
 
   const dots = useMemo(() => {
     if (!spots) return [];
-    const rows: { tid: string; kind: MapSpotKind; pt: MapOverridePoint; isOverride: boolean }[] = [];
+    const rows: { tid: string; kind: UiKind; pt: MapOverridePoint; isOverride: boolean }[] = [];
     for (const tid of paths.keys()) {
       for (const { kind } of SPOT_KINDS) {
         const spot = effectiveFor(tid, kind);
@@ -603,10 +633,19 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     () => (selected ? calculatedFor(selected) : {}),
     [selected, calculatedFor],
   );
-  const selectedOverride = selectedEntry?.focus === 'override' ? (selectedEntry.positions ?? {}) : {};
+  const selectedOverride = useMemo(() => {
+    if (!selected || selectedEntry?.focus !== 'override') return {};
+    const positions = selectedEntry.positions ?? {};
+    const out: Partial<Record<UiKind, MapOverridePoint>> = {};
+    for (const { kind } of SPOT_KINDS) {
+      const pt = positions[storageKindFor(selected, kind, territories)];
+      if (pt) out[kind] = pt;
+    }
+    return out;
+  }, [selected, selectedEntry, territories]);
 
   const description = spots
-    ? 'Color dots show the spots the game calculates. Pick a territory, switch it to Override, then drag its dots inside the territory. Save applies to every setup using this map.'
+    ? 'Four dots per territory: blue units · red production/sea number · yellow faction logo · green other icons (territory type, homes, camps, ports, signals, rings). Pick a territory, switch it to Override, then drag its dots. Save applies to every setup using this map.'
     : 'Loading calculated spots…';
 
   return (
@@ -728,7 +767,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                   </div>
                   {selectedFocus === 'override' ? (
                     <ul className="mapov-kinds">
-                      {SPOT_KINDS.map(({ kind }) => {
+                      {SPOT_KINDS.map(({ kind, hint }) => {
                         const ovp = selectedOverride[kind];
                         const calc = selectedCalc[kind];
                         const shown = ovp ?? calc;
@@ -736,7 +775,9 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                           return (
                             <li key={kind} className="mapov-kind mapov-kind--absent">
                               <span className="mapov-kind__swatch" style={{ background: KIND_COLOR[kind] }} aria-hidden />
-                              <span className="mapov-kind__label">{KIND_LABEL[kind]}</span>
+                              <span className="mapov-kind__label" title={hint}>
+                                {KIND_LABEL[kind]}
+                              </span>
                               <button type="button" className="admin-page__btn mapov-kind__btn" onClick={() => addKind(selected, kind)}>
                                 + Place
                               </button>
@@ -751,7 +792,9 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                             onClick={() => setActiveKind(kind)}
                           >
                             <span className="mapov-kind__swatch" style={{ background: KIND_COLOR[kind] }} aria-hidden />
-                            <span className="mapov-kind__label">{KIND_LABEL[kind]}</span>
+                            <span className="mapov-kind__label" title={hint}>
+                              {KIND_LABEL[kind]}
+                            </span>
                             <span className="mapov-kind__pos" title={ovp ? 'Override' : 'Calculated'}>
                               {fmt(shown)}
                               {ovp ? '' : ' · calc'}

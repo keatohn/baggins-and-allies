@@ -4783,9 +4783,13 @@ function GameMap({
                     <div className="territory-signal-layer">
                       {Object.entries(territorySignals).map(([territoryId, signal]) => {
                         const layout = territoryPositions[territoryId];
-                        const anchor = layout?.center ?? layout?.marker ?? territoryCentroids[territoryId];
+                        // Green "other icons" anchor (override or hint) owns signals; else calculated center/marker.
+                        const iconsAnchor = effectiveHintAnchors[territoryId]?.icons;
+                        const anchor = iconsAnchor ?? layout?.center ?? layout?.marker ?? territoryCentroids[territoryId];
                         if (!anchor || !signal?.label) return null;
-                        const screenPos = clampToMap(svgToScreen(anchor.x, anchor.y));
+                        const screenPos = iconsAnchor
+                          ? svgHintPointToOverlay(iconsAnchor)
+                          : clampToMap(svgToScreen(anchor.x, anchor.y));
                         const flagColor = signal.color || '#6b5b4b';
                         return (
                           <button
@@ -4820,12 +4824,15 @@ function GameMap({
                         if (ringHostUnitId(ring, present, unitDefs)) return null;
                         const layout = territoryPositions[ring.territory_id];
                         const territory = territoryData[ring.territory_id];
-                        const hintLogo = effectiveHintAnchors[ring.territory_id]?.logo;
+                        // Green icons anchor owns rings (umbrella "other"); else logo, else marker/center.
+                        const greenAnchor =
+                          effectiveHintAnchors[ring.territory_id]?.icons ??
+                          effectiveHintAnchors[ring.territory_id]?.logo;
                         const markerAnchor = layout?.marker ?? layout?.center ?? territoryCentroids[ring.territory_id];
-                        const anchor = hintLogo ?? markerAnchor;
+                        const anchor = greenAnchor ?? markerAnchor;
                         if (!anchor) return null;
-                        const screenPos = hintLogo
-                          ? svgHintPointToOverlay(hintLogo)
+                        const screenPos = greenAnchor
+                          ? svgHintPointToOverlay(greenAnchor)
                           : clampToMap(svgToScreen(anchor.x, anchor.y));
                         const siblings = rings.filter((other) => {
                           if (other.territory_id !== ring.territory_id) return false;
