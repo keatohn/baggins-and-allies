@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useRef, useCallback, useMemo, type PointerEvent as ReactPointerEvent } from 'react';
+import { Fragment, useState, useEffect, useRef, useCallback, useMemo, type PointerEvent as ReactPointerEvent, type CSSProperties } from 'react';
 import { DndContext, useDroppable, rectIntersection, pointerWithin, closestCenter, useSensors, useSensor, PointerSensor } from '@dnd-kit/core';
 import type { CollisionDetection, DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { useDraggable } from '@dnd-kit/core';
@@ -379,6 +379,29 @@ export interface PendingMoveConfirm {
   ringCarryDecided?: boolean;
 }
 
+/**
+ * Transient map animation cue derived from backend action events (purchase pop-in,
+ * movement travel ghost, combat flash, conquest fade/banner). Owned by App state;
+ * GameMap renders them and App prunes them after they expire.
+ */
+export interface MapAnimCue {
+  id: string;
+  kind: 'purchase-pop' | 'move-travel' | 'combat-flash' | 'conquest';
+  /** Destination / affected territory. */
+  territoryId: string;
+  /** Move-travel: source territory the ghost flies from. */
+  fromTerritoryId?: string;
+  /** purchase-pop: unit type that just mobilized onto the map. */
+  unitId?: string;
+  /** move-travel: moved instance IDs (resolved to unit types against post-action state). */
+  instanceIds?: string[];
+  /** conquest: previous and new owner faction IDs. */
+  oldOwner?: string | null;
+  newOwner?: string;
+  /** Epoch ms when queued (App prunes cues older than a few seconds). */
+  ts: number;
+}
+
 // Backend-provided movement data
 interface MoveableUnit {
   territory: string;
@@ -514,6 +537,8 @@ interface GameMapProps {
   mobilizationPendingDestination?: string | null;
   /** Alliance-visible pins, keyed by territory id. */
   territorySignals?: TerritorySignalMap;
+  /** Transient action animations (pop-in, travel ghosts, combat flash, conquest). */
+  animCues?: MapAnimCue[];
   /**
    * Map-level icon/location overrides (admin-edited, keyed by map base). Applied on top of the
    * calculated spots and the in-SVG hint circles: DB override > SVG hint > calculated/special-case.
@@ -752,6 +777,7 @@ function DroppableTerritory({
   isValidDrop,
   highlightMuted = false,
   shadowed = false,
+  conquestFadeColor,
   onClick,
 }: {
   territoryId: string;
@@ -766,6 +792,8 @@ function DroppableTerritory({
   /** Weaker outline — other valid mobilization zones while a destination is pending confirm. */
   highlightMuted?: boolean;
   shadowed?: boolean;
+  /** Conquest: old owner color rendered over the fill and faded out (cross-fade to new owner). */
+  conquestFadeColor?: string;
   onClick: (e: React.MouseEvent) => void;
 }) {
   const tid = typeof territoryId === 'string' ? territoryId : (territoryId != null && typeof territoryId === 'object' && 'id' in (territoryId as object) ? String((territoryId as { id: string }).id) : (territoryId != null && typeof territoryId === 'object' && 'territoryId' in (territoryId as object) ? String((territoryId as { territoryId: string }).territoryId) : String(territoryId ?? '')));
@@ -841,6 +869,16 @@ function DroppableTerritory({
           />
         ) : null}
       </g>
+      {conquestFadeColor ? (
+        <path
+          d={pathData.d}
+          transform={pathData.transform}
+          fill={conquestFadeColor}
+          stroke="none"
+          pointerEvents="none"
+          className="territory-conquest-fade"
+        />
+      ) : null}
     </>
   );
 }
@@ -951,6 +989,7 @@ function GameMap({
   forcedNavalCombatInstanceIds = [],
   seaZoneIdsEligibleForNavalTrayStackClick = EMPTY_ELIGIBLE_SEA_ZONES_FOR_TRAY,
   territorySignals = {},
+  animCues,
   mapOverrides = null,
   onSpotsCalculated,
 }: GameMapProps) {
@@ -979,6 +1018,40 @@ function GameMap({
   const forcedNavalCombatInstanceIdSet = useMemo(
     () => new Set(forcedNavalCombatInstanceIds),
     [forcedNavalCombatInstanceIds]
+  );
+
+  // ===== Action animation cues (purchase pop, combat flash, conquest) =====
+  /** `${territoryId}|${unitId}` keys whose tokens should play the pop-in scale animation. */
+  const popUnitKeys = useMemo(() => {
+    const s = new Set<string>();
+    for (const cue of animCues ?? []) {
+      if (cue.kind === 'purchase-pop' && cue.territoryId && cue.unitId) {
+        s.add(`${cue.territoryId}|${cue.unitId}`);
+      }
+    }
+    return s;
+  }, [animCues]);
+  /** Combat flash overlays keyed by cue id (territory + position resolved at render). */
+  const combatFlashCues = useMemo(
+    () => (animCues ?? []).filter(c => c.kind === 'combat-flash' && c.territoryId),
+    [animCues],
+  );
+  /** Conquest fades: territoryId -> old owner color (fill cross-fade after capture). */
+  const conquestFadeByTerritory = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const cue of animCues ?? []) {
+      if (cue.kind !== 'conquest' || !cue.territoryId) continue;
+      const oldColor = cue.oldOwner
+        ? (factionData[cue.oldOwner]?.color ?? '#d4c4a8')
+        : '#d4c4a8';
+      m.set(cue.territoryId, oldColor);
+    }
+    return m;
+  }, [animCues, factionData]);
+  /** Conquest banner overlays (captured-by label above the territory). */
+  const conquestCues = useMemo(
+    () => (animCues ?? []).filter(c => c.kind === 'conquest' && c.territoryId),
+    [animCues],
   );
   const wrapperRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -3836,6 +3909,61 @@ function GameMap({
     });
   };
 
+  /** Overlay (screen-space) anchor for animation effects — same spot the unit stack uses. */
+  const animAnchorFor = (territoryId: string): { x: number; y: number } => {
+    const unitPos = territoryPositions[territoryId]?.unit ?? territoryCentroids[territoryId];
+    if (!unitPos) return fallbackPositionForTerritory(territoryId);
+    return clampToMap(svgToScreen(unitPos.x, unitPos.y));
+  };
+
+  /**
+   * Movement travel ghosts: resolve each move-travel cue's moved instance IDs to unit
+   * types against post-action state (moved units now live in the destination territory),
+   * then pair source/destination anchors for the flight path. Capped per move.
+   */
+  const travelGhosts = useMemo(() => {
+    const ghosts: {
+      key: string;
+      unitId: string;
+      count: number;
+      from: { x: number; y: number };
+      to: { x: number; y: number };
+      factionColor: string;
+    }[] = [];
+    if (!animCues?.length) return ghosts;
+    for (const cue of animCues) {
+      if (cue.kind !== 'move-travel' || !cue.fromTerritoryId || !cue.territoryId) continue;
+      const destUnits = territoryUnitsFull?.[cue.territoryId];
+      if (!destUnits?.length) continue;
+      const byIid = new Map(destUnits.map(u => [u.instance_id, u]));
+      const typeCounts = new Map<string, number>();
+      for (const iid of cue.instanceIds ?? []) {
+        const u = byIid.get(iid);
+        if (u) typeCounts.set(u.unit_id, (typeCounts.get(u.unit_id) ?? 0) + 1);
+      }
+      let n = 0;
+      for (const [unitId, count] of typeCounts) {
+        if (n >= 4) break;
+        const defFaction = unitDefs[unitId]?.faction;
+        const parts = unitId.split('_');
+        const factionFromId = parts.find(p => factionData[p]);
+        const colorFromId = factionFromId ? factionData[factionFromId]?.color : undefined;
+        const colorFromDef = defFaction ? factionData[defFaction]?.color : undefined;
+        ghosts.push({
+          key: `${cue.id}-${unitId}`,
+          unitId,
+          count,
+          from: animAnchorFor(cue.fromTerritoryId),
+          to: animAnchorFor(cue.territoryId),
+          factionColor: colorFromId ?? colorFromDef ?? '#888888',
+        });
+        n++;
+      }
+    }
+    return ghosts;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- animAnchorFor is a stable per-render closure over position state
+  }, [animCues, territoryUnitsFull, unitDefs, factionData, territoryPositions, territoryCentroids]);
+
   return (
     <div className="game-map-root">
       <DndContext
@@ -4024,6 +4152,7 @@ function GameMap({
                               isValidDrop={isValidDrop || mobilizationStrong || isExternallyHighlighted}
                               highlightMuted={mobilizationMuted}
                               shadowed={shadowedTerritories?.has(territoryId) === true}
+                              conquestFadeColor={conquestFadeByTerritory.get(territoryId)}
                               onClick={(e) => handleTerritoryClick(territoryId, e)}
                             />
                           );
@@ -5074,7 +5203,7 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                                       return (
                                         <span
                                           key={`${territoryId}-${unit_id}`}
-                                          className={`unit-token-tap-wrapper${tapSelectedUnit?.territoryId === territoryId && tapSelectedUnit?.unitId === unit_id ? ' unit-token-tap-wrapper--selected' : ''}`}
+                                          className={`unit-token-tap-wrapper${tapSelectedUnit?.territoryId === territoryId && tapSelectedUnit?.unitId === unit_id ? ' unit-token-tap-wrapper--selected' : ''}${popUnitKeys.has(`${territoryId}|${unit_id}`) ? ' unit-token-tap-wrapper--pop' : ''}`}
                                           onPointerDownCapture={(ev) => handleUnitPointerDownCapture(territoryId, unit_id, ev)}
                                           style={{ display: 'inline-block' }}
                                         >
@@ -5129,7 +5258,7 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                                     return (
                                       <span
                                         key={`${territoryId}-${unit_id}-sea-surface`}
-                                        className={`unit-token-tap-wrapper${tapSelectedUnit?.territoryId === territoryId && tapSelectedUnit?.unitId === unit_id ? ' unit-token-tap-wrapper--selected' : ''}`}
+                                        className={`unit-token-tap-wrapper${tapSelectedUnit?.territoryId === territoryId && tapSelectedUnit?.unitId === unit_id ? ' unit-token-tap-wrapper--selected' : ''}${popUnitKeys.has(`${territoryId}|${unit_id}`) ? ' unit-token-tap-wrapper--pop' : ''}`}
                                         onPointerDownCapture={(ev) => handleUnitPointerDownCapture(territoryId, unit_id, ev)}
                                         style={{ display: 'inline-block' }}
                                       >
@@ -5226,7 +5355,7 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                                 return (
                                   <span
                                     key={`${territoryId}-${unit_id}`}
-                                    className={`unit-token-tap-wrapper${tapSelectedUnit?.territoryId === territoryId && tapSelectedUnit?.unitId === unit_id ? ' unit-token-tap-wrapper--selected' : ''}`}
+                                    className={`unit-token-tap-wrapper${tapSelectedUnit?.territoryId === territoryId && tapSelectedUnit?.unitId === unit_id ? ' unit-token-tap-wrapper--selected' : ''}${popUnitKeys.has(`${territoryId}|${unit_id}`) ? ' unit-token-tap-wrapper--pop' : ''}`}
                                     onPointerDownCapture={(ev) => handleUnitPointerDownCapture(territoryId, unit_id, ev)}
                                     style={{ display: 'inline-block' }}
                                   >
@@ -5262,6 +5391,52 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                                 />
                               )}
                             </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Transient action animations: travel ghosts, combat flashes, conquest banners */}
+                    <div className="map-anim-layer" aria-hidden>
+                      {travelGhosts.map(g => (
+                        <div
+                          key={g.key}
+                          className="map-anim-ghost"
+                          style={{
+                            left: g.from.x,
+                            top: g.from.y,
+                            '--ghost-tx': `${g.to.x - g.from.x}px`,
+                            '--ghost-ty': `${g.to.y - g.from.y}px`,
+                          } as CSSProperties}
+                        >
+                          <div className="unit-token map-anim-ghost-token" style={{ borderColor: g.factionColor }}>
+                            <img src={unitDefs[g.unitId]?.icon} alt="" draggable={false} />
+                            {g.count > 1 && <span className="count">{g.count}</span>}
+                          </div>
+                        </div>
+                      ))}
+                      {combatFlashCues.map(cue => {
+                        const pos = animAnchorFor(cue.territoryId);
+                        return (
+                          <div key={cue.id} className="map-anim-combat-flash" style={{ left: pos.x, top: pos.y }}>
+                            <svg viewBox="0 0 24 24" width="30" height="30" className="map-anim-swords">
+                              <path d="M5.5 18.5 18.5 5.5M5.5 5.5l13 13" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" fill="none" />
+                              <path d="M4 17l3 3M4 7l3-3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
+                            </svg>
+                          </div>
+                        );
+                      })}
+                      {conquestCues.map(cue => {
+                        const pos = animAnchorFor(cue.territoryId);
+                        const newColor = cue.newOwner ? (factionData[cue.newOwner]?.color ?? '#d4c4a8') : '#d4c4a8';
+                        const territoryName = territoryData[cue.territoryId]?.name ?? cue.territoryId;
+                        return (
+                          <div
+                            key={cue.id}
+                            className="map-anim-conquest-banner"
+                            style={{ left: pos.x, top: pos.y, '--banner-faction': newColor } as CSSProperties}
+                          >
+                            <span className="map-anim-conquest-banner-text">{territoryName} taken!</span>
                           </div>
                         );
                       })}
