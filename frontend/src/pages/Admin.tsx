@@ -24,6 +24,7 @@ import { GamesReportModal } from './admin/GamesReportModal';
 import { previewStatsFromBundle } from './admin/previewStats';
 import { completeTerritoryAsymmetries } from './admin/territoryGraph';
 import { MapViewPane, type MapSetupDraft } from './admin/MapViewPane';
+import { MapOverridesPane } from './admin/MapOverridesPane';
 import { GameStatsModal, UnitStatsModal, type UnitStatsExtraColumn } from '../components/StatsModals';
 import './Admin.css';
 
@@ -327,6 +328,7 @@ export default function Admin() {
   const [saving, setSaving] = useState(false);
   const [loadingBundle, setLoadingBundle] = useState(false);
   const [mapViewOpen, setMapViewOpen] = useState(false);
+  const [mapsOpen, setMapsOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [resolveAsymmetriesOpen, setResolveAsymmetriesOpen] = useState(false);
@@ -872,6 +874,13 @@ export default function Admin() {
           </button>
           <button
             type="button"
+            className={`page-menu-btn${mapsOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => setMapsOpen(true)}
+          >
+            Maps
+          </button>
+          <button
+            type="button"
             className={`page-menu-btn${gamesOpen ? ' admin-page__nav-btn--active' : ''}`}
             onClick={() => setGamesOpen(true)}
           >
@@ -1112,6 +1121,12 @@ export default function Admin() {
           units={(bundle.units as DictEntityMap) ?? {}}
           onClose={() => setMapViewOpen(false)}
           onSave={saveSetupFromMap}
+        />
+      ) : null}
+      {mapsOpen ? (
+        <MapOverridesPane
+          territories={(bundle?.territories as DictEntityMap) ?? {}}
+          onClose={() => setMapsOpen(false)}
         />
       ) : null}
       {resolveAsymmetriesOpen && (

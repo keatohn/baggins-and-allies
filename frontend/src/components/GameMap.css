@@ -133,11 +133,25 @@
 }
 
 /* Hover only for fine pointer (mouse); touch uses tap selection + highlight */
-@media (pointer: fine) {
+@media (hover: hover) and (pointer: fine) {
   .territory-path:hover {
-    fill-opacity: 0.6;
-    stroke: var(--territory-stroke, #333);
-    stroke-width: 2;
+    fill-opacity: 0.7;
+    stroke: var(--territory-glow, #333);
+  }
+  /* Wider border + stronger halo on the stroke layer only (visible layer).
+     :not() chain keeps highlight/drop-target at their dashed/thick borders while hovered.
+     :not(.territory-path--sea) — sea has its own width/color below. */
+  .territory-path-fill:hover
+    ~ .territory-path-stroke:not(.territory-path--sea):not(.selected):not(.highlight):not(.highlight-muted):not(.drop-target) {
+    stroke: var(--territory-glow, #444);
+    stroke-width: 3;
+    filter: drop-shadow(0 0 5px var(--territory-glow-rgba))
+            drop-shadow(0 0 10px var(--territory-glow-rgba-soft));
+  }
+  .territory-path--sea:hover {
+    fill-opacity: 0.66;
+    stroke: #3f6f96;
+    stroke-width: 5;
   }
 }
 
@@ -181,11 +195,6 @@
   filter: drop-shadow(0 0 2px rgba(45, 66, 88, 0.6))
           drop-shadow(0 0 4px rgba(20, 35, 50, 0.4));
 }
-.territory-path--sea:hover {
-  fill-opacity: 0.62;
-  stroke: #0d1319;
-  stroke-width: 4;
-}
 .territory-path--sea.selected {
   fill-opacity: 0.6;
   stroke: var(--gold);
@@ -224,9 +233,53 @@
   }
 }
 
+/* Selected sea: gold halo on the stroke layer (Chrome/FF; Safari keeps stroke + pulse) */
+.territory-path-stroke.territory-path--sea.selected:not(.drop-target) {
+  filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.8))
+          drop-shadow(0 0 14px rgba(255, 215, 0, 0.45));
+}
+
+/* Selected land: slight lift about the polygon center. Sea polygons are huge — no lift for sea.
+   transform-box: fill-box anchors scale to the territory itself so unit/marker overlays stay put. */
+.territory-group--selected:not(.territory-group--sea) {
+  transform: translate(0, -2px) scale(1.02);
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+/* Expanding gold pulse ring on the selected territory (stroke-only paint — animates reliably in Safari) */
+.territory-path-pulse {
+  stroke: var(--gold);
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  animation: territory-select-pulse 2s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+}
+
+@keyframes territory-select-pulse {
+  0% {
+    stroke-opacity: 0.85;
+    stroke-width: 3;
+  }
+  70%,
+  100% {
+    stroke-opacity: 0;
+    stroke-width: 14;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .map-water-flow {
     animation: none;
+  }
+  .territory-path-pulse {
+    animation: none;
+    stroke-opacity: 0.4;
+    stroke-width: 6;
+  }
+  .territory-group--selected {
+    transition: none;
   }
 }
 
@@ -1030,6 +1083,12 @@
 
   50% {
     opacity: 0.6;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .move-arrow {
+    animation: none;
   }
 }
 

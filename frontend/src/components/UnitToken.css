@@ -25,6 +25,11 @@
   z-index: 2;
 }
 
+/* Styled ring-name tip needs hover; drag still works (events bubble to .unit-token listeners). */
+.unit-token img.unit-token-ring.map-tip {
+  pointer-events: auto;
+}
+
 .unit-token img.unit-token-ring.ring-corner-tl { top: 0; left: 0; }
 .unit-token img.unit-token-ring.ring-corner-tr { top: 0; right: 0; }
 .unit-token img.unit-token-ring.ring-corner-bl { bottom: 0; left: 0; }

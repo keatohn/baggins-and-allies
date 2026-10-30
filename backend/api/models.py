@@ -61,3 +61,17 @@ class AppSetting(Base):
     key = Column(String(64), primary_key=True)
     value_json = Column(Text, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class MapOverride(Base):
+    """Map-level icon/location overrides keyed by map asset base name (shared across setups).
+
+    overrides_json: {"territories": {tid: {"focus": "calculated"|"override",
+    "positions": {kind: [x, y]}}}} in SVG viewBox coordinates.
+    """
+
+    __tablename__ = "map_overrides"
+
+    map_base = Column(String(64), primary_key=True)
+    overrides_json = Column(Text, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
