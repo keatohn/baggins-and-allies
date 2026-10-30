@@ -14,6 +14,7 @@ import { compareUnitStacksByMapOrder } from '../utils/unitStackSort';
 import { TERRITORY_UNIT_PIXEL_NUDGE } from './mapSpotNudge';
 import { ringHostUnitId, ringIconSrc, ringsOnUnit, type RingView } from '../ringsDisplay';
 import './GameMap.css';
+import './MapTooltip.css';
 import { sortSeaZoneIdsByNumericSuffix, seaZonesReachableBySailFrom } from '../seaZoneSort';
 import {
   directFordOnlyLandPair,
@@ -4228,13 +4229,14 @@ function GameMap({
                                 left: clampedMarkerPos.x,
                                 top: clampedMarkerPos.y,
                               }}
+                              onClick={(e) => handleTerritoryClick(territoryId, e)}
                             >
                               <div className="territory-markers-ring-harbor-rows">
                                 {showPower && (
                                   <div className="territory-markers-row territory-markers-row--ring-harbor-power">
                                     <div
-                                      className="territory-power-badge territory-power-badge--inline"
-                                      title={`${territory.name}: ${power} power`}
+                                      className="territory-power-badge territory-power-badge--inline map-tip"
+                                      data-tip={`${territory.name}: ${power} power`}
                                       aria-hidden
                                     >
                                       {power}
@@ -4244,25 +4246,25 @@ function GameMap({
                                 {ringHarborMidRow && (
                                   <div className="territory-markers-row territory-markers-row--ring-harbor-mid">
                                     {hasHome && (
-                                      <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
+                                      <div className="territory-marker home-marker map-tip" data-tip="Home territory (deploy 1 unit without camp)">
                                         <span className="home-marker-emoji" aria-hidden>🏠</span>
                                       </div>
                                     )}
                                     {showCamp && !isCapital && (
-                                      <div className="territory-marker camp-marker" title="Camp (mobilization point)">
+                                      <div className="territory-marker camp-marker map-tip" data-tip="Camp (mobilization point)">
                                         <span className="camp-marker-emoji" aria-hidden>⛺</span>
                                       </div>
                                     )}
                                     {hasPort && (
-                                      <div className="territory-marker port-marker" title="Port (naval mobilization)">
+                                      <div className="territory-marker port-marker map-tip" data-tip="Port (naval mobilization)">
                                         <span className="port-marker-emoji" aria-hidden>⚓</span>
                                       </div>
                                     )}
                                     {showTerrainMountain && (
-                                      <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
+                                      <div className="territory-marker terrain-marker map-tip" data-tip="Mountain">⛰️</div>
                                     )}
                                     {showTerrainForest && (
-                                      <div className="territory-marker terrain-marker" title="Forest">🌲</div>
+                                      <div className="territory-marker terrain-marker map-tip" data-tip="Forest">🌲</div>
                                     )}
                                   </div>
                                 )}
@@ -4271,8 +4273,8 @@ function GameMap({
                                     {showFactionLogo && (
                                       <div className="stronghold-faction-hp-group">
                                         <div
-                                          className={`territory-marker faction-marker ${isCapital ? 'faction-marker--capital' : ''}`}
-                                          title={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
+                                          className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marker--capital' : ''}`}
+                                          data-tip={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
                                         >
                                           <img
                                             src={factionData[territory.owner!].icon}
@@ -4286,8 +4288,8 @@ function GameMap({
                                           const current = (territory as { stronghold_current_health?: number }).stronghold_current_health ?? base;
                                           return (
                                             <div
-                                              className="stronghold-hp-bars"
-                                              title={`Stronghold HP: ${current}/${base}`}
+                                              className="stronghold-hp-bars map-tip"
+                                              data-tip={`Stronghold HP: ${current}/${base}`}
                                               style={{ ['--faction-color' as string]: factionData[territory.owner!]?.color ?? '#888' }}
                                             >
                                               {Array.from({ length: base }, (_, i) => (
@@ -4300,8 +4302,8 @@ function GameMap({
                                     )}
                                     {showNeutralStronghold && (
                                       <div
-                                        className="territory-marker neutral-stronghold-marker"
-                                        title={territory.name + ' (Neutral stronghold)'}
+                                        className="territory-marker neutral-stronghold-marker map-tip"
+                                        data-tip={territory.name + ' (Neutral stronghold)'}
                                         aria-hidden
                                       />
                                     )}
@@ -4315,8 +4317,8 @@ function GameMap({
                           <>
                             {isSeaZone && seaZoneNum ? (
                               <div
-                                className="sea-zone-number"
-                                title={`Sea Zone ${seaZoneNum}`}
+                                className="sea-zone-number map-tip"
+                                data-tip={`Sea Zone ${seaZoneNum}`}
                                 aria-hidden
                               >
                                 {seaZoneNum}
@@ -4325,41 +4327,41 @@ function GameMap({
                               <div className="territory-markers-row territory-markers-row--power-camp">
                                 {showPower && (
                                   <div
-                                    className="territory-power-badge territory-power-badge--inline"
-                                    title={`${territory.name}: ${power} power`}
+                                    className="territory-power-badge territory-power-badge--inline map-tip"
+                                    data-tip={`${territory.name}: ${power} power`}
                                     aria-hidden
                                   >
                                     {power}
                                   </div>
                                 )}
                                 {hasHome && (
-                                  <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
+                                  <div className="territory-marker home-marker map-tip" data-tip="Home territory (deploy 1 unit without camp)">
                                     <span className="home-marker-emoji" aria-hidden>🏠</span>
                                   </div>
                                 )}
                                 {showCamp && (
-                                  <div className="territory-marker camp-marker" title="Camp (mobilization point)">
+                                  <div className="territory-marker camp-marker map-tip" data-tip="Camp (mobilization point)">
                                     <span className="camp-marker-emoji" aria-hidden>⛺</span>
                                   </div>
                                 )}
                                 {hasPort && (
-                                  <div className="territory-marker port-marker" title="Port (naval mobilization)">
+                                  <div className="territory-marker port-marker map-tip" data-tip="Port (naval mobilization)">
                                     <span className="port-marker-emoji" aria-hidden>⚓</span>
                                   </div>
                                 )}
                                 {showTerrainMountain && (
-                                  <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
+                                  <div className="territory-marker terrain-marker map-tip" data-tip="Mountain">⛰️</div>
                                 )}
                                 {showTerrainForest && (
-                                  <div className="territory-marker terrain-marker" title="Forest">🌲</div>
+                                  <div className="territory-marker terrain-marker map-tip" data-tip="Forest">🌲</div>
                                 )}
                               </div>
                             ) : (
                               <>
                                 {showPower && !powerAndMarkersInline && (
                                   <div
-                                    className={`territory-power-badge${showStronghold ? ' territory-power-badge--above-logo' : ''}`}
-                                    title={`${territory.name}: ${power} power`}
+                                    className={`territory-power-badge map-tip${showStronghold ? ' territory-power-badge--above-logo' : ''}`}
+                                    data-tip={`${territory.name}: ${power} power`}
                                     aria-hidden
                                   >
                                     {power}
@@ -4370,8 +4372,8 @@ function GameMap({
                                     {showFactionLogo && (
                                       <div className="stronghold-faction-hp-group">
                                         <div
-                                          className={`territory-marker faction-marker ${isCapital ? 'faction-marker--capital' : ''}`}
-                                          title={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
+                                          className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marker--capital' : ''}`}
+                                          data-tip={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
                                         >
                                           <img
                                             src={factionData[territory.owner!].icon}
@@ -4385,8 +4387,8 @@ function GameMap({
                                           const current = (territory as { stronghold_current_health?: number }).stronghold_current_health ?? base;
                                           return (
                                             <div
-                                              className="stronghold-hp-bars"
-                                              title={`Stronghold HP: ${current}/${base}`}
+                                              className="stronghold-hp-bars map-tip"
+                                              data-tip={`Stronghold HP: ${current}/${base}`}
                                               style={{ ['--faction-color' as string]: factionData[territory.owner!]?.color ?? '#888' }}
                                             >
                                               {Array.from({ length: base }, (_, i) => (
@@ -4399,29 +4401,29 @@ function GameMap({
                                     )}
                                     {showNeutralStronghold && (
                                       <div
-                                        className="territory-marker neutral-stronghold-marker"
-                                        title={territory.name + ' (Neutral stronghold)'}
+                                        className="territory-marker neutral-stronghold-marker map-tip"
+                                        data-tip={territory.name + ' (Neutral stronghold)'}
                                         aria-hidden
                                       />
                                     )}
                                     {hasHome && (
-                                      <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
+                                      <div className="territory-marker home-marker map-tip" data-tip="Home territory (deploy 1 unit without camp)">
                                         <span className="home-marker-emoji" aria-hidden>🏠</span>
                                       </div>
                                     )}
-                                    <div className="territory-marker camp-marker" title="Camp (mobilization point)">
+                                    <div className="territory-marker camp-marker map-tip" data-tip="Camp (mobilization point)">
                                       <span className="camp-marker-emoji" aria-hidden>⛺</span>
                                     </div>
                                     {hasPort && (
-                                      <div className="territory-marker port-marker" title="Port (naval mobilization)">
+                                      <div className="territory-marker port-marker map-tip" data-tip="Port (naval mobilization)">
                                         <span className="port-marker-emoji" aria-hidden>⚓</span>
                                       </div>
                                     )}
                                     {showTerrainMountain && (
-                                      <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
+                                      <div className="territory-marker terrain-marker map-tip" data-tip="Mountain">⛰️</div>
                                     )}
                                     {showTerrainForest && (
-                                      <div className="territory-marker terrain-marker" title="Forest">🌲</div>
+                                      <div className="territory-marker terrain-marker map-tip" data-tip="Forest">🌲</div>
                                     )}
                                   </div>
                                 ) : (
@@ -4430,33 +4432,33 @@ function GameMap({
                                       {(showCamp || hasPort || hasHome || showTerrainIcon) && (
                                         <div className="territory-markers-row territory-markers-row--power-camp">
                                           {hasHome && (
-                                            <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
+                                            <div className="territory-marker home-marker map-tip" data-tip="Home territory (deploy 1 unit without camp)">
                                               <span className="home-marker-emoji" aria-hidden>🏠</span>
                                             </div>
                                           )}
                                           {showCamp && (
-                                            <div className="territory-marker camp-marker" title="Camp (mobilization point)">
+                                            <div className="territory-marker camp-marker map-tip" data-tip="Camp (mobilization point)">
                                               <span className="camp-marker-emoji" aria-hidden>⛺</span>
                                             </div>
                                           )}
                                           {hasPort && (
-                                            <div className="territory-marker port-marker" title="Port (naval mobilization)">
+                                            <div className="territory-marker port-marker map-tip" data-tip="Port (naval mobilization)">
                                               <span className="port-marker-emoji" aria-hidden>⚓</span>
                                             </div>
                                           )}
                                           {showTerrainMountain && (
-                                            <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
+                                            <div className="territory-marker terrain-marker map-tip" data-tip="Mountain">⛰️</div>
                                           )}
                                           {showTerrainForest && (
-                                            <div className="territory-marker terrain-marker" title="Forest">🌲</div>
+                                            <div className="territory-marker terrain-marker map-tip" data-tip="Forest">🌲</div>
                                           )}
                                         </div>
                                       )}
                                       {showFactionLogo && (
                                         <div className="stronghold-faction-hp-group">
                                           <div
-                                            className={`territory-marker faction-marker ${isCapital ? 'faction-marker--capital' : ''}`}
-                                            title={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
+                                            className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marker--capital' : ''}`}
+                                            data-tip={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
                                           >
                                             <img
                                               src={factionData[territory.owner!].icon}
@@ -4467,8 +4469,8 @@ function GameMap({
                                           </div>
                                           {((territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0) > 0 && (
                                             <div
-                                              className="stronghold-hp-bars"
-                                              title={`Stronghold HP: ${(territory as { stronghold_current_health?: number }).stronghold_current_health ?? (territory as { stronghold_base_health?: number }).stronghold_base_health}/${(territory as { stronghold_base_health?: number }).stronghold_base_health}`}
+                                              className="stronghold-hp-bars map-tip"
+                                              data-tip={`Stronghold HP: ${(territory as { stronghold_current_health?: number }).stronghold_current_health ?? (territory as { stronghold_base_health?: number }).stronghold_base_health}/${(territory as { stronghold_base_health?: number }).stronghold_base_health}`}
                                               style={{ ['--faction-color' as string]: factionData[territory.owner!]?.color ?? '#888' }}
                                             >
                                               {Array.from({ length: (territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0 }, (_, i) => {
@@ -4481,8 +4483,8 @@ function GameMap({
                                       )}
                                       {showNeutralStronghold && (
                                         <div
-                                          className="territory-marker neutral-stronghold-marker"
-                                          title={territory.name + ' (Neutral stronghold)'}
+                                          className="territory-marker neutral-stronghold-marker map-tip"
+                                          data-tip={territory.name + ' (Neutral stronghold)'}
                                           aria-hidden
                                         />
                                       )}
@@ -4503,6 +4505,7 @@ function GameMap({
                                 left: clampedMarkerPos.x,
                                 top: clampedMarkerPos.y,
                               }}
+                              onClick={(e) => handleTerritoryClick(territoryId, e)}
                             >
                               {legacyMarkerChildren}
                             </div>
@@ -4515,15 +4518,16 @@ function GameMap({
                               <div
                                 className="territory-markers territory-markers--svg-hint"
                                 style={{ left: hintScr(h.number).x, top: hintScr(h.number).y }}
+                                onClick={(e) => handleTerritoryClick(territoryId, e)}
                               >
                                 {isSeaZone && seaZoneNum ? (
-                                  <div className="sea-zone-number" title={`Sea Zone ${seaZoneNum}`} aria-hidden>
+                                  <div className="sea-zone-number map-tip" data-tip={`Sea Zone ${seaZoneNum}`} aria-hidden>
                                     {seaZoneNum}
                                   </div>
                                 ) : showPower ? (
                                   <div
-                                    className={`territory-power-badge${showStronghold && !h?.logo ? ' territory-power-badge--above-logo' : ''}`}
-                                    title={`${territory.name}: ${power} power`}
+                                    className={`territory-power-badge map-tip${showStronghold && !h?.logo ? ' territory-power-badge--above-logo' : ''}`}
+                                    data-tip={`${territory.name}: ${power} power`}
                                     aria-hidden
                                   >
                                     {power}
@@ -4535,28 +4539,29 @@ function GameMap({
                               <div
                                 className="territory-markers territory-markers--svg-hint"
                                 style={{ left: hintScr(h.icons).x, top: hintScr(h.icons).y }}
+                                onClick={(e) => handleTerritoryClick(territoryId, e)}
                               >
                                 <div className="territory-markers-row territory-markers-row--power-camp">
                                   {hasHome && (
-                                    <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
+                                    <div className="territory-marker home-marker map-tip" data-tip="Home territory (deploy 1 unit without camp)">
                                       <span className="home-marker-emoji" aria-hidden>🏠</span>
                                     </div>
                                   )}
                                   {showCamp && (
-                                    <div className="territory-marker camp-marker" title="Camp (mobilization point)">
+                                    <div className="territory-marker camp-marker map-tip" data-tip="Camp (mobilization point)">
                                       <span className="camp-marker-emoji" aria-hidden>⛺</span>
                                     </div>
                                   )}
                                   {hasPort && (
-                                    <div className="territory-marker port-marker" title="Port (naval mobilization)">
+                                    <div className="territory-marker port-marker map-tip" data-tip="Port (naval mobilization)">
                                       <span className="port-marker-emoji" aria-hidden>⚓</span>
                                     </div>
                                   )}
                                   {showTerrainMountain && (
-                                    <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
+                                    <div className="territory-marker terrain-marker map-tip" data-tip="Mountain">⛰️</div>
                                   )}
                                   {showTerrainForest && (
-                                    <div className="territory-marker terrain-marker" title="Forest">🌲</div>
+                                    <div className="territory-marker terrain-marker map-tip" data-tip="Forest">🌲</div>
                                   )}
                                 </div>
                               </div>
@@ -4565,12 +4570,13 @@ function GameMap({
                               <div
                                 className="territory-markers territory-markers--svg-hint"
                                 style={{ left: hintScr(h.logo).x, top: hintScr(h.logo).y }}
+                                onClick={(e) => handleTerritoryClick(territoryId, e)}
                               >
                                 {showFactionLogo && (
                                   <div className="stronghold-faction-hp-group">
                                     <div
-                                      className={`territory-marker faction-marker ${isCapital ? 'faction-marker--capital' : ''}`}
-                                      title={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
+className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marker--capital' : ''}`}
+                                          data-tip={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
                                     >
                                       <img
                                         src={factionData[territory.owner!].icon}
@@ -4581,8 +4587,8 @@ function GameMap({
                                     </div>
                                     {((territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0) > 0 && (
                                       <div
-                                        className="stronghold-hp-bars"
-                                        title={`Stronghold HP: ${(territory as { stronghold_current_health?: number }).stronghold_current_health ?? (territory as { stronghold_base_health?: number }).stronghold_base_health}/${(territory as { stronghold_base_health?: number }).stronghold_base_health}`}
+                                        className="stronghold-hp-bars map-tip"
+                                        data-tip={`Stronghold HP: ${(territory as { stronghold_current_health?: number }).stronghold_current_health ?? (territory as { stronghold_base_health?: number }).stronghold_base_health}/${(territory as { stronghold_base_health?: number }).stronghold_base_health}`}
                                         style={{ ['--faction-color' as string]: factionData[territory.owner!]?.color ?? '#888' }}
                                       >
                                         {Array.from({ length: (territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0 }, (_, i) => {
@@ -4595,8 +4601,8 @@ function GameMap({
                                 )}
                                 {showNeutralStronghold && (
                                   <div
-                                    className="territory-marker neutral-stronghold-marker"
-                                    title={territory.name + ' (Neutral stronghold)'}
+                                    className="territory-marker neutral-stronghold-marker map-tip"
+                                    data-tip={territory.name + ' (Neutral stronghold)'}
                                     aria-hidden
                                   />
                                 )}
@@ -4608,9 +4614,10 @@ function GameMap({
                                 left: clampedMarkerPos.x,
                                 top: clampedMarkerPos.y,
                               }}
+                              onClick={(e) => handleTerritoryClick(territoryId, e)}
                             >
                               {!h?.number && isSeaZone && seaZoneNum && (
-                                <div className="sea-zone-number" title={`Sea Zone ${seaZoneNum}`} aria-hidden>
+                                <div className="sea-zone-number map-tip" data-tip={`Sea Zone ${seaZoneNum}`} aria-hidden>
                                   {seaZoneNum}
                                 </div>
                               )}
@@ -4620,41 +4627,41 @@ function GameMap({
                                     <div className="territory-markers-row territory-markers-row--power-camp">
                                       {showPower && (
                                         <div
-                                          className="territory-power-badge territory-power-badge--inline"
-                                          title={`${territory.name}: ${power} power`}
+                                          className="territory-power-badge territory-power-badge--inline map-tip"
+                                          data-tip={`${territory.name}: ${power} power`}
                                           aria-hidden
                                         >
                                           {power}
                                         </div>
                                       )}
                                       {hasHome && (
-                                        <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
+                                        <div className="territory-marker home-marker map-tip" data-tip="Home territory (deploy 1 unit without camp)">
                                           <span className="home-marker-emoji" aria-hidden>🏠</span>
                                         </div>
                                       )}
                                       {showCamp && (
-                                        <div className="territory-marker camp-marker" title="Camp (mobilization point)">
+                                        <div className="territory-marker camp-marker map-tip" data-tip="Camp (mobilization point)">
                                           <span className="camp-marker-emoji" aria-hidden>⛺</span>
                                         </div>
                                       )}
                                       {hasPort && (
-                                        <div className="territory-marker port-marker" title="Port (naval mobilization)">
+                                        <div className="territory-marker port-marker map-tip" data-tip="Port (naval mobilization)">
                                           <span className="port-marker-emoji" aria-hidden>⚓</span>
                                         </div>
                                       )}
                                       {showTerrainMountain && (
-                                        <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
+                                        <div className="territory-marker terrain-marker map-tip" data-tip="Mountain">⛰️</div>
                                       )}
                                       {showTerrainForest && (
-                                        <div className="territory-marker terrain-marker" title="Forest">🌲</div>
+                                        <div className="territory-marker terrain-marker map-tip" data-tip="Forest">🌲</div>
                                       )}
                                     </div>
                                   )}
                                   {!h?.number && h?.icons && showPower && (
                                     <div className="territory-markers-row territory-markers-row--power-camp">
                                       <div
-                                        className="territory-power-badge territory-power-badge--inline"
-                                        title={`${territory.name}: ${power} power`}
+                                        className="territory-power-badge territory-power-badge--inline map-tip"
+                                        data-tip={`${territory.name}: ${power} power`}
                                         aria-hidden
                                       >
                                         {power}
@@ -4664,25 +4671,25 @@ function GameMap({
                                   {h?.number && !h?.icons && (
                                     <div className="territory-markers-row territory-markers-row--power-camp">
                                       {hasHome && (
-                                        <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
+                                        <div className="territory-marker home-marker map-tip" data-tip="Home territory (deploy 1 unit without camp)">
                                           <span className="home-marker-emoji" aria-hidden>🏠</span>
                                         </div>
                                       )}
                                       {showCamp && (
-                                        <div className="territory-marker camp-marker" title="Camp (mobilization point)">
+                                        <div className="territory-marker camp-marker map-tip" data-tip="Camp (mobilization point)">
                                           <span className="camp-marker-emoji" aria-hidden>⛺</span>
                                         </div>
                                       )}
                                       {hasPort && (
-                                        <div className="territory-marker port-marker" title="Port (naval mobilization)">
+                                        <div className="territory-marker port-marker map-tip" data-tip="Port (naval mobilization)">
                                           <span className="port-marker-emoji" aria-hidden>⚓</span>
                                         </div>
                                       )}
                                       {showTerrainMountain && (
-                                        <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
+                                        <div className="territory-marker terrain-marker map-tip" data-tip="Mountain">⛰️</div>
                                       )}
                                       {showTerrainForest && (
-                                        <div className="territory-marker terrain-marker" title="Forest">🌲</div>
+                                        <div className="territory-marker terrain-marker map-tip" data-tip="Forest">🌲</div>
                                       )}
                                     </div>
                                   )}
@@ -4692,8 +4699,8 @@ function GameMap({
                                 <>
                                   {showPower && !h?.number && (
                                     <div
-                                      className={`territory-power-badge${showStronghold && !h?.logo ? ' territory-power-badge--above-logo' : ''}`}
-                                      title={`${territory.name}: ${power} power`}
+                                      className={`territory-power-badge map-tip${showStronghold && !h?.logo ? ' territory-power-badge--above-logo' : ''}`}
+                                      data-tip={`${territory.name}: ${power} power`}
                                       aria-hidden
                                     >
                                       {power}
@@ -4704,8 +4711,8 @@ function GameMap({
                                       {showFactionLogo && !h?.logo && (
                                         <div className="stronghold-faction-hp-group">
                                           <div
-                                            className={`territory-marker faction-marker ${isCapital ? 'faction-marker--capital' : ''}`}
-                                            title={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
+                                            className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marker--capital' : ''}`}
+                                            data-tip={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
                                           >
                                             <img
                                               src={factionData[territory.owner!].icon}
@@ -4719,8 +4726,8 @@ function GameMap({
                                             const current = (territory as { stronghold_current_health?: number }).stronghold_current_health ?? base;
                                             return (
                                               <div
-                                                className="stronghold-hp-bars"
-                                                title={`Stronghold HP: ${current}/${base}`}
+                                                className="stronghold-hp-bars map-tip"
+                                                data-tip={`Stronghold HP: ${current}/${base}`}
                                                 style={{ ['--faction-color' as string]: factionData[territory.owner!]?.color ?? '#888' }}
                                               >
                                                 {Array.from({ length: base }, (_, i) => (
@@ -4733,31 +4740,31 @@ function GameMap({
                                       )}
                                       {showNeutralStronghold && !h?.logo && (
                                         <div
-                                          className="territory-marker neutral-stronghold-marker"
-                                          title={territory.name + ' (Neutral stronghold)'}
+                                          className="territory-marker neutral-stronghold-marker map-tip"
+                                          data-tip={territory.name + ' (Neutral stronghold)'}
                                           aria-hidden
                                         />
                                       )}
                                       {hasHome && !h?.icons && (
-                                        <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
+                                        <div className="territory-marker home-marker map-tip" data-tip="Home territory (deploy 1 unit without camp)">
                                           <span className="home-marker-emoji" aria-hidden>🏠</span>
                                         </div>
                                       )}
                                       {showCamp && !h?.icons && (
-                                        <div className="territory-marker camp-marker" title="Camp (mobilization point)">
+                                        <div className="territory-marker camp-marker map-tip" data-tip="Camp (mobilization point)">
                                           <span className="camp-marker-emoji" aria-hidden>⛺</span>
                                         </div>
                                       )}
                                       {hasPort && !h?.icons && (
-                                        <div className="territory-marker port-marker" title="Port (naval mobilization)">
+                                        <div className="territory-marker port-marker map-tip" data-tip="Port (naval mobilization)">
                                           <span className="port-marker-emoji" aria-hidden>⚓</span>
                                         </div>
                                       )}
                                       {showTerrainMountain && !h?.icons && (
-                                        <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
+                                        <div className="territory-marker terrain-marker map-tip" data-tip="Mountain">⛰️</div>
                                       )}
                                       {showTerrainForest && !h?.icons && (
-                                        <div className="territory-marker terrain-marker" title="Forest">🌲</div>
+                                        <div className="territory-marker terrain-marker map-tip" data-tip="Forest">🌲</div>
                                       )}
                                     </div>
                                   )}
@@ -4766,33 +4773,33 @@ function GameMap({
                                       {(showCamp || hasPort || hasHome || showTerrainIcon) && !h?.icons && (
                                         <div className="territory-markers-row territory-markers-row--power-camp">
                                           {hasHome && (
-                                            <div className="territory-marker home-marker" title="Home territory (deploy 1 unit without camp)">
+                                            <div className="territory-marker home-marker map-tip" data-tip="Home territory (deploy 1 unit without camp)">
                                               <span className="home-marker-emoji" aria-hidden>🏠</span>
                                             </div>
                                           )}
                                           {showCamp && (
-                                            <div className="territory-marker camp-marker" title="Camp (mobilization point)">
+                                            <div className="territory-marker camp-marker map-tip" data-tip="Camp (mobilization point)">
                                               <span className="camp-marker-emoji" aria-hidden>⛺</span>
                                             </div>
                                           )}
                                           {hasPort && (
-                                            <div className="territory-marker port-marker" title="Port (naval mobilization)">
+                                            <div className="territory-marker port-marker map-tip" data-tip="Port (naval mobilization)">
                                               <span className="port-marker-emoji" aria-hidden>⚓</span>
                                             </div>
                                           )}
                                           {showTerrainMountain && (
-                                            <div className="territory-marker terrain-marker" title="Mountain">⛰️</div>
+                                            <div className="territory-marker terrain-marker map-tip" data-tip="Mountain">⛰️</div>
                                           )}
                                           {showTerrainForest && (
-                                            <div className="territory-marker terrain-marker" title="Forest">🌲</div>
+                                            <div className="territory-marker terrain-marker map-tip" data-tip="Forest">🌲</div>
                                           )}
                                         </div>
                                       )}
                                       {showFactionLogo && !h?.logo && (
                                         <div className="stronghold-faction-hp-group">
                                           <div
-                                            className={`territory-marker faction-marker ${isCapital ? 'faction-marker--capital' : ''}`}
-                                            title={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
+                                            className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marker--capital' : ''}`}
+                                            data-tip={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
                                           >
                                             <img
                                               src={factionData[territory.owner!].icon}
@@ -4803,8 +4810,8 @@ function GameMap({
                                           </div>
                                           {((territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0) > 0 && (
                                             <div
-                                              className="stronghold-hp-bars"
-                                              title={`Stronghold HP: ${(territory as { stronghold_current_health?: number }).stronghold_current_health ?? (territory as { stronghold_base_health?: number }).stronghold_base_health}/${(territory as { stronghold_base_health?: number }).stronghold_base_health}`}
+                                              className="stronghold-hp-bars map-tip"
+                                              data-tip={`Stronghold HP: ${(territory as { stronghold_current_health?: number }).stronghold_current_health ?? (territory as { stronghold_base_health?: number }).stronghold_base_health}/${(territory as { stronghold_base_health?: number }).stronghold_base_health}`}
                                               style={{ ['--faction-color' as string]: factionData[territory.owner!]?.color ?? '#888' }}
                                             >
                                               {Array.from({ length: (territory as { stronghold_base_health?: number }).stronghold_base_health ?? 0 }, (_, i) => {
@@ -4817,8 +4824,8 @@ function GameMap({
                                       )}
                                       {showNeutralStronghold && !h?.logo && (
                                         <div
-                                          className="territory-marker neutral-stronghold-marker"
-                                          title={territory.name + ' (Neutral stronghold)'}
+                                          className="territory-marker neutral-stronghold-marker map-tip"
+                                          data-tip={territory.name + ' (Neutral stronghold)'}
                                           aria-hidden
                                         />
                                       )}
