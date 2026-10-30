@@ -4,7 +4,7 @@ import { boostingRingsFromRules, highestPowerHeroUnitId, ringHoldingFactionId, r
 import Header from './components/Header';
 import type { RingsOfPowerData, UnitForStats } from './components/StatsModals';
 import { compareUnitsForStats } from './unitStatsOrder';
-import GameMap, { type PendingMoveConfirm } from './components/GameMap';
+import GameMap, { type PendingMoveConfirm, type MapAnimCue } from './components/GameMap';
 import Sidebar from './components/Sidebar';
 import CombatSimulatorPanel from './components/CombatSimulatorPanel';
 import PurchaseModal from './components/PurchaseModal';
@@ -654,6 +654,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   const [selectedTerritory, setSelectedTerritory] = useState<string | null>(null);
   const [selectedUnit, setSelectedUnit] = useState<SelectedUnit | null>(null);
   const [eventLog, setEventLog] = useState<GameEvent[]>([]);
+  /** Transient map action animations (pop-in, travel, combat flash, conquest) derived from fresh backend events. */
+  const [mapAnimCues, setMapAnimCues] = useState<MapAnimCue[]>([]);
   const [isPurchaseModalOpen, setIsPurchaseModalOpen] = useState(false);
   const [pendingEndPhaseConfirm, setPendingEndPhaseConfirm] = useState<string | null>(null);
   const [pendingMoveConfirmState, setPendingMoveConfirmState] = useState<PendingMoveConfirm | null>(null);
@@ -1572,6 +1574,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   }, []);
 
   // Add backend events to log (only entries with a message; store full payload for filtering)
+  // Also queues transient map animation cues from the same fresh action events.
   const addBackendEvents = useCallback((events: ApiEvent[]) => {
     const ts = Date.now();
     const newEntries: GameEvent[] = events
@@ -1590,7 +1593,69 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     if (newEntries.length > 0) {
       setEventLog(prev => [...newEntries, ...prev]);
     }
+    const cues: MapAnimCue[] = [];
+    for (const e of events) {
+      const p = (e.payload ?? {}) as Record<string, unknown>;
+      if (e.type === 'units_mobilized') {
+        const territory = String(p.territory ?? '');
+        const units = Array.isArray(p.units) ? (p.units as { unit_id?: unknown }[]) : [];
+        const seen = new Set<string>();
+        for (const u of units) {
+          const unitId = String(u?.unit_id ?? '');
+          if (!territory || !unitId || seen.has(unitId)) continue;
+          seen.add(unitId);
+          cues.push({ id: `${ts}-pop-${territory}-${unitId}`, kind: 'purchase-pop', territoryId: territory, unitId, ts });
+        }
+      } else if (e.type === 'units_moved') {
+        const from = String(p.from_territory ?? '');
+        const to = String(p.to_territory ?? '');
+        const iids = Array.isArray(p.unit_ids) ? p.unit_ids.map(String) : [];
+        if (from && to && iids.length > 0) {
+          cues.push({
+            id: `${ts}-mv-${from}-${to}-${iids[0]}`,
+            kind: 'move-travel',
+            territoryId: to,
+            fromTerritoryId: from,
+            instanceIds: iids,
+            ts,
+          });
+        }
+      } else if (e.type === 'combat_started' || e.type === 'combat_round_resolved') {
+        const territory = String(p.territory ?? '');
+        if (territory) {
+          cues.push({ id: `${ts}-cb-${territory}-${e.type}`, kind: 'combat-flash', territoryId: territory, ts });
+        }
+      } else if (e.type === 'territory_captured') {
+        const territory = String(p.territory ?? '');
+        if (territory) {
+          cues.push({
+            id: `${ts}-cq-${territory}`,
+            kind: 'conquest',
+            territoryId: territory,
+            oldOwner: (p.old_owner as string | null) ?? null,
+            newOwner: String(p.new_owner ?? ''),
+            ts,
+          });
+        }
+      }
+    }
+    if (cues.length > 0) {
+      setMapAnimCues(prev => [...prev, ...cues].slice(-48));
+    }
   }, []);
+
+  // Prune animation cues a few seconds after they queue (longer than the longest animation)
+  useEffect(() => {
+    if (mapAnimCues.length === 0) return;
+    const t = setTimeout(() => {
+      const cutoff = Date.now() - 3500;
+      setMapAnimCues(prev => {
+        const next = prev.filter(c => c.ts >= cutoff);
+        return next.length === prev.length ? prev : next;
+      });
+    }, 3600);
+    return () => clearTimeout(t);
+  }, [mapAnimCues]);
 
   // Refresh game state and available actions from backend (and meta so lobby→start is detected by all clients)
   const refreshState = useCallback(async () => {
@@ -4388,6 +4453,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               unitStats={unitStats}
               factionData={factionData}
               territorySignals={isMultiplayer ? territorySignals : {}}
+              animCues={mapAnimCues}
               onTerritorySelect={handleTerritorySelect}
               onSeaZoneStackClick={isMovementPhase ? handleSeaZoneStackClick : undefined}
               onUnitSelect={handleUnitSelect}
