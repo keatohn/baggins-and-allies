@@ -11,9 +11,19 @@ Matchups are by alliance (alliance names come from the setup's faction defs):
 good and evil each get one algorithm. Caps are "whichever comes first";
 --max-cycles 0 disables the cycle cap (then --max-turns must be > 0).
 
+Eval-weight knobs (MCTS 3.6b): --w-<name> sets an AI_MCTS_W_* var for both
+sides; --good-w-<name> / --evil-w-<name> set it for one alliance only (the
+per-side value wins). Names: material, territory, stronghold, power_prod,
+board_scale, purchase_defense. Weight sweeps compare e.g.
+`--good-w-material 2.0` (variant good vs default evil) against the same
+weight on evil, across seeds.
+
 Run from the repo root:
     PYTHONPATH=. .venv/bin/python test/selfplay_winrate.py \
         --matchup mcts-vs-mcts --games 4 --max-cycles 20 --difficulty easy
+    PYTHONPATH=. .venv/bin/python test/selfplay_winrate.py \
+        --matchup mcts-vs-mcts --games 8 --max-cycles 20 \
+        --good-w-material 2.0 --seed 1
 """
 
 import argparse
@@ -25,9 +35,11 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from test_ai_mcts_selfplay import (  # noqa: E402
+from test.test_ai_mcts_selfplay import (  # noqa: E402
+    WEIGHT_ENV_KEYS,
     _load_setup,
     format_matchup_report,
+    resolve_weight_env,
     run_matchup,
     summarize_winrate,
 )
@@ -39,8 +51,55 @@ MATCHUPS = {
     "heuristic-vs-heuristic": {"good": "heuristic", "evil": "heuristic"},
 }
 
+SIDES = ("good", "evil")
 
-def main() -> int:
+
+def _add_weight_flags(parser: argparse.ArgumentParser) -> None:
+    """Add --w-<name>, --good-w-<name>, --evil-w-<name> for each weight knob."""
+    for name in WEIGHT_ENV_KEYS:
+        flag = name.replace("_", "-")
+        parser.add_argument(
+            f"--w-{flag}",
+            dest=f"w_{name}",
+            default=None,
+            metavar="V",
+            help=f"AI_MCTS_W_{name.upper()} for both sides",
+        )
+        for side in SIDES:
+            parser.add_argument(
+                f"--{side}-w-{flag}",
+                dest=f"{side}_w_{name}",
+                default=None,
+                metavar="V",
+                help=f"AI_MCTS_W_{name.upper()} for the {side} alliance (wins over --w-{flag})",
+            )
+
+
+def _side_weight_env(args: argparse.Namespace, side: str) -> dict[str, str]:
+    """Resolve one alliance's short-name weight overrides from parsed args."""
+    shorts: dict[str, str] = {}
+    for name in WEIGHT_ENV_KEYS:
+        value = getattr(args, f"{side}_w_{name}", None)
+        if value is None:
+            value = getattr(args, f"w_{name}", None)
+        if value is not None:
+            shorts[name] = value
+    return resolve_weight_env(shorts)
+
+
+def _alliance_env_overrides(fd, faction_ids, args: argparse.Namespace) -> dict[str, dict[str, str]]:
+    """Per-faction resolved weight env overrides from per-side CLI flags."""
+    per_side = {side: _side_weight_env(args, side) for side in SIDES}
+    overrides: dict[str, dict[str, str]] = {}
+    for fid in faction_ids:
+        alliance = getattr(fd.get(fid), "alliance", "")
+        side_env = per_side.get(alliance, {})
+        if side_env:
+            overrides[fid] = dict(side_env)
+    return overrides
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -65,6 +124,12 @@ def main() -> int:
     )
     parser.add_argument("--seed", type=int, default=1, help="base seed (game i uses seed+i)")
     parser.add_argument("--report", action="store_true", help="print the full per-game report")
+    _add_weight_flags(parser)
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
     args = parser.parse_args()
 
     max_cycles = args.max_cycles or None
@@ -80,17 +145,26 @@ def main() -> int:
     records = []
     for game_idx in range(args.games):
         state, ud, td, fd, cd, port_d = _load_setup(args.setup)
+        faction_ids = state.turn_order or list(fd)
         algorithms = {
             fid: by_alliance.get(getattr(fd.get(fid), "alliance", ""), "heuristic")
-            for fid in (state.turn_order or list(fd))
+            for fid in faction_ids
         }
+        env_overrides = _alliance_env_overrides(fd, faction_ids, args)
+        weight_note = ""
+        if env_overrides:
+            sides = sorted({
+                getattr(fd.get(fid), "alliance", "") for fid in env_overrides
+            })
+            weight_note = f" | weights on {'/'.join(sides)}"
         print(
             f"game {game_idx + 1}/{args.games}: {args.matchup} on {args.setup} "
-            f"({args.difficulty}, seed {args.seed + game_idx})",
+            f"({args.difficulty}, seed {args.seed + game_idx}){weight_note}",
             flush=True,
         )
         record = run_matchup(
             state, ud, td, fd, cd, port_d, algorithms,
+            env_overrides=env_overrides,
             max_cycles=max_cycles,
             max_faction_turns=max_turns,
             setup_id=args.setup,
