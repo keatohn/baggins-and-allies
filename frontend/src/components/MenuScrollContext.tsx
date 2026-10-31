@@ -32,11 +32,17 @@ export function isMenuScrollRoute(pathname: string): boolean {
 /** Must match the `transform` transition duration in MenuScrollOverlay.css. */
 const SCROLL_TRANSITION_MS = 300
 
-type ScrollTransitionPhase = 'idle' | 'closing' | 'opening'
+/**
+ * `closing` — panels slide to center, covering the outgoing menu page.
+ * `opening` — panels reopen to the screen edges (menu → menu).
+ * `exiting`  — panels continue off-screen and stay hidden (menu → game).
+ * `entering` — panels fly in from off-screen to the edges (game → menu).
+ */
+type ScrollTransitionPhase = 'idle' | 'closing' | 'opening' | 'exiting' | 'entering'
 
 interface MenuScrollContextValue {
   phase: ScrollTransitionPhase
-  /** Close the scrolls, navigate while covered, then reopen. No-op while animating. */
+  /** Animate the scroll ends around an in-app navigation. No-op while animating. */
   navigateWithScroll: (to: string, opts?: NavigateOptions) => void
 }
 
@@ -70,34 +76,48 @@ export function MenuScrollProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => clearTimers, [clearTimers])
 
+  const applyPhase = useCallback((next: ScrollTransitionPhase) => {
+    phaseRef.current = next
+    setPhase(next)
+  }, [])
+
+  const scheduleSettle = useCallback(() => {
+    openTimerRef.current = window.setTimeout(() => {
+      openTimerRef.current = null
+      phaseRef.current = 'idle'
+      setPhase('idle')
+    }, SCROLL_TRANSITION_MS)
+  }, [])
+
   const navigateWithScroll = useCallback(
     (to: string, opts?: NavigateOptions) => {
       if (phaseRef.current !== 'idle') return
 
-      const bothMenuRoutes =
-        isMenuScrollRoute(to.split('?')[0].split('#')[0]) &&
-        isMenuScrollRoute(location.pathname)
+      const toPath = to.split('?')[0].split('#')[0]
+      const fromMenu = isMenuScrollRoute(location.pathname)
+      const toMenu = isMenuScrollRoute(toPath)
 
-      if (prefersReducedMotion() || !bothMenuRoutes) {
+      if (prefersReducedMotion() || (!fromMenu && !toMenu)) {
         navigate(to, opts)
         return
       }
 
-      phaseRef.current = 'closing'
-      setPhase('closing')
+      if (!fromMenu) {
+        applyPhase('entering')
+        navigate(to, opts)
+        scheduleSettle()
+        return
+      }
+
+      applyPhase('closing')
       closeTimerRef.current = window.setTimeout(() => {
         closeTimerRef.current = null
         navigate(to, opts)
-        phaseRef.current = 'opening'
-        setPhase('opening')
-        openTimerRef.current = window.setTimeout(() => {
-          openTimerRef.current = null
-          phaseRef.current = 'idle'
-          setPhase('idle')
-        }, SCROLL_TRANSITION_MS)
+        applyPhase(toMenu ? 'opening' : 'exiting')
+        scheduleSettle()
       }, SCROLL_TRANSITION_MS)
     },
-    [navigate, location.pathname],
+    [navigate, location.pathname, applyPhase, scheduleSettle],
   )
 
   const contextValue: MenuScrollContextValue = { phase, navigateWithScroll }

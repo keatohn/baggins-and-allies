@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { api, type SetupInfo } from '../services/api';
 import ScenarioTimeline from '../components/ScenarioTimeline';
+import { useMenuScroll } from '../components/MenuScrollContext';
 import './CreateGame.css';
 
 function RuleLabel({ name, description }: { name: string; description?: string }) {
@@ -52,7 +53,7 @@ function RuleLabel({ name, description }: { name: string; description?: string }
 }
 
 export default function CreateGame() {
-  const navigate = useNavigate();
+  const { navigateWithScroll } = useMenuScroll();
   const [name, setName] = useState('');
   const [isMultiplayer, setIsMultiplayer] = useState(false);
   const [heroesEnabled, setHeroesEnabled] = useState(true);
@@ -127,7 +128,7 @@ export default function CreateGame() {
       const initialState = res.state != null
         ? { ...res.state, turn_order: res.turn_order ?? res.state.turn_order }
         : undefined;
-      navigate(`/game/${res.game_id}`, {
+      navigateWithScroll(`/game/${res.game_id}`, {
         replace: true,
         state: initialState != null ? { initialState, gameId: res.game_id } : undefined,
       });
