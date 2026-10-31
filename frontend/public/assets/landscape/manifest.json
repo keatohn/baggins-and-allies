@@ -1,0 +1,20 @@
+{
+  "forest": [
+    "forest_large.png",
+    "forest_low.png",
+    "forest_small.png",
+    "tree_broad.png",
+    "tree_oak.png",
+    "tree_pine.png",
+    "tree_tall.png"
+  ],
+  "mountains": [
+    "mountain_high.png",
+    "mountain_low.png",
+    "mountain_range.png",
+    "mountain_ridge.png",
+    "mountain_snow.png"
+  ],
+  "volcano": ["volcano.png"],
+  "hills": ["hills.png"]
+}

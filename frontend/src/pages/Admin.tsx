@@ -839,10 +839,10 @@ export default function Admin() {
         <div className="admin-page__nav-tools">
           <button
             type="button"
-            className={`page-menu-btn${!globalOpen && !gamesOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => openSection('setups')}
+            className={`page-menu-btn${audioOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => openSection('audio')}
           >
-            Setups
+            Audio
           </button>
           <button
             type="button"
@@ -860,17 +860,10 @@ export default function Admin() {
           </button>
           <button
             type="button"
-            className={`page-menu-btn${audioOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => openSection('audio')}
+            className={`page-menu-btn${gamesOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => setGamesOpen(true)}
           >
-            Audio
-          </button>
-          <button
-            type="button"
-            className={`page-menu-btn${signalsOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => openSection('signals')}
-          >
-            Signals
+            Games
           </button>
           <button
             type="button"
@@ -881,10 +874,17 @@ export default function Admin() {
           </button>
           <button
             type="button"
-            className={`page-menu-btn${gamesOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => setGamesOpen(true)}
+            className={`page-menu-btn${!globalOpen && !gamesOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => openSection('setups')}
           >
-            Games
+            Setups
+          </button>
+          <button
+            type="button"
+            className={`page-menu-btn${signalsOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => openSection('signals')}
+          >
+            Signals
           </button>
         </div>
       </div>
