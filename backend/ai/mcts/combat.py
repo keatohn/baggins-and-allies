@@ -24,9 +24,10 @@ from backend.engine.queries import (
 )
 
 from backend.ai.context import AIContext
-from backend.ai.formulas import battle_gain_if_win, get_unit_power_cost
+from backend.ai.formulas import battle_gain_if_win
 from backend.ai.mcts.action_key import HashableAction
 from backend.ai.mcts.dice import sample_dice_for_continue, sample_dice_for_initiate
+from backend.ai.mcts.eval_weights import board_score, get_eval_weights
 from backend.ai.mcts.search import Problem
 
 # Cap on branching factor per node. Combat space is small but retreats + multi-battles
@@ -60,6 +61,8 @@ class CombatProblem(Problem):
         self.cd = ctx.camp_defs
         self.port_d = ctx.port_defs
         self.rng = rng if rng is not None else random.Random()
+        # Eval weights fixed for this search (env read once per decide() call).
+        self._eval_weights = get_eval_weights()
 
     # ----- Problem protocol -----
 
@@ -216,58 +219,8 @@ class CombatProblem(Problem):
     # ----- Scoring -----
 
     def _score_board(self, state: Any) -> float:
-        """
-        Soft material + territory value from our faction's perspective.
-        Normalized roughly to [-1, 1] via a tanh-like squash.
-        """
-        our_power = 0.0
-        enemy_power = 0.0
-        our_terr = 0.0
-        enemy_terr = 0.0
-        our_alliance = ""
-        fd_row = self.fd.get(self.faction_id)
-        if fd_row:
-            our_alliance = getattr(fd_row, "alliance", "") or ""
-
-        for tid, terr in (state.territories or {}).items():
-            owner = getattr(terr, "owner", None)
-            value = 0.0
-            tdef = self.td.get(tid)
-            if tdef:
-                if getattr(tdef, "is_stronghold", False):
-                    value += 3.0
-                produces = getattr(tdef, "produces", None)
-                if isinstance(produces, dict):
-                    value += float(produces.get("power", 0) or 0) * 0.5
-            owner_is_ours = owner == self.faction_id
-            owner_is_enemy = False
-            if owner is not None and not owner_is_ours:
-                owner_alliance = getattr(self.fd.get(owner), "alliance", None) if self.fd.get(owner) else None
-                owner_is_enemy = owner_alliance != our_alliance
-            if owner_is_ours:
-                our_terr += value
-            elif owner_is_enemy:
-                enemy_terr += value
-
-            for unit in getattr(terr, "units", []) or []:
-                udef = self.ud.get(getattr(unit, "unit_id", ""))
-                cost = get_unit_power_cost(udef)
-                if cost <= 0:
-                    continue
-                u_faction = getattr(udef, "faction", None)
-                # Subfactions: treat controlled under our faction via alliance when possible.
-                u_alliance = getattr(self.fd.get(u_faction), "alliance", None) if u_faction and self.fd.get(u_faction) else None
-                if u_faction == self.faction_id or u_alliance == our_alliance:
-                    # Don't count enemy-alliance units that somehow share our faction id edge cases.
-                    if u_alliance is not None and u_alliance != our_alliance:
-                        enemy_power += cost
-                    else:
-                        our_power += cost
-                elif u_faction is not None:
-                    enemy_power += cost
-
-        raw = (our_power + our_terr) - (enemy_power + enemy_terr)
-        return raw / (1.0 + abs(raw))
+        """Soft material + territory value from our perspective, in [-1, 1]."""
+        return board_score(state, self.faction_id, self.td, self.fd, self.ud, self._eval_weights)
 
 
 def decide_combat_mcts(ctx: AIContext, rng: random.Random | None = None) -> Action | None:

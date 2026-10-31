@@ -26,8 +26,9 @@ from backend.ai.formulas import (
     defense_value_per_power,
     get_unit_power_cost,
 )
-from backend.ai.habits import MIN_POWER_RESERVE, PURCHASE_DEFENSE_WEIGHT_DEFAULT
+from backend.ai.habits import MIN_POWER_RESERVE
 from backend.ai.mcts.action_key import HashableAction
+from backend.ai.mcts.eval_weights import get_eval_weights
 from backend.ai.mcts.search import Problem
 
 # Cap on branching factor per node. Keeps the combinatorial space tractable.
@@ -66,6 +67,8 @@ class PurchaseProblem(Problem):
         self.fd = ctx.faction_defs
         self.cd = ctx.camp_defs
         self.port_d = ctx.port_defs
+        # Eval weights fixed for this search (env read once per decide() call).
+        self._eval_weights = get_eval_weights()
         # Precompute purchasable rows once (stable across the search).
         self._purchasable = get_purchasable_units(
             ctx.state, self.faction_id, self.ud, self.fd
@@ -295,7 +298,7 @@ class PurchaseProblem(Problem):
         if not fpu:
             return 0.0
         # Blend: defense-leaning (matches purchase phase intent).
-        w_def = PURCHASE_DEFENSE_WEIGHT_DEFAULT
+        w_def = self._eval_weights.purchase_defense_weight
         w_off = 1.0 - w_def
         raw = 0.0
         for stack in fpu:
@@ -316,7 +319,7 @@ class PurchaseProblem(Problem):
     def _bundle_prior_score(self, state: Any, bundle: dict[str, int]) -> float:
         """Cheap formula-only score for a bundle (no sims) — used as MCTS prior weight."""
         total = 0.0
-        w_def = PURCHASE_DEFENSE_WEIGHT_DEFAULT
+        w_def = self._eval_weights.purchase_defense_weight
         w_off = 1.0 - w_def
         for uid, count in bundle.items():
             if count <= 0:
