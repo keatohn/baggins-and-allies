@@ -165,6 +165,19 @@ def _ensure_games_completed_at_column():
             conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP"))
 
 
+def _ensure_player_last_login_column():
+    """Add players.last_login if missing (existing SQLite/Postgres DBs before this column)."""
+    if DATABASE_URL.startswith("sqlite"):
+        with engine.begin() as conn:
+            rows = conn.execute(text("PRAGMA table_info(players)")).fetchall()
+            names = {row[1] for row in rows}
+            if "last_login" not in names:
+                conn.execute(text("ALTER TABLE players ADD COLUMN last_login DATETIME"))
+    else:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE players ADD COLUMN IF NOT EXISTS last_login TIMESTAMP"))
+
+
 def init_db():
     """Create all tables and apply additive schema patches.
 
@@ -177,6 +190,7 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     _ensure_player_preferences_column()
     _ensure_games_completed_at_column()
+    _ensure_player_last_login_column()
     _sync_admin_column_and_flags()
     db = SessionLocal()
     try:

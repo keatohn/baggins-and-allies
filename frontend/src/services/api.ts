@@ -661,6 +661,15 @@ export interface AdminSetupListItem {
   updated_at: string | null;
 }
 
+/** Row in the admin users report. */
+export interface AdminUserItem {
+  id: string;
+  username: string;
+  email: string;
+  /** ISO timestamp of the most recent successful login; null until first login. */
+  last_login: string | null;
+}
+
 /** Full setup document for admin editor (matches backend setup JSON files). */
 export interface AdminSetupBundle {
   id: string;
@@ -983,6 +992,7 @@ export const api = {
   adminListSetups: () =>
     fetchJson<{ setups: AdminSetupListItem[] }>('/admin/setups'),
   adminListGames: () => fetchJson<{ games: GameListItem[] }>('/admin/games'),
+  adminListUsers: () => fetchJson<{ users: AdminUserItem[] }>('/admin/users'),
   getAudioGains: async () => {
     const r = await fetchJson<{ gains: AudioGainsMap; menu_music?: string[] }>('/audio/gains');
     setAudioFileGains(r.gains);

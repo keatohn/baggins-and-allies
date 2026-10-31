@@ -1316,6 +1316,9 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
     player = db.query(Player).filter(func.lower(Player.email) == email_norm).first()
     if not player or not verify_password(request.password, player.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    player.last_login = datetime.utcnow()
+    db.commit()
+    db.refresh(player)
     token = create_access_token(player.id)
     return {"access_token": token, "player": _profile_response(player)}
 
@@ -1597,6 +1600,26 @@ def admin_list_games(
 ):
     """Every game (lobby, in progress, and finished) for the admin games report."""
     return {"games": _build_games_list(_admin, db, include_all=True)}
+
+
+@app.get("/admin/users")
+def admin_list_users(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Every registered user for the admin users report."""
+    rows = db.query(Player).order_by(Player.username).all()
+    return {
+        "users": [
+            {
+                "id": p.id,
+                "username": p.username,
+                "email": p.email,
+                "last_login": p.last_login.isoformat() if p.last_login else None,
+            }
+            for p in rows
+        ]
+    }
 
 
 @app.get("/admin/setups")
