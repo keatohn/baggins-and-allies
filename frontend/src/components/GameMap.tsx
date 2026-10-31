@@ -572,10 +572,11 @@ function wheelZoomScaleMultiplier(e: WheelEvent): number {
   } else if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
     dy *= 320;
   }
-  if (e.ctrlKey) dy *= 50;
+  if (e.ctrlKey) dy *= 75;
   const k = 0.00028;
   const raw = Math.exp(-dy * k);
-  return Math.max(0.978, Math.min(1.022, raw));
+  const [minM, maxM] = e.ctrlKey ? [0.965, 1.035] : [0.978, 1.022];
+  return Math.max(minM, Math.min(maxM, raw));
 }
 
 const EMPTY_ELIGIBLE_SEA_ZONES_FOR_TRAY = new Set<string>();
