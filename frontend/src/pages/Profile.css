@@ -31,7 +31,7 @@
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  max-width: 360px;
+  max-width: 520px;
 }
 
 .profile-page__panel {
@@ -285,4 +285,138 @@
 .profile-page .page-menu-btn {
   margin-top: 1.5rem;
   margin-bottom: 0;
+}
+
+/* Stats panel */
+.profile-page__stats {
+  margin: 0;
+}
+
+.profile-page__stats-title {
+  font-size: 1rem;
+  margin: 0 0 0.75rem;
+}
+
+.profile-page__stats-subhead {
+  font-size: 0.9rem;
+  margin: 1rem 0 0.5rem;
+}
+
+.profile-page__stats-headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.profile-page__stats-record {
+  font-size: 1.15rem;
+}
+
+.profile-page__stats-sep {
+  margin: 0 0.15rem;
+  color: var(--ink-faded);
+}
+
+.profile-page__stats-pct {
+  margin-left: 0.35rem;
+  color: var(--ink-light);
+}
+
+.profile-page__stats-games {
+  color: var(--ink-light);
+}
+
+.profile-page__stats-forfeits {
+  color: var(--ink-faded);
+  font-size: 0.9rem;
+}
+
+.profile-page__stats-alliances {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+}
+
+.profile-page__stats-alliance--good {
+  color: #2d5a2d;
+}
+
+.profile-page__stats-alliance--evil {
+  color: #7a1f1f;
+}
+
+.profile-page__stats-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.profile-page__stats-filter-label {
+  font-size: 0.9rem;
+}
+
+.profile-page__stats-select {
+  font-family: var(--font-parchment);
+  padding: 0.25rem 0.4rem;
+  background: var(--parchment);
+  border: 1px solid var(--ink-faded);
+  border-radius: 4px;
+  color: var(--ink);
+}
+
+.profile-page__stats-table-wrap {
+  overflow-x: auto;
+  margin-bottom: 0.25rem;
+}
+
+.profile-page__stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.profile-page__stats-table th,
+.profile-page__stats-table td {
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.profile-page__stats-table th {
+  font-weight: 600;
+  color: var(--ink-light);
+  white-space: nowrap;
+}
+
+.profile-page__stats-table td:not(:first-child),
+.profile-page__stats-table th:not(:first-child) {
+  text-align: right;
+}
+
+.profile-page__stats-extras {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  margin: 0.75rem 0 0;
+}
+
+.profile-page__stats-extra {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+
+.profile-page__stats-extra dt {
+  color: var(--ink-light);
+  font-size: 0.9rem;
+}
+
+.profile-page__stats-extra dd {
+  margin: 0;
+  font-weight: 600;
 }
