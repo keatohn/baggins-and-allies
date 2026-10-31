@@ -470,6 +470,79 @@
   cursor: grabbing;
 }
 
+/* Landscape art layer — above map raster (z-index 12), below territory markers (z18). */
+.territory-landscape-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 17;
+  pointer-events: none;
+}
+
+.territory-landscape {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  user-select: none;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
+}
+
+.territory-landscape img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.territory-landscape__smoke {
+  position: absolute;
+  left: 50%;
+  bottom: 68%;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  border-radius: 50%;
+  background: rgba(190, 190, 190, 0.55);
+  filter: blur(1px);
+  animation: landscape-smoke 2.6s ease-out infinite;
+  pointer-events: none;
+}
+
+.territory-landscape__smoke--late {
+  animation-delay: 1.3s;
+  width: 9px;
+  height: 9px;
+  margin-left: -3px;
+  left: 42%;
+}
+
+@keyframes landscape-smoke {
+  0% {
+    transform: translateY(0) scale(0.45);
+    opacity: 0.65;
+  }
+  70% {
+    opacity: 0.2;
+  }
+  100% {
+    transform: translateY(-16px) scale(1.7);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .territory-landscape__smoke {
+    animation: none;
+    opacity: 0.35;
+    transform: translateY(-6px) scale(1.1);
+  }
+}
+
 /* Territory markers — above map raster (z-index 12); below unit-layer */
 .territory-markers-layer {
   position: absolute;

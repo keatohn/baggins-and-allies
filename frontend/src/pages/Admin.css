@@ -10,7 +10,7 @@
 .admin-page {
   min-height: 100vh;
   padding: clamp(1rem, 3vw, 2rem);
-  max-width: 960px;
+  max-width: 1200px;
   margin: 0 auto;
   background: var(--parchment);
   font-family: var(--font-parchment);
@@ -259,6 +259,13 @@
   align-items: center;
   gap: 0.5rem;
   margin-left: auto;
+}
+
+/* Shrink the top-right admin section buttons without touching the global page-menu-btn used elsewhere. */
+.admin-page__nav-tools .page-menu-btn {
+  margin-bottom: 0;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.82rem;
 }
 
 .admin-page__nav .page-menu-btn {
@@ -1348,6 +1355,142 @@
   opacity: 0;
   pointer-events: none;
   z-index: -1;
+}
+
+/* Landscape editor (Map editor → Landscape tab) */
+.mapov-landscape {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.5rem;
+}
+
+.mapov-landscape-hint {
+  margin: 0.25rem 0 0;
+}
+
+.mapov-landscape__modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.mapov-landscape__palette {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
+  gap: 0.35rem;
+}
+
+.mapov-landscape__thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: 2px solid rgba(61, 41, 20, 0.22);
+  border-radius: 6px;
+  background: #fffef8;
+  cursor: pointer;
+  min-height: 48px;
+}
+
+.mapov-landscape__thumb img {
+  width: 100%;
+  height: 40px;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.mapov-landscape__thumb--active {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 2px rgba(61, 41, 20, 0.25);
+}
+
+.mapov-landscape__row-img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  flex: 0 0 auto;
+  pointer-events: none;
+}
+
+.mapov-landscape__scale {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  min-width: 4.5rem;
+}
+
+.mapov-landscape__scale input[type='range'] {
+  width: 100%;
+  margin: 0;
+}
+
+.admin-graph__viewport--placing {
+  cursor: crosshair;
+}
+
+.admin-graph__viewport--placing .admin-graph__path {
+  cursor: crosshair;
+}
+
+.mapov-placement {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  box-sizing: border-box;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 254, 248, 0.35);
+}
+
+.mapov-placement img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.mapov-placement--border {
+  border-style: dashed;
+  border-color: rgba(61, 41, 20, 0.55);
+}
+
+.mapov-placement--auto {
+  opacity: 0.85;
+}
+
+.mapov-placement--active {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 2px rgba(61, 41, 20, 0.35);
+  z-index: 3;
+}
+
+.mapov-placement:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.mapov-placement:active {
+  cursor: grabbing;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .admin-modal__title {

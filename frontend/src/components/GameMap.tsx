@@ -3,8 +3,9 @@ import { DndContext, useDroppable, rectIntersection, pointerWithin, closestCente
 import type { CollisionDetection, DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import type { GameState, SelectedUnit, MapTransform, PendingMove, MapOverridesData, MapSpotKind } from '../types/game';
+import type { GameState, SelectedUnit, MapTransform, PendingMove, MapOverridesData, MapSpotKind, LandscapePlacement } from '../types/game';
 import type { TerritorySignalMap } from '../territorySignals';
+import { landscapeSrc, terrainEmojiSuppressed } from '../pages/admin/landscape';
 import DraggableUnit from './DraggableUnit';
 import DragOverlay, { type BulkDragOverlayStack } from './DragOverlay';
 import MobilizationTray from './MobilizationTray';
@@ -3873,6 +3874,25 @@ function GameMap({
     setTransform(prev => ({ ...prev, ...clamped }));
   };
 
+  /** Admin-placed landscape art + per-territory emoji-suppression flags. */
+  const landscapeByTerritory = useMemo(() => mapOverrides?.landscape?.territories ?? {}, [mapOverrides]);
+  const landscapeRows = useMemo(() => {
+    const rows: { tid: string; placement: LandscapePlacement }[] = [];
+    for (const [tid, list] of Object.entries(landscapeByTerritory)) {
+      for (const placement of list) rows.push({ tid, placement });
+    }
+    return rows;
+  }, [landscapeByTerritory]);
+  const terrainEmojiFlags = useMemo(() => {
+    const out: Record<string, { mountain: boolean; forest: boolean }> = {};
+    for (const [tid, def] of Object.entries(territoryData)) {
+      const placements = landscapeByTerritory[tid] ?? landscapeByTerritory[tid.toLowerCase()];
+      const flags = terrainEmojiSuppressed(placements, def?.terrain);
+      if (flags.mountain || flags.forest) out[tid] = flags;
+    }
+    return out;
+  }, [landscapeByTerritory, territoryData]);
+
   // Convert SVG coords to screen coords for unit placement
   const svgToScreen = (svgX: number, svgY: number) => {
     const scaleX = IMG_DIMENSIONS.width / SVG_VIEWBOX.width;
@@ -4310,6 +4330,31 @@ function GameMap({
                       />
                     )}
 
+                    {/* Landscape art (admin-placed) sits above the map raster, below territory markers. */}
+                    <div className="territory-landscape-layer">
+                      {landscapeRows.map(({ tid, placement }, i) => {
+                        const screenPos = svgToScreen(placement.x, placement.y);
+                        const clamped = clampToMap(screenPos);
+                        const size = Math.round(40 * (placement.s ?? 1));
+                        return (
+                          <div
+                            key={`${tid}|${i}|${placement.img}`}
+                            className={`territory-landscape territory-landscape--${placement.cat}${placement.layer === 'border' ? ' territory-landscape--border' : ''}`}
+                            style={{ left: clamped.x, top: clamped.y, width: size, height: size }}
+                            aria-hidden
+                          >
+                            <img src={landscapeSrc(placement)} alt="" draggable={false} />
+                            {placement.cat === 'volcano' ? (
+                              <>
+                                <span className="territory-landscape__smoke" />
+                                <span className="territory-landscape__smoke territory-landscape__smoke--late" />
+                              </>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+
                     {/* Territory markers (camps, strongholds) and power production badges). Requires territory in game state (e.g. create new game for east/west Osgiliath if missing). */}
                     <div className="territory-markers-layer">
                       {Object.keys(territoryCentroids).map((territoryId) => {
@@ -4339,8 +4384,9 @@ function GameMap({
                         const showCamp = hasCamp && !isCapital;
                         const campAndStrongholdRow = showCamp && showStronghold;
                         const terrainType = (territory.terrain || '').toLowerCase();
-                        const showTerrainMountain = terrainType === 'mountains';
-                        const showTerrainForest = terrainType === 'forest';
+                        const emojiFlags = terrainEmojiFlags[territoryId] ?? terrainEmojiFlags[territoryId.toLowerCase()];
+                        const showTerrainMountain = terrainType === 'mountains' && !emojiFlags?.mountain;
+                        const showTerrainForest = terrainType === 'forest' && !emojiFlags?.forest;
                         const showTerrainIcon = showTerrainMountain || showTerrainForest;
                         const ringHarborFlatMarkers =
                           RING_HARBOR_RING_LAYOUT_TERRITORY_IDS.has(territoryId) && !isSeaZone;

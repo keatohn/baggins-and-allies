@@ -2,8 +2,25 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import GameMap, { DEFAULT_MAP_BASE } from '../../components/GameMap';
 import { TERRITORY_UNIT_PIXEL_NUDGE } from '../../components/mapSpotNudge';
 import { api } from '../../services/api';
-import type { GameState, MapOverridePoint, MapOverridesData, MapSpotKind } from '../../types/game';
+import type {
+  GameState,
+  LandscapeOverrides,
+  LandscapePlacement,
+  MapOverridePoint,
+  MapOverridesData,
+  MapSpotKind,
+} from '../../types/game';
 import { normalizeMapOverrides } from '../../types/game';
+import {
+  autoGenerateForTerritory,
+  isPointInTerritoryPath,
+  landscapeCategoriesForTerrain,
+  landscapeSrc,
+  loadLandscapeManifest,
+  nearestPointOnOutline,
+  territoryPathEl,
+  type LandscapeManifest,
+} from './landscape';
 import { loadTerritorySvgPaths, sameTerritoryId, type TerritoryPathData } from './territoryGraph';
 
 type Pt = { x: number; y: number };
@@ -145,6 +162,12 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
+  const [editorTab, setEditorTab] = useState<'icon' | 'landscape'>('icon');
+  const [manifest, setManifest] = useState<LandscapeManifest>({});
+  const [placing, setPlacing] = useState<{ cat: string; img: string } | null>(null);
+  const [borderMode, setBorderMode] = useState(false);
+  const [selectedPlacement, setSelectedPlacement] = useState<{ tid: string; index: number } | null>(null);
+  const [autoBusy, setAutoBusy] = useState(false);
 
   const dragRef = useRef<{ x: number; y: number; tx: number; ty: number; id: number } | null>(null);
   const didDragRef = useRef(false);
@@ -156,6 +179,16 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     sy: number;
     scale: number;
     startPt: Pt;
+  } | null>(null);
+  const placeDragRef = useRef<{
+    tid: string;
+    index: number;
+    id: number;
+    sx: number;
+    sy: number;
+    scale: number;
+    startPt: Pt;
+    layer: 'interior' | 'border';
   } | null>(null);
 
   const current = draft ?? stored;
@@ -188,6 +221,16 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    loadLandscapeManifest().then((m) => {
+      if (!cancelled) setManifest(m);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!mapBase) {
       setLoading(false);
       return;
@@ -202,6 +245,10 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     setSelected(null);
     setPngFailed(false);
     setSearch('');
+    setPlacing(null);
+    setBorderMode(false);
+    setSelectedPlacement(null);
+    setEditorTab('icon');
     api
       .getMapOverrides(mapBase)
       .then((r) => {
@@ -306,6 +353,11 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && placing) {
+        e.stopPropagation();
+        setPlacing(null);
+        return;
+      }
       if (e.key !== 'Escape') return;
       if (discardOpen) {
         setDiscardOpen(false);
@@ -322,7 +374,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [discardOpen, saving, dirty, onClose]);
+  }, [discardOpen, saving, dirty, onClose, placing]);
 
   const changeMap = (next: string) => {
     if (!next || next === mapBase) return;
@@ -390,6 +442,19 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     }));
   };
 
+  const viewportToViewBox = useCallback(
+    (clientX: number, clientY: number): Pt | null => {
+      const el = wrapRef.current;
+      if (!el) return null;
+      const rect = el.getBoundingClientRect();
+      return {
+        x: (clientX - rect.left - transform.x) / transform.scale,
+        y: (clientY - rect.top - transform.y) / transform.scale,
+      };
+    },
+    [transform],
+  );
+
   const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
     const d = dragRef.current;
     if (d && e.pointerId === d.id) {
@@ -401,10 +466,15 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     }
     dragRef.current = null;
     if (didDragRef.current) return;
+    if (editorTab === 'landscape' && placing) {
+      tryPlaceLandscape(e.clientX, e.clientY);
+      return;
+    }
     const tid = territoryIdFromPoint(e.clientX, e.clientY);
     if (tid) {
       setSelected(tid);
       setActiveKind('unit');
+      setSelectedPlacement(null);
     }
   };
 
@@ -460,10 +530,173 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
       if (entry === null) delete next[key];
       else next[key] = entry;
       const data: MapOverridesData = { territories: next };
+      if (base.landscape) data.landscape = base.landscape;
       return stableJson(data) === stableJson(base) ? prevDraft ?? base : data;
     });
     setSaveError(null);
   }, [stored]);
+
+  const updateLandscape = useCallback(
+    (fn: (prev: LandscapeOverrides | undefined) => LandscapeOverrides | undefined) => {
+      setDraft((prevDraft) => {
+        const base = prevDraft ?? stored ?? { territories: {} };
+        const nextLandscape = fn(base.landscape);
+        const data: MapOverridesData = { territories: base.territories };
+        if (nextLandscape) data.landscape = nextLandscape;
+        return stableJson(data) === stableJson(base) ? prevDraft ?? base : data;
+      });
+      setSaveError(null);
+    },
+    [stored],
+  );
+
+  const landscapeFor = useCallback(
+    (tid: string): LandscapePlacement[] => {
+      const map = current?.landscape?.territories;
+      if (!map) return [];
+      const key = resolveTid(map, tid);
+      return key ? (map[key] ?? []) : [];
+    },
+    [current],
+  );
+
+  const setPlacementAt = useCallback(
+    (tid: string, index: number, patch: Partial<LandscapePlacement> | null) => {
+      updateLandscape((prev) => {
+        const map = { ...(prev?.territories ?? {}) };
+        const key = resolveTid(map, tid) ?? tid;
+        const list = [...(map[key] ?? [])];
+        if (patch === null) {
+          list.splice(index, 1);
+        } else if (list[index]) {
+          list[index] = { ...list[index]!, ...patch };
+        } else {
+          return prev;
+        }
+        if (list.length) map[key] = list;
+        else delete map[key];
+        return Object.keys(map).length ? { territories: map } : undefined;
+      });
+      setSelectedPlacement(patch === null ? null : { tid, index });
+    },
+    [updateLandscape],
+  );
+
+  const clearAllLandscape = useCallback(() => {
+    updateLandscape(() => undefined);
+    setSelectedPlacement(null);
+    setPlacing(null);
+  }, [updateLandscape]);
+
+  const autoGenerateLandscape = useCallback(() => {
+    if (!paths.size) return;
+    setAutoBusy(true);
+    try {
+      updateLandscape((prev) => {
+        const map: Record<string, LandscapePlacement[]> = { ...(prev?.territories ?? {}) };
+        for (const [tid, placements] of Object.entries(map)) {
+          map[tid] = placements.filter((p) => !p.auto);
+          if (!map[tid].length) delete map[tid];
+        }
+        const seed = (Date.now() % 2147483647) || 1;
+        let seedAcc = seed;
+        const nextSeed = () => {
+          seedAcc = (seedAcc * 1103515245 + 12345) % 2147483647;
+          return seedAcc || 1;
+        };
+        for (const tid of paths.keys()) {
+          const defKey = resolveTid(territories, tid) ?? tid;
+          const def = territories[defKey];
+          const terrain =
+            def && typeof def.terrain_type === 'string'
+              ? def.terrain_type
+              : def && typeof def.terrain === 'string'
+                ? def.terrain
+                : '';
+          const cats = landscapeCategoriesForTerrain(terrain, manifest);
+          if (!cats.length) continue;
+          const pathEl = territoryPathEl(tid);
+          if (!pathEl) continue;
+          for (const cat of cats) {
+            const images = manifest[cat] ?? [];
+            if (!images.length) continue;
+            const key = resolveTid(map, tid) ?? tid;
+            const generated = autoGenerateForTerritory(pathEl, cat, images, nextSeed());
+            if (generated.length) map[key] = [...(map[key] ?? []), ...generated];
+          }
+        }
+        return Object.keys(map).length ? { territories: map } : undefined;
+      });
+    } finally {
+      setAutoBusy(false);
+    }
+  }, [paths, territories, manifest, updateLandscape]);
+
+  const selectedTerrainType = useMemo(() => {
+    if (!selected) return '';
+    const defKey = resolveTid(territories, selected) ?? selected;
+    const def = territories[defKey];
+    if (!def) return '';
+    return typeof def.terrain_type === 'string'
+      ? def.terrain_type
+      : typeof def.terrain === 'string'
+        ? def.terrain
+        : '';
+  }, [selected, territories]);
+
+  const selectedCategories = useMemo(() => {
+    const cats = landscapeCategoriesForTerrain(selectedTerrainType, manifest);
+    // Border mountains are allowed on any land territory (decorative), independent of terrain type.
+    if (borderMode && manifest.mountains && !cats.includes('mountains')) return [...cats, 'mountains'];
+    return cats;
+  }, [selectedTerrainType, manifest, borderMode]);
+
+  const selectedPlacements = useMemo(
+    () => (selected ? landscapeFor(selected) : []),
+    [selected, landscapeFor],
+  );
+
+  const tryPlaceLandscape = useCallback(
+    (clientX: number, clientY: number) => {
+      if (!placing) return false;
+      const tid = territoryIdFromPoint(clientX, clientY);
+      if (!tid) return false;
+      const vb = viewportToViewBox(clientX, clientY);
+      if (!vb) return false;
+      let x = vb.x;
+      let y = vb.y;
+      if (borderMode) {
+        const pathEl = territoryPathEl(tid);
+        if (!pathEl) return false;
+        const snapped = nearestPointOnOutline(pathEl, x, y);
+        if (!snapped) return false;
+        x = snapped.x;
+        y = snapped.y;
+      } else {
+        const pathEl = territoryPathEl(tid);
+        if (pathEl && !isPointInTerritoryPath(pathEl, x, y)) return false;
+      }
+      const key = resolveTid(current?.landscape?.territories, tid) ?? tid;
+      const placement: LandscapePlacement = {
+        cat: placing.cat,
+        img: placing.img,
+        x: Math.round(x * 100) / 100,
+        y: Math.round(y * 100) / 100,
+        layer: borderMode ? 'border' : 'interior',
+      };
+      updateLandscape((prev) => {
+        const map = { ...(prev?.territories ?? {}) };
+        const list = [...(map[key] ?? []), placement];
+        if (list.length > 50) return prev;
+        map[key] = list;
+        return { territories: map };
+      });
+      setSelected(tid);
+      setSelectedPlacement({ tid: key, index: (current?.landscape?.territories?.[key]?.length ?? 0) });
+      return true;
+    },
+    [placing, borderMode, viewportToViewBox, current, updateLandscape],
+  );
 
   const setFocus = (tid: string, focus: 'calculated' | 'override') => {
     if (focus === 'calculated') {
@@ -560,6 +793,76 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     dotDragRef.current = null;
   };
 
+  // --- landscape placement dragging ---------------------------------------
+
+  const onPlacementPointerDown = (e: ReactPointerEvent<HTMLDivElement>, tid: string, index: number) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (e.button !== 0) return;
+    if (placing) return; // placing mode takes priority; don't start a drag
+    const placement = landscapeFor(tid)[index];
+    if (!placement) return;
+    setSelected(tid);
+    setSelectedPlacement({ tid, index });
+    try {
+      (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    placeDragRef.current = {
+      tid,
+      index,
+      id: e.pointerId,
+      sx: e.clientX,
+      sy: e.clientY,
+      scale: transform.scale,
+      startPt: { x: placement.x, y: placement.y },
+      layer: placement.layer,
+    };
+  };
+
+  const onPlacementPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    const d = placeDragRef.current;
+    if (!d || e.pointerId !== d.id) return;
+    const el = wrapRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const startVb = {
+      x: (d.sx - rect.left - transform.x) / d.scale,
+      y: (d.sy - rect.top - transform.y) / d.scale,
+    };
+    const vb = viewportToViewBox(e.clientX, e.clientY);
+    if (!vb) return;
+    let x = d.startPt.x + (vb.x - startVb.x);
+    let y = d.startPt.y + (vb.y - startVb.y);
+    const pathEl = territoryPathEl(d.tid);
+    if (d.layer === 'border') {
+      if (pathEl) {
+        const snapped = nearestPointOnOutline(pathEl, x, y);
+        if (snapped) {
+          x = snapped.x;
+          y = snapped.y;
+        }
+      }
+    } else if (pathEl && !isPointInTerritoryPath(pathEl, x, y)) {
+      return; // interior drags stay inside the polygon
+    }
+    setPlacementAt(d.tid, d.index, { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 });
+  };
+
+  const onPlacementPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    const d = placeDragRef.current;
+    if (!d || e.pointerId !== d.id) return;
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    placeDragRef.current = null;
+  };
+
   // --- save ---------------------------------------------------------------
 
   const save = async () => {
@@ -627,6 +930,30 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     [current],
   );
 
+  const landscapeMarkers = useMemo(() => {
+    const map = current?.landscape?.territories;
+    if (!map) return [];
+    const rows: { tid: string; index: number; placement: LandscapePlacement }[] = [];
+    for (const [tid, list] of Object.entries(map)) {
+      list.forEach((placement, index) => {
+        rows.push({ tid, index, placement });
+      });
+    }
+    // Selected territory's placements render last so they stay clickable when overlapping.
+    rows.sort((a, b) => {
+      const aSel = a.tid === selected ? 1 : 0;
+      const bSel = b.tid === selected ? 1 : 0;
+      if (aSel !== bSel) return aSel - bSel;
+      return 0;
+    });
+    return rows;
+  }, [current, selected]);
+
+  const landscapeCount = useMemo(
+    () => Object.values(current?.landscape?.territories ?? {}).reduce((n, list) => n + list.length, 0),
+    [current],
+  );
+
   const selectedEntry = selected ? entryFor(current, selected) : undefined;
   const selectedFocus: 'calculated' | 'override' = selectedEntry?.focus === 'override' ? 'override' : 'calculated';
   const selectedCalc = useMemo(
@@ -644,9 +971,12 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     return out;
   }, [selected, selectedEntry, territories]);
 
-  const description = spots
-    ? 'Four dots per territory: blue units · red production/sea number · yellow faction logo · green other icons (territory type, homes, camps, ports, signals, rings). Pick a territory, switch it to Override, then drag its dots. Save applies to every setup using this map.'
-    : 'Loading calculated spots…';
+  const description =
+    editorTab === 'landscape'
+      ? 'Place terrain art constrained by each territory’s type. Auto-generate fills interiors; Border mode snaps to outlines. Emoji fallback stays until interior art exists for that type. Save applies to every setup using this map.'
+      : spots
+        ? 'Four dots per territory: blue units · red production/sea number · yellow faction logo · green other icons (territory type, homes, camps, ports, signals, rings). Pick a territory, switch it to Override, then drag its dots. Save applies to every setup using this map.'
+        : 'Loading calculated spots…';
 
   return (
     <div className="admin-modal-overlay" role="presentation" onClick={requestClose}>
@@ -660,8 +990,30 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
         <div className="admin-graph__header">
           <div className="admin-graph__title-row">
             <h2 id="admin-mapov-title" className="admin-modal__title">
-              Map icons
+              Map editor
             </h2>
+            <div className="admin-mapview__toggle" role="group" aria-label="Editor mode">
+              <button
+                type="button"
+                className={`admin-mapview__toggle-btn${editorTab === 'icon' ? ' admin-mapview__toggle-btn--active' : ''}`}
+                aria-pressed={editorTab === 'icon'}
+                onClick={() => {
+                  setEditorTab('icon');
+                  setPlacing(null);
+                  setSelectedPlacement(null);
+                }}
+              >
+                Icon
+              </button>
+              <button
+                type="button"
+                className={`admin-mapview__toggle-btn${editorTab === 'landscape' ? ' admin-mapview__toggle-btn--active' : ''}`}
+                aria-pressed={editorTab === 'landscape'}
+                onClick={() => setEditorTab('landscape')}
+              >
+                Landscape
+              </button>
+            </div>
             <label className="admin-graph__prop">
               Map
               <select
@@ -680,6 +1032,27 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
             </label>
           </div>
           <div className="admin-graph__header-actions">
+            {editorTab === 'landscape' ? (
+              <>
+                <button
+                  type="button"
+                  className="admin-page__btn"
+                  disabled={autoBusy}
+                  onClick={autoGenerateLandscape}
+                  title="Place interior art on every territory whose terrain type has landscape images (keeps manual placements)"
+                >
+                  {autoBusy ? 'Generating…' : 'Auto-generate'}
+                </button>
+                <button
+                  type="button"
+                  className="admin-page__btn admin-page__btn--danger"
+                  disabled={landscapeCount === 0}
+                  onClick={clearAllLandscape}
+                >
+                  Clear all
+                </button>
+              </>
+            ) : null}
             <button
               type="button"
               className={`admin-page__btn${dirty ? ' admin-page__btn--primary' : ''}`}
@@ -693,18 +1066,27 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
             </button>
           </div>
           <p className="admin-form__micro">{description}</p>
-          <ul className="admin-graph__key mapov-legend" aria-label="Spot colors">
-            {SPOT_KINDS.map((row) => (
-              <li key={row.kind}>
-                <span
-                  className="mapov-legend__swatch"
-                  style={{ background: row.color }}
-                  aria-hidden
-                />
-                {row.label}
-              </li>
-            ))}
-          </ul>
+          {editorTab === 'icon' ? (
+            <ul className="admin-graph__key mapov-legend" aria-label="Spot colors">
+              {SPOT_KINDS.map((row) => (
+                <li key={row.kind}>
+                  <span
+                    className="mapov-legend__swatch"
+                    style={{ background: row.color }}
+                    aria-hidden
+                  />
+                  {row.label}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="admin-form__micro mapov-landscape-hint">
+              {placing
+                ? `Click the map to place ${placing.img}${borderMode ? ' on the territory border' : ' inside the territory'} · Esc to cancel`
+                : 'Pick an image below, then click the map. Drag existing art to move it.'}
+              {landscapeCount ? ` · ${landscapeCount} placed` : ''}
+            </p>
+          )}
         </div>
         {loading ? <p className="admin-form__micro">Loading map…</p> : null}
         {err ? <p className="admin-page__error">{err}</p> : null}
@@ -733,6 +1115,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                       onClick={() => {
                         setSelected(row.id);
                         setActiveKind('unit');
+                        setSelectedPlacement(null);
                       }}
                     >
                       {row.label}
@@ -746,26 +1129,127 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                 <div className="mapov-inspector">
                   <div className="mapov-inspector__head">
                     <strong title={selected}>{territoryLabel(selected, territories)}</strong>
-                    <div className="admin-mapview__toggle" role="group" aria-label="Spot focus">
-                      <button
-                        type="button"
-                        className={`admin-mapview__toggle-btn${selectedFocus === 'calculated' ? ' admin-mapview__toggle-btn--active' : ''}`}
-                        aria-pressed={selectedFocus === 'calculated'}
-                        onClick={() => setFocus(selected, 'calculated')}
-                      >
-                        Calculated
-                      </button>
-                      <button
-                        type="button"
-                        className={`admin-mapview__toggle-btn${selectedFocus === 'override' ? ' admin-mapview__toggle-btn--active' : ''}`}
-                        aria-pressed={selectedFocus === 'override'}
-                        onClick={() => setFocus(selected, 'override')}
-                      >
-                        Override
-                      </button>
-                    </div>
+                    {editorTab === 'icon' ? (
+                      <div className="admin-mapview__toggle" role="group" aria-label="Spot focus">
+                        <button
+                          type="button"
+                          className={`admin-mapview__toggle-btn${selectedFocus === 'calculated' ? ' admin-mapview__toggle-btn--active' : ''}`}
+                          aria-pressed={selectedFocus === 'calculated'}
+                          onClick={() => setFocus(selected, 'calculated')}
+                        >
+                          Calculated
+                        </button>
+                        <button
+                          type="button"
+                          className={`admin-mapview__toggle-btn${selectedFocus === 'override' ? ' admin-mapview__toggle-btn--active' : ''}`}
+                          aria-pressed={selectedFocus === 'override'}
+                          onClick={() => setFocus(selected, 'override')}
+                        >
+                          Override
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="mapov-kind__pos" title="Terrain type">{selectedTerrainType || 'land'}</span>
+                    )}
                   </div>
-                  {selectedFocus === 'override' ? (
+                  {editorTab === 'landscape' ? (
+                    selectedCategories.length ? (
+                      <div className="mapov-landscape">
+                        <div className="mapov-landscape__modes">
+                          <label className="admin-page__checkbox-label">
+                            <input
+                              type="checkbox"
+                              checked={borderMode}
+                              onChange={(e) => setBorderMode(e.target.checked)}
+                            />
+                            Border mode (snap to outline)
+                          </label>
+                        </div>
+                        <div className="mapov-landscape__palette" role="listbox" aria-label="Landscape images">
+                          {selectedCategories.flatMap((cat) =>
+                            (manifest[cat] ?? []).map((img) => {
+                              const isPlacing = placing?.img === img && placing?.cat === cat;
+                              return (
+                                <button
+                                  key={`${cat}/${img}`}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={isPlacing}
+                                  className={`mapov-landscape__thumb${isPlacing ? ' mapov-landscape__thumb--active' : ''}`}
+                                  title={`${cat} · ${img}`}
+                                  onClick={() => {
+                                    setPlacing(isPlacing ? null : { cat, img });
+                                    setSelectedPlacement(null);
+                                  }}
+                                >
+                                  <img src={landscapeSrc({ img })} alt={img} draggable={false} />
+                                </button>
+                              );
+                            }),
+                          )}
+                        </div>
+                        <ul className="mapov-kinds">
+                          {selectedPlacements.map((p, index) => {
+                            const isActive = selectedPlacement?.tid === selected && selectedPlacement?.index === index;
+                            return (
+                              <li
+                                key={`${p.img}-${index}`}
+                                className={`mapov-kind${isActive ? ' mapov-kind--active' : ''}`}
+                                onClick={() => setSelectedPlacement({ tid: selected, index })}
+                              >
+                                <img
+                                  className="mapov-landscape__row-img"
+                                  src={landscapeSrc(p)}
+                                  alt=""
+                                  draggable={false}
+                                />
+                                <span className="mapov-kind__label">
+                                  {p.img.replace(/\.png$/i, '')}
+                                  {p.layer === 'border' ? ' · border' : ''}
+                                  {p.auto ? ' · auto' : ''}
+                                </span>
+                                <label className="mapov-landscape__scale" title="Scale">
+                                  <span className="visually-hidden">Scale</span>
+                                  <input
+                                    type="range"
+                                    min={0.25}
+                                    max={4}
+                                    step={0.05}
+                                    value={p.s ?? 1}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => setPlacementAt(selected, index, { s: Number(e.target.value) })}
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  className="admin-page__btn mapov-kind__btn"
+                                  title="Remove this placement"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setPlacementAt(selected, index, null);
+                                  }}
+                                >
+                                  ×
+                                </button>
+                              </li>
+                            );
+                          })}
+                          {selectedPlacements.length ? null : (
+                            <li className="mapov-kind mapov-kind--absent">
+                              <span className="mapov-kind__label">No landscape art placed yet</span>
+                            </li>
+                          )}
+                        </ul>
+                      </div>
+                    ) : (
+                      <p className="admin-form__micro">
+                        No landscape art for this terrain type ({selectedTerrainType || 'land'}).
+                        {borderMode && manifest.mountains
+                          ? ' Border mountains are still available from the palette.'
+                          : ' Enable Border mode to place mountain ranges on this territory’s edges.'}
+                      </p>
+                    )
+                  ) : selectedFocus === 'override' ? (
                     <ul className="mapov-kinds">
                       {SPOT_KINDS.map(({ kind, hint }) => {
                         const ovp = selectedOverride[kind];
@@ -828,7 +1312,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
             </div>
             <div
               ref={wrapRef}
-              className="admin-graph__viewport"
+              className={`admin-graph__viewport${placing ? ' admin-graph__viewport--placing' : ''}`}
               onWheel={onWheel}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
@@ -869,44 +1353,84 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                   ))}
                 </svg>
               </div>
-              <div className="mapov-dots">
-                {dots.map((d) => {
-                  const isActive = d.tid === selected && d.kind === activeKind;
-                  const x = transform.x + d.pt.x * transform.scale;
-                  const y = transform.y + d.pt.y * transform.scale;
-                  return (
-                    <div
-                      key={`${d.tid}|${d.kind}`}
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`${territoryLabel(d.tid, territories)} ${KIND_LABEL[d.kind]}`}
-                      className={`mapov-dot mapov-dot--${d.kind}${d.isOverride ? ' mapov-dot--override' : ''}${isActive ? ' mapov-dot--active' : ''}`}
-                      style={{ left: x, top: y, background: KIND_COLOR[d.kind] }}
-                      title={`${territoryLabel(d.tid, territories)} · ${KIND_LABEL[d.kind]} · ${d.isOverride ? 'override' : 'calculated'}${selectedFocus === 'override' && d.tid === selected ? ' — drag to move' : ''}`}
-                      onPointerDown={(e) => onDotPointerDown(e, d.tid, d.kind)}
-                      onPointerMove={onDotPointerMove}
-                      onPointerUp={onDotPointerUp}
-                      onPointerCancel={onDotPointerUp}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          setSelected(d.tid);
-                          setActiveKind(d.kind);
-                        }
-                      }}
-                    />
-                  );
-                })}
-              </div>
+              {editorTab === 'landscape' ? (
+                <div className="mapov-dots mapov-landscape-markers">
+                  {landscapeMarkers.map((row) => {
+                    const isActive =
+                      selectedPlacement?.tid === row.tid && selectedPlacement?.index === row.index;
+                    const x = transform.x + row.placement.x * transform.scale;
+                    const y = transform.y + row.placement.y * transform.scale;
+                    const size = Math.max(18, 36 * (row.placement.s ?? 1) * Math.min(transform.scale, 1.4));
+                    return (
+                      <div
+                        key={`${row.tid}|${row.index}|${row.placement.img}`}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`${territoryLabel(row.tid, territories)} ${row.placement.img}`}
+                        className={`mapov-placement${isActive ? ' mapov-placement--active' : ''}${row.placement.layer === 'border' ? ' mapov-placement--border' : ''}${row.placement.auto ? ' mapov-placement--auto' : ''}`}
+                        style={{ left: x, top: y, width: size, height: size }}
+                        title={`${territoryLabel(row.tid, territories)} · ${row.placement.img} · ${row.placement.layer}${placing ? '' : ' — drag to move'}`}
+                        onPointerDown={(e) => onPlacementPointerDown(e, row.tid, row.index)}
+                        onPointerMove={onPlacementPointerMove}
+                        onPointerUp={onPlacementPointerUp}
+                        onPointerCancel={onPlacementPointerUp}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setSelected(row.tid);
+                            setSelectedPlacement({ tid: row.tid, index: row.index });
+                          }
+                        }}
+                      >
+                        <img src={landscapeSrc(row.placement)} alt="" draggable={false} />
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="mapov-dots">
+                  {dots.map((d) => {
+                    const isActive = d.tid === selected && d.kind === activeKind;
+                    const x = transform.x + d.pt.x * transform.scale;
+                    const y = transform.y + d.pt.y * transform.scale;
+                    return (
+                      <div
+                        key={`${d.tid}|${d.kind}`}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`${territoryLabel(d.tid, territories)} ${KIND_LABEL[d.kind]}`}
+                        className={`mapov-dot mapov-dot--${d.kind}${d.isOverride ? ' mapov-dot--override' : ''}${isActive ? ' mapov-dot--active' : ''}`}
+                        style={{ left: x, top: y, background: KIND_COLOR[d.kind] }}
+                        title={`${territoryLabel(d.tid, territories)} · ${KIND_LABEL[d.kind]} · ${d.isOverride ? 'override' : 'calculated'}${selectedFocus === 'override' && d.tid === selected ? ' — drag to move' : ''}`}
+                        onPointerDown={(e) => onDotPointerDown(e, d.tid, d.kind)}
+                        onPointerMove={onDotPointerMove}
+                        onPointerUp={onDotPointerUp}
+                        onPointerCancel={onDotPointerUp}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setSelected(d.tid);
+                            setActiveKind(d.kind);
+                          }
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         ) : null}
         <p className="admin-graph__status">
-          {selected
-            ? `${territoryLabel(selected, territories)} · ${KIND_LABEL[activeKind]}${
-                selectedFocus === 'override' ? ' · override' : ' · calculated'
-              }${overrideCount ? ` · ${overrideCount} overridden` : ''}`
-            : 'No territory selected'}
+          {editorTab === 'landscape'
+            ? selected
+              ? `${territoryLabel(selected, territories)} · ${selectedTerrainType || 'land'} · ${selectedPlacements.length} placed${landscapeCount ? ` · ${landscapeCount} total` : ''}`
+              : 'No territory selected'
+            : selected
+              ? `${territoryLabel(selected, territories)} · ${KIND_LABEL[activeKind]}${
+                  selectedFocus === 'override' ? ' · override' : ' · calculated'
+                }${overrideCount ? ` · ${overrideCount} overridden` : ''}`
+              : 'No territory selected'}
         </p>
         {/* Hidden spot oracle: a mounted-but-invisible GameMap reports the exact calculated anchors. */}
         <div className="mapov-oracle" aria-hidden="true">
