@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useRef, useCallback, useMemo, type PointerEvent as ReactPointerEvent, type CSSProperties } from 'react';
+import { Fragment, useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type CSSProperties } from 'react';
 import { DndContext, useDroppable, rectIntersection, pointerWithin, closestCenter, useSensors, useSensor, PointerSensor } from '@dnd-kit/core';
 import type { CollisionDetection, DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { useDraggable } from '@dnd-kit/core';
@@ -968,6 +968,19 @@ function unitCommandedByCurrent(
   return factionData[unitFaction]?.parent === currentFaction;
 }
 
+/** SMIL water-flow animations can't be disabled by CSS media queries, so gate them in JSX. */
+function usePrefersReducedMotion(): boolean {
+  return useSyncExternalStore(
+    (onStoreChange) => {
+      const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+      mq.addEventListener('change', onStoreChange);
+      return () => mq.removeEventListener('change', onStoreChange);
+    },
+    () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    () => false,
+  );
+}
+
 function GameMap({
   gameState,
   selectedTerritory,
@@ -1032,6 +1045,7 @@ function GameMap({
     () => new Set([...seaHullIds, ...riverUnitIds]),
     [seaHullIds, riverUnitIds],
   );
+  const prefersReducedMotion = usePrefersReducedMotion();
   /** Unique territory colors for SVG glow filters (Safari doesn't render CSS drop-shadow on SVG). */
   const uniqueGlowColors = useMemo(() => {
     const s = new Set<string>(['#2d4258', '#d4c4a8', '#7a7a7a']);
@@ -4253,31 +4267,30 @@ function GameMap({
                           <feFlood floodColor="#000" floodOpacity="0.5" result="shadowColor" />
                           <feComposite in="shadowColor" in2="blurred" operator="in" result="shadow" />
                         </filter>
-                        {/* Ocean wave texture for sea zones: base blue with repeating wave curves */}
+                        {/* Ocean wave texture for sea zones: base blue with repeating wave curves.
+                            SMIL animates patternTransform (the one channel browsers repaint for pattern
+                            fills); CSS animations inside <pattern> tiles are rasterized once and freeze. */}
                         <pattern id="sea-wave-pattern" x="0" y="0" width="120" height="60" patternUnits="userSpaceOnUse">
                           <rect width="120" height="60" fill="#2d4258" />
-                          <g className="map-water-flow">
-                            <g id="sea-wave-crests">
-                              {/* Lighter wave crests */}
-                              <path d="M0 20 Q30 12 60 20 T120 20 M0 45 Q30 37 60 45 T120 45" fill="none" stroke="rgba(120,160,200,0.42)" strokeWidth="3.5" strokeLinecap="round" />
-                              <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(160,195,220,0.32)" strokeWidth="2.25" strokeLinecap="round" />
-                              {/* Darker troughs for depth */}
-                              <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(15,30,45,0.52)" strokeWidth="2.75" strokeLinecap="round" />
-                            </g>
-                            <use href="#sea-wave-crests" x="120" y="0" />
-                          </g>
+                          {/* Lighter wave crests */}
+                          <path d="M0 20 Q30 12 60 20 T120 20 M0 45 Q30 37 60 45 T120 45" fill="none" stroke="rgba(120,160,200,0.42)" strokeWidth="3.5" strokeLinecap="round" />
+                          <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(160,195,220,0.32)" strokeWidth="2.25" strokeLinecap="round" />
+                          {/* Darker troughs for depth */}
+                          <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(15,30,45,0.52)" strokeWidth="2.75" strokeLinecap="round" />
+                          {/* Scroll the tiling by exactly one 120px tile for a seamless loop */}
+                          {!prefersReducedMotion && (
+                            <animateTransform attributeName="patternTransform" type="translate" from="0 0" to="-120 0" dur="12s" repeatCount="indefinite" />
+                          )}
                         </pattern>
                         {/* River: slightly darker and grayer than the previous blue, still lighter than sea. */}
                         <pattern id="river-wave-pattern" x="0" y="0" width="120" height="60" patternUnits="userSpaceOnUse">
                           <rect width="120" height="60" fill="#366896" />
-                          <g className="map-water-flow map-water-flow--river">
-                            <g id="river-wave-crests">
-                              <path d="M0 20 Q30 12 60 20 T120 20 M0 45 Q30 37 60 45 T120 45" fill="none" stroke="rgba(174,204,232,0.52)" strokeWidth="3.5" strokeLinecap="round" />
-                              <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(196,214,232,0.38)" strokeWidth="2.25" strokeLinecap="round" />
-                              <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(20,44,78,0.42)" strokeWidth="2.75" strokeLinecap="round" />
-                            </g>
-                            <use href="#river-wave-crests" x="120" y="0" />
-                          </g>
+                          <path d="M0 20 Q30 12 60 20 T120 20 M0 45 Q30 37 60 45 T120 45" fill="none" stroke="rgba(174,204,232,0.52)" strokeWidth="3.5" strokeLinecap="round" />
+                          <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(196,214,232,0.38)" strokeWidth="2.25" strokeLinecap="round" />
+                          <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(20,44,78,0.42)" strokeWidth="2.75" strokeLinecap="round" />
+                          {!prefersReducedMotion && (
+                            <animateTransform attributeName="patternTransform" type="translate" from="0 0" to="-120 0" dur="8s" repeatCount="indefinite" />
+                          )}
                         </pattern>
                         <marker id="arrowhead-combat" markerWidth="5" markerHeight="5" refX="3.5" refY="2.5" orient="auto">
                           <polygon points="0,0 5,2.5 0,5" fill="#c62828" />
