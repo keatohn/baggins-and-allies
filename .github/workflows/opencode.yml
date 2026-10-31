@@ -31,4 +31,4 @@ jobs:
         with:
           model: opencode/mimo-v2.6-flash-free
 
-    timeout-minutes: 45
+    timeout-minutes: 60
