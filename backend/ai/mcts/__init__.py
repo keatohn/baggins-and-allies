@@ -14,6 +14,7 @@ from backend.ai.mcts.search import (
     Problem,
     SearchStats,
     run_mcts,
+    run_mcts_reuse,
     run_mcts_search,
     run_mcts_with_values,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "SearchStats",
     "get_budget",
     "run_mcts",
+    "run_mcts_reuse",
     "run_mcts_search",
     "run_mcts_with_values",
 ]

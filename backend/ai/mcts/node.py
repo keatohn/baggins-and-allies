@@ -100,3 +100,30 @@ class Node(Generic[S, A]):
     def add_child(self, action: A, child: "Node[S, A]") -> "Node[S, A]":
         self.children[action] = child
         return child
+
+    def clone(self, memo: dict[int, "Node[S, A]"] | None = None) -> "Node[S, A]":
+        """
+        Structural copy of this node and its subtree (3.4 tree reuse).
+
+        States are shared by reference — search treats them as immutable — while
+        visit statistics and child edges are copied so the consumer can keep
+        backing up without touching the source node. DAG-safe: a node reachable
+        through several parents is cloned once and re-shared, preserving both
+        the shape and the shared statistics of transposition-merged trees.
+        """
+        if memo is None:
+            memo = {}
+        existing = memo.get(id(self))
+        if existing is not None:
+            return existing
+        copy: Node[S, A] = Node(
+            state=self.state, prior=self.prior, state_key=self.state_key
+        )
+        copy.visit_count = self.visit_count
+        copy.total_value = self.total_value
+        copy.untried_actions = list(self.untried_actions)
+        copy._expanded = self._expanded
+        memo[id(self)] = copy
+        for action, child in self.children.items():
+            copy.children[action] = child.clone(memo)
+        return copy

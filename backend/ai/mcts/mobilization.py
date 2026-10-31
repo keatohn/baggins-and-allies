@@ -552,7 +552,7 @@ def decide_mobilization_mcts(ctx: AIContext, rng: random.Random | None = None) -
     Falls back to None if search yields nothing (caller keeps the heuristic path).
     """
     from backend.ai.mcts.budget import get_budget
-    from backend.ai.mcts.search import run_mcts
+    from backend.ai.mcts.search import run_mcts_reuse
 
     if not ctx.state or not ctx.faction_id:
         return None
@@ -563,7 +563,9 @@ def decide_mobilization_mcts(ctx: AIContext, rng: random.Random | None = None) -
 
     problem = MobilizationProblem(ctx, rng=rng)
     budget = get_budget(os.environ.get(DEFAULT_DIFFICULTY_ENV))
-    action = run_mcts(problem, ctx.state, budget)
+    # 3.4: placements apply verbatim, so consecutive /ai-step calls chain the
+    # same multi-placement subtree instead of re-searching.
+    action = run_mcts_reuse(problem, ctx.state, budget)
     if action is None:
         return None
     if isinstance(action, HashableAction):

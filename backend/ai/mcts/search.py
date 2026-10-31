@@ -14,6 +14,12 @@ Building block 3.3 adds an in-run transposition table (TT):
   (measured cheap at ~0.24ms by the 3.1 benchmark) for GameState-like states.
 The table is strictly per-run: no cross-run leakage, and `use_tt=False`
 reproduces the pre-TT tree behavior exactly.
+
+Building block 3.4 adds tree reuse across `/ai-step` calls: `run_mcts_reuse`
+looks the current state up in `mcts/tree_cache` and, on a hit, resumes from the
+carried subtree (a clone — the cache entry itself is never mutated); after the
+search it stashes the chosen child's subtree for the next call. Plain `run_mcts`
+is untouched by the cache and behaves exactly as before.
 """
 
 from __future__ import annotations
@@ -24,6 +30,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Hashable, Protocol, TypeVar
 
+from backend.ai.mcts import tree_cache
 from backend.ai.mcts.budget import SearchBudget
 from backend.ai.mcts.node import Node
 
@@ -66,6 +73,16 @@ def _default_state_key(state: Any) -> Hashable:
     return repr(state)
 
 
+def _state_key_fn(problem: Any) -> Any:
+    """
+    Resolve a problem's state-key function: its own `state_key` when provided
+    (concrete Problems inherit the Protocol's default), else `_default_state_key`
+    (toy test problems that don't inherit `Problem`).
+    """
+    fn = getattr(problem, "state_key", None)
+    return fn if callable(fn) else _default_state_key
+
+
 @dataclass
 class SearchStats:
     """
@@ -87,6 +104,10 @@ class SearchStats:
     # 3.3 transposition-table counters (0 when use_tt=False).
     evaluate_cache_hits: int = 0
     transposition_merges: int = 0
+    # 3.4 cross-call tree reuse: True when this run resumed from a cached
+    # subtree; reused_nodes is that subtree's size (0 on a cold start).
+    reused_root: bool = False
+    reused_nodes: int = 0
 
 
 class Problem(Protocol[S, A]):
@@ -231,6 +252,30 @@ def _count_nodes(root: Node[S, A]) -> int:
     return count
 
 
+def _seed_node_table(
+    root: Node[S, A], key_fn: Any, table: dict[Hashable, Node[S, A]]
+) -> None:
+    """
+    Rebuild the in-run TT index over a carried subtree (3.4).
+
+    Nodes stashed by a `use_tt=False` run have no state_key yet; compute it here
+    so later merges and evaluate-memo lookups work on the resumed tree. Duplicate
+    keys keep their first (nearest-to-root) node, matching normal expansion order.
+    """
+    stack: list[Node[S, A]] = [root]
+    seen: set[int] = set()
+    while stack:
+        node = stack.pop()
+        node_id = id(node)
+        if node_id in seen:
+            continue
+        seen.add(node_id)
+        if node.state_key is None:
+            node.state_key = key_fn(node.state)
+        table.setdefault(node.state_key, node)
+        stack.extend(node.children.values())
+
+
 def _search_core(
     problem: Problem[S, A],
     root_state: S,
@@ -240,9 +285,11 @@ def _search_core(
     c_puct: float = DEFAULT_C_PUCT,
     stats: SearchStats | None = None,
     use_tt: bool = True,
+    initial_root: Node[S, A] | None = None,
 ) -> tuple[A | None, dict[A, float], Node[S, A] | None]:
     """
-    Unified PUCT loop shared by run_mcts / run_mcts_with_values / run_mcts_search.
+    Unified PUCT loop shared by run_mcts / run_mcts_with_values / run_mcts_search
+    / run_mcts_reuse.
 
     Returns (best_action, root_action_mean_values, root_node). When `stats` is
     given, counters are populated in place; selection/RNG behavior is identical
@@ -251,6 +298,12 @@ def _search_core(
     `use_tt` (3.3, default True) enables the in-run transposition table: node
     merging for identical states + evaluate() memoization. With use_tt=False the
     search behaves exactly as the pre-3.3 tree search (no keys are computed).
+
+    `initial_root` (3.4) resumes from an already-expanded subtree instead of a
+    fresh root — the caller (run_mcts_reuse) guarantees it was keyed by this
+    state, so its children are exactly the actions the enumerator produced for
+    it. A carried root that is already expanded skips root expansion entirely;
+    one with no children (a leaf that only ever got backed up) expands as usual.
     """
     root_actions = problem.legal_actions(root_state)
     if stats is not None:
@@ -265,15 +318,24 @@ def _search_core(
     node_table: dict[Hashable, Node[S, A]] | None = None
     eval_cache: dict[Hashable, float] | None = None
     if use_tt:
-        problem_key = getattr(problem, "state_key", None)
-        key_fn = problem_key if callable(problem_key) else _default_state_key
+        key_fn = _state_key_fn(problem)
         node_table = {}
         eval_cache = {}
 
-    root: Node[S, A] = Node(state=root_state, state_key=key_fn(root_state) if key_fn else None)
-    if node_table is not None and root.state_key is not None:
-        node_table[root.state_key] = root
-    _expand(problem, root, stats, key_fn=key_fn, node_table=node_table)
+    root: Node[S, A]
+    if initial_root is not None:
+        root = initial_root
+        if stats is not None:
+            stats.reused_root = True
+            stats.reused_nodes = _count_nodes(root)
+        if node_table is not None and key_fn is not None:
+            _seed_node_table(root, key_fn, node_table)
+    else:
+        root = Node(state=root_state, state_key=key_fn(root_state) if key_fn else None)
+        if node_table is not None and root.state_key is not None:
+            node_table[root.state_key] = root
+    if not root.children:
+        _expand(problem, root, stats, key_fn=key_fn, node_table=node_table)
 
     start = time.monotonic()
     for _ in range(budget.max_iterations):
@@ -403,3 +465,66 @@ def run_mcts_search(
         problem, root_state, budget, rng=rng, c_puct=c_puct, stats=stats, use_tt=use_tt
     )
     return action, stats
+
+
+def run_mcts_reuse(
+    problem: Problem[S, A],
+    root_state: S,
+    budget: SearchBudget,
+    *,
+    rng: random.Random | None = None,
+    c_puct: float = DEFAULT_C_PUCT,
+    use_tt: bool = True,
+    stats: SearchStats | None = None,
+    reuse: bool = True,
+) -> A | None:
+    """
+    `run_mcts` plus tree reuse across `/ai-step` calls (building block 3.4).
+
+    On entry the current state is looked up in `mcts/tree_cache`; a hit resumes
+    the search from a clone of the carried subtree (already-expanded children,
+    accumulated visits — see `tree_cache` for the key/trust model). On exit the
+    chosen child's subtree is stashed under *its* state key so the next call at
+    that state reuses it. Terminal children are not stashed: the phase they
+    advance to belongs to a different Problem, so a same-state lookup there
+    could never resume.
+
+    A resumed root keeps the branch set from its original expansion. Actions the
+    enumerator would newly propose for the same state (its output can drift with
+    ctx-derived precomputation, e.g. remaining purchase budget) are not added
+    mid-resume — they are considered again on the next cold root.
+
+    `reuse=False` skips both lookup and stash, reproducing a cold `run_mcts`
+    exactly — a useful baseline for latency comparisons.
+    """
+    key: Hashable | None = None
+    initial_root: Node[S, A] | None = None
+    if reuse:
+        key = _state_key_fn(problem)(root_state)
+        initial_root = tree_cache.lookup(key)
+
+    action, _values, root = _search_core(
+        problem,
+        root_state,
+        budget,
+        rng=rng,
+        c_puct=c_puct,
+        stats=stats,
+        use_tt=use_tt,
+        initial_root=initial_root,
+    )
+
+    if reuse and key is not None:
+        if action is None:
+            # The carried subtree pointed at a state with no legal actions (or
+            # the state itself has none): it can never be resumed, drop it.
+            tree_cache.discard(key)
+        elif root is not None:
+            child = root.children.get(action)
+            if child is not None and not problem.is_terminal(child.state):
+                child_key = child.state_key
+                if child_key is None:
+                    child_key = _state_key_fn(problem)(child.state)
+                    child.state_key = child_key
+                tree_cache.stash(child_key, child)
+    return action
