@@ -844,8 +844,8 @@ function DroppableTerritory({
           <path
             d={pathData.d}
             transform={pathData.transform}
-            fill="#8a8a8a"
-            fillOpacity={0.72}
+            fill="#1e1e22"
+            fillOpacity={0.58}
             stroke="none"
             pointerEvents="none"
             className="territory-path-shadow"
