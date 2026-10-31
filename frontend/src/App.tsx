@@ -633,6 +633,12 @@ interface AppProps {
   initialState?: ApiGameState | null;
 }
 
+function factionAssetUrl(filename: string | null | undefined): string | undefined {
+  if (typeof filename !== 'string') return undefined;
+  const trimmed = filename.trim();
+  return trimmed ? `/assets/factions/${trimmed}` : undefined;
+}
+
 function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   const GAME_ID = gameIdProp ?? DEFAULT_GAME_ID;
   // Backend state (use initialState from navigation when we just created this game)
@@ -963,15 +969,17 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     return defs;
   }, [definitions]);
 
-  const factionData: Record<string, { name: string; icon: string; color: string; alliance: string; capital: string; parent?: string }> = useMemo(() => {
+  const factionData: Record<string, { name: string; icon: string; banner?: string; color: string; alliance: string; capital: string; parent?: string }> = useMemo(() => {
     if (!definitions) return {};
 
-    const data: Record<string, { name: string; icon: string; color: string; alliance: string; capital: string; parent?: string }> = {};
+    const data: Record<string, { name: string; icon: string; banner?: string; color: string; alliance: string; capital: string; parent?: string }> = {};
     for (const [id, faction] of Object.entries(definitions.factions)) {
       const parentIcon = `/assets/factions/${faction.icon || `${id}.png`}`;
+      const parentBanner = factionAssetUrl(faction.banner);
       data[id] = {
         name: faction.display_name,
         icon: parentIcon,
+        ...(parentBanner ? { banner: parentBanner } : {}),
         color: faction.color,
         alliance: faction.alliance,
         capital: faction.capital ?? '',
@@ -981,9 +989,11 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         const subIcon = typeof sub.icon === 'string' && sub.icon.trim()
           ? `/assets/factions/${sub.icon.trim()}`
           : parentIcon;
+        const subBanner = factionAssetUrl(sub.banner);
         data[sub.id] = {
           name: sub.display_name,
           icon: subIcon,
+          ...(subBanner ? { banner: subBanner } : {}),
           color: sub.color,
           alliance: faction.alliance,
           capital: '',

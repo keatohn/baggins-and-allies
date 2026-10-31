@@ -370,6 +370,19 @@ function FactionIconField({ value, onApply }: { value: unknown; onApply: (icon: 
   );
 }
 
+function FactionBannerField({ value, onApply }: { value: unknown; onApply: (banner: string | undefined) => void }) {
+  return (
+    <AssetPngField
+      value={value}
+      files={FACTION_ICON_PNG}
+      dir="factions"
+      noneLabel="None (map uses icon)"
+      ariaLabel="Faction banner"
+      onApply={onApply}
+    />
+  );
+}
+
 function UnitIconField({ value, onApply }: { value: unknown; onApply: (icon: string | undefined) => void }) {
   return (
     <AssetPngField
@@ -2041,7 +2054,7 @@ function SubfactionsField({
     <div className="admin-subfactions">
       <h3 className="admin-form__subtitle">Subfactions</h3>
       <p className="admin-form__micro">
-        Controlled on this faction&apos;s turn. They do not appear in the turn order. Leave the icon empty to use this faction&apos;s icon.
+        Controlled on this faction&apos;s turn. They do not appear in the turn order. Leave the icon empty to use this faction&apos;s icon. Leave the banner empty to use the subfaction&apos;s icon on the map.
       </p>
       {rows.map((row, i) => (
         <div key={i} className="admin-subfaction">
@@ -2077,6 +2090,10 @@ function SubfactionsField({
               ariaLabel="Subfaction icon"
               onApply={(icon) => patchRow(i, { icon })}
             />,
+          )}
+          {fieldRow(
+            'Banner',
+            <FactionBannerField value={row.banner} onApply={(banner) => patchRow(i, { banner })} />,
           )}
           <button type="button" className="admin-page__btn" onClick={() => onChange(rows.filter((_, j) => j !== i))}>
             Remove subfaction
@@ -2128,6 +2145,10 @@ export function FactionsPanel({
           {fieldRow(
             'Icon',
             <FactionIconField value={f.icon} onApply={(icon) => patch({ icon })} />,
+          )}
+          {fieldRow(
+            'Banner',
+            <FactionBannerField value={f.banner} onApply={(banner) => patch({ banner })} />,
           )}
           {fieldRow(
             'Music',

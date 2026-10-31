@@ -458,6 +458,8 @@ export interface ApiSubfactionDefinition {
   color: string;
   /** Filename in assets/factions. Omitted = use the parent faction's icon. */
   icon?: string | null;
+  /** Map stronghold/capital art. Omitted = use this subfaction's icon. */
+  banner?: string | null;
 }
 
 export interface ApiFactionDefinition {
@@ -467,6 +469,8 @@ export interface ApiFactionDefinition {
   color: string;
   capital: string;
   icon?: string;
+  /** Map stronghold and capital art in assets/factions. Omitted = use icon. */
+  banner?: string | null;
   /** Turn music in assets/audio/music; stem(s) with .mp3/.ogg fallbacks. One file or ordered list (playlist cycles until turn changes). Omitted = use faction id. */
   music?: string | string[];
   subfactions?: ApiSubfactionDefinition[];

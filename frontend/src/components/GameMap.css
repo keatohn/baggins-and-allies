@@ -768,6 +768,12 @@
   object-fit: cover;
 }
 
+/* Banners are taller than wide; show the whole image instead of cropping it into the seal. */
+.territory-marker.faction-marker img.faction-marker__img--portrait {
+  border-radius: 3px;
+  object-fit: contain;
+}
+
 /* Group faction logo + stronghold HP so HP is always to the right of the logo (never wraps below) */
 .stronghold-faction-hp-group {
   display: flex;

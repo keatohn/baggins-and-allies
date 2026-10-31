@@ -437,6 +437,7 @@ class SubfactionDefinition:
     display_name: str
     color: str
     icon: Optional[str] = None  # Filename in frontend/assets/factions/; None uses the parent icon
+    banner: Optional[str] = None  # Map stronghold/capital art; None uses this subfaction's icon
 
 
 @dataclass
@@ -448,6 +449,8 @@ class FactionDefinition:
     capital: str  # territory_id
     color: str
     icon: Optional[str] = None  # Filename in frontend/assets/factions/
+    # Map stronghold and capital art. Omitted or empty uses icon. Other UI keeps icon.
+    banner: Optional[str] = None
     # Turn music: one filename or ordered list under public/assets/audio/music/ (may differ from id).
     music: str | list[str] | None = None
     # Set on a resolved subfaction view. Playable factions leave this empty.
@@ -476,6 +479,7 @@ class FactionTable(dict[str, FactionDefinition]):
                     capital="",
                     color=sub.color,
                     icon=sub.icon or parent.icon,
+                    banner=sub.banner,
                     music=None,
                     parent=parent.id,
                     subfactions=(),
@@ -553,6 +557,7 @@ def _parse_subfactions(raw: Any) -> tuple[SubfactionDefinition, ...]:
             display_name=name.strip() if isinstance(name, str) and name.strip() else sid.strip(),
             color=color.strip() if isinstance(color, str) and color.strip() else "#888888",
             icon=icon_s,
+            banner=_parse_optional_str(item.get("banner")),
         ))
     return tuple(out)
 
@@ -565,6 +570,7 @@ def _faction_from_json(faction_id: str, data: dict) -> FactionDefinition:
         capital=_faction_capital_from_json(data.get("capital")),
         color=data["color"],
         icon=data.get("icon"),
+        banner=_parse_optional_str(data.get("banner")),
         music=_coerce_faction_music(data.get("music")),
         subfactions=_parse_subfactions(data.get("subfactions")),
     )
