@@ -24,11 +24,60 @@
 }
 
 .sidebar.sidebar--turn-accent .panel.actions-panel,
+.sidebar.sidebar--turn-accent .panel.turn-status-panel,
 .sidebar.sidebar--turn-accent .panel.territory-panel,
 .sidebar.sidebar--turn-accent .panel.event-log {
   border-width: 2px;
   border-color: color-mix(in srgb, var(--sidebar-panel-accent) 50%, var(--ink-faded));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--sidebar-panel-accent) 20%, transparent);
+}
+
+/* Turn / phase / power panel (top of sidebar, above Actions) — container-type lets the
+   phase stepper drop pill labels when the sidebar is resized narrow or on mobile. */
+.turn-status-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+  container-type: inline-size;
+}
+
+.turn-status-panel .turn-status-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.6rem;
+  margin-bottom: 0;
+}
+
+.turn-status-panel .turn-status-title {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.turn-status-panel .turn-status-sep {
+  color: var(--ink-faded);
+}
+
+.turn-status-panel .turn-status-faction {
+  /* Tint toward ink so light faction colors stay readable on parchment */
+  color: color-mix(in srgb, var(--sidebar-panel-accent, var(--ink)) 55%, var(--ink));
+}
+
+.turn-status-panel .turn-status-power {
+  font-family: var(--font-parchment);
+  font-size: 0.9rem;
+  color: var(--ink-light);
+  white-space: nowrap;
+}
+
+.turn-status-panel .turn-status-power strong {
+  color: var(--gold-dark);
+  font-weight: 700;
 }
 
 /* Territory: don't shrink to a sliver under flex siblings */

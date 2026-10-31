@@ -58,6 +58,19 @@
   margin: 0;
 }
 
+.auth-form__notice {
+  color: #2e7d32;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.auth-form__hint {
+  font-family: var(--font-parchment);
+  font-size: 0.9rem;
+  color: var(--ink-light);
+  margin: 0;
+}
+
 .auth-form__label {
   display: flex;
   flex-direction: column;

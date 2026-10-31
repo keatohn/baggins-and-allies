@@ -25,6 +25,11 @@
   z-index: 2;
 }
 
+/* Styled ring-name tip needs hover; drag still works (events bubble to .unit-token listeners). */
+.unit-token img.unit-token-ring.map-tip {
+  pointer-events: auto;
+}
+
 .unit-token img.unit-token-ring.ring-corner-tl { top: 0; left: 0; }
 .unit-token img.unit-token-ring.ring-corner-tr { top: 0; right: 0; }
 .unit-token img.unit-token-ring.ring-corner-bl { bottom: 0; left: 0; }
@@ -56,15 +61,53 @@
   height: clamp(52px, 15vmin, 63px);
 }
 
-.unit-token:hover:not(.disabled) {
-  transform: scale(1.15);
-  border-color: var(--ink);
-  box-shadow: 2px 2px 6px var(--shadow);
+@media (hover: hover) and (pointer: fine) {
+  .unit-token-tap-wrapper:not(.unit-token-tap-wrapper--selected):hover
+    .unit-token:not(.unit-token--naval):not(.unit-token--hero):not(.dragging):not(.dragging-overlay):not(.disabled) {
+    transform: scale(1.5);
+    border-color: var(--ink);
+    box-shadow: 2px 2px 6px var(--shadow);
+    z-index: 10;
+  }
+
+  .unit-token-tap-wrapper:not(.unit-token-tap-wrapper--selected):hover
+    .unit-token.unit-token--naval:not(.dragging):not(.dragging-overlay):not(.disabled),
+  .unit-token-tap-wrapper:not(.unit-token-tap-wrapper--selected):hover
+    .unit-token.unit-token--hero:not(.dragging):not(.dragging-overlay):not(.disabled) {
+    transform: scale(1.15);
+    border-color: var(--ink);
+    box-shadow: 2px 2px 6px var(--shadow);
+    z-index: 10;
+  }
+}
+
+.unit-token-tap-wrapper--selected
+  .unit-token:not(.unit-token--naval):not(.unit-token--hero):not(.dragging):not(.dragging-overlay) {
+  transform: scale(1.5);
+  border-color: var(--gold);
+  box-shadow: 0 0 8px var(--gold);
   z-index: 10;
 }
 
-.unit-token.selected {
-  transform: scale(1.2);
+.unit-token-tap-wrapper--selected
+  .unit-token.unit-token--naval:not(.dragging):not(.dragging-overlay),
+.unit-token-tap-wrapper--selected .unit-token.unit-token--hero:not(.dragging):not(.dragging-overlay) {
+  transform: scale(1.15);
+  border-color: var(--gold);
+  box-shadow: 0 0 8px var(--gold);
+  z-index: 10;
+}
+
+.unit-token.selected:not(.dragging):not(.dragging-overlay) {
+  transform: scale(1.5);
+  border-color: var(--gold);
+  box-shadow: 0 0 8px var(--gold);
+  z-index: 10;
+}
+
+.unit-token.unit-token--naval.selected:not(.dragging):not(.dragging-overlay),
+.unit-token.unit-token--hero.selected:not(.dragging):not(.dragging-overlay) {
+  transform: scale(1.15);
   border-color: var(--gold);
   box-shadow: 0 0 8px var(--gold);
   z-index: 10;

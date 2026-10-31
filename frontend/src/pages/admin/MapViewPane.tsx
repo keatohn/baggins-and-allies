@@ -35,6 +35,12 @@ export type MapSetupDraft = {
   ports: Dict;
 };
 
+function factionAssetUrl(filename: unknown): string | undefined {
+  if (typeof filename !== 'string') return undefined;
+  const trimmed = filename.trim();
+  return trimmed ? `/assets/factions/${trimmed}` : undefined;
+}
+
 function neighborIdsForField(
   territories: Dict,
   selectedKey: string,
@@ -219,13 +225,15 @@ export function MapViewPane({
   const ownerLabel = (id: string) => ownerChoices.find((row) => row.id === id)?.label ?? id;
 
   const factionData = useMemo(() => {
-    const data: Record<string, { name: string; icon: string; color: string; alliance: string; capital?: string; parent?: string }> = {};
+    const data: Record<string, { name: string; icon: string; banner?: string; color: string; alliance: string; capital?: string; parent?: string }> = {};
     for (const [fid, f] of Object.entries(factions)) {
       const icon = `/assets/factions/${typeof f.icon === 'string' && f.icon ? f.icon : `${fid}.png`}`;
+      const banner = factionAssetUrl(f.banner);
       const alliance = typeof f.alliance === 'string' ? f.alliance : '';
       data[fid] = {
         name: territoryLabel(fid, f),
         icon,
+        ...(banner ? { banner } : {}),
         color: typeof f.color === 'string' ? f.color : '#888888',
         alliance,
         capital: typeof f.capital === 'string' ? f.capital : '',
@@ -233,9 +241,11 @@ export function MapViewPane({
       for (const sub of Array.isArray(f.subfactions) ? f.subfactions : []) {
         const rec = asRecord(sub);
         if (typeof rec.id !== 'string' || !rec.id) continue;
+        const subBanner = factionAssetUrl(rec.banner);
         data[rec.id] = {
           name: territoryLabel(rec.id, rec),
           icon: typeof rec.icon === 'string' && rec.icon.trim() ? `/assets/factions/${rec.icon.trim()}` : icon,
+          ...(subBanner ? { banner: subBanner } : {}),
           color: typeof rec.color === 'string' ? rec.color : data[fid].color,
           alliance,
           capital: '',
@@ -622,6 +632,16 @@ export function MapViewPane({
     e.preventDefault();
     const el = wrapRef.current;
     if (!el) return;
+    if (!e.ctrlKey) {
+      // Two-finger scroll (and plain mouse wheel) pans.
+      setTransform((prev) => ({
+        ...prev,
+        x: prev.x + e.deltaX,
+        y: prev.y + e.deltaY,
+      }));
+      return;
+    }
+    // Pinch (ctrlKey) and Ctrl+wheel zoom toward cursor.
     const rect = el.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;

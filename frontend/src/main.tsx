@@ -6,6 +6,7 @@ import App from './App.tsx'
 import MainMenu from './pages/MainMenu.tsx'
 import Login from './pages/Login.tsx'
 import Register from './pages/Register.tsx'
+import ForgotPassword from './pages/ForgotPassword.tsx'
 import CreateGame from './pages/CreateGame.tsx'
 import GameList from './pages/GameList.tsx'
 import JoinGame from './pages/JoinGame.tsx'
@@ -225,6 +226,7 @@ if (!rootEl) {
             <Route path="/" element={<MainMenu />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/games" element={<GameList />} />
             <Route path="/join" element={<JoinGame />} />
             <Route path="/profile" element={<Profile />} />
