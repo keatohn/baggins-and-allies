@@ -172,7 +172,7 @@ def init_db():
     truncate rows, or rewrite game_state — player and game data are preserved.
     """
     # Register all models on Base before create_all (setups table, etc.)
-    from .models import AppSetting, Game, MapOverride, Player, Setup  # noqa: F401
+    from .models import AppSetting, Game, GameResult, MapOverride, Player, Setup  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _ensure_player_preferences_column()

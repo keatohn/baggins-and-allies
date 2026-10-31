@@ -15,7 +15,7 @@ from dataclasses import asdict
 from datetime import datetime
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
 from fastapi.responses import JSONResponse
@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from .database import get_db, get_db_file_path, init_db, SessionLocal
 from .models import Game as GameModel, Player
+from .player_stats import compute_player_stats, player_headline_record
 from .auth import (
     create_access_token,
     get_current_player,
@@ -222,6 +223,14 @@ async def lifespan(app: FastAPI):
                     starting_setup = su["starting_setup"]
             except FileNotFoundError:
                 pass
+        try:
+            from .game_results import backfill_game_results
+
+            n = backfill_game_results(db)
+            if n:
+                print(f"[game_results] backfilled {n} row(s) for finished games", flush=True)
+        except Exception as e:
+            print(f"[game_results] startup backfill failed: {e}", flush=True)
     finally:
         db.close()
     yield
@@ -918,6 +927,13 @@ def save_game(
         if state.winner is not None and row.status != "finished":
             row.status = "finished"
             row.completed_at = datetime.utcnow()
+            try:
+                from .game_results import ensure_game_results_for_row
+
+                ensure_game_results_for_row(db, row)
+            except Exception as e:
+                # Results are stats-only; never block the game save.
+                print(f"[game_results] write failed for game {game_id}: {e}", flush=True)
         if events:
             try:
                 config = json.loads(row.config) if isinstance(row.config, str) else {}
@@ -1381,6 +1397,71 @@ def update_profile(
         raise HTTPException(status_code=500, detail=f"Update failed: {str(e)}")
 
 
+# ----- Player profile & stats (public to any logged-in player) -----
+
+
+def _parse_date_param(value: str | None, field: str) -> datetime | None:
+    if value is None or value.strip() == "":
+        return None
+    try:
+        return datetime.fromisoformat(value.strip())
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid {field} date (expected ISO 8601)")
+
+
+@app.get("/players/{player_id}/stats")
+def get_player_stats(
+    player_id: str,
+    scenario: str | None = Query(None, description="Filter by setup_id"),
+    opponent: str | None = Query(None, description="Only games against this player_id"),
+    teammate: str | None = Query(None, description="Only games with this player_id as teammate"),
+    alliance: str | None = Query(None, pattern="^(good|evil)$", description="Filter by alliance played"),
+    date_from: str | None = Query(None, alias="from", description="ISO date lower bound"),
+    date_to: str | None = Query(None, alias="to", description="ISO date upper bound"),
+    _viewer: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Public (any logged-in player) career stats from game_results.
+
+    Headline W-L excludes forfeited games; forfeits are reported separately as
+    abandoned. Filters: scenario (setup_id), opponent/teammate (player_id),
+    alliance (good|evil), from/to (ISO dates on game end).
+    """
+    target = db.query(Player).filter(Player.id == str(player_id)).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return compute_player_stats(
+        db,
+        str(target.id),
+        scenario=scenario,
+        opponent=opponent,
+        teammate=teammate,
+        alliance=alliance,
+        date_from=_parse_date_param(date_from, "from"),
+        date_to=_parse_date_param(date_to, "to"),
+    )
+
+
+@app.get("/players/{player_id}/profile")
+def get_player_profile(
+    player_id: str,
+    _viewer: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Public-lite profile card: username + headline record (for player-vs-player UI)."""
+    target = db.query(Player).filter(Player.id == str(player_id)).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Player not found")
+    headline = player_headline_record(db, str(target.id))
+    return {
+        "id": str(target.id),
+        "username": target.username,
+        "headline": headline,
+        "tier": None,
+        "achievements": [],
+    }
+
+
 # ----- Games (create, list, join) -----
 
 @app.get("/setups")
@@ -1837,18 +1918,31 @@ def _get_scenario_from_config(row, db: Session) -> dict[str, Any] | None:
     return None
 
 
-def _build_games_list(player: Player, db: Session, *, include_all: bool = False) -> list[dict[str, Any]]:
+def _build_games_list(
+    player: Player,
+    db: Session,
+    *,
+    include_all: bool = False,
+    status: str | None = None,
+) -> list[dict[str, Any]]:
     """Build list of game dicts (with faction_stats and current_player_username).
 
     Default: games the player is in, excluding finished and games they forfeited.
+    status="finished": finished games the player was in (includes games they forfeited).
+    status="all": every game the player is in (any status; includes forfeited).
     include_all=True: every game (admin report) — no membership/status/forfeit filter,
     newest first.
     """
     query = db.query(GameModel)
-    if not include_all:
-        rows = query.filter(GameModel.status != "finished").all()
-    else:
+    include_forfeited = bool(include_all or status in ("finished", "all"))
+    if include_all:
         rows = query.order_by(GameModel.created_at.desc()).all()
+    elif status == "finished":
+        rows = query.filter(GameModel.status == "finished").order_by(GameModel.created_at.desc()).all()
+    elif status == "all":
+        rows = query.order_by(GameModel.created_at.desc()).all()
+    else:
+        rows = query.filter(GameModel.status != "finished").all()
     mine = []
     player_ids = set()
     player_id_str = str(player.id)
@@ -1859,9 +1953,12 @@ def _build_games_list(player: Player, db: Session, *, include_all: bool = False)
             if not isinstance(pl, list):
                 continue
             if not include_all:
-                if player_id_str not in {str(p.get("player_id")) for p in pl}:
+                roster_ids = {str(p.get("player_id")) for p in pl}
+                if include_forfeited:
+                    roster_ids |= set(_get_forfeited_player_ids(r))
+                if player_id_str not in roster_ids:
                     continue
-                if player_id_str in _get_forfeited_player_ids(r):
+                if not include_forfeited and player_id_str in _get_forfeited_player_ids(r):
                     continue
             for p in pl:
                 pid = p.get("player_id")
@@ -1887,9 +1984,12 @@ def _build_games_list(player: Player, db: Session, *, include_all: bool = False)
             if not isinstance(pl, list):
                 continue
             if not include_all:
-                if player_id_str not in {str(p.get("player_id")) for p in pl}:
+                roster_ids = {str(p.get("player_id")) for p in pl}
+                if include_forfeited:
+                    roster_ids |= set(_get_forfeited_player_ids(r))
+                if player_id_str not in roster_ids:
                     continue
-                if player_id_str in _get_forfeited_player_ids(r):
+                if not include_forfeited and player_id_str in _get_forfeited_player_ids(r):
                     continue
         except (json.JSONDecodeError, TypeError):
             continue
@@ -2035,11 +2135,19 @@ def _build_games_list(player: Player, db: Session, *, include_all: bool = False)
 
 @app.get("/games")
 def list_my_games(
+    status: str | None = Query(None, pattern="^(active|finished|all)$", description="Filter by game status; default excludes finished"),
     player: Player = Depends(get_current_player),
     db: Session = Depends(get_db),
 ):
-    """List games the current player is in. Includes turn info, current player username, and faction_stats for the stronghold bar."""
-    mine = _build_games_list(player, db)
+    """List games the current player is in.
+
+    Default: active/lobby games (excludes finished and games this player forfeited).
+    status=finished: finished games this player was in (includes games they forfeited).
+    status=active: alias for the default.
+    status=all: every game this player is in.
+    """
+    query_status = status if status not in (None, "active") else None
+    mine = _build_games_list(player, db, status=query_status)
     # Return plain dict so FastAPI serializes it; include marker so client can confirm this handler ran
     return {"games": mine, "_list_version": 2}
 
