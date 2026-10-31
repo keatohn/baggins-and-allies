@@ -12,6 +12,8 @@ import GameList from './pages/GameList.tsx'
 import JoinGame from './pages/JoinGame.tsx'
 import Profile from './pages/Profile.tsx'
 import Admin from './pages/Admin.tsx'
+import { MenuScrollProvider } from './components/MenuScrollContext'
+import MenuScrollOverlay from './components/MenuScrollOverlay'
 import api, { AUTH_CHANGED_EVENT, getAuthToken } from './services/api'
 import {
   playUiClickSound,
@@ -222,17 +224,20 @@ if (!rootEl) {
       <AppErrorBoundary>
         <BrowserRouter>
           <MenuAmbienceController />
-          <Routes>
-            <Route path="/" element={<MainMenu />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
-            <Route path="/games" element={<GameList />} />
-            <Route path="/join" element={<JoinGame />} />
-            <Route path="/profile" element={<Profile />} />
-            <Route path="/admin" element={<Admin />} />
-            <Route path="/game/:gameId" element={<GameRoute />} />
-          </Routes>
+          <MenuScrollProvider>
+            <MenuScrollOverlay />
+            <Routes>
+              <Route path="/" element={<MainMenu />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/games" element={<GameList />} />
+              <Route path="/join" element={<JoinGame />} />
+              <Route path="/profile" element={<Profile />} />
+              <Route path="/admin" element={<Admin />} />
+              <Route path="/game/:gameId" element={<GameRoute />} />
+            </Routes>
+          </MenuScrollProvider>
         </BrowserRouter>
       </AppErrorBoundary>
     </StrictMode>,
