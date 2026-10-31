@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useMenuScroll } from '../components/MenuScrollContext';
 import { api, getAuthToken } from '../services/api';
 import type { AuthPlayer } from '../services/api';
 import './MainMenu.css';
 
 export default function MainMenu() {
-  const navigate = useNavigate();
+  const { navigateWithScroll } = useMenuScroll();
   const [player, setPlayer] = useState<AuthPlayer | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -26,16 +26,16 @@ export default function MainMenu() {
         <>
           <p className="main-menu__quote">“The board is set. The pieces are moving.” <span className="main-menu__quote-attribution">—Gandalf</span></p>
           <div className="main-menu__actions">
-          <button type="button" className="main-menu__btn primary" onClick={() => navigate('/game/new')}>
+          <button type="button" className="main-menu__btn primary" onClick={() => navigateWithScroll('/game/new')}>
             Create game
           </button>
-          <button type="button" className="main-menu__btn" onClick={() => navigate('/games')}>
+          <button type="button" className="main-menu__btn" onClick={() => navigateWithScroll('/games')}>
             Load game
           </button>
-          <button type="button" className="main-menu__btn" onClick={() => navigate('/join')}>
+          <button type="button" className="main-menu__btn" onClick={() => navigateWithScroll('/join')}>
             Join game
           </button>
-          <button type="button" className="main-menu__btn" onClick={() => navigate('/profile')}>
+          <button type="button" className="main-menu__btn" onClick={() => navigateWithScroll('/profile')}>
             Profile
           </button>
           {player.is_admin ? (
@@ -43,7 +43,7 @@ export default function MainMenu() {
               type="button"
               className="main-menu__btn"
               data-admin-major-sfx
-              onClick={() => navigate('/admin')}
+              onClick={() => navigateWithScroll('/admin')}
             >
               Admin
             </button>
@@ -53,10 +53,10 @@ export default function MainMenu() {
         </>
       ) : (
         <div className="main-menu__actions">
-          <button type="button" className="main-menu__btn primary" onClick={() => navigate('/login')}>
+          <button type="button" className="main-menu__btn primary" onClick={() => navigateWithScroll('/login')}>
             Log in
           </button>
-          <button type="button" className="main-menu__btn" onClick={() => navigate('/register')}>
+          <button type="button" className="main-menu__btn" onClick={() => navigateWithScroll('/register')}>
             Create Account
           </button>
         </div>
