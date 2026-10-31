@@ -216,23 +216,6 @@
   filter: drop-shadow(0 0 4px rgba(255, 215, 0, 0.5)) brightness(1.2);
 }
 
-.map-water-flow {
-  animation: map-water-flow-x 40s linear infinite;
-}
-
-.map-water-flow--river {
-  animation-duration: 25s;
-}
-
-@keyframes map-water-flow-x {
-  from {
-    transform: translateX(0);
-  }
-  to {
-    transform: translateX(-120px);
-  }
-}
-
 /* Selected sea: gold halo on the stroke layer (Chrome/FF; Safari keeps stroke + pulse) */
 .territory-path-stroke.territory-path--sea.selected:not(.drop-target) {
   filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.8))
@@ -270,9 +253,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .map-water-flow {
-    animation: none;
-  }
   .territory-path-pulse {
     animation: none;
     stroke-opacity: 0.55;

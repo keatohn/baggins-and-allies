@@ -1,0 +1,67 @@
+/* 5-step turn-phase stepper: all phases visible, current phase highlighted.
+   Lives in the right sidebar panel (never the header) — pills wrap instead of
+   ellipsizing, and never shrink below their content. */
+.phase-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: clamp(0.2rem, 0.4vw, 0.35rem);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.phase-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3em;
+  flex: 0 0 auto;
+  min-width: clamp(1.15rem, 1.7vw, 1.6rem);
+  padding: 0.1em clamp(0.4em, 0.55vw, 0.65em);
+  border: 1px solid var(--ink-faded);
+  border-radius: 999px;
+  line-height: 1.4;
+  font-size: 0.85em;
+  white-space: nowrap;
+  color: var(--ink-faded);
+  background: transparent;
+}
+
+.phase-step-num {
+  font-weight: 700;
+}
+
+.phase-step-name {
+  font-weight: 600;
+}
+
+.phase-step--past {
+  background: rgba(90, 66, 48, 0.14);
+  color: var(--ink-light);
+  border-color: rgba(139, 115, 85, 0.65);
+}
+
+.phase-step--future {
+  opacity: 0.72;
+}
+
+/* Current phase: the current turn's faction color, with text contrast chosen
+   dynamically (inline style sets --phase-faction-color + color). */
+.phase-step--current {
+  background: var(--phase-faction-color, #6b5b4b);
+  border-color: color-mix(in srgb, var(--phase-faction-color, #6b5b4b) 65%, #000);
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  opacity: 1;
+}
+
+/* Narrow sidebar / mobile: numbers only for non-current phases, current keeps its name */
+@container (max-width: 360px) {
+  .phase-step--past .phase-step-name,
+  .phase-step--future .phase-step-name {
+    display: none;
+  }
+}
