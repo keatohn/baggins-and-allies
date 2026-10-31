@@ -12,7 +12,9 @@ from backend.ai.mcts.search import (
     DEFAULT_C_PUCT,
     PRIOR_FLOOR,
     Problem,
+    SearchStats,
     run_mcts,
+    run_mcts_search,
     run_mcts_with_values,
 )
 
@@ -24,7 +26,9 @@ __all__ = [
     "Node",
     "Problem",
     "SearchBudget",
+    "SearchStats",
     "get_budget",
     "run_mcts",
+    "run_mcts_search",
     "run_mcts_with_values",
 ]

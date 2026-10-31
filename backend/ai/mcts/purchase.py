@@ -128,6 +128,10 @@ class PurchaseProblem(Problem):
             return -1.0
         return self._score_purchased(state)
 
+    def enumerator_size(self, state: Any) -> int:
+        """Branching factor the enumerator yields for this state (3.1 hook)."""
+        return len(self.legal_actions(state))
+
     def priors(self, state: Any) -> dict[HashableAction, float] | None:
         """
         Heuristic priors: end_phase gets a baseline weight; purchase bundles get

@@ -141,6 +141,10 @@ class MobilizationProblem(Problem):
             return self._winner_value(state)
         return self._score_board(state)
 
+    def enumerator_size(self, state: Any) -> int:
+        """Branching factor the enumerator yields for this state (3.1 hook)."""
+        return len(self.legal_actions(state))
+
     def priors(self, state: Any) -> dict[HashableAction, float] | None:
         """
         Heuristic priors: weight each top-K candidate by its cheap destination score;
