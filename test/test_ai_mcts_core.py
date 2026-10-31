@@ -244,6 +244,8 @@ def test_search_stats_default_zero():
     assert s.terminal_evaluations == 0
     assert s.root_actions == 0
     assert s.tree_nodes == 0
+    assert s.evaluate_cache_hits == 0
+    assert s.transposition_merges == 0
 
 
 def test_run_mcts_search_returns_stats():

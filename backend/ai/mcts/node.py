@@ -7,7 +7,7 @@ so backpropagation is a simple running mean regardless of tree depth.
 from __future__ import annotations
 
 import math
-from typing import Generic, TypeVar
+from typing import Any, Generic, Hashable, TypeVar
 
 A = TypeVar("A")  # action type
 S = TypeVar("S")  # state type
@@ -18,6 +18,7 @@ class Node(Generic[S, A]):
 
     __slots__ = (
         "state",
+        "state_key",
         "prior",
         "visit_count",
         "total_value",
@@ -31,8 +32,12 @@ class Node(Generic[S, A]):
         state: S,
         prior: float = 1.0,
         untried_actions: list[A] | None = None,
+        state_key: Hashable | None = None,
     ) -> None:
         self.state = state
+        # Transposition-table key for `state` (3.3). Set by the search when the
+        # Problem provides state_key; None when the TT is disabled or unused.
+        self.state_key: Any = state_key
         self.prior = prior
         self.visit_count = 0
         self.total_value = 0.0
