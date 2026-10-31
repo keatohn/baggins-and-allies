@@ -121,7 +121,7 @@ def _finish_game(
     return game
 
 
-def test_stats_overall_excludes_forfeits_but_counts_them(db_session, players, make_client):
+def test_stats_overall_includes_forfeits_as_normal_results(db_session, players, make_client):
     alice, bob, _carol = players
     # alice wins as good vs bob
     _finish_game(
@@ -141,7 +141,7 @@ def test_stats_overall_excludes_forfeits_but_counts_them(db_session, players, ma
         ],
         winner="evil",
     )
-    # alice forfeits
+    # alice forfeits (counted as a normal loss — evil wins)
     _finish_game(
         db_session,
         players_list=[
@@ -157,12 +157,12 @@ def test_stats_overall_excludes_forfeits_but_counts_them(db_session, players, ma
     assert r.status_code == 200
     data = r.json()
     overall = data["overall"]
-    assert overall["games"] == 2
+    assert overall["games"] == 3
     assert overall["wins"] == 1
-    assert overall["losses"] == 1
-    assert overall["win_pct"] == 50.0
-    assert overall["forfeits"] == 1
-    assert data["by_alliance"]["good"]["games"] == 2
+    assert overall["losses"] == 2
+    assert overall["win_pct"] == 33.3
+    assert "forfeits" not in overall
+    assert data["by_alliance"]["good"]["games"] == 3
     assert data["by_alliance"]["good"]["wins"] == 1
     assert data["by_alliance"]["evil"]["games"] == 0
 

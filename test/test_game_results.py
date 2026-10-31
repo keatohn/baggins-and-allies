@@ -197,6 +197,65 @@ def test_forfeit_flagged_and_computer_excluded(db_session, players):
     assert by_pid[bob.id].won is True
 
 
+def test_removed_forfeiter_still_gets_row(db_session, players):
+    """A player who forfeited out of the roster still gets a forfeited row from forfeited_player_factions."""
+    alice, bob = players
+    state = GameState.from_dict({})
+    state.winner = "evil"  # alice (good) forfeited and was removed; evil wins
+    state.turn_number = 7
+    game = _add_game(
+        db_session,
+        # alice no longer in roster (removed at leave time)
+        players_list=[
+            {"player_id": bob.id, "faction_id": "mordor"},
+            {"player_id": "__computer__", "faction_id": "gondor"},
+        ],
+        state=state,
+        config=_config(
+            forfeited_player_ids=[alice.id],
+            forfeited_player_factions={alice.id: ["gondor"]},
+        ),
+    )
+    _try_save_game(game.id, state, db_session)
+
+    rows = _results_for(db_session, game.id)
+    by_pid = {r.player_id: r for r in rows}
+    assert set(by_pid) == {alice.id, bob.id}
+    assert by_pid[alice.id].forfeited is True
+    assert by_pid[alice.id].won is False
+    assert by_pid[alice.id].alliance == "good"
+    assert by_pid[alice.id].faction_id == "gondor"
+    assert by_pid[bob.id].forfeited is False
+    assert by_pid[bob.id].won is True
+    # Both humans are participants
+    participants = json.loads(by_pid[alice.id].participant_ids)
+    assert set(participants) == {alice.id, bob.id}
+
+
+def test_removed_forfeiter_multi_faction_rows(db_session, players):
+    """One row per faction the forfeiter controlled."""
+    alice, bob = players
+    state = GameState.from_dict({})
+    state.winner = "evil"
+    game = _add_game(
+        db_session,
+        players_list=[{"player_id": bob.id, "faction_id": "mordor"}],
+        state=state,
+        config=_config(
+            forfeited_player_ids=[alice.id],
+            forfeited_player_factions={alice.id: ["gondor", "rohan"]},
+        ),
+    )
+    _try_save_game(game.id, state, db_session)
+
+    rows = _results_for(db_session, game.id)
+    alice_rows = [r for r in rows if r.player_id == alice.id]
+    assert len(alice_rows) == 2
+    assert {r.faction_id for r in alice_rows} == {"gondor", "rohan"}
+    assert all(r.forfeited is True for r in alice_rows)
+    assert all(r.won is False for r in alice_rows)
+
+
 def test_duration_seconds_snapshot(db_session, players):
     alice, bob = players
     created = datetime(2026, 1, 1, 12, 0, 0)

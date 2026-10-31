@@ -859,14 +859,12 @@ export interface GameListPlayer {
   forfeited?: boolean;
 }
 
-/** Aggregated W-L block from GET /players/{id}/stats (forfeits excluded from W-L). */
+/** Aggregated W-L block from GET /players/{id}/stats (forfeits count as normal results). */
 export interface PlayerStatsOverall {
   games: number;
   wins: number;
   losses: number;
   win_pct: number | null;
-  /** Games the player abandoned; excluded from headline W-L. */
-  forfeits: number;
 }
 
 export interface PlayerStatsAlliance {
@@ -1051,6 +1049,15 @@ export const api = {
   adminListSetups: () =>
     fetchJson<{ setups: AdminSetupListItem[] }>('/admin/setups'),
   adminListGames: () => fetchJson<{ games: GameListItem[] }>('/admin/games'),
+  /** Admin: end an in-progress game now. winner: "good" | "evil" | "none" (void, no stats rows). */
+  adminEndGame: (gameId: string, winner: 'good' | 'evil' | 'none') =>
+    fetchJson<{ ok: boolean; game_id: string; winner: string | null; status: string }>(
+      `/admin/games/${encodeURIComponent(gameId)}/end`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ winner }),
+      },
+    ),
   getAudioGains: async () => {
     const r = await fetchJson<{ gains: AudioGainsMap; menu_music?: string[] }>('/audio/gains');
     setAudioFileGains(r.gains);

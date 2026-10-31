@@ -331,11 +331,6 @@ export default function Profile() {
                     <span className="profile-page__stats-pct">({formatPct(stats.overall.win_pct)})</span>
                   </span>
                   <span className="profile-page__stats-games">{stats.overall.games} games</span>
-                  {stats.overall.forfeits > 0 && (
-                    <span className="profile-page__stats-forfeits" title="Abandoned games (not counted in W-L)">
-                      {stats.overall.forfeits} abandoned
-                    </span>
-                  )}
                 </div>
 
                 <div className="profile-page__stats-alliances">

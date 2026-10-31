@@ -1,6 +1,6 @@
 """Aggregate finished-game stats from game_results for profile pages.
 
-Headline W-L excludes forfeited games (kept as a separate abandoned count).
+Headline W-L includes every finished game (forfeits count as normal results).
 All filters are SQL against game_results; scenario responses use the display-name
 snapshot stored at game end.
 """
@@ -212,7 +212,7 @@ def compute_player_stats(
         base_rows = [r for r in base_rows if str(r.game_id) in keep]
 
     # Opponent/teammate breakdown needs every human row in the counted games.
-    counted_game_ids = sorted({str(r.game_id) for r in base_rows if not r.forfeited})
+    counted_game_ids = sorted({str(r.game_id) for r in base_rows})
     peer_rows: list[GameResult] = []
     if counted_game_ids:
         peer_rows = (
@@ -223,15 +223,13 @@ def compute_player_stats(
         )
 
     games = _aggregate_by_game(base_rows)
-    counted = [g for g in games if not g["forfeited"]]
-    forfeited_count = sum(1 for g in games if g["forfeited"])
 
-    wins = sum(1 for g in counted if g["won"])
-    games_played = len(counted)
+    wins = sum(1 for g in games if g["won"])
+    games_played = len(games)
 
     by_alliance: dict[str, dict[str, Any]] = {}
     for alliance_key in ("good", "evil"):
-        subset = [g for g in counted if g["alliance"] == alliance_key]
+        subset = [g for g in games if g["alliance"] == alliance_key]
         a_wins = sum(1 for g in subset if g["won"])
         by_alliance[alliance_key] = {
             "games": len(subset),
@@ -240,7 +238,7 @@ def compute_player_stats(
         }
 
     scenario_totals: dict[str, dict[str, Any]] = {}
-    for g in counted:
+    for g in games:
         sid = g["setup_id"] or ""
         bucket = scenario_totals.get(sid)
         if bucket is None:
@@ -267,8 +265,8 @@ def compute_player_stats(
     )
 
     # Head-to-head vs/with each other human, from peer rows in counted games.
-    subject_alliance_by_game = {g["game_id"]: g["alliance"] for g in counted}
-    subject_win_by_game = {g["game_id"]: g["won"] for g in counted}
+    subject_alliance_by_game = {g["game_id"]: g["alliance"] for g in games}
+    subject_win_by_game = {g["game_id"]: g["won"] for g in games}
     h2h: dict[str, dict[str, Any]] = {}
     for row in peer_rows:
         game_id = str(row.game_id)
@@ -317,7 +315,7 @@ def compute_player_stats(
     )
 
     faction_counts: dict[str, int] = defaultdict(int)
-    for g in counted:
+    for g in games:
         for fid in g["faction_ids"]:
             faction_counts[fid] += 1
     favorite_faction = None
@@ -325,12 +323,12 @@ def compute_player_stats(
         favorite_faction = max(faction_counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
 
     longest_game = max(
-        (g["duration_seconds"] for g in counted if g["duration_seconds"] is not None),
+        (g["duration_seconds"] for g in games if g["duration_seconds"] is not None),
         default=None,
     )
     most_played_scenario = by_scenario[0] if by_scenario else None
 
-    streak_data = _streaks(counted)
+    streak_data = _streaks(games)
 
     return {
         "player_id": player_id,
@@ -339,7 +337,6 @@ def compute_player_stats(
             "wins": wins,
             "losses": games_played - wins,
             "win_pct": _win_pct(wins, games_played),
-            "forfeits": forfeited_count,
         },
         "by_alliance": by_alliance,
         "by_scenario": by_scenario,
@@ -362,7 +359,7 @@ def compute_player_stats(
 def _empty_stats(player_id: str) -> dict[str, Any]:
     return {
         "player_id": player_id,
-        "overall": {"games": 0, "wins": 0, "losses": 0, "win_pct": None, "forfeits": 0},
+        "overall": {"games": 0, "wins": 0, "losses": 0, "win_pct": None},
         "by_alliance": {
             "good": {"games": 0, "wins": 0, "win_pct": None},
             "evil": {"games": 0, "wins": 0, "win_pct": None},

@@ -328,11 +328,6 @@
   color: var(--ink-light);
 }
 
-.profile-page__stats-forfeits {
-  color: var(--ink-faded);
-  font-size: 0.9rem;
-}
-
 .profile-page__stats-alliances {
   display: flex;
   flex-wrap: wrap;

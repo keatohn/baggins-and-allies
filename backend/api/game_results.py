@@ -120,12 +120,34 @@ def ensure_game_results_for_row(db: Session, row: GameModel) -> int:
         winner = str(winner)
 
     roster = _human_roster(players_list)
-    participant_ids = sorted({e["player_id"] for e in roster})
     forfeited_ids = {
         str(x)
         for x in (config.get("forfeited_player_ids") or [])
         if x is not None and str(x).strip() != ""
     }
+
+    # Forfeited players are removed from the roster at leave time; keep their rows so
+    # stats still count the game (forfeited=True). Skip any already in the roster
+    # (e.g. rejoined after a lobby forfeit) to avoid duplicate rows.
+    roster_pids = {e["player_id"] for e in roster}
+    entries = list(roster)
+    factions_cfg = config.get("forfeited_player_factions")
+    if isinstance(factions_cfg, dict):
+        for pid, fids in factions_cfg.items():
+            pid_s = str(pid)
+            if pid_s in roster_pids or pid_s not in forfeited_ids:
+                continue
+            if isinstance(fids, str):
+                fids = [fids]
+            if not isinstance(fids, list):
+                continue
+            for fid in fids:
+                fid_s = str(fid).strip()
+                if not fid_s:
+                    continue
+                entries.append({"player_id": pid_s, "faction_id": fid_s})
+
+    participant_ids = sorted({e["player_id"] for e in entries})
 
     setup_id = config.get("setup_id") if isinstance(config.get("setup_id"), str) else None
     scenario_name = _scenario_display_name(config, db)
@@ -143,7 +165,7 @@ def ensure_game_results_for_row(db: Session, row: GameModel) -> int:
 
     now = datetime.utcnow()
     rows: list[GameResult] = []
-    for entry in roster:
+    for entry in entries:
         alliance = _faction_alliance_from_config(config, entry["faction_id"])
         won = winner is not None and alliance == winner
         forfeited = entry["player_id"] in forfeited_ids

@@ -1423,8 +1423,8 @@ def get_player_stats(
 ):
     """Public (any logged-in player) career stats from game_results.
 
-    Headline W-L excludes forfeited games; forfeits are reported separately as
-    abandoned. Filters: scenario (setup_id), opponent/teammate (player_id),
+    Headline W-L includes every finished game (forfeits count as normal results).
+    Filters: scenario (setup_id), opponent/teammate (player_id),
     alliance (good|evil), from/to (ISO dates on game end).
     """
     target = db.query(Player).filter(Player.id == str(player_id)).first()
@@ -1671,6 +1671,12 @@ def admin_balance(
     return compute_starting_strength(body.model_dump(), rings=rings)
 
 
+class AdminEndGameBody(BaseModel):
+    """Admin end-game: winning alliance, or none to void the game (no stats rows)."""
+
+    winner: str  # "good" | "evil" | "none" ("neither" accepted as alias for "none")
+
+
 @app.get("/admin/games")
 def admin_list_games(
     _admin: Player = Depends(get_current_admin),
@@ -1678,6 +1684,101 @@ def admin_list_games(
 ):
     """Every game (lobby, in progress, and finished) for the admin games report."""
     return {"games": _build_games_list(_admin, db, include_all=True)}
+
+
+@app.post("/admin/games/{game_id}/end")
+def admin_end_game(
+    game_id: str,
+    body: AdminEndGameBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin: end an in-progress game now, choosing the winner or voiding it.
+
+    good/evil: sets state.winner, emits a victory event, and saves (writes game_results).
+    none: finishes the game with no winner and no game_results rows (void — no stats impact).
+    """
+    winner = (body.winner or "").strip().lower()
+    if winner == "neither":
+        winner = "none"
+    if winner not in ("good", "evil", "none"):
+        raise HTTPException(status_code=400, detail="winner must be good, evil, or none")
+
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Game not found")
+    if row.status == "finished":
+        raise HTTPException(status_code=400, detail="Game is already finished")
+    if row.status != "active":
+        raise HTTPException(status_code=400, detail="Only in-progress games can be ended")
+
+    try:
+        raw = json.loads(row.game_state) if isinstance(row.game_state, str) else row.game_state
+        state = GameState.from_dict(raw) if isinstance(raw, dict) else None
+    except (TypeError, json.JSONDecodeError):
+        state = None
+    if state is None:
+        raise HTTPException(status_code=400, detail="Game state is corrupt; cannot end game")
+
+    if winner == "none":
+        # Void: finish with no winner and no game_results rows (no stats impact).
+        state.winner = None
+        row.game_state = json.dumps(state.to_dict())
+        row.status = "finished"
+        row.completed_at = datetime.utcnow()
+        db.commit()
+    else:
+        _, td, fd, _, _ = get_game_definitions(game_id, db)
+        if not isinstance(fd, dict):
+            fd = {}
+        if not isinstance(td, dict):
+            td = {}
+        state.winner = winner
+        stronghold_counts: dict[str, int] = {}
+        controlled: list[str] = []
+        for territory_id, territory_state in state.territories.items():
+            territory_def = td.get(territory_id)
+            if not territory_def or not getattr(territory_def, "is_stronghold", False):
+                continue
+            owner = territory_state.owner
+            if not owner:
+                continue
+            faction_def = fd.get(owner)
+            if not faction_def:
+                continue
+            alliance = getattr(faction_def, "alliance", None)
+            if not alliance:
+                continue
+            stronghold_counts[alliance] = stronghold_counts.get(alliance, 0) + 1
+            if alliance == winner:
+                controlled.append(territory_id)
+        strongholds_criteria = state.victory_criteria.get("strongholds") or {}
+        strongholds_required = (
+            int(strongholds_criteria.get(winner, 0))
+            if isinstance(strongholds_criteria, dict)
+            else 0
+        )
+        from backend.engine.events import victory as victory_event
+
+        save_game(
+            game_id,
+            state,
+            db,
+            events=[
+                victory_event(
+                    winner,
+                    stronghold_counts,
+                    strongholds_required,
+                    controlled,
+                )
+            ],
+        )
+
+    if game_id in games:
+        del games[game_id]
+    if game_id in game_defs:
+        del game_defs[game_id]
+    return {"ok": True, "game_id": game_id, "winner": None if winner == "none" else winner, "status": "finished"}
 
 
 @app.get("/admin/setups")
@@ -2941,6 +3042,14 @@ def forfeit_game(
         forfeited = list(forfeited) + [player_id_str]
     forfeited_set = set(str(x) for x in forfeited)
     config["forfeited_player_ids"] = forfeited
+    # Record the factions this player controlled so game_results can write rows for them
+    # after they are removed from the roster (stats keep the forfeit as a normal W-L game).
+    if row.status != "lobby":
+        factions_cfg = config.get("forfeited_player_factions")
+        if not isinstance(factions_cfg, dict):
+            factions_cfg = {}
+        factions_cfg[player_id_str] = sorted(str(f) for f in my_faction_ids)
+        config["forfeited_player_factions"] = factions_cfg
     # Persist a player-readable reassignment summary so the toast can be specific after refresh/rejoin.
     reassign_cfg = config.get("forfeit_reassignments")
     if not isinstance(reassign_cfg, dict):
