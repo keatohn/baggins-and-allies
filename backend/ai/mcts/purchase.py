@@ -336,7 +336,7 @@ def decide_purchase_mcts(ctx: AIContext) -> Action | None:
     Entry point: run purchase-phase MCTS and return the chosen root action.
     Falls back to end_phase if search yields nothing (safety net).
     """
-    from backend.ai.mcts.budget import get_budget
+    from backend.ai.mcts.budget import get_phase_budget
     from backend.ai.mcts.search import run_mcts_reuse
 
     if not ctx.state or not ctx.faction_id:
@@ -345,7 +345,7 @@ def decide_purchase_mcts(ctx: AIContext) -> Action | None:
         return None
 
     problem = PurchaseProblem(ctx)
-    budget = get_budget(os.environ.get(DEFAULT_DIFFICULTY_ENV))
+    budget = get_phase_budget("purchase", os.environ.get(DEFAULT_DIFFICULTY_ENV))
     # 3.4: resumes from the previous call's chosen subtree when this state was
     # already searched (purchase actions apply verbatim, so the next /ai-step
     # state matches the searched child exactly).

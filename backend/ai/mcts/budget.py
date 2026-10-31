@@ -32,8 +32,41 @@ BUDGETS: dict[str, SearchBudget] = {
 
 DEFAULT_DIFFICULTY = "normal"
 
+# The five decision phases that route through MCTS (see backend/ai/decide.py).
+PHASES: tuple[str, ...] = (
+    "purchase",
+    "combat",
+    "combat_move",
+    "non_combat_move",
+    "mobilization",
+)
+
+# Per-phase difficulty -> budget table. 3.5a initializes every phase from the
+# flat BUDGETS table (zero behavior change vs get_budget); per-phase retuning
+# (3.5b) edits the entries here, e.g. cheaper budgets for the slow move-phase
+# enumerators measured in the 3.1 benchmark.
+PHASE_BUDGETS: dict[str, dict[str, SearchBudget]] = {phase: dict(BUDGETS) for phase in PHASES}
+
 
 def get_budget(difficulty: str | None = None) -> SearchBudget:
     """Resolve a budget by difficulty name; falls back to DEFAULT_DIFFICULTY."""
-    key = (difficulty or os.environ.get("AI_MCTS_DIFFICULTY") or DEFAULT_DIFFICULTY).strip().lower()
+    key = _resolve_difficulty(difficulty)
     return BUDGETS.get(key, BUDGETS[DEFAULT_DIFFICULTY])
+
+
+def get_phase_budget(phase: str, difficulty: str | None = None) -> SearchBudget:
+    """
+    Resolve a budget for one decision phase by difficulty name.
+
+    Falls back to the global BUDGETS table when the phase is unknown, and to
+    DEFAULT_DIFFICULTY when the difficulty name is unknown — so env-driven
+    difficulty selection behaves exactly like get_budget() until per-phase
+    tables diverge (3.5b).
+    """
+    key = _resolve_difficulty(difficulty)
+    table = PHASE_BUDGETS.get(phase, BUDGETS)
+    return table.get(key, BUDGETS[DEFAULT_DIFFICULTY])
+
+
+def _resolve_difficulty(difficulty: str | None) -> str:
+    return (difficulty or os.environ.get("AI_MCTS_DIFFICULTY") or DEFAULT_DIFFICULTY).strip().lower()

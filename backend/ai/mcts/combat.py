@@ -276,7 +276,7 @@ def decide_combat_mcts(ctx: AIContext, rng: random.Random | None = None) -> Acti
     Dice are left empty for initiate/continue so the API can fill real rolls.
     Falls back to end_phase if search yields nothing (safety net).
     """
-    from backend.ai.mcts.budget import get_budget
+    from backend.ai.mcts.budget import get_phase_budget
     from backend.ai.mcts.search import run_mcts_reuse
 
     if not ctx.state or not ctx.faction_id:
@@ -287,7 +287,7 @@ def decide_combat_mcts(ctx: AIContext, rng: random.Random | None = None) -> Acti
         return None
 
     problem = CombatProblem(ctx, rng=rng)
-    budget = get_budget(os.environ.get(DEFAULT_DIFFICULTY_ENV))
+    budget = get_phase_budget("combat", os.environ.get(DEFAULT_DIFFICULTY_ENV))
     # 3.4: reuse often misses here — decide() strips dice and the API fills real
     # rolls before apply, so the next state differs from the searched child.
     action = run_mcts_reuse(problem, ctx.state, budget)
