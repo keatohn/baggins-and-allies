@@ -401,6 +401,16 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     e.preventDefault();
     const el = wrapRef.current;
     if (!el) return;
+    if (!e.ctrlKey) {
+      // Two-finger scroll (and plain mouse wheel) pans.
+      setTransform((prev) => ({
+        ...prev,
+        x: prev.x + e.deltaX,
+        y: prev.y + e.deltaY,
+      }));
+      return;
+    }
+    // Pinch (ctrlKey) and Ctrl+wheel zoom toward cursor.
     const rect = el.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
