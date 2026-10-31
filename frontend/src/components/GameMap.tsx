@@ -98,8 +98,8 @@ function territoryGlowFromHex(hex: string): { stroke: string; glowRgba: string; 
   const stroke = `#${sr.toString(16).padStart(2, '0')}${sg.toString(16).padStart(2, '0')}${sb.toString(16).padStart(2, '0')}`;
   return {
     stroke,
-    glowRgba: `rgba(${r},${g},${b},0.7)`,
-    glowRgbaSoft: `rgba(${r},${g},${b},0.4)`,
+    glowRgba: `rgba(${r},${g},${b},0.9)`,
+    glowRgbaSoft: `rgba(${r},${g},${b},0.55)`,
   };
 }
 
@@ -4228,15 +4228,20 @@ function GameMap({
                       <defs>
                         {/* Native SVG glow filters so Safari shows the halo (Safari ignores CSS drop-shadow on SVG) */}
                         {uniqueGlowColors.map((hex) => {
-                          const { glowRgba } = territoryGlowFromHex(hex);
+                          const { glowRgba, glowRgbaSoft } = territoryGlowFromHex(hex);
                           const id = `territory-glow-${hex.replace(/^#/, '')}`;
                           return (
                             <filter key={id} id={id} x="-50%" y="-50%" width="200%" height="200%">
-                              <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur" />
-                              <feFlood floodColor={glowRgba} result="flood" />
-                              <feComposite in2="blur" in="flood" operator="in" result="coloredBlur" />
+                              {/* Two-radius blur: tight core + wide halo so borders read as glowing between territories */}
+                              <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blurCore" />
+                              <feGaussianBlur in="SourceGraphic" stdDeviation="7" result="blurWide" />
+                              <feFlood floodColor={glowRgba} result="floodCore" />
+                              <feComposite in2="blurCore" in="floodCore" operator="in" result="coloredCore" />
+                              <feFlood floodColor={glowRgbaSoft} result="floodWide" />
+                              <feComposite in2="blurWide" in="floodWide" operator="in" result="coloredWide" />
                               <feMerge>
-                                <feMergeNode in="coloredBlur" />
+                                <feMergeNode in="coloredWide" />
+                                <feMergeNode in="coloredCore" />
                                 <feMergeNode in="SourceGraphic" />
                               </feMerge>
                             </filter>
@@ -4244,11 +4249,15 @@ function GameMap({
                         })}
                         {/* Gold halo for selected land territories (native filter so Safari shows it) */}
                         <filter id="territory-glow-gold" x="-50%" y="-50%" width="200%" height="200%">
-                          <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur" />
-                          <feFlood floodColor="rgba(255,215,0,0.85)" result="flood" />
-                          <feComposite in2="blur" in="flood" operator="in" result="coloredBlur" />
+                          <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blurCore" />
+                          <feGaussianBlur in="SourceGraphic" stdDeviation="9" result="blurWide" />
+                          <feFlood floodColor="rgba(255,215,0,0.95)" result="floodCore" />
+                          <feComposite in2="blurCore" in="floodCore" operator="in" result="coloredCore" />
+                          <feFlood floodColor="rgba(255,215,0,0.5)" result="floodWide" />
+                          <feComposite in2="blurWide" in="floodWide" operator="in" result="coloredWide" />
                           <feMerge>
-                            <feMergeNode in="coloredBlur" />
+                            <feMergeNode in="coloredWide" />
+                            <feMergeNode in="coloredCore" />
                             <feMergeNode in="SourceGraphic" />
                           </feMerge>
                         </filter>
@@ -4268,28 +4277,47 @@ function GameMap({
                           <feComposite in="shadowColor" in2="blurred" operator="in" result="shadow" />
                         </filter>
                         {/* Ocean wave texture for sea zones: base blue with repeating wave curves.
-                            SMIL animates patternTransform (the one channel browsers repaint for pattern
-                            fills); CSS animations inside <pattern> tiles are rasterized once and freeze. */}
-                        <pattern id="sea-wave-pattern" x="0" y="0" width="120" height="60" patternUnits="userSpaceOnUse">
+                            Dual scroll so Chrome + Safari both move:
+                            - CSS transform on the <pattern> (class wave-pattern-sea) — verified in Chrome.
+                            - SMIL animateTransform on patternTransform — WebKit historically had a bug
+                              re-rasterizing patternTransform; CSS transform on pattern is poorly
+                              implemented per SVG2/MDN, so keep SMIL as the attribute-channel fallback.
+                            Animating children inside the tile rasterizes once and never moves. */}
+                        <pattern
+                          id="sea-wave-pattern"
+                          className="wave-pattern-sea"
+                          x="0"
+                          y="0"
+                          width="120"
+                          height="60"
+                          patternUnits="userSpaceOnUse"
+                        >
                           <rect width="120" height="60" fill="#2d4258" />
-                          {/* Lighter wave crests */}
-                          <path d="M0 20 Q30 12 60 20 T120 20 M0 45 Q30 37 60 45 T120 45" fill="none" stroke="rgba(120,160,200,0.42)" strokeWidth="3.5" strokeLinecap="round" />
-                          <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(160,195,220,0.32)" strokeWidth="2.25" strokeLinecap="round" />
+                          {/* Lighter wave crests — higher contrast so motion reads at map zoom */}
+                          <path d="M0 20 Q30 12 60 20 T120 20 M0 45 Q30 37 60 45 T120 45" fill="none" stroke="rgba(150,195,235,0.72)" strokeWidth="4" strokeLinecap="round" />
+                          <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(195,225,245,0.55)" strokeWidth="2.75" strokeLinecap="round" />
                           {/* Darker troughs for depth */}
-                          <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(15,30,45,0.52)" strokeWidth="2.75" strokeLinecap="round" />
-                          {/* Scroll the tiling by exactly one 120px tile for a seamless loop */}
+                          <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(10,24,40,0.62)" strokeWidth="3" strokeLinecap="round" />
                           {!prefersReducedMotion && (
-                            <animateTransform attributeName="patternTransform" type="translate" from="0 0" to="-120 0" dur="12s" repeatCount="indefinite" />
+                            <animateTransform attributeName="patternTransform" type="translate" from="0 0" to="-120 0" dur="5s" repeatCount="indefinite" />
                           )}
                         </pattern>
-                        {/* River: slightly darker and grayer than the previous blue, still lighter than sea. */}
-                        <pattern id="river-wave-pattern" x="0" y="0" width="120" height="60" patternUnits="userSpaceOnUse">
+                        {/* River: lighter blue than sea, still distinct; same dual scroll (faster). */}
+                        <pattern
+                          id="river-wave-pattern"
+                          className="wave-pattern-river"
+                          x="0"
+                          y="0"
+                          width="120"
+                          height="60"
+                          patternUnits="userSpaceOnUse"
+                        >
                           <rect width="120" height="60" fill="#366896" />
-                          <path d="M0 20 Q30 12 60 20 T120 20 M0 45 Q30 37 60 45 T120 45" fill="none" stroke="rgba(174,204,232,0.52)" strokeWidth="3.5" strokeLinecap="round" />
-                          <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(196,214,232,0.38)" strokeWidth="2.25" strokeLinecap="round" />
-                          <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(20,44,78,0.42)" strokeWidth="2.75" strokeLinecap="round" />
+                          <path d="M0 20 Q30 12 60 20 T120 20 M0 45 Q30 37 60 45 T120 45" fill="none" stroke="rgba(205,230,250,0.78)" strokeWidth="4" strokeLinecap="round" />
+                          <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(225,240,252,0.6)" strokeWidth="2.75" strokeLinecap="round" />
+                          <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(16,40,74,0.55)" strokeWidth="3" strokeLinecap="round" />
                           {!prefersReducedMotion && (
-                            <animateTransform attributeName="patternTransform" type="translate" from="0 0" to="-120 0" dur="8s" repeatCount="indefinite" />
+                            <animateTransform attributeName="patternTransform" type="translate" from="0 0" to="-120 0" dur="3s" repeatCount="indefinite" />
                           )}
                         </pattern>
                         <marker id="arrowhead-combat" markerWidth="5" markerHeight="5" refX="3.5" refY="2.5" orient="auto">

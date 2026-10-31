@@ -114,11 +114,11 @@
   pointer-events: auto;
   transition: fill-opacity 0.2s ease, stroke 0.2s ease;
   stroke: var(--territory-stroke, #444);
-  stroke-width: 2;
+  stroke-width: 2.5;
   stroke-linejoin: round;
   stroke-linecap: round;
   paint-order: stroke fill;
-  filter: drop-shadow(0 0 2px var(--territory-glow-rgba, rgba(0, 0, 0, 0.25))) drop-shadow(0 0 4px var(--territory-glow-rgba-soft, rgba(0, 0, 0, 0.15)));
+  filter: drop-shadow(0 0 3px var(--territory-glow-rgba, rgba(0, 0, 0, 0.35))) drop-shadow(0 0 7px var(--territory-glow-rgba-soft, rgba(0, 0, 0, 0.25)));
 }
 .territory-path-fill.territory-path--svg-glow {
   filter: none;
@@ -126,7 +126,39 @@
 
 /* Stroke-only layer. Land paths use native SVG filter (attribute) so Safari shows glow; sea uses CSS. */
 .territory-path-stroke:not(.territory-path--svg-glow) {
-  filter: drop-shadow(0 0 2px var(--territory-glow-rgba, rgba(0, 0, 0, 0.25))) drop-shadow(0 0 4px var(--territory-glow-rgba-soft, rgba(0, 0, 0, 0.15)));
+  filter: drop-shadow(0 0 3px var(--territory-glow-rgba, rgba(0, 0, 0, 0.35))) drop-shadow(0 0 7px var(--territory-glow-rgba-soft, rgba(0, 0, 0, 0.25)));
+}
+
+/* Water wave scroll: CSS transform on the <pattern> element maps to patternTransform
+   in Chrome and WebKit. SMIL animateTransform on patternTransform often never repaints
+   in Safari. Duration ~one 120px tile — sea 5s, river 3s (was 12s/8s SMIL). */
+.wave-pattern-sea {
+  animation: wave-scroll-sea 5s linear infinite;
+}
+.wave-pattern-river {
+  animation: wave-scroll-river 3s linear infinite;
+}
+@keyframes wave-scroll-sea {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-120px);
+  }
+}
+@keyframes wave-scroll-river {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-120px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wave-pattern-sea,
+  .wave-pattern-river {
+    animation: none;
+  }
 }
 .territory-path-stroke {
   pointer-events: none;
@@ -189,11 +221,11 @@
 
 /* Sea zones: slightly lower opacity to match land */
 .territory-path--sea {
-  fill-opacity: 0.5;
+  fill-opacity: 0.58;
   stroke: #0d1319;
   stroke-width: 4;
-  filter: drop-shadow(0 0 2px rgba(45, 66, 88, 0.6))
-          drop-shadow(0 0 4px rgba(20, 35, 50, 0.4));
+  filter: drop-shadow(0 0 3px rgba(45, 66, 88, 0.75))
+          drop-shadow(0 0 6px rgba(20, 35, 50, 0.55));
 }
 .territory-path--sea.selected {
   fill-opacity: 0.6;
