@@ -76,6 +76,22 @@ class NonCombatMoveProblem(Problem):
         self._root_can_end_phase = bool(
             (ctx.available_actions or {}).get("can_end_phase", True)
         )
+        # Per-instance memo of the top-K enumeration, keyed by id(state) with the
+        # state held so the id stays valid. The search calls legal_actions() then
+        # priors() on the same node state, and both enumerate from scratch — on the
+        # move phases a single enumeration is the dominant per-expansion cost, so
+        # sharing it is the difference between ~2x and ~1x that cost per expansion.
+        self._enum_memo: dict[int, tuple[Any, list]] = {}
+
+    def _enumerate_top_k_cached(self, state: Any) -> tuple[list, dict[str, int]]:
+        """_enumerate_top_k memoized per state object (states are treated immutable)."""
+        key = id(state)
+        hit = self._enum_memo.get(key)
+        if hit is not None and hit[0] is state:
+            return hit[1], hit[2]
+        candidates, threat_map = self._enumerate_top_k(state)
+        self._enum_memo[key] = (state, candidates, threat_map)
+        return candidates, threat_map
 
     # ----- Problem protocol -----
 
@@ -87,7 +103,8 @@ class NonCombatMoveProblem(Problem):
             return []
 
         actions: list[HashableAction] = []
-        for from_tid, to_tid, unit_ids in self._enumerate_top_k(state):
+        candidates, _threat_map = self._enumerate_top_k_cached(state)
+        for from_tid, to_tid, unit_ids in candidates:
             action = move_units(self.faction_id, from_tid, to_tid, list(unit_ids))
             v = validate_action(state, action, self.ud, self.td, self.fd, self.cd, self.port_d)
             if v.valid:
@@ -147,12 +164,15 @@ class NonCombatMoveProblem(Problem):
 
         stuck_ids = self._stuck_aerial_instance_ids(state)
         scored: list[tuple[HashableAction, float]] = []
-        for from_tid, to_tid, unit_ids in self._enumerate_top_k(state):
+        candidates, threat_map = self._enumerate_top_k_cached(state)
+        for from_tid, to_tid, unit_ids in candidates:
             action = move_units(self.faction_id, from_tid, to_tid, list(unit_ids))
             v = validate_action(state, action, self.ud, self.td, self.fd, self.cd, self.port_d)
             if not v.valid:
                 continue
-            score = self._cheap_move_score(state, from_tid, to_tid, unit_ids)
+            score = self._cheap_move_score(
+                state, from_tid, to_tid, unit_ids, threat_from=threat_map.get(from_tid, 0)
+            )
             if stuck_ids and (set(unit_ids) & stuck_ids):
                 score += _AERIAL_RESCUE_PRIOR_BONUS
             scored.append((HashableAction(action), max(0.05, score)))
@@ -168,9 +188,10 @@ class NonCombatMoveProblem(Problem):
 
     def _enumerate_top_k(
         self, state: Any
-    ) -> list[tuple[str, str, list[str]]]:
+    ) -> tuple[list[tuple[str, str, list[str]]], dict[str, int]]:
         """
-        Generate up to MAX_NON_COMBAT_MOVE_BRANCHES ranked (from, to, unit_ids) tuples.
+        Generate up to MAX_NON_COMBAT_MOVE_BRANCHES ranked (from, to, unit_ids) tuples,
+        plus the batched per-origin enemy-reach map used while ranking.
 
         Mirrors the greedy policy's candidate construction (friendly/allied/neutral
         destinations, garrison pruning) but ranks with cheap formulas so expansion
@@ -185,6 +206,13 @@ class NonCombatMoveProblem(Problem):
             if getattr(pm, "phase", None) == "non_combat_move":
                 pending_unit_ids.update(getattr(pm, "unit_instance_ids", []) or [])
 
+        # One shared post-pending snapshot for every per-unit reachability call below
+        # (identical result to each call computing its own, N times cheaper).
+        if any(getattr(pm, "phase", None) == "non_combat_move" for pm in (state.pending_moves or [])):
+            slot_state = get_state_after_pending_moves(state, "non_combat_move", ud, td, fd)
+        else:
+            slot_state = state
+
         # Group movable instances by (from, to) for friendly/allied/neutral destinations.
         from_to_units: dict[tuple[str, str], list[str]] = {}
         for unit_info in movable:
@@ -192,7 +220,7 @@ class NonCombatMoveProblem(Problem):
             if not iid or iid in pending_unit_ids:
                 continue
             from_tid = unit_info.get("territory_id")
-            targets, _ = get_unit_move_targets(state, iid, ud, td, fd)
+            targets, _ = get_unit_move_targets(state, iid, ud, td, fd, slot_state)
             unit_def = ud.get(unit_info.get("unit_id", ""))
             for to_tid in (targets or {}).keys():
                 if not to_tid or to_tid == from_tid:
@@ -201,13 +229,22 @@ class NonCombatMoveProblem(Problem):
                     continue
                 from_to_units.setdefault((from_tid, to_tid), []).append(iid)
 
+        # One batched full-board reachability pass for every origin below, instead of
+        # a per-candidate threat scan (each of which walked every enemy unit).
+        from backend.ai.geography import count_enemies_that_can_reach_territories
+
+        origin_ids = {from_tid for from_tid, _to_tid in from_to_units}
+        threat_map = count_enemies_that_can_reach_territories(
+            origin_ids, state, faction_id, fd, td, ud
+        )
+
         candidates: list[tuple[float, tuple[str, str, list[str]]]] = []
         for (from_tid, to_tid), unit_ids in from_to_units.items():
             if not unit_ids:
                 continue
             # Garrison pruning: never strip land from a threatened origin in non-combat
             # (no relief-attack exemption — attacks already happened).
-            threat_from = self._threat_count(from_tid, state)
+            threat_from = threat_map.get(from_tid, 0)
             pruned = prune_move_unit_ids_for_garrison_floor(
                 state,
                 from_tid,
@@ -218,10 +255,11 @@ class NonCombatMoveProblem(Problem):
                 fd,
                 threat_from_count=threat_from,
                 threat_relief_attack=False,
+                effective_reach_count=threat_from,
             )
             if not pruned:
                 continue
-            pruned = filter_unit_instances_that_can_reach(state, to_tid, pruned, ud, td, fd)
+            pruned = filter_unit_instances_that_can_reach(state, to_tid, pruned, ud, td, fd, slot_state)
             if not pruned:
                 continue
             # Sea -> land: only land units may move (naval cannot go on land).
@@ -237,11 +275,14 @@ class NonCombatMoveProblem(Problem):
                 ]
                 if not pruned:
                     continue
-            score = self._cheap_move_score(state, from_tid, to_tid, pruned)
+            score = self._cheap_move_score(
+                state, from_tid, to_tid, pruned, threat_from=threat_from
+            )
             candidates.append((score, (from_tid, to_tid, pruned)))
 
         candidates.sort(key=lambda x: x[0], reverse=True)
-        return [cand for _score, cand in candidates[:MAX_NON_COMBAT_MOVE_BRANCHES]]
+        top = [cand for _score, cand in candidates[:MAX_NON_COMBAT_MOVE_BRANCHES]]
+        return top, threat_map
 
     def _destination_allowed(self, state: Any, to_tid: str, unit_def: Any) -> bool:
         """Friendly / allied / neutral for land/naval; aerials require friendly-for-landing."""
@@ -271,17 +312,31 @@ class NonCombatMoveProblem(Problem):
 
     def _stuck_aerial_instance_ids(self, state: Any) -> set[str]:
         """Aerials still on unfriendly land after pending moves (phase cannot end until they move)."""
-        sim = get_state_after_pending_moves(state, "non_combat_move", self.ud, self.td, self.fd)
+        if any(getattr(pm, "phase", None) == "non_combat_move" for pm in (state.pending_moves or [])):
+            sim = get_state_after_pending_moves(state, "non_combat_move", self.ud, self.td, self.fd)
+        else:
+            sim = state  # no same-phase pendings: post-pending board is this state
         stuck = get_aerial_units_must_move(sim, self.ud, self.td, self.fd, self.faction_id)
         return {entry.get("instance_id") for entry in stuck if entry.get("instance_id")}
 
     # ----- Cheap scoring (no sims) -----
 
-    def _cheap_move_score(self, state: Any, from_tid: str, to_tid: str, unit_ids: list[str]) -> float:
+    def _cheap_move_score(
+        self,
+        state: Any,
+        from_tid: str,
+        to_tid: str,
+        unit_ids: list[str],
+        *,
+        threat_from: int | None = None,
+    ) -> float:
         """
         Formula-only rank for a reposition candidate. Mixes destination defense value,
         forward-attack setup, and graph-distance advance toward enemy land. Used for
         both top-K ranking and priors.
+
+        threat_from: precomputed enemy-reach count for from_tid (from the batched
+        enumeration map); when None, computed on the fly.
         """
         base = territory_reinforce_base_score(to_tid, self.td, self.fd)
         asv = _attack_setup_value(to_tid, state, self.faction_id, self.fd, self.td, self.ud)
@@ -292,7 +347,8 @@ class NonCombatMoveProblem(Problem):
             score += prox * 0.6
 
         # Penalize retreating from an unthreatened origin with good forward position.
-        threat_from = self._threat_count(from_tid, state)
+        if threat_from is None:
+            threat_from = self._threat_count(from_tid, state)
         if threat_from == 0 and prox < 0.0:
             asv_from = _attack_setup_value(from_tid, state, self.faction_id, self.fd, self.td, self.ud)
             if asv_from > asv + 0.25:
@@ -307,7 +363,10 @@ class NonCombatMoveProblem(Problem):
         True when non_combat_move may end: no aerial units left on unfriendly land
         (mirrors the API / reducer end-phase guard via state after pending moves).
         """
-        sim = get_state_after_pending_moves(state, "non_combat_move", self.ud, self.td, self.fd)
+        if any(getattr(pm, "phase", None) == "non_combat_move" for pm in (state.pending_moves or [])):
+            sim = get_state_after_pending_moves(state, "non_combat_move", self.ud, self.td, self.fd)
+        else:
+            sim = state  # no same-phase pendings: post-pending board is this state
         stuck = get_aerial_units_must_move(sim, self.ud, self.td, self.fd, self.faction_id)
         return not stuck
 

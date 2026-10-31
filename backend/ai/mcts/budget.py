@@ -41,11 +41,37 @@ PHASES: tuple[str, ...] = (
     "mobilization",
 )
 
-# Per-phase difficulty -> budget table. 3.5a initializes every phase from the
-# flat BUDGETS table (zero behavior change vs get_budget); per-phase retuning
-# (3.5b) edits the entries here, e.g. cheaper budgets for the slow move-phase
-# enumerators measured in the 3.1 benchmark.
-PHASE_BUDGETS: dict[str, dict[str, SearchBudget]] = {phase: dict(BUDGETS) for phase in PHASES}
+# Per-phase retuning (3.5b), calibrated against the 3.1 latency baseline after the
+# move-phase enumerator optimizations that landed with it (batched threat map, one
+# shared post-pending snapshot, per-state enumeration memo). Each child expansion
+# in a move phase still pays a full top-K enumeration + validates (~50ms measured
+# per expansion on the benchmark snapshot, more on bloated mid-game boards), so the
+# two move phases get roughly a third of the flat iteration caps and a 1.2s hard
+# wall (vs 2.0s flat): worst-case search cost is wall time plus one overshooting
+# iteration, keeping a "normal" per-action search under the ≲2s target (the
+# frontend waits AI_STEP_DELAY_MS=2500 between /ai-step calls anyway). The fast
+# phases (purchase, combat, mobilization) exhaust or bottom out long before the
+# flat caps bind, so they keep the flat table.
+PHASE_BUDGET_OVERRIDES: dict[str, dict[str, SearchBudget]] = {
+    "combat_move": {
+        "easy": SearchBudget(max_iterations=50, max_time_seconds=0.1),
+        "normal": SearchBudget(max_iterations=200, max_time_seconds=0.4),
+        "hard": SearchBudget(max_iterations=500, max_time_seconds=1.2),
+    },
+    "non_combat_move": {
+        "easy": SearchBudget(max_iterations=50, max_time_seconds=0.1),
+        "normal": SearchBudget(max_iterations=150, max_time_seconds=0.45),
+        "hard": SearchBudget(max_iterations=400, max_time_seconds=1.2),
+    },
+}
+
+# Per-phase difficulty -> budget table. Each phase starts from the flat BUDGETS
+# table with that phase's overrides applied on top; unknown phases resolve to
+# the flat table via get_phase_budget.
+PHASE_BUDGETS: dict[str, dict[str, SearchBudget]] = {
+    phase: dict(BUDGETS, **PHASE_BUDGET_OVERRIDES.get(phase, {}))
+    for phase in PHASES
+}
 
 
 def get_budget(difficulty: str | None = None) -> SearchBudget:
@@ -60,12 +86,12 @@ def get_phase_budget(phase: str, difficulty: str | None = None) -> SearchBudget:
 
     Falls back to the global BUDGETS table when the phase is unknown, and to
     DEFAULT_DIFFICULTY when the difficulty name is unknown — so env-driven
-    difficulty selection behaves exactly like get_budget() until per-phase
-    tables diverge (3.5b).
+    difficulty selection behaves exactly like get_budget() for phases without
+    a retuned entry.
     """
     key = _resolve_difficulty(difficulty)
     table = PHASE_BUDGETS.get(phase, BUDGETS)
-    return table.get(key, BUDGETS[DEFAULT_DIFFICULTY])
+    return table.get(key, table.get(DEFAULT_DIFFICULTY, BUDGETS[DEFAULT_DIFFICULTY]))
 
 
 def _resolve_difficulty(difficulty: str | None) -> str:

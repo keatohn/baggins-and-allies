@@ -1,11 +1,12 @@
 """
-Tests for 3.5a: per-phase MCTS budget resolution.
+Tests for per-phase MCTS budget resolution (3.5a plumbing + 3.5b retuning).
 
-PHASE_BUDGETS initially mirrors the flat BUDGETS table for every phase (zero
-behavior change vs get_budget), so these tests pin the parity guarantee that
-3.5b's retuning will deliberately break per phase. Also covers env-difficulty
-resolution, fallbacks, and that all five decide_*_mcts entry points resolve
-their budget through get_phase_budget with the correct phase key.
+3.5b retunes combat_move and non_combat_move off the flat table (measured against
+the 3.1 latency baseline): those phases get smaller iteration caps and a 1.2s hard
+wall so worst-case "normal" per-action search stays under the ≲2s target. The fast
+phases (purchase, combat, mobilization) still resolve exactly like get_budget.
+Also covers env-difficulty resolution, fallbacks, and that all five decide_*_mcts
+entry points resolve their budget through get_phase_budget with the correct phase key.
 """
 
 from functools import lru_cache
@@ -40,12 +41,45 @@ def test_phase_table_covers_all_phases():
         assert set(table) == set(BUDGETS), phase
 
 
-def test_phase_budgets_match_global_table_for_now():
-    """3.5a parity: every phase resolves exactly like get_budget (no retuning yet)."""
-    for phase in PHASES:
+def test_fast_phases_match_global_table():
+    """Purchase, combat, and mobilization have cheap enumerators and keep the flat table."""
+    for phase in ("purchase", "combat", "mobilization"):
         for difficulty in BUDGETS:
             assert get_phase_budget(phase, difficulty) == get_budget(difficulty), (phase, difficulty)
         assert get_phase_budget(phase, None) == get_budget(None), phase
+
+
+# Phases 3.5b deliberately retunes off the flat table (see PHASE_BUDGET_OVERRIDES).
+_RETUNED_PHASES = ("combat_move", "non_combat_move")
+
+
+def test_retuned_phases_are_cheaper_than_global_table():
+    """3.5b: move-phase budgets never exceed the flat table on either cap."""
+    for phase in _RETUNED_PHASES:
+        for difficulty in BUDGETS:
+            phase_budget = get_phase_budget(phase, difficulty)
+            flat = get_budget(difficulty)
+            assert phase_budget.max_iterations <= flat.max_iterations, (phase, difficulty)
+            assert phase_budget.max_time_seconds <= flat.max_time_seconds, (phase, difficulty)
+            # At least one cap must be strictly cheaper, or the override is pointless.
+            assert (
+                phase_budget.max_iterations < flat.max_iterations
+                or phase_budget.max_time_seconds < flat.max_time_seconds
+            ), (phase, difficulty)
+
+
+def test_retuned_hard_wall_keeps_worst_case_under_two_seconds():
+    """
+    3.5b latency gate: hard wall + one overshooting iteration stays ≲2s.
+
+    The search checks its wall cap between iterations, so worst-case cost is the
+    wall plus one full child expansion. A 1.2s hard wall leaves ~0.8s of headroom
+    for that overshoot against the frontend's AI_STEP_DELAY_MS=2500.
+    """
+    for phase in _RETUNED_PHASES:
+        for difficulty in ("normal", "hard"):
+            budget = get_phase_budget(phase, difficulty)
+            assert budget.max_time_seconds + 1.0 <= 2.5, (phase, difficulty)
 
 
 def test_unknown_phase_falls_back_to_global_table():
@@ -56,14 +90,18 @@ def test_unknown_phase_falls_back_to_global_table():
 
 def test_unknown_difficulty_falls_back_to_default():
     for phase in PHASES:
-        assert get_phase_budget(phase, "nope") == BUDGETS[DEFAULT_DIFFICULTY], phase
-        assert get_phase_budget(phase, None) == BUDGETS[DEFAULT_DIFFICULTY], phase
+        # Unknown difficulty resolves to the phase's DEFAULT_DIFFICULTY entry:
+    # the flat normal for fast phases, the retuned normal for move phases.
+        expected = PHASE_BUDGETS[phase][DEFAULT_DIFFICULTY]
+        assert get_phase_budget(phase, "nope") == expected, phase
+        assert get_phase_budget(phase, None) == expected, phase
 
 
 def test_env_difficulty_honored(monkeypatch):
     monkeypatch.setenv("AI_MCTS_DIFFICULTY", "easy")
     for phase in PHASES:
-        assert get_phase_budget(phase, None) == BUDGETS["easy"], phase
+        # Env difficulty selects that phase's easy entry (retuned for move phases).
+        assert get_phase_budget(phase, None) == PHASE_BUDGETS[phase]["easy"], phase
     # Explicit argument still wins over env.
     assert get_phase_budget("purchase", "hard") == BUDGETS["hard"]
 
@@ -136,8 +174,10 @@ def test_entry_point_resolves_budget_for_its_phase(monkeypatch, phase, decide_fn
 
 
 def test_entry_points_do_not_share_budget_objects_across_phases():
-    """Phase tables start as independent copies, so 3.5b retunes can't leak."""
+    """Phase tables start as independent copies, so retunes can't leak across phases."""
     a = PHASE_BUDGETS["purchase"]
     b = PHASE_BUDGETS["non_combat_move"]
     assert a is not b
-    assert a["normal"] == b["normal"]  # same values, until 3.5b diverges them
+    # 3.5b diverged the move phases; the purchase table must be untouched by that.
+    assert a["normal"] == BUDGETS["normal"]
+    assert b["normal"] != BUDGETS["normal"]

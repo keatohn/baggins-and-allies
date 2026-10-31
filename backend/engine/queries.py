@@ -2282,15 +2282,19 @@ def filter_unit_instances_that_can_reach(
     unit_defs: dict[str, UnitDefinition],
     territory_defs: dict[str, TerritoryDefinition],
     faction_defs: dict[str, FactionDefinition],
+    slot_check_state: GameState | None = None,
 ) -> list[str]:
     """
     Return only those unit instance IDs that can reach to_territory_id.
     Uses each unit's remaining_movement and phase; never includes a unit that cannot reach.
+
+    slot_check_state: optional snapshot for land→sea embark capacity (same-phase pending
+    applied). Pass once per build to avoid redundant deepcopy per unit.
     """
     result = []
     for iid in unit_instance_ids:
         targets, _ = get_unit_move_targets(
-            state, iid, unit_defs, territory_defs, faction_defs
+            state, iid, unit_defs, territory_defs, faction_defs, slot_check_state
         )
         if to_territory_id in (targets or {}):
             result.append(iid)

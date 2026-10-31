@@ -89,11 +89,16 @@ def prune_move_unit_ids_for_garrison_floor(
     *,
     threat_from_count: int,
     threat_relief_attack: bool = False,
+    effective_reach_count: int | None = None,
 ) -> list[str]:
     """
     Drop land movers from unit_ids so at least required_remain friendly land units stay on
     from_tid. When threat_relief_attack is True, only one land unit must stay (counterattack
     into enemies on the destination that threaten this origin).
+
+    effective_reach_count: optional precomputed reach count for from_tid (e.g. from a
+    batched count_enemies_that_can_reach_territories map) so the full-board reach scan
+    is not repeated per candidate; when None, computed as before.
     """
     if not is_frontline(from_tid, state, faction_id, fd, td) and threat_from_count <= 0:
         return list(unit_ids)
@@ -118,7 +123,8 @@ def prune_move_unit_ids_for_garrison_floor(
         required_remain = 1
     elif threat_from_count > 0:
         eff = effective_defensive_reinforce_pressure(
-            from_tid, state, faction_id, fd, td, ud
+            from_tid, state, faction_id, fd, td, ud,
+            precomputed_reach=effective_reach_count,
         )
         required_remain = min(n_land, max(1, min(threat_from_count, eff)))
     else:

@@ -306,6 +306,48 @@ def test_json_key_is_cheap_enough_for_transposition():
     assert size < 1_000_000, f"JSON key is {size} bytes — unexpectedly large"
 
 
+# 3.5b gate: worst-case "normal" decide for the move phases must stay well under
+# the frontend's AI_STEP_DELAY_MS=2500. The cap is generous for slow CI machines
+# (local post-optimization numbers: combat_move ~90ms, non_combat_move ~550ms);
+# the printed numbers are the record, the assert only catches regressions.
+NORMAL_BUDGET_DECIDE_CAP_S = 6.0
+
+
+def test_normal_budget_move_phases_stay_under_target():
+    """3.5b verification: retuned per-phase budgets keep move-phase decides snappy."""
+    import os
+
+    from backend.ai.mcts.budget import get_phase_budget
+
+    os.environ["AI_MCTS_DIFFICULTY"] = "normal"
+    try:
+        rows = []
+        for name, problem_factory, ctx, decide_fn in _phase_scenarios():
+            if name not in ("combat_move", "non_combat_move"):
+                continue
+            budget = get_phase_budget(name, "normal")
+            decide_times = []
+            for _ in range(DECIDE_REPEATS):
+                t0 = time.perf_counter()
+                decide_fn(ctx)
+                decide_times.append(time.perf_counter() - t0)
+            decide_max = max(decide_times)
+            assert decide_max <= NORMAL_BUDGET_DECIDE_CAP_S, (
+                f"{name} normal-budget decide took {decide_max:.2f}s "
+                f"(budget {budget.max_iterations}it/{budget.max_time_seconds}s)"
+            )
+            rows.append((name, decide_max, budget))
+        print("\n=== 3.5b normal-budget move-phase decide (worst of %d) ===" % DECIDE_REPEATS)
+        for name, worst, budget in rows:
+            print(
+                f"{name:<18} worst={worst * 1000:8.1f}ms  "
+                f"budget={budget.max_iterations}it/{budget.max_time_seconds}s"
+            )
+        assert len(rows) == 2, "expected both move phases in the gate"
+    finally:
+        del os.environ["AI_MCTS_DIFFICULTY"]
+
+
 def test_tree_retention_is_bounded():
     """3.1 finding gate: one search tree's retained size stays within 3.4's cache budget."""
     state, ud, td, fd, cd, port_d = _load_setup()

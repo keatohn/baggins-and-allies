@@ -359,3 +359,76 @@ def test_decide_keeps_heuristic_when_mcts_disabled(monkeypatch):
     action = decide(ctx)
     assert action is not None
     assert action.type in ("move_units", "end_phase")
+
+
+# ---------------------------------------------------------------------------
+# Batched threat map (3.5b enumerator optimization)
+# ---------------------------------------------------------------------------
+
+
+def test_batch_threat_map_matches_single_and_does_not_mutate_faction():
+    """
+    3.5b: the batched reach-count map must agree with the per-territory wrapper
+    for every destination, and must not mutate state.current_faction (the old
+    single-territory implementation set it per enemy unit and restored it later).
+    """
+    from backend.ai.geography import (
+        count_enemies_that_can_reach_territories,
+        count_enemies_that_can_reach_territory_combat_move,
+    )
+
+    state, ud, td, fd, cd, port_d = _load_wotr_setup()
+    _plant_movable_stack(state, ud)
+    faction_id = "gondor"
+    state.current_faction = faction_id
+
+    sample = list(state.territories)[:12]
+    batch = count_enemies_that_can_reach_territories(
+        sample, state, faction_id, fd, td, ud
+    )
+    assert set(batch) == set(sample)
+    for tid in sample:
+        single = count_enemies_that_can_reach_territory_combat_move(
+            tid, state, faction_id, fd, td, ud
+        )
+        assert batch[tid] == single, tid
+    assert state.current_faction == faction_id
+
+
+def test_garrison_prune_accepts_precomputed_reach():
+    """
+    3.5b: prune_move_unit_ids_for_garrison_floor's effective_reach_count must
+    reproduce the internally computed effective_defensive_reinforce_pressure.
+    """
+    from backend.ai.garrison import prune_move_unit_ids_for_garrison_floor
+    from backend.ai.geography import count_enemies_that_can_reach_territory_combat_move
+
+    state, ud, td, fd, cd, port_d = _load_wotr_setup()
+    _plant_movable_stack(state, ud)
+    faction_id = "gondor"
+    state.phase = "non_combat_move"
+    state.current_faction = faction_id
+
+    from_tid = "north_ithilien"
+    terr = state.territories.get(from_tid)
+    if terr is None:
+        pytest.skip(f"{from_tid} not in setup")
+    unit_ids = [u.instance_id for u in terr.units]
+    if len(unit_ids) < 2:
+        pytest.skip("need a stack to prune")
+
+    threat = count_enemies_that_can_reach_territory_combat_move(
+        from_tid, state, faction_id, fd, td, ud
+    )
+    kwargs = dict(
+        threat_from_count=threat,
+        threat_relief_attack=False,
+    )
+    without = prune_move_unit_ids_for_garrison_floor(
+        state, from_tid, list(unit_ids), faction_id, ud, td, fd, **kwargs
+    )
+    with_precomputed = prune_move_unit_ids_for_garrison_floor(
+        state, from_tid, list(unit_ids), faction_id, ud, td, fd,
+        effective_reach_count=threat, **kwargs
+    )
+    assert without == with_precomputed

@@ -82,6 +82,22 @@ class CombatMoveProblem(Problem):
         self._root_can_end_phase = bool(
             (ctx.available_actions or {}).get("can_end_phase", True)
         )
+        # Per-instance memo of the top-K enumeration, keyed by id(state) with the
+        # state held so the id stays valid. The search calls legal_actions() then
+        # priors() on the same node state, and both enumerate from scratch — on the
+        # move phases a single enumeration is the dominant per-expansion cost, so
+        # sharing it is the difference between ~2x and ~1x that cost per expansion.
+        self._enum_memo: dict[int, tuple[Any, list]] = {}
+
+    def _enumerate_top_k_cached(self, state: Any) -> list:
+        """_enumerate_top_k memoized per state object (states are treated immutable)."""
+        key = id(state)
+        hit = self._enum_memo.get(key)
+        if hit is not None and hit[0] is state:
+            return hit[1]
+        result = self._enumerate_top_k(state)
+        self._enum_memo[key] = (state, result)
+        return result
 
     # ----- Problem protocol -----
 
@@ -93,7 +109,7 @@ class CombatMoveProblem(Problem):
             return []
 
         actions: list[HashableAction] = []
-        for from_tid, to_tid, unit_ids, charge_through in self._enumerate_top_k(state):
+        for from_tid, to_tid, unit_ids, charge_through in self._enumerate_top_k_cached(state):
             action = move_units(
                 self.faction_id,
                 from_tid,
@@ -158,7 +174,7 @@ class CombatMoveProblem(Problem):
             return None
 
         scored: list[tuple[HashableAction, float]] = []
-        for from_tid, to_tid, unit_ids, charge_through in self._enumerate_top_k(state):
+        for from_tid, to_tid, unit_ids, charge_through in self._enumerate_top_k_cached(state):
             action = move_units(
                 self.faction_id,
                 from_tid,
@@ -194,7 +210,10 @@ class CombatMoveProblem(Problem):
         faction_id = self.faction_id
         ud, td, fd = self.ud, self.td, self.fd
 
-        state_after = get_state_after_pending_moves(state, "combat_move", ud, td, fd)
+        if any(getattr(pm, "phase", None) == "combat_move" for pm in (state.pending_moves or [])):
+            state_after = get_state_after_pending_moves(state, "combat_move", ud, td, fd)
+        else:
+            state_after = state  # no same-phase pendings: post-pending board is this state
         movable = get_movable_units(state, faction_id, ud, fd)
         pending_unit_ids: set[str] = set()
         for pm in (state.pending_moves or []):
@@ -209,7 +228,7 @@ class CombatMoveProblem(Problem):
             if not iid or iid in pending_unit_ids:
                 continue
             from_tid = unit_info.get("territory_id")
-            targets, charge_routes = get_unit_move_targets(state, iid, ud, td, fd)
+            targets, charge_routes = get_unit_move_targets(state, iid, ud, td, fd, state_after)
             for to_tid in (targets or {}).keys():
                 if not to_tid or to_tid == from_tid:
                     continue
@@ -220,6 +239,15 @@ class CombatMoveProblem(Problem):
                 if charge_routes.get(to_tid):
                     charge_routes_per_unit.setdefault(key, {})[iid] = charge_routes[to_tid]
 
+        # One batched full-board reachability pass for every origin below, instead of
+        # a per-candidate threat scan (each of which walked every enemy unit).
+        from backend.ai.geography import count_enemies_that_can_reach_territories
+
+        origin_ids = {from_tid for from_tid, _to_tid in from_to_units}
+        threat_map = count_enemies_that_can_reach_territories(
+            origin_ids, state, faction_id, fd, td, ud
+        )
+
         candidates: list[tuple[float, tuple[str, str, list[str], list[str]]]] = []
         for (from_tid, to_tid), unit_ids in from_to_units.items():
             if not unit_ids:
@@ -229,7 +257,7 @@ class CombatMoveProblem(Problem):
             threat_relief = move_attacks_enemy_stack_that_threatens_origin(
                 from_tid, to_tid, state, faction_id, fd, td, ud
             )
-            threat_from = self._threat_count(from_tid, state)
+            threat_from = threat_map.get(from_tid, 0)
             pruned = prune_move_unit_ids_for_garrison_floor(
                 state,
                 from_tid,
@@ -240,10 +268,11 @@ class CombatMoveProblem(Problem):
                 fd,
                 threat_from_count=threat_from,
                 threat_relief_attack=threat_relief,
+                effective_reach_count=threat_from,
             )
             if not pruned:
                 continue
-            pruned = filter_unit_instances_that_can_reach(state, to_tid, pruned, ud, td, fd)
+            pruned = filter_unit_instances_that_can_reach(state, to_tid, pruned, ud, td, fd, state_after)
             if not pruned:
                 continue
             # Sea -> land: only land units may move (naval cannot go on land).
@@ -269,13 +298,6 @@ class CombatMoveProblem(Problem):
 
         candidates.sort(key=lambda x: x[0], reverse=True)
         return [cand for _score, cand in candidates[:MAX_COMBAT_MOVE_BRANCHES]]
-
-    def _threat_count(self, from_tid: str, state: Any) -> int:
-        from backend.ai.geography import count_enemies_that_can_reach_territory_combat_move
-
-        return count_enemies_that_can_reach_territory_combat_move(
-            from_tid, state, self.faction_id, self.fd, self.td, self.ud
-        )
 
     def _is_boat(self, unit_id: str) -> bool:
         from backend.engine.queries import _is_water_boat
@@ -415,7 +437,10 @@ class CombatMoveProblem(Problem):
         True when combat_move may end: no loaded boats that must attack and no
         unresolved idle sails (mirrors the API / reducer end-phase guards).
         """
-        sim = get_state_after_pending_moves(state, "combat_move", self.ud, self.td, self.fd)
+        if any(getattr(pm, "phase", None) == "combat_move" for pm in (state.pending_moves or [])):
+            sim = get_state_after_pending_moves(state, "combat_move", self.ud, self.td, self.fd)
+        else:
+            sim = state  # no same-phase pendings: post-pending board is this state
         if getattr(sim, "loaded_naval_must_attack_instance_ids", None):
             return False
         if getattr(sim, "combat_move_naval_idle_sail_instance_ids", None):

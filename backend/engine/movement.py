@@ -1352,11 +1352,19 @@ def get_reachable_territories_for_unit(
     if phase in ("combat_move", "non_combat_move"):
         embark_slot_state = slot_check_state
         if embark_slot_state is None:
-            from backend.engine.reducer import get_state_after_pending_moves
-
-            embark_slot_state = get_state_after_pending_moves(
-                state, phase, unit_defs, territory_defs, faction_defs
+            # With no same-phase pending moves the post-pending board IS this state;
+            # skip the full-state deepcopy get_state_after_pending_moves would make.
+            has_same_phase_pending = any(
+                getattr(pm, "phase", None) == phase for pm in (state.pending_moves or [])
             )
+            if has_same_phase_pending:
+                from backend.engine.reducer import get_state_after_pending_moves
+
+                embark_slot_state = get_state_after_pending_moves(
+                    state, phase, unit_defs, territory_defs, faction_defs
+                )
+            else:
+                embark_slot_state = state
 
     # Filter destinations based on phase and unit type
     filtered_reachable = {}
