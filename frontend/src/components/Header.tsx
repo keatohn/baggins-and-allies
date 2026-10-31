@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { GameState } from '../types/game';
 import type { ApiFactionStats, SpecialDefinition } from '../services/api';
 import StrongholdAllianceBar from './StrongholdAllianceBar';
+import { useMenuScroll } from './MenuScrollContext';
 import { GameStatsModal, RingsOfPowerModal, UnitStatsModal, type RingsOfPowerData, type StatsRingMark, type UnitForStats } from './StatsModals';
 import './Header.css';
 
@@ -50,6 +51,7 @@ function subfactionMarks(
 }
 
 function Header({ gameState, turnOrderForTicker, factionData, factionStats, ringsByFaction, ringsOfPower = null, unitsByFaction = {}, gameName = null, setupDisplayName = null, specials = {}, specialsOrder: _specialsOrder = [], unitsBySpecial = {}, onOpenCombatSim }: HeaderProps) {
+  const { navigateWithScroll } = useMenuScroll();
   const [statsOpen, setStatsOpen] = useState(false);
   const [ringsOpen, setRingsOpen] = useState(false);
   const [specialsOpen, setSpecialsOpen] = useState(false);
@@ -69,7 +71,16 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
           factionColor ? { ['--header-faction-accent' as string]: factionColor } : undefined
         }
       >
-        <Link to="/" className="header-menu-btn" title="Main menu" aria-label="Main menu">
+        <Link
+          to="/"
+          className="header-menu-btn"
+          title="Main menu"
+          aria-label="Main menu"
+          onClick={(e) => {
+            e.preventDefault();
+            navigateWithScroll('/');
+          }}
+        >
           Menu
         </Link>
         <button
