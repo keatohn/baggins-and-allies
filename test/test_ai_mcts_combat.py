@@ -7,8 +7,8 @@ import random
 
 import pytest
 
-from backend.engine.actions import end_phase
-from backend.engine.queries import validate_action
+from backend.engine.actions import end_phase, retreat
+from backend.engine.queries import get_retreat_options, validate_action
 from backend.engine.reducer import apply_action
 from backend.engine.state import ActiveCombat, Unit
 
@@ -144,6 +144,48 @@ def test_legal_actions_all_pass_validation_with_active_combat():
         action = _unwrap(haction)
         v = validate_action(state, action, ud, td, fd, cd, port_d)
         assert v.valid, f"illegal action {action.type} {action.payload}: {v.error}"
+
+
+def test_retreat_validation_rejects_prefire_before_attackers_rolled():
+    """validate_action must mirror the reducer's retreat block during prefire.
+
+    _handle_retreat raises until attackers_have_rolled (archer/stealth prefire
+    runs first); without this guard the MCTS combat enumerator offered retreats
+    that crash apply() mid-search.
+    """
+    state, ud, td, fd, cd, port_d = _load_wotr_setup()
+    _plant_active_combat(state, ud, td)
+    state.phase = "combat"
+    state.current_faction = "gondor"
+    action = retreat("gondor", "north_ithilien")
+
+    state.active_combat.attackers_have_rolled = True
+    ok = validate_action(state, action, ud, td, fd, cd, port_d)
+    assert ok.valid, f"retreat after the attacker rolls should pass here: {ok.error}"
+
+    state.active_combat.attackers_have_rolled = False
+    blocked = validate_action(state, action, ud, td, fd, cd, port_d)
+    assert not blocked.valid
+    assert "attackers have rolled" in blocked.error
+
+
+def test_legal_actions_exclude_retreat_during_prefire():
+    """During a prefire round the enumerator offers continue only, no retreat."""
+    state, ud, td, fd, cd, port_d = _load_wotr_setup()
+    _plant_active_combat(state, ud, td)
+    ctx = _combat_ctx(state, ud, td, fd, cd, port_d)
+    problem = CombatProblem(ctx, rng=random.Random(0))
+
+    assert get_retreat_options(state, td, fd, ud), (
+        "planted battle must have a retreat option for this to be meaningful"
+    )
+    state.active_combat.attackers_have_rolled = True
+    assert any(a.type == "retreat" for a in problem.legal_actions(state))
+
+    state.active_combat.attackers_have_rolled = False
+    actions = problem.legal_actions(state)
+    assert any(a.type == "continue_combat" for a in actions)
+    assert not any(a.type == "retreat" for a in actions)
 
 
 def test_legal_actions_initiate_plus_end_phase_when_legal():

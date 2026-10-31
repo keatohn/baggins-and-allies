@@ -1675,6 +1675,14 @@ def _validate_retreat(
     if not state.active_combat:
         return ValidationResult(False, "No active combat to retreat from")
 
+    if not getattr(state.active_combat, "attackers_have_rolled", True):
+        # Mirror _handle_retreat: retreat is blocked until round 1 has been run
+        # (defender archer/stealth prefire happens before the attacker rolls).
+        return ValidationResult(
+            False,
+            "Cannot retreat until attackers have rolled (after archer or stealth prefire, continue combat first)",
+        )
+
     if getattr(state.active_combat, "sea_zone_id", None):
         return ValidationResult(False, "Retreat is not allowed during a sea raid")
 
