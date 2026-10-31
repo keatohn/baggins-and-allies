@@ -563,6 +563,7 @@ const MAX_SCALE = 3;
 /**
  * Per wheel event: scale multiplier from deltaY (gentler than a fixed ±10% step).
  * Normalizes DOM_DELTA_LINE / PAGE so different devices feel similar; caps max change per event.
+ * Ctrl+wheel (browser pinch signal) uses tiny deltas — boost so pinch feels responsive.
  */
 function wheelZoomScaleMultiplier(e: WheelEvent): number {
   let dy = e.deltaY;
@@ -571,6 +572,7 @@ function wheelZoomScaleMultiplier(e: WheelEvent): number {
   } else if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
     dy *= 320;
   }
+  if (e.ctrlKey) dy *= 50;
   const k = 0.00028;
   const raw = Math.exp(-dy * k);
   return Math.max(0.978, Math.min(1.022, raw));
@@ -3795,8 +3797,9 @@ function GameMap({
     };
   }, []);
 
-  // Non-passive wheel listener: mouse wheel zooms toward cursor.
-  // Hold Shift to pan with trackpads when needed.
+  // Non-passive wheel listener.
+  // Trackpad: two-finger scroll pans; pinch (ctrlKey) zooms toward cursor.
+  // Mouse: plain wheel pans; Ctrl+wheel zooms.
   useEffect(() => {
     const el = wrapperRef.current;
     if (!el) return;
@@ -3814,8 +3817,8 @@ function GameMap({
       const maxX = Math.max(0, wrapper.clientWidth - scaledW);
       const maxY = Math.max(0, wrapper.clientHeight - scaledH);
 
-      if (!e.shiftKey) {
-        // Zoom toward cursor for wheel and pinch gestures.
+      if (e.ctrlKey) {
+        // Zoom toward cursor for pinch gestures and Ctrl+wheel.
         const rect = wrapper.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
@@ -3835,9 +3838,9 @@ function GameMap({
         newY = Math.max(newMinY, Math.min(newMaxY, newY));
         setTransform({ x: newX, y: newY, scale: newScale });
       } else {
-        // Optional trackpad pan while holding Shift.
-        let newX = Math.max(minX, Math.min(maxX, t.x + e.deltaX));
-        let newY = Math.max(minY, Math.min(maxY, t.y + e.deltaY));
+        // Pan with two-finger scroll (and plain mouse wheel).
+        const newX = Math.max(minX, Math.min(maxX, t.x + e.deltaX));
+        const newY = Math.max(minY, Math.min(maxY, t.y + e.deltaY));
         setTransform({ ...t, x: newX, y: newY });
       }
     };
