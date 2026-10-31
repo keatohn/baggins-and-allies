@@ -11,6 +11,7 @@ import GameList from './pages/GameList.tsx'
 import JoinGame from './pages/JoinGame.tsx'
 import Profile from './pages/Profile.tsx'
 import Admin from './pages/Admin.tsx'
+import MenuScrollOverlay from './components/MenuScrollOverlay'
 import api, { AUTH_CHANGED_EVENT, getAuthToken } from './services/api'
 import {
   playUiClickSound,
@@ -221,6 +222,7 @@ if (!rootEl) {
       <AppErrorBoundary>
         <BrowserRouter>
           <MenuAmbienceController />
+          <MenuScrollOverlay />
           <Routes>
             <Route path="/" element={<MainMenu />} />
             <Route path="/login" element={<Login />} />

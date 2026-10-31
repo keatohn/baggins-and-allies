@@ -1,0 +1,151 @@
+/* Decorative parchment scroll ends framing menu pages (issue #44 phase 1).
+   Pure CSS: cylinder-shaded rolls + finials + parchment faces; no image assets. */
+
+.menu-scroll-overlay {
+  --scroll-roll-w: 32px;
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.menu-scroll-panel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 50vw;
+  display: flex;
+  align-items: stretch;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
+}
+
+/* Idle on menu routes: parked so only the roll peeks in from the screen edge. */
+.menu-scroll-panel--left {
+  left: 0;
+  transform: translateX(calc(-100% + var(--scroll-roll-w)));
+}
+
+.menu-scroll-panel--right {
+  right: 0;
+  transform: translateX(calc(100% - var(--scroll-roll-w)));
+}
+
+/* Idle on game routes: fully off-screen. */
+.menu-scroll-overlay--hidden .menu-scroll-panel--left {
+  transform: translateX(-100%);
+}
+
+.menu-scroll-overlay--hidden .menu-scroll-panel--right {
+  transform: translateX(100%);
+}
+
+/* Parchment face — visible mid-transition when panels meet (phase 2+); parked off-screen otherwise. */
+.menu-scroll-panel__face {
+  flex: 1;
+  min-width: 0;
+  background:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 3px,
+      rgba(61, 41, 20, 0.025) 3px 4px
+    ),
+    radial-gradient(
+      120% 100% at 50% 50%,
+      var(--parchment-light) 0%,
+      var(--parchment) 55%,
+      var(--parchment-dark) 100%
+    );
+}
+
+.menu-scroll-panel--left .menu-scroll-panel__face {
+  box-shadow: inset -10px 0 18px -6px rgba(61, 41, 20, 0.35);
+}
+
+.menu-scroll-panel--right .menu-scroll-panel__face {
+  box-shadow: inset 10px 0 18px -6px rgba(61, 41, 20, 0.35);
+}
+
+/* The roll: a cylinder of parchment wrapped around a rod. */
+.menu-scroll-panel__roll {
+  position: relative;
+  flex-shrink: 0;
+  width: var(--scroll-roll-w);
+  background: linear-gradient(
+    90deg,
+    #5c4024 0%,
+    #7a5a34 12%,
+    #a8885a 28%,
+    #dcc99a 46%,
+    #f0e2bc 52%,
+    #dcc99a 58%,
+    #a8885a 74%,
+    #7a5a34 88%,
+    #4a331c 100%
+  );
+  box-shadow: inset 0 0 10px rgba(40, 26, 10, 0.4);
+}
+
+.menu-scroll-panel--left .menu-scroll-panel__roll {
+  box-shadow:
+    inset 0 0 10px rgba(40, 26, 10, 0.4),
+    4px 0 14px rgba(61, 41, 20, 0.3);
+}
+
+.menu-scroll-panel--right .menu-scroll-panel__roll {
+  box-shadow:
+    inset 0 0 10px rgba(40, 26, 10, 0.4),
+    -4px 0 14px rgba(61, 41, 20, 0.3);
+}
+
+/* Finial knobs at top and bottom of the rod. */
+.menu-scroll-panel__roll::before,
+.menu-scroll-panel__roll::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: calc(var(--scroll-roll-w) + 10px);
+  height: 11px;
+  transform: translateX(-50%);
+  border-radius: 45% / 50%;
+  background: radial-gradient(
+    70% 100% at 50% 30%,
+    #e0c060 0%,
+    #a07d1c 45%,
+    #6b5210 100%
+  );
+  box-shadow: 0 1px 3px rgba(40, 26, 10, 0.45);
+}
+
+.menu-scroll-panel__roll::before {
+  top: -3px;
+}
+
+.menu-scroll-panel__roll::after {
+  bottom: -3px;
+  background: radial-gradient(
+    70% 100% at 50% 70%,
+    #e0c060 0%,
+    #a07d1c 45%,
+    #6b5210 100%
+  );
+}
+
+@media (max-width: 767px) {
+  .menu-scroll-overlay {
+    --scroll-roll-w: 16px;
+  }
+
+  .menu-scroll-panel__roll::before,
+  .menu-scroll-panel__roll::after {
+    width: calc(var(--scroll-roll-w) + 6px);
+    height: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu-scroll-panel {
+    transition: none;
+  }
+}
