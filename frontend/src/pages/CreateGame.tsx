@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
 import { api, type SetupInfo } from '../services/api';
 import ScenarioTimeline from '../components/ScenarioTimeline';
 import { useMenuScroll } from '../components/MenuScrollContext';
+import MenuLink from '../components/MenuLink';
 import './CreateGame.css';
 
 function RuleLabel({ name, description }: { name: string; description?: string }) {
@@ -290,7 +290,7 @@ export default function CreateGame() {
           </button>
         </form>
       )}
-      <Link to="/" className="page-menu-btn create-game-page__menu-anchor">Menu</Link>
+      <MenuLink to="/" className="page-menu-btn create-game-page__menu-anchor">Menu</MenuLink>
     </div>
   );
 }

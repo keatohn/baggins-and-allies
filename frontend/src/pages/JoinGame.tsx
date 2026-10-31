@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
 import { api } from '../services/api';
 import { useMenuScroll } from '../components/MenuScrollContext';
+import MenuLink from '../components/MenuLink';
 import './JoinGame.css';
 
 export default function JoinGame() {
@@ -50,7 +50,7 @@ export default function JoinGame() {
           {loading ? 'Joining…' : 'Join game'}
         </button>
       </form>
-      <Link to="/" className="page-menu-btn join-game-page__menu-anchor">Menu</Link>
+      <MenuLink to="/" className="page-menu-btn join-game-page__menu-anchor">Menu</MenuLink>
     </div>
   );
 }

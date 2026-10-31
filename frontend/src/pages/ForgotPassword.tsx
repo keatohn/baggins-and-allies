@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../services/api';
+import { useMenuScroll } from '../components/MenuScrollContext';
+import MenuLink from '../components/MenuLink';
 import './Auth.css';
 
 /**
@@ -8,7 +9,7 @@ import './Auth.css';
  * together with a new password. The temp password is never a login credential.
  */
 export default function ForgotPassword() {
-  const navigate = useNavigate();
+  const { navigateWithScroll } = useMenuScroll();
   const [step, setStep] = useState<'request' | 'reset'>('request');
   const [email, setEmail] = useState('');
   const [tempPassword, setTempPassword] = useState('');
@@ -42,7 +43,7 @@ export default function ForgotPassword() {
     setLoading(true);
     try {
       await api.resetPassword(email.trim(), tempPassword.trim(), newPassword);
-      navigate('/login', { replace: true, state: { passwordReset: true } });
+      navigateWithScroll('/login', { replace: true, state: { passwordReset: true } });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Reset failed. Please try again.');
     } finally {
@@ -76,7 +77,7 @@ export default function ForgotPassword() {
           </button>
         </form>
         <p className="auth-page__footer">
-          Remembered it? <Link to="/login">Log in</Link>
+          Remembered it? <MenuLink to="/login">Log in</MenuLink>
         </p>
       </div>
     );

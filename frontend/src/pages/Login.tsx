@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { api, setAuthToken } from '../services/api';
+import { useMenuScroll } from '../components/MenuScrollContext';
+import MenuLink from '../components/MenuLink';
 import './Auth.css';
 
 export default function Login() {
-  const navigate = useNavigate();
+  const { navigateWithScroll } = useMenuScroll();
   const location = useLocation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -23,7 +25,7 @@ export default function Login() {
     try {
       const res = await api.login(email.trim(), password);
       setAuthToken(res.access_token);
-      navigate('/', { replace: true });
+      navigateWithScroll('/', { replace: true });
     } catch (err) {
       const raw = err instanceof Error ? err.message : 'Login failed';
       const isNetwork =
@@ -78,10 +80,10 @@ export default function Login() {
         </button>
       </form>
       <p className="auth-page__footer">
-        <Link to="/forgot-password">Forgot password?</Link>
+        <MenuLink to="/forgot-password">Forgot password?</MenuLink>
       </p>
       <p className="auth-page__footer">
-        Don’t have an account? <Link to="/register">Create Account</Link>
+        Don’t have an account? <MenuLink to="/register">Create Account</MenuLink>
       </p>
     </div>
   );

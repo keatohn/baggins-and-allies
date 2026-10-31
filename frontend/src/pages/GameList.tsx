@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { api } from '../services/api';
 import { useMenuScroll } from '../components/MenuScrollContext';
+import MenuLink from '../components/MenuLink';
 import type { GameListItem, AuthPlayer, ForfeitOptionsResponse } from '../services/api';
 import StrongholdAllianceBar from '../components/StrongholdAllianceBar';
 import './GameList.css';
@@ -188,7 +188,7 @@ export default function GameList() {
     return (
       <div className="game-list-page">
         <p className="game-list__error">{error}</p>
-        <Link to="/">Back</Link>
+        <MenuLink to="/">Back</MenuLink>
       </div>
     );
   }
@@ -200,7 +200,7 @@ export default function GameList() {
   return (
     <div className="game-list-page" data-page="load-game">
       <header className="game-list-page__header">
-        <Link to="/" className="page-menu-btn">Menu</Link>
+        <MenuLink to="/" className="page-menu-btn">Menu</MenuLink>
       </header>
       {forfeitResult && (
         <div className="game-list__result" role="status">

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
+import MenuLink from '../components/MenuLink';
 import {
   setGameMusicVolume,
   setGameSfxVolume,
@@ -385,9 +386,9 @@ export default function Profile() {
         </div>
       </div>
 
-      <Link to="/" className="page-menu-btn">
+      <MenuLink to="/" className="page-menu-btn">
         Menu
-      </Link>
+      </MenuLink>
     </div>
   );
 }
