@@ -845,6 +845,10 @@
   grid-row: 3;
 }
 
+.admin-graph__header .admin-form__micro.mapov-landscape-hint {
+  grid-row: 4;
+}
+
 .admin-graph__key {
   grid-column: 1 / -1;
   grid-row: 4;
