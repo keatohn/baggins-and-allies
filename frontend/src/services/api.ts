@@ -3,6 +3,7 @@
  */
 
 import { syncAudioFromAuthPlayer, setAudioFileGains, setMenuMusicFiles } from '../audio/gameAudio';
+import type { MapOverridesData } from '../types/game';
 import type { SignalPreset, TerritorySignalMap } from '../territorySignals';
 
 /**
@@ -457,6 +458,8 @@ export interface ApiSubfactionDefinition {
   color: string;
   /** Filename in assets/factions. Omitted = use the parent faction's icon. */
   icon?: string | null;
+  /** Map stronghold/capital art. Omitted = use this subfaction's icon. */
+  banner?: string | null;
 }
 
 export interface ApiFactionDefinition {
@@ -466,6 +469,8 @@ export interface ApiFactionDefinition {
   color: string;
   capital: string;
   icon?: string;
+  /** Map stronghold and capital art in assets/factions. Omitted = use icon. */
+  banner?: string | null;
   /** Turn music in assets/audio/music; stem(s) with .mp3/.ogg fallbacks. One file or ordered list (playlist cycles until turn changes). Omitted = use faction id. */
   music?: string | string[];
   subfactions?: ApiSubfactionDefinition[];
@@ -656,6 +661,15 @@ export interface AdminSetupListItem {
   updated_at: string | null;
 }
 
+/** Row in the admin users report. */
+export interface AdminUserItem {
+  id: string;
+  username: string;
+  email: string;
+  /** ISO timestamp of the most recent successful login; null until first login. */
+  last_login: string | null;
+}
+
 /** Full setup document for admin editor (matches backend setup JSON files). */
 export interface AdminSetupBundle {
   id: string;
@@ -842,6 +856,8 @@ export interface GameMeta {
 export interface ForfeitOptionsResponse {
   factions: { faction_id: string; display_name: string; alliance: string }[];
   assignees: { id: string; label: string }[];
+  /** True when this is the last human in an active game — forfeiting ends the game and loses for their alliance. */
+  forfeit_ends_game?: boolean;
 }
 
 export interface GameListPlayer {
@@ -959,6 +975,18 @@ export const api = {
     syncAudioFromAuthPlayer(res.player);
     return res;
   },
+  /** Start forgot-password: backend emails a single-use temp password. Response is always generic. */
+  forgotPassword: async (email: string) => {
+    return authFetchJson<{ message: string }>('/auth/forgot-password', { email });
+  },
+  /** Complete forgot-password with the emailed temp password and a new password. */
+  resetPassword: async (email: string, tempPassword: string, newPassword: string) => {
+    return authFetchJson<{ message: string }>('/auth/reset-password', {
+      email,
+      temp_password: tempPassword,
+      new_password: newPassword,
+    });
+  },
   authMe: async () => {
     const p = await fetchJson<AuthPlayer>('/auth/me');
     syncAudioFromAuthPlayer(p);
@@ -976,6 +1004,7 @@ export const api = {
   adminListSetups: () =>
     fetchJson<{ setups: AdminSetupListItem[] }>('/admin/setups'),
   adminListGames: () => fetchJson<{ games: GameListItem[] }>('/admin/games'),
+  adminListUsers: () => fetchJson<{ users: AdminUserItem[] }>('/admin/users'),
   getAudioGains: async () => {
     const r = await fetchJson<{ gains: AudioGainsMap; menu_music?: string[] }>('/audio/gains');
     setAudioFileGains(r.gains);
@@ -984,6 +1013,20 @@ export const api = {
   },
   getSignals: () => fetchJson<{ presets: SignalPreset[] }>('/signals'),
   getCatalog: () => fetchJson<Catalog>('/catalog'),
+  /** Public read: icon/location overrides for a map (every client renders with them). */
+  getMapOverrides: (mapBase: string) =>
+    fetchJson<{ map_base: string; overrides: MapOverridesData }>(`/maps/${encodeURIComponent(mapBase)}/overrides`),
+  /** Admin: distinct map asset names known from setups, for the Maps editor. */
+  adminListMaps: () => fetchJson<{ maps: string[] }>('/admin/maps'),
+  /** Admin: replace a map's whole overrides blob (shared by every setup using that map). */
+  adminPutMapOverrides: (mapBase: string, overrides: MapOverridesData) =>
+    fetchJson<{ ok: boolean; map_base: string; overrides: MapOverridesData }>(
+      `/admin/maps/${encodeURIComponent(mapBase)}/overrides`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(overrides),
+      },
+    ),
   adminPutCatalog: (catalog: Catalog) =>
     fetchJson<{ ok: boolean; catalog: Catalog }>('/admin/catalog', {
       method: 'PUT',
@@ -1109,7 +1152,7 @@ export const api = {
   getForfeitOptions: (gameId: string) =>
     fetchJson<ForfeitOptionsResponse>(`/games/${gameId}/forfeit-options`),
   forfeitGame: (gameId: string, body: { faction_assignments: Record<string, string> }) =>
-    fetchJson<{ message: string }>(`/games/${gameId}/forfeit`, {
+    fetchJson<{ message: string; game_over?: boolean; winner?: string }>(`/games/${gameId}/forfeit`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

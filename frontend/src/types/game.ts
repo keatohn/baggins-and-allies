@@ -121,6 +121,149 @@ export interface MapTransform {
   scale: number;
 }
 
+// Map-level icon/location overrides (admin-edited, shared by every setup using the map).
+// Positions are SVG viewBox coordinates — the same space as the in-SVG hint_* circles.
+export type MapSpotKind = 'unit' | 'marker' | 'center' | 'number' | 'icons' | 'logo';
+export type MapOverrideFocus = 'calculated' | 'override';
+export type MapOverridePoint = { x: number; y: number };
+
+export interface MapOverrideTerritoryEntry {
+  /** "calculated" = ignore overrides for this territory; "override" = use the listed positions (omitted kinds keep calculated). */
+  focus: MapOverrideFocus;
+  positions?: Partial<Record<MapSpotKind, MapOverridePoint>>;
+}
+
+export type LandscapeLayer = 'interior' | 'border';
+
+export interface LandscapePlacement {
+  /** Category folder key, e.g. "forest" | "mountains" | "volcano" | "hills". */
+  cat: string;
+  /** PNG filename within the flat landscape asset folder, e.g. "forest_large.png". */
+  img: string;
+  x: number;
+  y: number;
+  layer: LandscapeLayer;
+  /** Display scale (default 1, clamped 0.25–4). */
+  s?: number;
+  /** Placed by Auto-generate — re-generated on the next auto pass; manual ones are preserved. */
+  auto?: boolean;
+}
+
+export interface LandscapeOverrides {
+  territories: Record<string, LandscapePlacement[]>;
+}
+
+export interface MapOverridesData {
+  territories: Record<string, MapOverrideTerritoryEntry>;
+  landscape?: LandscapeOverrides;
+}
+
+/** Accept `[x, y]` or `{ x, y }`; anything else → null. */
+export function normalizeMapOverridePoint(raw: unknown): MapOverridePoint | null {
+  let x: unknown;
+  let y: unknown;
+  if (Array.isArray(raw) && raw.length === 2) {
+    [x, y] = raw;
+  } else if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const rec = raw as Record<string, unknown>;
+    x = rec.x;
+    y = rec.y;
+  } else {
+    return null;
+  }
+  if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
+}
+
+export function emptyMapOverrides(): MapOverridesData {
+  return { territories: {} };
+}
+
+const LANDSCAPE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const LANDSCAPE_SCALE_MIN = 0.25;
+const LANDSCAPE_SCALE_MAX = 4;
+const MAX_LANDSCAPE_PER_TERRITORY = 50;
+const MAX_LANDSCAPE_TOTAL = 2500;
+
+/** Lenient read of one landscape placement; anything malformed → null. */
+export function normalizeLandscapePlacement(raw: unknown): LandscapePlacement | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const rec = raw as Record<string, unknown>;
+  const cat = rec.cat;
+  const img = rec.img;
+  if (typeof cat !== 'string' || !LANDSCAPE_NAME_RE.test(cat) || cat.includes('..')) return null;
+  if (typeof img !== 'string' || !LANDSCAPE_NAME_RE.test(img) || img.includes('..')) return null;
+  if (!img.toLowerCase().endsWith('.png')) return null;
+  const layer = rec.layer === 'border' ? 'border' : rec.layer === 'interior' ? 'interior' : rec.layer == null ? 'interior' : null;
+  if (!layer) return null;
+  const x = rec.x;
+  const y = rec.y;
+  if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+  const out: LandscapePlacement = { cat, img, x, y, layer };
+  if (typeof rec.s === 'number' && Number.isFinite(rec.s)) {
+    out.s = Math.min(LANDSCAPE_SCALE_MAX, Math.max(LANDSCAPE_SCALE_MIN, rec.s));
+  }
+  if (rec.auto === true) out.auto = true;
+  return out;
+}
+
+function normalizeLandscapeSection(raw: unknown): LandscapeOverrides | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const source = (raw as Record<string, unknown>).territories;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return undefined;
+  const out: Record<string, LandscapePlacement[]> = {};
+  let total = 0;
+  for (const [tid, listRaw] of Object.entries(source as Record<string, unknown>)) {
+    if (!Array.isArray(listRaw)) continue;
+    const cleaned: LandscapePlacement[] = [];
+    for (const item of listRaw) {
+      if (total >= MAX_LANDSCAPE_TOTAL || cleaned.length >= MAX_LANDSCAPE_PER_TERRITORY) break;
+      const one = normalizeLandscapePlacement(item);
+      if (one) {
+        cleaned.push(one);
+        total += 1;
+      }
+    }
+    if (cleaned.length) out[tid] = cleaned;
+  }
+  return Object.keys(out).length ? { territories: out } : undefined;
+}
+
+/** Lenient read of a server payload into the canonical shape (drops malformed entries). */
+export function normalizeMapOverrides(raw: unknown): MapOverridesData {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return emptyMapOverrides();
+  const rec = raw as Record<string, unknown>;
+  const source = rec.territories;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    const landscapeOnly = normalizeLandscapeSection(rec.landscape);
+    return landscapeOnly ? { territories: {}, landscape: landscapeOnly } : emptyMapOverrides();
+  }
+  const out: Record<string, MapOverrideTerritoryEntry> = {};
+  for (const [tid, entryRaw] of Object.entries(source as Record<string, unknown>)) {
+    if (!entryRaw || typeof entryRaw !== 'object' || Array.isArray(entryRaw)) continue;
+    const entry = entryRaw as Record<string, unknown>;
+    if (entry.focus === 'calculated') {
+      out[tid] = { focus: 'calculated' };
+      continue;
+    }
+    if (entry.focus !== 'override') continue;
+    const positions: Partial<Record<MapSpotKind, MapOverridePoint>> = {};
+    if (entry.positions && typeof entry.positions === 'object' && !Array.isArray(entry.positions)) {
+      for (const [kind, ptRaw] of Object.entries(entry.positions as Record<string, unknown>)) {
+        const pt = normalizeMapOverridePoint(ptRaw);
+        if (pt && (kind === 'unit' || kind === 'marker' || kind === 'center' || kind === 'number' || kind === 'icons' || kind === 'logo')) {
+          positions[kind] = pt;
+        }
+      }
+    }
+    out[tid] = { focus: 'override', positions };
+  }
+  const result: MapOverridesData = { territories: out };
+  const landscape = normalizeLandscapeSection(rec.landscape);
+  if (landscape) result.landscape = landscape;
+  return result;
+}
+
 // Event types for logging (backend-enriched events include payload with turn_number, phase, faction, message)
 export interface GameEvent {
   id: string;

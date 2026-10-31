@@ -28,6 +28,11 @@ function truncateUsername(username: string, maxChars: number = 12): string {
   return `${username.slice(0, maxChars)}...`;
 }
 
+function allianceLabel(alliance: string | undefined): string {
+  if (!alliance) return 'your team';
+  return alliance.charAt(0).toUpperCase() + alliance.slice(1).toLowerCase();
+}
+
 function playerNames(g: GameListItem): string | null {
   const names: string[] = [];
   for (const p of g.players ?? []) {
@@ -55,6 +60,9 @@ export default function GameList() {
   const [forfeitOptions, setForfeitOptions] = useState<ForfeitOptionsResponse | null>(null);
   const [forfeitOptionsLoading, setForfeitOptionsLoading] = useState(false);
   const [forfeitAssignments, setForfeitAssignments] = useState<Record<string, string>>({});
+  const [forfeitResult, setForfeitResult] = useState<
+    { gameName: string; allianceLabel: string; winningLabel?: string } | null
+  >(null);
 
   const loadGames = () => {
     api.listGames()
@@ -122,6 +130,7 @@ export default function GameList() {
     setConfirmText('');
     setForfeitError(null);
     setDeleteError(null);
+    setForfeitResult(null);
   };
 
   const handleDeleteCancel = () => {
@@ -154,7 +163,15 @@ export default function GameList() {
     if (!forfeitOptions?.factions.length) return;
     setForfeitError(null);
     try {
-      await api.forfeitGame(gameToForfeit, { faction_assignments: forfeitAssignments });
+      const res = await api.forfeitGame(gameToForfeit, { faction_assignments: forfeitAssignments });
+      if (res.game_over) {
+        const endedName = games.find((g) => g.id === gameToForfeit)?.name;
+        setForfeitResult({
+          gameName: endedName ?? 'The game',
+          allianceLabel: allianceLabel(forfeitOptions.factions[0]?.alliance),
+          winningLabel: res.winner ? allianceLabel(res.winner) : undefined,
+        });
+      }
       setGames((prev) => prev.filter((g) => g.id !== gameToForfeit));
       setGameToForfeit(null);
       setConfirmText('');
@@ -184,6 +201,23 @@ export default function GameList() {
       <header className="game-list-page__header">
         <Link to="/" className="page-menu-btn">Menu</Link>
       </header>
+      {forfeitResult && (
+        <div className="game-list__result" role="status">
+          <p className="game-list__result-text">
+            <strong>Game over</strong> — {forfeitResult.gameName} has ended. Your alliance (
+            {forfeitResult.allianceLabel}) lost the game
+            {forfeitResult.winningLabel ? ` to ${forfeitResult.winningLabel}` : ''}.
+          </p>
+          <button
+            type="button"
+            className="game-list__result-close"
+            onClick={() => setForfeitResult(null)}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {games.length === 0 ? (
         <p className="game-list__empty">No games yet.</p>
       ) : (
@@ -336,12 +370,24 @@ export default function GameList() {
         <div className="game-list__modal-overlay" onClick={handleForfeitCancel}>
           <div className="game-list__modal" onClick={(e) => e.stopPropagation()}>
             <h2 className="game-list__modal-title">Forfeit this game?</h2>
-            <p className="game-list__modal-text">
-              You will be removed from <strong>{forfeitingGame.name}</strong>. Choose who will control each of your
-              factions. Then type <strong>{FORFEIT_CONFIRM_PHRASE}</strong> to confirm.
-            </p>
+            {forfeitOptions?.forfeit_ends_game ? (
+              <p className="game-list__modal-text">
+                You are the last human player — forfeiting will immediately end{' '}
+                <strong>{forfeitingGame.name}</strong> and your alliance (
+                {allianceLabel(forfeitOptions.factions[0]?.alliance)}) will lose the game. Type{' '}
+                <strong>{FORFEIT_CONFIRM_PHRASE}</strong> to confirm.
+              </p>
+            ) : (
+              <p className="game-list__modal-text">
+                You will be removed from <strong>{forfeitingGame.name}</strong>. Choose who will control each of your
+                factions. Then type <strong>{FORFEIT_CONFIRM_PHRASE}</strong> to confirm.
+              </p>
+            )}
             {forfeitOptionsLoading && <p className="game-list__modal-text">Loading options…</p>}
-            {!forfeitOptionsLoading && forfeitOptions && forfeitOptions.factions.length > 0 && (
+            {!forfeitOptionsLoading &&
+              forfeitOptions &&
+              forfeitOptions.factions.length > 0 &&
+              !forfeitOptions.forfeit_ends_game && (
               <ul className="game-list__forfeit-faction-list">
                 {forfeitOptions.factions.map((f) => (
                   <li key={f.faction_id} className="game-list__forfeit-faction-row">

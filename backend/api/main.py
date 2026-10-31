@@ -12,7 +12,7 @@ import uuid
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -142,6 +142,7 @@ from backend.map_overrides import (
 )
 from backend.unit_formulas import UnitFormulasError, load_unit_formulas, save_unit_formulas, train_regression
 from backend.setup_validation import validate_setup_payload
+from backend.email import send_temp_password_email
 from dataclasses import asdict
 from backend.engine.queries import (
     validate_action,
@@ -334,6 +335,16 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    temp_password: str
+    new_password: str
 
 
 class AudioSettingsPatch(BaseModel):
@@ -1316,8 +1327,59 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
     player = db.query(Player).filter(func.lower(Player.email) == email_norm).first()
     if not player or not verify_password(request.password, player.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    player.last_login = datetime.utcnow()
+    db.commit()
+    db.refresh(player)
     token = create_access_token(player.id)
     return {"access_token": token, "player": _profile_response(player)}
+
+
+# Single-use temp password lifetime; override with TEMP_PASSWORD_EXPIRE_MINUTES (e.g. 15 or 120).
+TEMP_PASSWORD_EXPIRE_MINUTES = int(os.environ.get("TEMP_PASSWORD_EXPIRE_MINUTES", "60"))
+TEMP_PASSWORD_LENGTH = 12
+
+
+@app.post("/auth/forgot-password")
+def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Start the forgot-password flow: email a single-use temp password.
+
+    Always returns the same generic response so the endpoint never reveals
+    whether an email is registered. Unknown emails are a no-op.
+    """
+    email_norm = request.email.strip().lower()
+    player = db.query(Player).filter(func.lower(Player.email) == email_norm).first()
+    if player:
+        alphabet = string.ascii_letters + string.digits
+        temp_password = "".join(secrets.choice(alphabet) for _ in range(TEMP_PASSWORD_LENGTH))
+        expires_at = datetime.utcnow() + timedelta(minutes=TEMP_PASSWORD_EXPIRE_MINUTES)
+        player.temp_password_hash = hash_password(temp_password)
+        player.temp_password_expires_at = expires_at
+        db.commit()
+        send_temp_password_email(player.email, player.username, temp_password, expires_at)
+    return {"message": "If that email is registered, a temporary password has been sent."}
+
+
+@app.post("/auth/reset-password")
+def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """Replace the password with a new one after verifying the emailed temp password."""
+    email_norm = request.email.strip().lower()
+    player = db.query(Player).filter(func.lower(Player.email) == email_norm).first()
+    now = datetime.utcnow()
+    if (
+        not player
+        or not player.temp_password_hash
+        or not player.temp_password_expires_at
+        or player.temp_password_expires_at <= now
+        or not verify_password(request.temp_password.strip(), player.temp_password_hash)
+    ):
+        raise HTTPException(status_code=400, detail="Invalid or expired temporary password")
+    if not request.new_password.strip():
+        raise HTTPException(status_code=400, detail="New password is required")
+    player.password_hash = hash_password(request.new_password)
+    player.temp_password_hash = None
+    player.temp_password_expires_at = None
+    db.commit()
+    return {"message": "Password updated. You can now log in."}
 
 
 @app.get("/auth/me")
@@ -1597,6 +1659,26 @@ def admin_list_games(
 ):
     """Every game (lobby, in progress, and finished) for the admin games report."""
     return {"games": _build_games_list(_admin, db, include_all=True)}
+
+
+@app.get("/admin/users")
+def admin_list_users(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Every registered user for the admin users report."""
+    rows = db.query(Player).order_by(Player.username).all()
+    return {
+        "users": [
+            {
+                "id": p.id,
+                "username": p.username,
+                "email": p.email,
+                "last_login": p.last_login.isoformat() if p.last_login else None,
+            }
+            for p in rows
+        ]
+    }
 
 
 @app.get("/admin/setups")
@@ -2479,6 +2561,12 @@ def get_forfeit_options(
     _, _, fd, _, _ = get_game_definitions(game_id, db)
     if not isinstance(fd, dict):
         fd = {}
+    other_humans = any(
+        str(p.get("player_id")) != player_id_str
+        and str(p.get("player_id")) != LOBBY_COMPUTER_PLAYER_ID
+        for p in players_list
+    )
+    forfeit_ends_game = row.status == "active" and not other_humans
     eligible_ids = _eligible_forfeit_assignee_ids(
         fd, players_list, lobby_claims, my_faction_ids, player_id_str,
     )
@@ -2496,7 +2584,7 @@ def get_forfeit_options(
             "display_name": display,
             "alliance": _faction_alliance(fd, fid),
         })
-    return {"factions": factions_out, "assignees": assignees}
+    return {"factions": factions_out, "assignees": assignees, "forfeit_ends_game": forfeit_ends_game}
 
 
 @app.get("/games/{game_id}/meta")
@@ -2794,6 +2882,12 @@ def forfeit_game(
     my_faction_ids = _forfeit_my_faction_ids(row, player_id_str, players_list, lobby_claims_cfg)
     if not my_faction_ids:
         raise HTTPException(status_code=400, detail="You have no factions to forfeit")
+    other_humans = any(
+        str(p.get("player_id")) != player_id_str
+        and str(p.get("player_id")) != LOBBY_COMPUTER_PLAYER_ID
+        for p in players_list
+    )
+    forfeit_ends_game = row.status == "active" and not other_humans
     fa = body.faction_assignments or {}
     if set(fa.keys()) != set(my_faction_ids):
         raise HTTPException(
@@ -2859,36 +2953,39 @@ def forfeit_game(
         new_players = [p for p in players_list if str(p.get("player_id")) != player_id_str]
     else:
         # Advance past this player's turn while they still appear as owners in the DB (skip-turn auth).
-        try:
-            raw = json.loads(row.game_state) if isinstance(row.game_state, str) else row.game_state
-            if isinstance(raw, dict):
-                state = GameState.from_dict(raw)
-                faction_to_player_old = {
-                    str(p["faction_id"]): str(p["player_id"])
-                    for p in players_list
-                    if p.get("faction_id") is not None and p.get("player_id") is not None
-                }
-                _, _, fd_skip, _, _ = get_game_definitions(game_id, db)
-                faction_ids = state.turn_order if state.turn_order else (sorted(fd_skip.keys()) if fd_skip else [])
-                max_skips = len(faction_ids) if faction_ids else 1
-                auth = http_request.headers.get("Authorization") or http_request.headers.get("authorization")
-                headers = {"Authorization": auth} if auth else {}
-                with TestClient(app) as client:
-                    for _ in range(max_skips):
-                        owner = faction_to_player_old.get(state.current_faction)
-                        if owner not in forfeited_set:
-                            break
-                        r = client.post(f"/games/{game_id}/skip-turn", headers=headers)
-                        if r.status_code != 200:
-                            break
-                        db.refresh(row)
-                        raw = json.loads(row.game_state) if isinstance(row.game_state, str) else {}
-                        if isinstance(raw, dict):
-                            state = GameState.from_dict(raw)
-                        else:
-                            break
-        except Exception:
-            pass
+        # Skipped when this forfeit ends the game: no further turns, and cycle-wrap victory must not override the forced defeat.
+        # Also skipped on already-finished games: turns are over, no skip-turn round-trips needed.
+        if row.status == "active" and not forfeit_ends_game:
+            try:
+                raw = json.loads(row.game_state) if isinstance(row.game_state, str) else row.game_state
+                if isinstance(raw, dict):
+                    state = GameState.from_dict(raw)
+                    faction_to_player_old = {
+                        str(p["faction_id"]): str(p["player_id"])
+                        for p in players_list
+                        if p.get("faction_id") is not None and p.get("player_id") is not None
+                    }
+                    _, _, fd_skip, _, _ = get_game_definitions(game_id, db)
+                    faction_ids = state.turn_order if state.turn_order else (sorted(fd_skip.keys()) if fd_skip else [])
+                    max_skips = len(faction_ids) if faction_ids else 1
+                    auth = http_request.headers.get("Authorization") or http_request.headers.get("authorization")
+                    headers = {"Authorization": auth} if auth else {}
+                    with TestClient(app) as client:
+                        for _ in range(max_skips):
+                            owner = faction_to_player_old.get(state.current_faction)
+                            if owner not in forfeited_set:
+                                break
+                            r = client.post(f"/games/{game_id}/skip-turn", headers=headers)
+                            if r.status_code != 200:
+                                break
+                            db.refresh(row)
+                            raw = json.loads(row.game_state) if isinstance(row.game_state, str) else {}
+                            if isinstance(raw, dict):
+                                state = GameState.from_dict(raw)
+                            else:
+                                break
+            except Exception:
+                pass
 
         new_players = [p for p in players_list if str(p.get("player_id")) != player_id_str]
         ai_existing = [str(x) for x in (config.get("ai_factions") or []) if x]
@@ -2903,37 +3000,104 @@ def forfeit_game(
         config["ai_factions"] = list(ai_set)
 
     row.players = json.dumps(new_players)
-    # If host forfeited, promote first remaining player to host (by turn order in lobby, else first in list)
-    if str(row.created_by) == player_id_str and new_players:
+    # If host forfeited, record the flag (even a last-human forfeit that ends the game),
+    # then promote first remaining player to host (by turn order in lobby, else first in list)
+    if str(row.created_by) == player_id_str:
         config["host_forfeited"] = True
-        try:
-            state_dict = json.loads(row.game_state) if isinstance(row.game_state, str) else {}
-            turn_order = (state_dict or {}).get("turn_order") or []
-        except (TypeError, json.JSONDecodeError):
-            turn_order = []
-        remaining_ids = list(dict.fromkeys(str(p.get("player_id")) for p in new_players if p.get("player_id")))
-        new_host = None
-        if isinstance(turn_order, list) and turn_order and row.status == "lobby":
-            lobby_claims_after = config.get("lobby_claims") or {}
-            for fid in turn_order:
-                pid = lobby_claims_after.get(fid)
-                if (
-                    pid
-                    and str(pid) != LOBBY_COMPUTER_PLAYER_ID
-                    and str(pid) in remaining_ids
-                ):
-                    new_host = pid
-                    break
-        if new_host is None and remaining_ids:
-            new_host = remaining_ids[0]
-        if new_host:
-            row.created_by = new_host
+        if new_players:
+            try:
+                state_dict = json.loads(row.game_state) if isinstance(row.game_state, str) else {}
+                turn_order = (state_dict or {}).get("turn_order") or []
+            except (TypeError, json.JSONDecodeError):
+                turn_order = []
+            remaining_ids = list(dict.fromkeys(str(p.get("player_id")) for p in new_players if p.get("player_id")))
+            new_host = None
+            if isinstance(turn_order, list) and turn_order and row.status == "lobby":
+                lobby_claims_after = config.get("lobby_claims") or {}
+                for fid in turn_order:
+                    pid = lobby_claims_after.get(fid)
+                    if (
+                        pid
+                        and str(pid) != LOBBY_COMPUTER_PLAYER_ID
+                        and str(pid) in remaining_ids
+                    ):
+                        new_host = pid
+                        break
+            if new_host is None and remaining_ids:
+                new_host = remaining_ids[0]
+            if new_host:
+                row.created_by = new_host
     row.config = json.dumps(config)
     db.commit()
+
+    forfeit_winner: str | None = None
+    if forfeit_ends_game:
+        # Last human leaving: force the opposing alliance to win instead of running AI vs AI.
+        try:
+            raw = json.loads(row.game_state) if isinstance(row.game_state, str) else row.game_state
+            state = GameState.from_dict(raw) if isinstance(raw, dict) else None
+        except (TypeError, json.JSONDecodeError):
+            state = None
+        if state is not None and state.winner is None:
+            _, td_forfeit, fd_forfeit, _, _ = get_game_definitions(game_id, db)
+            if not isinstance(fd_forfeit, dict):
+                fd_forfeit = {}
+            if not isinstance(td_forfeit, dict):
+                td_forfeit = {}
+            forfeit_alliances = {
+                _faction_alliance(fd_forfeit, fid) for fid in my_faction_ids
+            }
+            forfeit_alliance = next(
+                (a for a in ("good", "evil") if a in forfeit_alliances), "good"
+            )
+            forfeit_winner = "evil" if forfeit_alliance == "good" else "good"
+            state.winner = forfeit_winner
+            stronghold_counts: dict[str, int] = {}
+            controlled: list[str] = []
+            for territory_id, territory_state in state.territories.items():
+                territory_def = td_forfeit.get(territory_id)
+                if not territory_def or not getattr(territory_def, "is_stronghold", False):
+                    continue
+                owner = territory_state.owner
+                if not owner:
+                    continue
+                faction_def = fd_forfeit.get(owner)
+                if not faction_def:
+                    continue
+                alliance = getattr(faction_def, "alliance", None)
+                if not alliance:
+                    continue
+                stronghold_counts[alliance] = stronghold_counts.get(alliance, 0) + 1
+                if alliance == forfeit_winner:
+                    controlled.append(territory_id)
+            strongholds_criteria = state.victory_criteria.get("strongholds") or {}
+            strongholds_required = (
+                int(strongholds_criteria.get(forfeit_winner, 0))
+                if isinstance(strongholds_criteria, dict)
+                else 0
+            )
+            from backend.engine.events import victory as victory_event
+
+            save_game(
+                game_id,
+                state,
+                db,
+                events=[
+                    victory_event(
+                        forfeit_winner,
+                        stronghold_counts,
+                        strongholds_required,
+                        controlled,
+                    )
+                ],
+            )
+
     if game_id in games:
         del games[game_id]
     if game_id in game_defs:
         del game_defs[game_id]
+    if forfeit_winner is not None:
+        return {"message": "Game over", "game_over": True, "winner": forfeit_winner}
     return {"message": "You have left the game"}
 
 

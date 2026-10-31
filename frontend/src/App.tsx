@@ -1,10 +1,10 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import type { GameState, GamePhase, FactionId, GameEvent, SelectedUnit, DeclaredBattle } from './types/game';
+import type { GameState, GamePhase, FactionId, GameEvent, SelectedUnit, DeclaredBattle, MapOverridesData } from './types/game';
 import { boostingRingsFromRules, highestPowerHeroUnitId, ringHoldingFactionId, ringsOnUnit } from './ringsDisplay';
 import Header from './components/Header';
 import type { RingsOfPowerData, UnitForStats } from './components/StatsModals';
 import { compareUnitsForStats } from './unitStatsOrder';
-import GameMap, { type PendingMoveConfirm } from './components/GameMap';
+import GameMap, { DEFAULT_MAP_BASE, type PendingMoveConfirm, type MapAnimCue } from './components/GameMap';
 import Sidebar from './components/Sidebar';
 import CombatSimulatorPanel from './components/CombatSimulatorPanel';
 import PurchaseModal from './components/PurchaseModal';
@@ -633,6 +633,12 @@ interface AppProps {
   initialState?: ApiGameState | null;
 }
 
+function factionAssetUrl(filename: string | null | undefined): string | undefined {
+  if (typeof filename !== 'string') return undefined;
+  const trimmed = filename.trim();
+  return trimmed ? `/assets/factions/${trimmed}` : undefined;
+}
+
 function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   const GAME_ID = gameIdProp ?? DEFAULT_GAME_ID;
   // Backend state (use initialState from navigation when we just created this game)
@@ -644,6 +650,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   );
   const [territorySignals, setTerritorySignals] = useState<TerritorySignalMap>({});
   const [signalPresets, setSignalPresets] = useState<SignalPreset[]>([]);
+  const [mapOverrides, setMapOverrides] = useState<MapOverridesData | null>(null);
   const [signalBusy, setSignalBusy] = useState(false);
   const [availableActions, setAvailableActions] = useState<AvailableActionsResponse | null>(null);
   const [canAct, setCanAct] = useState(true);
@@ -654,6 +661,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   const [selectedTerritory, setSelectedTerritory] = useState<string | null>(null);
   const [selectedUnit, setSelectedUnit] = useState<SelectedUnit | null>(null);
   const [eventLog, setEventLog] = useState<GameEvent[]>([]);
+  /** Transient map action animations (pop-in, travel, combat flash, conquest) derived from fresh backend events. */
+  const [mapAnimCues, setMapAnimCues] = useState<MapAnimCue[]>([]);
   const [isPurchaseModalOpen, setIsPurchaseModalOpen] = useState(false);
   const [pendingEndPhaseConfirm, setPendingEndPhaseConfirm] = useState<string | null>(null);
   const [pendingMoveConfirmState, setPendingMoveConfirmState] = useState<PendingMoveConfirm | null>(null);
@@ -960,15 +969,17 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     return defs;
   }, [definitions]);
 
-  const factionData: Record<string, { name: string; icon: string; color: string; alliance: string; capital: string; parent?: string }> = useMemo(() => {
+  const factionData: Record<string, { name: string; icon: string; banner?: string; color: string; alliance: string; capital: string; parent?: string }> = useMemo(() => {
     if (!definitions) return {};
 
-    const data: Record<string, { name: string; icon: string; color: string; alliance: string; capital: string; parent?: string }> = {};
+    const data: Record<string, { name: string; icon: string; banner?: string; color: string; alliance: string; capital: string; parent?: string }> = {};
     for (const [id, faction] of Object.entries(definitions.factions)) {
       const parentIcon = `/assets/factions/${faction.icon || `${id}.png`}`;
+      const parentBanner = factionAssetUrl(faction.banner);
       data[id] = {
         name: faction.display_name,
         icon: parentIcon,
+        ...(parentBanner ? { banner: parentBanner } : {}),
         color: faction.color,
         alliance: faction.alliance,
         capital: faction.capital ?? '',
@@ -978,9 +989,11 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         const subIcon = typeof sub.icon === 'string' && sub.icon.trim()
           ? `/assets/factions/${sub.icon.trim()}`
           : parentIcon;
+        const subBanner = factionAssetUrl(sub.banner);
         data[sub.id] = {
           name: sub.display_name,
           icon: subIcon,
+          ...(subBanner ? { banner: subBanner } : {}),
           color: sub.color,
           alliance: faction.alliance,
           capital: '',
@@ -1032,6 +1045,26 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       cancelled = true;
     };
   }, []);
+
+  /** Map base for override lookups: same normalization GameMap uses (strip extension, default map). */
+  const mapAssetBase = useMemo(() => {
+    const raw = (backendState?.map_asset ?? '').trim().replace(/\.(svg|png)$/i, '');
+    return raw || DEFAULT_MAP_BASE;
+  }, [backendState?.map_asset]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getMapOverrides(mapAssetBase)
+      .then((r) => {
+        if (!cancelled) setMapOverrides(r?.overrides ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setMapOverrides(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mapAssetBase]);
 
   const mySignalAlliances = useMemo(() => {
     if (!currentPlayerId || !gameMeta) return [];
@@ -1572,6 +1605,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   }, []);
 
   // Add backend events to log (only entries with a message; store full payload for filtering)
+  // Also queues transient map animation cues from the same fresh action events.
   const addBackendEvents = useCallback((events: ApiEvent[]) => {
     const ts = Date.now();
     const newEntries: GameEvent[] = events
@@ -1590,7 +1624,69 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     if (newEntries.length > 0) {
       setEventLog(prev => [...newEntries, ...prev]);
     }
+    const cues: MapAnimCue[] = [];
+    for (const e of events) {
+      const p = (e.payload ?? {}) as Record<string, unknown>;
+      if (e.type === 'units_mobilized') {
+        const territory = String(p.territory ?? '');
+        const units = Array.isArray(p.units) ? (p.units as { unit_id?: unknown }[]) : [];
+        const seen = new Set<string>();
+        for (const u of units) {
+          const unitId = String(u?.unit_id ?? '');
+          if (!territory || !unitId || seen.has(unitId)) continue;
+          seen.add(unitId);
+          cues.push({ id: `${ts}-pop-${territory}-${unitId}`, kind: 'purchase-pop', territoryId: territory, unitId, ts });
+        }
+      } else if (e.type === 'units_moved') {
+        const from = String(p.from_territory ?? '');
+        const to = String(p.to_territory ?? '');
+        const iids = Array.isArray(p.unit_ids) ? p.unit_ids.map(String) : [];
+        if (from && to && iids.length > 0) {
+          cues.push({
+            id: `${ts}-mv-${from}-${to}-${iids[0]}`,
+            kind: 'move-travel',
+            territoryId: to,
+            fromTerritoryId: from,
+            instanceIds: iids,
+            ts,
+          });
+        }
+      } else if (e.type === 'combat_started' || e.type === 'combat_round_resolved') {
+        const territory = String(p.territory ?? '');
+        if (territory) {
+          cues.push({ id: `${ts}-cb-${territory}-${e.type}`, kind: 'combat-flash', territoryId: territory, ts });
+        }
+      } else if (e.type === 'territory_captured') {
+        const territory = String(p.territory ?? '');
+        if (territory) {
+          cues.push({
+            id: `${ts}-cq-${territory}`,
+            kind: 'conquest',
+            territoryId: territory,
+            oldOwner: (p.old_owner as string | null) ?? null,
+            newOwner: String(p.new_owner ?? ''),
+            ts,
+          });
+        }
+      }
+    }
+    if (cues.length > 0) {
+      setMapAnimCues(prev => [...prev, ...cues].slice(-48));
+    }
   }, []);
+
+  // Prune animation cues a few seconds after they queue (longer than the longest animation)
+  useEffect(() => {
+    if (mapAnimCues.length === 0) return;
+    const t = setTimeout(() => {
+      const cutoff = Date.now() - 3500;
+      setMapAnimCues(prev => {
+        const next = prev.filter(c => c.ts >= cutoff);
+        return next.length === prev.length ? prev : next;
+      });
+    }, 3600);
+    return () => clearTimeout(t);
+  }, [mapAnimCues]);
 
   // Refresh game state and available actions from backend (and meta so lobby→start is detected by all clients)
   const refreshState = useCallback(async () => {
@@ -4271,7 +4367,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
 
   const isMovementPhase = gameState.phase === 'combat_move' || gameState.phase === 'non_combat_move';
   const currentResources = gameState.faction_resources[gameState.current_faction] || {};
-  const currentPower = currentResources.power || 0; // Keep for header display
+  const currentPower = currentResources.power || 0; // Shown in the sidebar turn/phase panel
   const currentFactionColor = gameState.current_faction
     ? factionData[gameState.current_faction]?.color
     : undefined;
@@ -4326,7 +4422,6 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         gameState={gameState}
         turnOrderForTicker={turnOrderForTicker}
         factionData={factionData}
-        effectivePower={currentPower}
         factionStats={backendState?.faction_stats}
         ringsByFaction={ringsByFaction}
         ringsOfPower={ringsOfPower}
@@ -4388,6 +4483,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               unitStats={unitStats}
               factionData={factionData}
               territorySignals={isMultiplayer ? territorySignals : {}}
+              animCues={mapAnimCues}
+              mapOverrides={mapOverrides}
               onTerritorySelect={handleTerritorySelect}
               onSeaZoneStackClick={isMovementPhase ? handleSeaZoneStackClick : undefined}
               onUnitSelect={handleUnitSelect}
@@ -4540,6 +4637,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               canAct={canAct}
               gameOver={!!backendState?.winner}
               turnAccentColor={currentFactionColor}
+              effectivePower={currentPower}
               gameState={gameState}
               selectedTerritory={selectedTerritory}
               territoryData={currentTerritoryData}

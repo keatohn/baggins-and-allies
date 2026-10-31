@@ -259,14 +259,24 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
           </select>
         </div>
 
-        {error ? <p className="admin-page__error">{error}</p> : null}
+        {error ? <p className="admin-page__error games-report__error">{error}</p> : null}
 
-        {games != null && !error ? (
-          shown.length === 0 ? (
-            <p className="admin-form__micro">No games match this filter.</p>
-          ) : (
-            <div className="games-report__table-scroll">
+        <div className="games-report__table-scroll">
+          {games != null && !error ? (
+            shown.length === 0 ? (
+              <p className="admin-form__micro">No games match this filter.</p>
+            ) : (
               <table className="games-report__table">
+                <colgroup>
+                  <col className="games-report__col-name" />
+                  <col className="games-report__col-players" />
+                  <col className="games-report__col-scenario" />
+                  <col className="games-report__col-turn" />
+                  <col className="games-report__col-status" />
+                  <col className="games-report__col-winner" />
+                  <col className="games-report__col-created" />
+                  <col className="games-report__col-completed" />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>Name</th>
@@ -287,7 +297,7 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
                         <span className="games-report__players-text">{playerNames(g)}</span>
                       </td>
                       <td className="games-report__scenario">{scenarioOptionLabel(g)}</td>
-                      <td>{turnPhase(g)}</td>
+                      <td className="games-report__turn">{turnPhase(g)}</td>
                       <td>
                         <span className={`games-report__status games-report__status--${g.status}`}>
                           {statusLabel(g.status)}
@@ -300,9 +310,9 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
                   ))}
                 </tbody>
               </table>
-            </div>
-          )
-        ) : null}
+            )
+          ) : null}
+        </div>
       </div>
     </div>
   );

@@ -21,9 +21,11 @@ import type { SignalPreset } from '../territorySignals';
 import { isValidSetupId } from './admin/setupId';
 import { BalanceModal } from './admin/BalanceModal';
 import { GamesReportModal } from './admin/GamesReportModal';
+import { UsersReportModal } from './admin/UsersReportModal';
 import { previewStatsFromBundle } from './admin/previewStats';
 import { completeTerritoryAsymmetries } from './admin/territoryGraph';
 import { MapViewPane, type MapSetupDraft } from './admin/MapViewPane';
+import { MapOverridesPane } from './admin/MapOverridesPane';
 import { GameStatsModal, UnitStatsModal, type UnitStatsExtraColumn } from '../components/StatsModals';
 import './Admin.css';
 
@@ -327,6 +329,7 @@ export default function Admin() {
   const [saving, setSaving] = useState(false);
   const [loadingBundle, setLoadingBundle] = useState(false);
   const [mapViewOpen, setMapViewOpen] = useState(false);
+  const [mapsOpen, setMapsOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [resolveAsymmetriesOpen, setResolveAsymmetriesOpen] = useState(false);
@@ -351,6 +354,7 @@ export default function Admin() {
   const [gameStatsOpen, setGameStatsOpen] = useState(false);
   const [balanceOpen, setBalanceOpen] = useState(false);
   const [gamesOpen, setGamesOpen] = useState(false);
+  const [usersOpen, setUsersOpen] = useState(false);
   const audioJson = useMemo(() => ({ gains: audioGains, menu_music: menuMusic }), [audioGains, menuMusic]);
   const signalsJson = useMemo(() => ({ presets: signalPresets }), [signalPresets]);
   const [statsWithRings, setStatsWithRings] = useState(true);
@@ -837,10 +841,10 @@ export default function Admin() {
         <div className="admin-page__nav-tools">
           <button
             type="button"
-            className={`page-menu-btn${!globalOpen && !gamesOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => openSection('setups')}
+            className={`page-menu-btn${audioOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => openSection('audio')}
           >
-            Setups
+            Audio
           </button>
           <button
             type="button"
@@ -858,10 +862,24 @@ export default function Admin() {
           </button>
           <button
             type="button"
-            className={`page-menu-btn${audioOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => openSection('audio')}
+            className={`page-menu-btn${gamesOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => setGamesOpen(true)}
           >
-            Audio
+            Games
+          </button>
+          <button
+            type="button"
+            className={`page-menu-btn${mapsOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => setMapsOpen(true)}
+          >
+            Maps
+          </button>
+          <button
+            type="button"
+            className={`page-menu-btn${!globalOpen && !gamesOpen && !usersOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => openSection('setups')}
+          >
+            Setups
           </button>
           <button
             type="button"
@@ -872,10 +890,10 @@ export default function Admin() {
           </button>
           <button
             type="button"
-            className={`page-menu-btn${gamesOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => setGamesOpen(true)}
+            className={`page-menu-btn${usersOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => setUsersOpen(true)}
           >
-            Games
+            Users
           </button>
         </div>
       </div>
@@ -1114,6 +1132,12 @@ export default function Admin() {
           onSave={saveSetupFromMap}
         />
       ) : null}
+      {mapsOpen ? (
+        <MapOverridesPane
+          territories={(bundle?.territories as DictEntityMap) ?? {}}
+          onClose={() => setMapsOpen(false)}
+        />
+      ) : null}
       {resolveAsymmetriesOpen && (
         <div className="admin-modal-overlay" role="presentation" onClick={() => setResolveAsymmetriesOpen(false)}>
           <div
@@ -1215,6 +1239,7 @@ export default function Admin() {
         />
       )}
       {gamesOpen && <GamesReportModal onClose={() => setGamesOpen(false)} />}
+      {usersOpen && <UsersReportModal onClose={() => setUsersOpen(false)} />}
     </div>
   );
 }

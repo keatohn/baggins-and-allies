@@ -32,6 +32,7 @@ MAPS_DIR = DATA_DIR / "maps"
 KNOWN_MAP_BASES = (
     "motw_map_1.2",
     "wotla_map_1.0",
+    "wotla_map_1.1",
     "woteas_map_1.0",
     "wotr_map_1.0",
     "wotr_map_1.1",
@@ -48,8 +49,16 @@ FOCUS_VALUES = ("calculated", "override")
 MAX_TERRITORY_OVERRIDES = 400
 MAX_COORD = 100_000.0
 
+# Landscape decorations (admin-placed terrain art). Stored as a sibling of "territories".
+LANDSCAPE_LAYERS = ("interior", "border")
+MIN_LANDSCAPE_SCALE = 0.25
+MAX_LANDSCAPE_SCALE = 4.0
+MAX_LANDSCAPE_PER_TERRITORY = 50
+MAX_LANDSCAPE_TOTAL = 2500
+
 _MAP_BASE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _TID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+_LANDSCAPE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 class MapOverridesError(ValueError):
@@ -64,9 +73,17 @@ def validate_map_base(map_base: Any) -> str:
 
 
 def _entries_source(raw: Any) -> Any:
-    """Accept ``{"territories": {...}}`` or a bare ``{tid: entry}`` mapping."""
-    if isinstance(raw, dict) and "territories" in raw:
-        return raw.get("territories")
+    """Accept ``{"territories": {...}}`` or a bare ``{tid: entry}`` mapping.
+
+    A dict that carries the ``landscape`` sibling but no ``territories`` key is not a
+    bare tid-mapping — treat it as an empty territory map so ``landscape`` is not
+    misread as a territory id.
+    """
+    if isinstance(raw, dict):
+        if "territories" in raw:
+            return raw.get("territories")
+        if "landscape" in raw:
+            return {}
     return raw
 
 
@@ -116,19 +133,98 @@ def _clean_entry(tid: Any, entry: Any) -> dict[str, Any] | None:
     return {"focus": "override", "positions": _clean_positions(entry.get("positions"))}
 
 
+def _clean_placement(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    cat = raw.get("cat")
+    img = raw.get("img")
+    if not isinstance(cat, str) or not _LANDSCAPE_NAME_RE.match(cat) or ".." in cat:
+        return None
+    if not isinstance(img, str) or not _LANDSCAPE_NAME_RE.match(img) or ".." in img:
+        return None
+    if not img.lower().endswith(".png"):
+        return None
+    layer = raw.get("layer", "interior")
+    if layer not in LANDSCAPE_LAYERS:
+        return None
+    x, y = raw.get("x"), raw.get("y")
+    if isinstance(x, bool) or isinstance(y, bool):
+        return None
+    try:
+        fx, fy = float(x), float(y)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(fx) or not math.isfinite(fy):
+        return None
+    if abs(fx) > MAX_COORD or abs(fy) > MAX_COORD:
+        return None
+    out: dict[str, Any] = {"cat": cat, "img": img, "x": fx, "y": fy, "layer": layer}
+    scale = raw.get("s")
+    if scale is not None:
+        if isinstance(scale, bool):
+            return None
+        try:
+            fscale = float(scale)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(fscale) or not (MIN_LANDSCAPE_SCALE <= fscale <= MAX_LANDSCAPE_SCALE):
+            return None
+        out["s"] = fscale
+    if raw.get("auto") is True:
+        out["auto"] = True
+    return out
+
+
+def _clean_landscape_section(raw: Any) -> dict[str, Any] | None:
+    """Lenient parse of the landscape sibling; returns None when empty/unusable."""
+    if not isinstance(raw, dict):
+        return None
+    source = raw.get("territories")
+    if not isinstance(source, dict):
+        return None
+    out: dict[str, list[dict[str, Any]]] = {}
+    total = 0
+    for tid, placements in source.items():
+        if not isinstance(tid, str) or not _TID_RE.match(tid):
+            continue
+        if not isinstance(placements, list):
+            continue
+        cleaned: list[dict[str, Any]] = []
+        for item in placements:
+            if total >= MAX_LANDSCAPE_TOTAL or len(cleaned) >= MAX_LANDSCAPE_PER_TERRITORY:
+                break
+            one = _clean_placement(item)
+            if one is not None:
+                cleaned.append(one)
+                total += 1
+        if cleaned:
+            out[tid] = cleaned
+    return out or None
+
+
+def _raw_landscape_section(raw: Any) -> Any:
+    if isinstance(raw, dict):
+        return raw.get("landscape")
+    return None
+
+
 def normalize_map_overrides(raw: Any) -> dict[str, Any]:
     """Lenient parse for reads/seed: drop anything malformed, always return the canonical shape."""
     source = _entries_source(raw)
-    if not isinstance(source, dict):
-        return {"territories": {}}
-    out: dict[str, dict[str, Any]] = {}
-    for tid, entry in source.items():
-        cleaned = _clean_entry(tid, entry)
-        if cleaned is not None:
-            out[str(tid)] = cleaned
-        if len(out) >= MAX_TERRITORY_OVERRIDES:
-            break
-    return {"territories": out}
+    out: dict[str, Any] = {"territories": {}}
+    if isinstance(source, dict):
+        tids: dict[str, dict[str, Any]] = {}
+        for tid, entry in source.items():
+            cleaned = _clean_entry(tid, entry)
+            if cleaned is not None:
+                tids[str(tid)] = cleaned
+            if len(tids) >= MAX_TERRITORY_OVERRIDES:
+                break
+        out["territories"] = tids
+    landscape = _clean_landscape_section(_raw_landscape_section(raw))
+    if landscape is not None:
+        out["landscape"] = {"territories": landscape}
+    return out
 
 
 def validate_map_overrides(raw: Any) -> dict[str, Any]:
@@ -164,7 +260,38 @@ def validate_map_overrides(raw: Any) -> dict[str, Any]:
                 raise MapOverridesError(
                     f"Position for {tid}.{kind} must be two finite numbers [x, y]."
                 )
+    _validate_landscape_section(_raw_landscape_section(raw))
     return normalize_map_overrides(raw)
+
+
+def _validate_landscape_section(raw: Any) -> None:
+    if raw is None:
+        return
+    if not isinstance(raw, dict):
+        raise MapOverridesError("Landscape overrides must be an object with a 'territories' map.")
+    source = raw.get("territories")
+    if not isinstance(source, dict):
+        raise MapOverridesError("Landscape 'territories' must be an object mapping territory ids to lists.")
+    total = 0
+    for tid, placements in source.items():
+        if not isinstance(tid, str) or not _TID_RE.match(tid):
+            raise MapOverridesError(f"Invalid landscape territory id: {tid!r}.")
+        if not isinstance(placements, list):
+            raise MapOverridesError(f"Landscape placements for {tid} must be a list.")
+        if len(placements) > MAX_LANDSCAPE_PER_TERRITORY:
+            raise MapOverridesError(
+                f"At most {MAX_LANDSCAPE_PER_TERRITORY} landscape placements per territory ({tid})."
+            )
+        total += len(placements)
+        if total > MAX_LANDSCAPE_TOTAL:
+            raise MapOverridesError(f"At most {MAX_LANDSCAPE_TOTAL} landscape placements per map.")
+        for item in placements:
+            if _clean_placement(item) is None:
+                raise MapOverridesError(
+                    f"Landscape placement for {tid} needs cat/img (.png), layer "
+                    f"({'/'.join(LANDSCAPE_LAYERS)}), finite x/y, and optional s in "
+                    f"[{MIN_LANDSCAPE_SCALE}, {MAX_LANDSCAPE_SCALE}]."
+                )
 
 
 def _read_file(map_base: str) -> Any:

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
 import GameMap from '../../components/GameMap';
+import { api } from '../../services/api';
 import type { RingView } from '../../ringsDisplay';
-import type { GameState, PendingMove } from '../../types/game';
+import type { GameState, MapOverridesData, PendingMove } from '../../types/game';
 import {
   adjacencyEdges,
   computePathCentroids,
@@ -33,6 +34,12 @@ export type MapSetupDraft = {
   camps: Dict;
   ports: Dict;
 };
+
+function factionAssetUrl(filename: unknown): string | undefined {
+  if (typeof filename !== 'string') return undefined;
+  const trimmed = filename.trim();
+  return trimmed ? `/assets/factions/${trimmed}` : undefined;
+}
 
 function neighborIdsForField(
   territories: Dict,
@@ -169,6 +176,7 @@ export function MapViewPane({
   const dragRef = useRef<{ x: number; y: number; tx: number; ty: number; id: number } | null>(null);
   const didDragRef = useRef(false);
   const [pngFailed, setPngFailed] = useState(false);
+  const [mapOverrides, setMapOverrides] = useState<MapOverridesData | null>(null);
   const [editing, setEditing] = useState(false);
   const [edgeField, setEdgeField] = useState<TerritoryEdgeField>('adjacent');
   const [editId, setEditId] = useState<string | null>(null);
@@ -217,13 +225,15 @@ export function MapViewPane({
   const ownerLabel = (id: string) => ownerChoices.find((row) => row.id === id)?.label ?? id;
 
   const factionData = useMemo(() => {
-    const data: Record<string, { name: string; icon: string; color: string; alliance: string; capital?: string; parent?: string }> = {};
+    const data: Record<string, { name: string; icon: string; banner?: string; color: string; alliance: string; capital?: string; parent?: string }> = {};
     for (const [fid, f] of Object.entries(factions)) {
       const icon = `/assets/factions/${typeof f.icon === 'string' && f.icon ? f.icon : `${fid}.png`}`;
+      const banner = factionAssetUrl(f.banner);
       const alliance = typeof f.alliance === 'string' ? f.alliance : '';
       data[fid] = {
         name: territoryLabel(fid, f),
         icon,
+        ...(banner ? { banner } : {}),
         color: typeof f.color === 'string' ? f.color : '#888888',
         alliance,
         capital: typeof f.capital === 'string' ? f.capital : '',
@@ -231,9 +241,11 @@ export function MapViewPane({
       for (const sub of Array.isArray(f.subfactions) ? f.subfactions : []) {
         const rec = asRecord(sub);
         if (typeof rec.id !== 'string' || !rec.id) continue;
+        const subBanner = factionAssetUrl(rec.banner);
         data[rec.id] = {
           name: territoryLabel(rec.id, rec),
           icon: typeof rec.icon === 'string' && rec.icon.trim() ? `/assets/factions/${rec.icon.trim()}` : icon,
+          ...(subBanner ? { banner: subBanner } : {}),
           color: typeof rec.color === 'string' ? rec.color : data[fid].color,
           alliance,
           capital: '',
@@ -415,6 +427,21 @@ export function MapViewPane({
         if (cancelled) return;
         setErr(e instanceof Error ? e.message : 'Failed to load map SVG');
         setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mapBase]);
+
+  // Map-level icon overrides: the preview must honor them so admins see what players see.
+  useEffect(() => {
+    let cancelled = false;
+    api.getMapOverrides(mapBase)
+      .then((r) => {
+        if (!cancelled) setMapOverrides(r?.overrides ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setMapOverrides(null);
       });
     return () => {
       cancelled = true;
@@ -605,6 +632,16 @@ export function MapViewPane({
     e.preventDefault();
     const el = wrapRef.current;
     if (!el) return;
+    if (!e.ctrlKey) {
+      // Two-finger scroll (and plain mouse wheel) pans.
+      setTransform((prev) => ({
+        ...prev,
+        x: prev.x + e.deltaX,
+        y: prev.y + e.deltaY,
+      }));
+      return;
+    }
+    // Pinch (ctrlKey) and Ctrl+wheel zoom toward cursor.
     const rect = el.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
@@ -1013,6 +1050,7 @@ export function MapViewPane({
                   unitDefs={unitDefs}
                   unitStats={unitStats}
                   factionData={factionData}
+                  mapOverrides={mapOverrides}
                   onTerritorySelect={onMapSelect}
                   onUnitSelect={NOOP}
                   onUnitMove={NOOP}

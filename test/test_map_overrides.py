@@ -125,6 +125,9 @@ def test_admin_maps_requires_admin(make_client, players):
     maps = r.json()["maps"]
     assert maps == sorted(maps)
     assert "wotr_map_1.2" in maps  # known-map fallback + file setups
+    # Fallback list covers every frontend MAP_CONFIG / asset map (incl. the live WotLA map).
+    for base in ("motw_map_1.2", "wotla_map_1.0", "wotla_map_1.1", "woteas_map_1.0", "wotr_map_1.0", "wotr_map_1.1", "wotr_map_1.2"):
+        assert base in maps
 
 
 def test_put_overrides_requires_admin(make_client, players):
@@ -245,8 +248,127 @@ def test_normalize_map_overrides_lenient():
     assert tids["the_shire"]["positions"] == {"unit": [1.0, 2.0]}
     # calculated entries drop positions entirely
     assert tids["mordor"] == {"focus": "calculated"}
+    assert "landscape" not in out
     assert normalize_map_overrides(None) == {"territories": {}}
     assert normalize_map_overrides("nope") == {"territories": {}}
+
+
+LANDSCAPE_PAYLOAD = {
+    "territories": {
+        "the_shire": {"focus": "calculated"},
+    },
+    "landscape": {
+        "territories": {
+            "the_shire": [
+                {"cat": "forest", "img": "forest_large.png", "x": 10.5, "y": 20, "layer": "interior", "auto": True},
+                {"cat": "mountains", "img": "mountain_range.png", "x": 30, "y": 40, "layer": "border", "s": 1.5},
+            ],
+            "mordor": [
+                {"cat": "volcano", "img": "volcano.png", "x": 1, "y": 2},
+            ],
+        }
+    },
+}
+
+
+def test_put_overrides_landscape_round_trip(make_client, players):
+    admin, _ = players
+    client = make_client(admin)
+    r = client.put("/admin/maps/wotr_map_1.2/overrides", json=LANDSCAPE_PAYLOAD)
+    assert r.status_code == 200
+    landscape = r.json()["overrides"]["landscape"]["territories"]
+    assert landscape["the_shire"][0]["cat"] == "forest"
+    assert landscape["the_shire"][0]["auto"] is True
+    assert landscape["the_shire"][1]["layer"] == "border"
+    assert landscape["the_shire"][1]["s"] == 1.5
+    # missing layer defaults to interior; missing s omitted
+    assert landscape["mordor"][0]["layer"] == "interior"
+    assert "s" not in landscape["mordor"][0]
+    # public read returns the same blob
+    r2 = client.get("/maps/wotr_map_1.2/overrides")
+    assert r2.json()["overrides"]["landscape"] == r.json()["overrides"]["landscape"]
+
+
+def test_put_overrides_landscape_only_no_territories(make_client, players):
+    admin, _ = players
+    client = make_client(admin)
+    payload = {"landscape": {"territories": {"mordor": [{"cat": "volcano", "img": "volcano.png", "x": 5, "y": 6}]}}}
+    r = client.put("/admin/maps/wotr_map_1.2/overrides", json=payload)
+    assert r.status_code == 200
+    body = r.json()["overrides"]
+    # "landscape" must not be misread as a territory id
+    assert body["territories"] == {}
+    assert body["landscape"]["territories"]["mordor"][0]["img"] == "volcano.png"
+
+
+@pytest.mark.parametrize(
+    "landscape",
+    [
+        "nope",
+        {"territories": "nope"},
+        {"territories": {"the_shire": "nope"}},
+        {"territories": {"the_shire": [{"cat": "forest", "img": "evil.jpg", "x": 1, "y": 2}]}},  # not .png
+        {"territories": {"the_shire": [{"cat": "forest", "img": "../secret.png", "x": 1, "y": 2}]}},
+        {"territories": {"the_shire": [{"cat": "a/b", "img": "x.png", "x": 1, "y": 2}]}},
+        {"territories": {"the_shire": [{"cat": "forest", "img": "x.png", "x": 1, "y": 2, "layer": "sideways"}]}},
+        {"territories": {"the_shire": [{"cat": "forest", "img": "x.png", "x": "a", "y": 2}]}},
+        {"territories": {"the_shire": [{"cat": "forest", "img": "x.png", "x": 1, "y": 2, "s": 99}]}},
+        {"territories": {"the_shire": [{"cat": "forest", "img": "x.png", "x": 1e9, "y": 2}]}},
+    ],
+)
+def test_put_overrides_rejects_invalid_landscape(make_client, players, landscape):
+    admin, _ = players
+    client = make_client(admin)
+    r = client.put(
+        "/admin/maps/wotr_map_1.2/overrides",
+        json={"territories": {}, "landscape": landscape},
+    )
+    assert r.status_code == 400
+
+
+def test_put_overrides_rejects_too_many_landscape_placements(make_client, players):
+    admin, _ = players
+    client = make_client(admin)
+    payload = {
+        "territories": {},
+        "landscape": {
+            "territories": {
+                "the_shire": [
+                    {"cat": "forest", "img": "f.png", "x": i, "y": i} for i in range(51)
+                ]
+            }
+        },
+    }
+    r = client.put("/admin/maps/wotr_map_1.2/overrides", json=payload)
+    assert r.status_code == 400
+
+
+def test_normalize_map_overrides_landscape_lenient():
+    from backend.map_overrides import normalize_map_overrides
+
+    raw = {
+        "territories": {"the_shire": {"focus": "calculated"}},
+        "landscape": {
+            "territories": {
+                "the_shire": [
+                    {"cat": "forest", "img": "forest_large.png", "x": 1, "y": 2, "layer": "interior"},
+                    {"cat": "forest", "img": "bad.jpg", "x": 1, "y": 2},
+                    {"cat": "forest", "img": "ok.png", "x": "nan", "y": 2},
+                    "junk",
+                ],
+                "broken": "not-a-list",
+            }
+        },
+    }
+    out = normalize_map_overrides(raw)
+    placements = out["landscape"]["territories"]["the_shire"]
+    assert len(placements) == 1
+    assert placements[0]["img"] == "forest_large.png"
+    assert "broken" not in out["landscape"]["territories"]
+    # landscape-only payload keeps empty territories, does not invent a "landscape" tid
+    only = normalize_map_overrides({"landscape": {"territories": {"mordor": [{"cat": "volcano", "img": "v.png", "x": 0, "y": 0}]}}})
+    assert only["territories"] == {}
+    assert only["landscape"]["territories"]["mordor"][0]["cat"] == "volcano"
 
 
 def test_seed_map_overrides_from_files(db_session, tmp_path, monkeypatch):
