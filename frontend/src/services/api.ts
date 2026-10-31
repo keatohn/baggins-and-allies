@@ -975,6 +975,18 @@ export const api = {
     syncAudioFromAuthPlayer(res.player);
     return res;
   },
+  /** Start forgot-password: backend emails a single-use temp password. Response is always generic. */
+  forgotPassword: async (email: string) => {
+    return authFetchJson<{ message: string }>('/auth/forgot-password', { email });
+  },
+  /** Complete forgot-password with the emailed temp password and a new password. */
+  resetPassword: async (email: string, tempPassword: string, newPassword: string) => {
+    return authFetchJson<{ message: string }>('/auth/reset-password', {
+      email,
+      temp_password: tempPassword,
+      new_password: newPassword,
+    });
+  },
   authMe: async () => {
     const p = await fetchJson<AuthPlayer>('/auth/me');
     syncAudioFromAuthPlayer(p);

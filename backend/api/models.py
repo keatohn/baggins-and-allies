@@ -18,6 +18,9 @@ class Player(Base):
     is_admin = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login = Column(DateTime, nullable=True)  # set on each successful login; null until first login
+    # Forgot-password flow: bcrypt hash of a single-use temp password and its UTC expiry; both cleared on reset.
+    temp_password_hash = Column(String(255), nullable=True)
+    temp_password_expires_at = Column(DateTime, nullable=True)
     # JSON string: preferences, e.g. { "audio": { "menu_music_volume": 0, "game_music_volume": 0, "sfx_volume": 0, "muted": false } }
     preferences = Column(Text, nullable=True)
 
