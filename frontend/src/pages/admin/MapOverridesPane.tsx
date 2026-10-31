@@ -28,6 +28,12 @@ type Dict = Record<string, Record<string, unknown>>;
 
 type HintKind = 'units' | 'number' | 'icons' | 'logo';
 
+/** Landscape-tab cursor behavior: pan the map, rubber-band select, or stamp along a drag. */
+type CursorMode = 'navigate' | 'select' | 'paint';
+
+/** ViewBox-space spacing between paint-mode stamps along a drag path. */
+const PAINT_STAMP_SPACING = 36;
+
 type CalculatedSpots = {
   centroids: Record<string, Pt>;
   positions: Record<string, { marker: Pt; unit: Pt; center?: Pt }>;
@@ -168,6 +174,8 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   const [borderMode, setBorderMode] = useState(false);
   const [selectedPlacement, setSelectedPlacement] = useState<{ tid: string; index: number } | null>(null);
   const [autoBusy, setAutoBusy] = useState(false);
+  const [cursorMode, setCursorMode] = useState<CursorMode>('navigate');
+  const [band, setBand] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
 
   const dragRef = useRef<{ x: number; y: number; tx: number; ty: number; id: number } | null>(null);
   const didDragRef = useRef(false);
@@ -190,6 +198,8 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     startPt: Pt;
     layer: 'interior' | 'border';
   } | null>(null);
+  const selectDragRef = useRef<{ x: number; y: number; id: number } | null>(null);
+  const paintLastRef = useRef<Pt | null>(null);
 
   const current = draft ?? stored;
   const dirty = draft != null && stored != null && stableJson(draft) !== stableJson(stored);
@@ -249,6 +259,8 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     setBorderMode(false);
     setSelectedPlacement(null);
     setEditorTab('icon');
+    setCursorMode('navigate');
+    setBand(null);
     api
       .getMapOverrides(mapBase)
       .then((r) => {
@@ -353,6 +365,12 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && band) {
+        e.stopPropagation();
+        selectDragRef.current = null;
+        setBand(null);
+        return;
+      }
       if (e.key === 'Escape' && placing) {
         e.stopPropagation();
         setPlacing(null);
@@ -374,7 +392,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [discardOpen, saving, dirty, onClose, placing]);
+  }, [discardOpen, saving, dirty, onClose, placing, band]);
 
   const changeMap = (next: string) => {
     if (!next || next === mapBase) return;
@@ -427,12 +445,72 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   };
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    // Middle-button always pans so the map stays reachable in select/paint modes.
+    if (e.button === 1) {
+      didDragRef.current = false;
+      dragRef.current = { x: e.clientX, y: e.clientY, tx: transform.x, ty: transform.y, id: e.pointerId };
+      return;
+    }
     if (e.button !== 0) return;
     didDragRef.current = false;
+    const landscape = editorTab === 'landscape';
+    if (landscape && cursorMode === 'select') {
+      const el = wrapRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      selectDragRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top, id: e.pointerId };
+      setBand(null);
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    if (landscape && cursorMode === 'paint') {
+      const el = wrapRef.current;
+      if (!el) return;
+      paintLastRef.current = null;
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      // Stamp immediately at the press point, then again along the drag.
+      tryPlaceLandscape(e.clientX, e.clientY);
+      const vb = viewportToViewBox(e.clientX, e.clientY);
+      paintLastRef.current = vb;
+      return;
+    }
     dragRef.current = { x: e.clientX, y: e.clientY, tx: transform.x, ty: transform.y, id: e.pointerId };
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const sd = selectDragRef.current;
+    if (sd && e.pointerId === sd.id) {
+      const el = wrapRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const x1 = e.clientX - rect.left;
+      const y1 = e.clientY - rect.top;
+      setBand({
+        left: Math.min(sd.x, x1),
+        top: Math.min(sd.y, y1),
+        width: Math.abs(x1 - sd.x),
+        height: Math.abs(y1 - sd.y),
+      });
+      return;
+    }
+    if (editorTab === 'landscape' && cursorMode === 'paint') {
+      if (!placing) return;
+      const vb = viewportToViewBox(e.clientX, e.clientY);
+      if (!vb) return;
+      const last = paintLastRef.current;
+      if (last && Math.hypot(vb.x - last.x, vb.y - last.y) < PAINT_STAMP_SPACING) return;
+      tryPlaceLandscape(e.clientX, e.clientY);
+      paintLastRef.current = vb;
+      return;
+    }
     const d = dragRef.current;
     if (!d || e.pointerId !== d.id) return;
     const dist = Math.abs(e.clientX - d.x) + Math.abs(e.clientY - d.y);
@@ -466,6 +544,36 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   );
 
   const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const sd = selectDragRef.current;
+    if (sd && e.pointerId === sd.id) {
+      try {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      selectDragRef.current = null;
+      // Band selection is applied in a later phase; clear the transient rect for now.
+      setBand(null);
+      return;
+    }
+    if (editorTab === 'landscape' && cursorMode === 'paint') {
+      try {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      paintLastRef.current = null;
+      return;
+    }
+    if (editorTab === 'landscape' && cursorMode === 'select') {
+      // Band was cancelled (Escape) or never started — don't fall through to territory selection.
+      try {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     const d = dragRef.current;
     if (d && e.pointerId === d.id) {
       try {
@@ -810,6 +918,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     e.preventDefault();
     if (e.button !== 0) return;
     if (placing) return; // placing mode takes priority; don't start a drag
+    if (editorTab === 'landscape' && cursorMode !== 'navigate') return; // select/paint own left-drag
     const placement = landscapeFor(tid)[index];
     if (!placement) return;
     setSelected(tid);
@@ -1011,6 +1120,8 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                   setEditorTab('icon');
                   setPlacing(null);
                   setSelectedPlacement(null);
+                  setCursorMode('navigate');
+                  setBand(null);
                 }}
               >
                 Icon
@@ -1044,6 +1155,30 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
           <div className="admin-graph__header-actions">
             {editorTab === 'landscape' ? (
               <>
+                <div className="admin-mapview__toggle" role="group" aria-label="Cursor mode">
+                  {(
+                    [
+                      ['navigate', 'Navigate'],
+                      ['select', 'Select'],
+                      ['paint', 'Paint'],
+                    ] as const
+                  ).map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`admin-mapview__toggle-btn${cursorMode === mode ? ' admin-mapview__toggle-btn--active' : ''}`}
+                      aria-pressed={cursorMode === mode}
+                      onClick={() => {
+                        setCursorMode(mode);
+                        setBand(null);
+                        selectDragRef.current = null;
+                        paintLastRef.current = null;
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
                 <button
                   type="button"
                   className="admin-page__btn"
@@ -1091,9 +1226,15 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
             </ul>
           ) : (
             <p className="admin-form__micro mapov-landscape-hint">
-              {placing
-                ? `Click the map to place ${placing.img}${borderMode ? ' on the territory border' : ' inside the territory'} · Esc to cancel`
-                : 'Pick an image below, then click the map. Drag existing art to move it.'}
+              {cursorMode === 'select'
+                ? 'Select mode: drag a rectangle over landscape pieces (box-select actions land next). Esc cancels the band.'
+                : cursorMode === 'paint'
+                  ? placing
+                    ? `Paint mode: drag on the map to stamp ${placing.img}${borderMode ? ' on borders' : ' inside territories'}.`
+                    : 'Paint mode: pick an image below, then drag on the map to stamp.'
+                  : placing
+                    ? `Click the map to place ${placing.img}${borderMode ? ' on the territory border' : ' inside the territory'} · Esc to cancel`
+                    : 'Pick an image below, then click the map. Drag existing art to move it.'}
               {landscapeCount ? ` · ${landscapeCount} placed` : ''}
             </p>
           )}
@@ -1322,7 +1463,11 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
             </div>
             <div
               ref={wrapRef}
-              className={`admin-graph__viewport${placing ? ' admin-graph__viewport--placing' : ''}`}
+              className={`admin-graph__viewport${placing ? ' admin-graph__viewport--placing' : ''}${
+                editorTab === 'landscape' && cursorMode === 'select'
+                  ? ' admin-graph__viewport--select'
+                  : ''
+              }${editorTab === 'landscape' && cursorMode === 'paint' ? ' admin-graph__viewport--paint' : ''}`}
               onWheel={onWheel}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
@@ -1363,6 +1508,13 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                   ))}
                 </svg>
               </div>
+              {band ? (
+                <div
+                  className="mapov-band"
+                  style={{ left: band.left, top: band.top, width: band.width, height: band.height }}
+                  aria-hidden
+                />
+              ) : null}
               {editorTab === 'landscape' ? (
                 <div className="mapov-dots mapov-landscape-markers">
                   {landscapeMarkers.map((row) => {

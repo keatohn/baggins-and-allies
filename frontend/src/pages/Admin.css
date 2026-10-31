@@ -1438,6 +1438,31 @@
   cursor: crosshair;
 }
 
+.admin-graph__viewport--select,
+.admin-graph__viewport--select .admin-graph__path {
+  cursor: crosshair;
+}
+
+.admin-graph__viewport--paint,
+.admin-graph__viewport--paint .admin-graph__path {
+  cursor: crosshair;
+}
+
+/* Select/paint own left-drag: markers must not intercept the viewport handlers. */
+.admin-graph__viewport--select .mapov-landscape-markers,
+.admin-graph__viewport--paint .mapov-landscape-markers {
+  pointer-events: none;
+}
+
+.mapov-band {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1.5px solid var(--ink);
+  background: rgba(61, 41, 20, 0.12);
+  pointer-events: none;
+  z-index: 5;
+}
+
 .mapov-placement {
   position: absolute;
   transform: translate(-50%, -50%);
