@@ -13,7 +13,6 @@ interface HeaderProps {
   /** Faction IDs in display order for ticker (from create response or backend). Overrides gameState.turn_order when provided. */
   turnOrderForTicker?: string[];
   factionData: Record<string, { name: string; icon: string; color: string; alliance: string; parent?: string }>;
-  effectivePower?: number;
   factionStats?: ApiFactionStats | null;
   /** Rings held by each faction, shown beside the name in Game Stats. */
   ringsByFaction?: Record<string, StatsRingMark[]>;
@@ -34,35 +33,6 @@ interface HeaderProps {
   onOpenCombatSim?: () => void;
 }
 
-const PHASE_ORDER: string[] = ['purchase', 'combat_move', 'combat', 'non_combat_move', 'mobilization'];
-
-function formatPhase(phase: string): string {
-  if (phase === 'non_combat_move') return 'Non-Combat Move';
-  if (phase === 'mobilization') return 'Mobilization';
-  return phase
-    .split('_')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
-}
-
-/** Short pill labels shown for the active phase when the full stepper doesn't fit. */
-const PHASE_SHORT: Record<string, string> = {
-  purchase: 'Purchase',
-  combat_move: 'Combat Move',
-  combat: 'Combat',
-  non_combat_move: 'Non-Combat',
-  mobilization: 'Mobilize',
-};
-
-function phaseKey(phase: string): string {
-  return phase === 'mobilize' ? 'mobilization' : phase;
-}
-
-function currentPhaseIndex(phase: string): number {
-  const idx = PHASE_ORDER.indexOf(phaseKey(phase));
-  return idx >= 0 ? idx : 0;
-}
-
 type FactionMark = { id: string; name: string; icon: string; color: string };
 
 /** Subfactions that have their own icon. A blank icon inherits the parent and is not badged. */
@@ -79,21 +49,18 @@ function subfactionMarks(
   return marks;
 }
 
-function Header({ gameState, turnOrderForTicker, factionData, effectivePower, factionStats, ringsByFaction, ringsOfPower = null, unitsByFaction = {}, gameName = null, setupDisplayName = null, specials = {}, specialsOrder: _specialsOrder = [], unitsBySpecial = {}, onOpenCombatSim }: HeaderProps) {
+function Header({ gameState, turnOrderForTicker, factionData, factionStats, ringsByFaction, ringsOfPower = null, unitsByFaction = {}, gameName = null, setupDisplayName = null, specials = {}, specialsOrder: _specialsOrder = [], unitsBySpecial = {}, onOpenCombatSim }: HeaderProps) {
   const [statsOpen, setStatsOpen] = useState(false);
   const [ringsOpen, setRingsOpen] = useState(false);
   const [specialsOpen, setSpecialsOpen] = useState(false);
   const [unitStatsOpen, setUnitStatsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const faction = factionData[gameState.current_faction];
-  const resources = gameState.faction_resources[gameState.current_faction];
-  const power = effectivePower ?? resources?.power ?? 0;
   const factionColor = faction?.color;
 
   const alliances = factionStats?.alliances ?? {};
   const allianceOrder = ['good', 'evil'].filter(a => a in alliances);
   const turnOrder = (turnOrderForTicker?.length ? turnOrderForTicker : gameState.turn_order) ?? [];
-  const activePhaseIndex = currentPhaseIndex(gameState.phase);
   return (
     <>
       <header
@@ -278,32 +245,6 @@ function Header({ gameState, turnOrderForTicker, factionData, effectivePower, fa
 
         <div className="faction-header" style={factionColor ? { borderColor: factionColor } : undefined}>
           <span className="faction-title">{faction?.name}</span>
-        </div>
-
-        <div className="turn-status">
-          <span className="turn-number">Turn {gameState.turn_number}</span>
-          <span className="phase-divider">|</span>
-          <ol className="phase-stepper" aria-label="Turn phases">
-            {PHASE_ORDER.map((key, i) => {
-              const isCurrent = i === activePhaseIndex;
-              const state = i < activePhaseIndex ? 'past' : isCurrent ? 'current' : 'future';
-              const fullName = formatPhase(key);
-              return (
-                <li
-                  key={key}
-                  className={`phase-step phase-step--${state}`}
-                  aria-current={isCurrent ? 'step' : undefined}
-                  aria-label={`${i + 1} of ${PHASE_ORDER.length}: ${fullName}`}
-                  title={fullName}
-                >
-                  <span className="phase-step-num" aria-hidden="true">{i + 1}</span>
-                  <span className="phase-step-name">{PHASE_SHORT[key] ?? fullName}</span>
-                </li>
-              );
-            })}
-          </ol>
-          <span className="phase-divider">|</span>
-          <span className="current-power">{power}P</span>
         </div>
       </header>
 

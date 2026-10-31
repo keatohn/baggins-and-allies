@@ -4367,7 +4367,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
 
   const isMovementPhase = gameState.phase === 'combat_move' || gameState.phase === 'non_combat_move';
   const currentResources = gameState.faction_resources[gameState.current_faction] || {};
-  const currentPower = currentResources.power || 0; // Keep for header display
+  const currentPower = currentResources.power || 0; // Shown in the sidebar turn/phase panel
   const currentFactionColor = gameState.current_faction
     ? factionData[gameState.current_faction]?.color
     : undefined;
@@ -4422,7 +4422,6 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         gameState={gameState}
         turnOrderForTicker={turnOrderForTicker}
         factionData={factionData}
-        effectivePower={currentPower}
         factionStats={backendState?.faction_stats}
         ringsByFaction={ringsByFaction}
         ringsOfPower={ringsOfPower}
@@ -4638,6 +4637,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               canAct={canAct}
               gameOver={!!backendState?.winner}
               turnAccentColor={currentFactionColor}
+              effectivePower={currentPower}
               gameState={gameState}
               selectedTerritory={selectedTerritory}
               territoryData={currentTerritoryData}
