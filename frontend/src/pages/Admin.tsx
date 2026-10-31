@@ -21,6 +21,7 @@ import type { SignalPreset } from '../territorySignals';
 import { isValidSetupId } from './admin/setupId';
 import { BalanceModal } from './admin/BalanceModal';
 import { GamesReportModal } from './admin/GamesReportModal';
+import { UsersReportModal } from './admin/UsersReportModal';
 import { previewStatsFromBundle } from './admin/previewStats';
 import { completeTerritoryAsymmetries } from './admin/territoryGraph';
 import { MapViewPane, type MapSetupDraft } from './admin/MapViewPane';
@@ -353,6 +354,7 @@ export default function Admin() {
   const [gameStatsOpen, setGameStatsOpen] = useState(false);
   const [balanceOpen, setBalanceOpen] = useState(false);
   const [gamesOpen, setGamesOpen] = useState(false);
+  const [usersOpen, setUsersOpen] = useState(false);
   const audioJson = useMemo(() => ({ gains: audioGains, menu_music: menuMusic }), [audioGains, menuMusic]);
   const signalsJson = useMemo(() => ({ presets: signalPresets }), [signalPresets]);
   const [statsWithRings, setStatsWithRings] = useState(true);
@@ -874,7 +876,7 @@ export default function Admin() {
           </button>
           <button
             type="button"
-            className={`page-menu-btn${!globalOpen && !gamesOpen ? ' admin-page__nav-btn--active' : ''}`}
+            className={`page-menu-btn${!globalOpen && !gamesOpen && !usersOpen ? ' admin-page__nav-btn--active' : ''}`}
             onClick={() => openSection('setups')}
           >
             Setups
@@ -885,6 +887,13 @@ export default function Admin() {
             onClick={() => openSection('signals')}
           >
             Signals
+          </button>
+          <button
+            type="button"
+            className={`page-menu-btn${usersOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => setUsersOpen(true)}
+          >
+            Users
           </button>
         </div>
       </div>
@@ -1230,6 +1239,7 @@ export default function Admin() {
         />
       )}
       {gamesOpen && <GamesReportModal onClose={() => setGamesOpen(false)} />}
+      {usersOpen && <UsersReportModal onClose={() => setUsersOpen(false)} />}
     </div>
   );
 }

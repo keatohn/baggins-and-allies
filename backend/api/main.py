@@ -12,7 +12,7 @@ import uuid
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -142,6 +142,7 @@ from backend.map_overrides import (
 )
 from backend.unit_formulas import UnitFormulasError, load_unit_formulas, save_unit_formulas, train_regression
 from backend.setup_validation import validate_setup_payload
+from backend.email import send_temp_password_email
 from dataclasses import asdict
 from backend.engine.queries import (
     validate_action,
@@ -334,6 +335,16 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    temp_password: str
+    new_password: str
 
 
 class AudioSettingsPatch(BaseModel):
@@ -1316,8 +1327,59 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
     player = db.query(Player).filter(func.lower(Player.email) == email_norm).first()
     if not player or not verify_password(request.password, player.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    player.last_login = datetime.utcnow()
+    db.commit()
+    db.refresh(player)
     token = create_access_token(player.id)
     return {"access_token": token, "player": _profile_response(player)}
+
+
+# Single-use temp password lifetime; override with TEMP_PASSWORD_EXPIRE_MINUTES (e.g. 15 or 120).
+TEMP_PASSWORD_EXPIRE_MINUTES = int(os.environ.get("TEMP_PASSWORD_EXPIRE_MINUTES", "60"))
+TEMP_PASSWORD_LENGTH = 12
+
+
+@app.post("/auth/forgot-password")
+def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Start the forgot-password flow: email a single-use temp password.
+
+    Always returns the same generic response so the endpoint never reveals
+    whether an email is registered. Unknown emails are a no-op.
+    """
+    email_norm = request.email.strip().lower()
+    player = db.query(Player).filter(func.lower(Player.email) == email_norm).first()
+    if player:
+        alphabet = string.ascii_letters + string.digits
+        temp_password = "".join(secrets.choice(alphabet) for _ in range(TEMP_PASSWORD_LENGTH))
+        expires_at = datetime.utcnow() + timedelta(minutes=TEMP_PASSWORD_EXPIRE_MINUTES)
+        player.temp_password_hash = hash_password(temp_password)
+        player.temp_password_expires_at = expires_at
+        db.commit()
+        send_temp_password_email(player.email, player.username, temp_password, expires_at)
+    return {"message": "If that email is registered, a temporary password has been sent."}
+
+
+@app.post("/auth/reset-password")
+def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """Replace the password with a new one after verifying the emailed temp password."""
+    email_norm = request.email.strip().lower()
+    player = db.query(Player).filter(func.lower(Player.email) == email_norm).first()
+    now = datetime.utcnow()
+    if (
+        not player
+        or not player.temp_password_hash
+        or not player.temp_password_expires_at
+        or player.temp_password_expires_at <= now
+        or not verify_password(request.temp_password.strip(), player.temp_password_hash)
+    ):
+        raise HTTPException(status_code=400, detail="Invalid or expired temporary password")
+    if not request.new_password.strip():
+        raise HTTPException(status_code=400, detail="New password is required")
+    player.password_hash = hash_password(request.new_password)
+    player.temp_password_hash = None
+    player.temp_password_expires_at = None
+    db.commit()
+    return {"message": "Password updated. You can now log in."}
 
 
 @app.get("/auth/me")
@@ -1597,6 +1659,26 @@ def admin_list_games(
 ):
     """Every game (lobby, in progress, and finished) for the admin games report."""
     return {"games": _build_games_list(_admin, db, include_all=True)}
+
+
+@app.get("/admin/users")
+def admin_list_users(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Every registered user for the admin users report."""
+    rows = db.query(Player).order_by(Player.username).all()
+    return {
+        "users": [
+            {
+                "id": p.id,
+                "username": p.username,
+                "email": p.email,
+                "last_login": p.last_login.isoformat() if p.last_login else None,
+            }
+            for p in rows
+        ]
+    }
 
 
 @app.get("/admin/setups")

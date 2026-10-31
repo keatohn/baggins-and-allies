@@ -70,6 +70,8 @@ Optional:
 | `BCRYPT_ROUNDS` | Defaults to `10`; increase only if you want slower hashing. |
 | `ADMIN_PLAYER_EMAIL` | Login email(s) granted `is_admin` at every startup (comma-separated for several; aliases `ADMIN_EMAIL`, `ADMIN_EMAILS`). Everyone else's admin flag is cleared — admin is controlled by this env var, not the DB. |
 | `SETUP_SOURCE` | Leave **unset** in production (default `db`). `files` is local-dev only; startup fails if set alongside a production env var. |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` | Forgot-password email (`backend/email.py`). E.g. `smtp.gmail.com`, `587`, a Gmail address, a Gmail **App Password**, and an optional From header (defaults to `SMTP_USER`). When unset, the forgot-password endpoint still returns its generic response but no email is sent (logged warning). |
+| `TEMP_PASSWORD_EXPIRE_MINUTES` | Temp password lifetime for forgot-password; defaults to `60` (1 hour). The email states the exact expiry. |
 
 **Security:** Rotate `JWT_SECRET` if leaked; existing sessions invalidate.
 
