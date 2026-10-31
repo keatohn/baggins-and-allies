@@ -222,6 +222,14 @@ async def lifespan(app: FastAPI):
                     starting_setup = su["starting_setup"]
             except FileNotFoundError:
                 pass
+        try:
+            from .game_results import backfill_game_results
+
+            n = backfill_game_results(db)
+            if n:
+                print(f"[game_results] backfilled {n} row(s) for finished games", flush=True)
+        except Exception as e:
+            print(f"[game_results] startup backfill failed: {e}", flush=True)
     finally:
         db.close()
     yield
@@ -918,6 +926,13 @@ def save_game(
         if state.winner is not None and row.status != "finished":
             row.status = "finished"
             row.completed_at = datetime.utcnow()
+            try:
+                from .game_results import ensure_game_results_for_row
+
+                ensure_game_results_for_row(db, row)
+            except Exception as e:
+                # Results are stats-only; never block the game save.
+                print(f"[game_results] write failed for game {game_id}: {e}", flush=True)
         if events:
             try:
                 config = json.loads(row.config) if isinstance(row.config, str) else {}
