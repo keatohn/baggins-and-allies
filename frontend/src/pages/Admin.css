@@ -948,6 +948,10 @@
   grid-row: 3;
 }
 
+.admin-graph__header .admin-form__micro.mapov-landscape-hint {
+  grid-row: 4;
+}
+
 .admin-graph__key {
   grid-column: 1 / -1;
   grid-row: 4;
@@ -1135,6 +1139,13 @@
 .admin-graph__search {
   flex: 0 0 auto;
   width: 100%;
+  box-sizing: border-box;
+}
+
+.admin-graph__filter {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
   box-sizing: border-box;
 }
 
@@ -1537,6 +1548,189 @@
   cursor: crosshair;
 }
 
+.admin-graph__viewport--select,
+.admin-graph__viewport--select .admin-graph__path {
+  cursor: crosshair;
+}
+
+.admin-graph__viewport--paint,
+.admin-graph__viewport--paint .admin-graph__path {
+  cursor: crosshair;
+}
+
+/* Paint owns left-drag: markers must not intercept the viewport handlers. Select keeps
+   markers interactive so a group can be drag-moved and shift-click toggled. */
+.admin-graph__viewport--paint .mapov-landscape-markers {
+  pointer-events: none;
+}
+
+.mapov-band {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1.5px solid var(--ink);
+  background: rgba(61, 41, 20, 0.12);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.mapov-bulk {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.7rem;
+  background: #fffef8;
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(61, 41, 20, 0.25);
+  z-index: 6;
+}
+
+.mapov-bulk__count {
+  font-size: 0.75rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.mapov-bulk__scale {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 7rem;
+  margin: 0;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.mapov-bulk__scale input[type='range'] {
+  width: 100%;
+  margin: 0;
+}
+
+.mapov-brush {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.7rem;
+  background: #fffef8;
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(61, 41, 20, 0.25);
+  z-index: 6;
+}
+
+.mapov-brush__thumb {
+  width: 1.75rem;
+  height: 1.75rem;
+  object-fit: contain;
+}
+
+.mapov-brush__none {
+  font-size: 0.75rem;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+.mapov-brush__scale {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 7rem;
+  margin: 0;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.mapov-brush__scale input[type='range'] {
+  width: 9rem;
+  margin: 0;
+}
+
+.mapov-brush__value {
+  min-width: 3rem;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Copy-from-another-map dialog (Landscape tab) */
+.mapov-copy {
+  width: min(100%, 46rem);
+  max-height: min(88vh, 46rem);
+}
+
+.mapov-copy__source {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.mapov-copy__source .admin-form__label {
+  padding-top: 0;
+}
+
+.mapov-copy__preview {
+  border: 1px solid var(--ink-faded);
+  border-radius: 8px;
+  background: var(--parchment);
+  overflow: hidden;
+}
+
+.mapov-copy__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.mapov-copy__path {
+  fill: rgba(61, 41, 20, 0.1);
+  stroke: var(--ink);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.mapov-copy__marker {
+  fill: rgba(37, 99, 235, 0.5);
+  stroke: rgba(255, 255, 255, 0.7);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.mapov-copy__marker--hit {
+  fill: #ea580c;
+}
+
+.mapov-copy__band {
+  fill: rgba(61, 41, 20, 0.14);
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.mapov-copy__note,
+.mapov-copy__hint {
+  margin: 0.5rem 0 0;
+}
+
+.mapov-copy__summary {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+  color: var(--ink);
+}
+
 .mapov-placement {
   position: absolute;
   transform: translate(-50%, -50%);
@@ -1570,6 +1764,12 @@
 }
 
 .mapov-placement--active {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 2px rgba(61, 41, 20, 0.35);
+  z-index: 3;
+}
+
+.mapov-placement--multi {
   border-color: var(--ink);
   box-shadow: 0 0 0 2px rgba(61, 41, 20, 0.35);
   z-index: 3;

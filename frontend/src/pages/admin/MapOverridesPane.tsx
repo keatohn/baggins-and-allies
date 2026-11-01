@@ -28,6 +28,48 @@ type Dict = Record<string, Record<string, unknown>>;
 
 type HintKind = 'units' | 'number' | 'icons' | 'logo';
 
+/** Landscape-tab cursor behavior: pan the map, rubber-band select, or stamp along a drag. */
+type CursorMode = 'navigate' | 'select' | 'paint';
+
+/** ViewBox-space spacing between paint-mode stamps along a drag path. */
+const PAINT_STAMP_SPACING = 36;
+
+/** Minimum viewBox-space distance between painted pieces (dedupe vs existing stamps). */
+const PAINT_MIN_DIST = 36;
+
+/** Axis-aligned region in some map's viewBox space (used by the copy dialog). */
+type RegionRect = { x1: number; y1: number; x2: number; y2: number };
+
+/** Target territory geometry used to place copied pieces by position. */
+type TargetHitArea = {
+  tid: string;
+  el: SVGPathElement;
+  bbox: { x: number; y: number; width: number; height: number };
+};
+
+type CopyPlanItem = { tid: string; placement: LandscapePlacement };
+
+type CopyPlan = {
+  items: CopyPlanItem[];
+  inRegion: number;
+  outsideRegion: number;
+  unmatched: number;
+  capped: number;
+};
+
+/** Multi-select key for a placement: landscape territory key + index in its list. */
+function placementKey(tid: string, index: number): string {
+  return `${tid}#${index}`;
+}
+
+function parsePlacementKey(key: string): { tid: string; index: number } | null {
+  const sep = key.lastIndexOf('#');
+  if (sep <= 0) return null;
+  const index = Number(key.slice(sep + 1));
+  if (!Number.isInteger(index) || index < 0) return null;
+  return { tid: key.slice(0, sep), index };
+}
+
 type CalculatedSpots = {
   centroids: Record<string, Pt>;
   positions: Record<string, { marker: Pt; unit: Pt; center?: Pt }>;
@@ -156,6 +198,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   const [selected, setSelected] = useState<string | null>(null);
   const [activeKind, setActiveKind] = useState<UiKind>('unit');
   const [search, setSearch] = useState('');
+  const [terrainFilter, setTerrainFilter] = useState('');
   const [stored, setStored] = useState<MapOverridesData | null>(null);
   const [draft, setDraft] = useState<MapOverridesData | null>(null);
   const [spots, setSpots] = useState<CalculatedSpots | null>(null);
@@ -168,6 +211,21 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   const [borderMode, setBorderMode] = useState(false);
   const [selectedPlacement, setSelectedPlacement] = useState<{ tid: string; index: number } | null>(null);
   const [autoBusy, setAutoBusy] = useState(false);
+  const [cursorMode, setCursorMode] = useState<CursorMode>('navigate');
+  const [band, setBand] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const [multiSel, setMultiSel] = useState<Set<string>>(() => new Set());
+  const [paintRadius, setPaintRadius] = useState(0);
+  // Copy-from-another-map dialog: source map preview + optional region filter.
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copySource, setCopySource] = useState('');
+  const [copyLoading, setCopyLoading] = useState(false);
+  const [copyErr, setCopyErr] = useState<string | null>(null);
+  const [copyPaths, setCopyPaths] = useState<Map<string, TerritoryPathData>>(new Map());
+  const [copyViewBox, setCopyViewBox] = useState({ width: 0, height: 0 });
+  const [copyOverrides, setCopyOverrides] = useState<MapOverridesData | null>(null);
+  const [copyRegion, setCopyRegion] = useState<RegionRect | null>(null);
+  const [copyDrag, setCopyDrag] = useState<RegionRect | null>(null);
+  const [targetHitAreas, setTargetHitAreas] = useState<TargetHitArea[]>([]);
 
   const dragRef = useRef<{ x: number; y: number; tx: number; ty: number; id: number } | null>(null);
   const didDragRef = useRef(false);
@@ -189,6 +247,16 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     scale: number;
     startPt: Pt;
     layer: 'interior' | 'border';
+  } | null>(null);
+  const selectDragRef = useRef<{ x: number; y: number; id: number } | null>(null);
+  const paintLastRef = useRef<Pt | null>(null);
+  const copyDragRef = useRef<{ id: number; sx: number; sy: number; x1: number; y1: number } | null>(null);
+  const bulkDragRef = useRef<{
+    id: number;
+    sx: number;
+    sy: number;
+    scale: number;
+    items: { tid: string; index: number; x: number; y: number; layer: 'interior' | 'border' }[];
   } | null>(null);
 
   const current = draft ?? stored;
@@ -245,10 +313,14 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     setSelected(null);
     setPngFailed(false);
     setSearch('');
+    setTerrainFilter('');
     setPlacing(null);
     setBorderMode(false);
     setSelectedPlacement(null);
     setEditorTab('icon');
+    setCursorMode('navigate');
+    setBand(null);
+    setMultiSel(new Set());
     api
       .getMapOverrides(mapBase)
       .then((r) => {
@@ -274,6 +346,63 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
       cancelled = true;
     };
   }, [mapBase]);
+
+  // --- copy-from-another-map: source data + target hit-test geometry ------
+
+  useEffect(() => {
+    if (!copyOpen || !copySource) {
+      setCopyLoading(false);
+      setCopyErr(null);
+      return;
+    }
+    let cancelled = false;
+    setCopyLoading(true);
+    setCopyErr(null);
+    setCopyOverrides(null);
+    setCopyPaths(new Map());
+    setCopyRegion(null);
+    setCopyDrag(null);
+    Promise.all([
+      api.getMapOverrides(copySource).then((r) => normalizeMapOverrides(r?.overrides)),
+      loadTerritorySvgPaths(copySource),
+    ])
+      .then(([overrides, { paths: srcPaths, viewBox: srcViewBox }]) => {
+        if (cancelled) return;
+        setCopyOverrides(overrides);
+        setCopyPaths(srcPaths);
+        setCopyViewBox(srcViewBox);
+        setCopyLoading(false);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setCopyErr(e instanceof Error ? e.message : 'Failed to load source map');
+        setCopyLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [copyOpen, copySource]);
+
+  // Target territory fills for position-based copy. Runs after paint so the
+  // freshly loaded SVG paths are in the DOM; bboxes prefilter isPointInFill.
+  useEffect(() => {
+    if (loading || !wrapRef.current) return;
+    const out: TargetHitArea[] = [];
+    for (const node of wrapRef.current.querySelectorAll('path.admin-graph__path')) {
+      const el = node as SVGPathElement;
+      const tid = el.dataset.tid;
+      if (!tid) continue;
+      try {
+        const b = el.getBBox();
+        if (Number.isFinite(b.x + b.y + b.width + b.height) && b.width > 0 && b.height > 0) {
+          out.push({ tid, el, bbox: { x: b.x, y: b.y, width: b.width, height: b.height } });
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    setTargetHitAreas(out);
+  }, [loading, paths]);
 
   // --- calculated spot oracle (hidden GameMap) ----------------------------
 
@@ -353,6 +482,22 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && copyOpen) {
+        e.stopPropagation();
+        setCopyOpen(false);
+        return;
+      }
+      if (e.key === 'Escape' && band) {
+        e.stopPropagation();
+        selectDragRef.current = null;
+        setBand(null);
+        return;
+      }
+      if (e.key === 'Escape' && multiSel.size) {
+        e.stopPropagation();
+        setMultiSel(new Set());
+        return;
+      }
       if (e.key === 'Escape' && placing) {
         e.stopPropagation();
         setPlacing(null);
@@ -374,7 +519,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [discardOpen, saving, dirty, onClose, placing]);
+  }, [discardOpen, saving, dirty, onClose, placing, band, multiSel, copyOpen]);
 
   const changeMap = (next: string) => {
     if (!next || next === mapBase) return;
@@ -427,12 +572,73 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   };
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    // Middle-button always pans so the map stays reachable in select/paint modes.
+    if (e.button === 1) {
+      didDragRef.current = false;
+      dragRef.current = { x: e.clientX, y: e.clientY, tx: transform.x, ty: transform.y, id: e.pointerId };
+      return;
+    }
     if (e.button !== 0) return;
     didDragRef.current = false;
+    const landscape = editorTab === 'landscape';
+    if (landscape && cursorMode === 'select') {
+      const el = wrapRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      selectDragRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top, id: e.pointerId };
+      setBand(null);
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    if (landscape && cursorMode === 'paint') {
+      const el = wrapRef.current;
+      if (!el) return;
+      paintLastRef.current = null;
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      // Stamp immediately at the press point, then again along the drag.
+      paintStampAt(e.clientX, e.clientY);
+      const vb = viewportToViewBox(e.clientX, e.clientY);
+      paintLastRef.current = vb;
+      return;
+    }
     dragRef.current = { x: e.clientX, y: e.clientY, tx: transform.x, ty: transform.y, id: e.pointerId };
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const sd = selectDragRef.current;
+    if (sd && e.pointerId === sd.id) {
+      const el = wrapRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const x1 = e.clientX - rect.left;
+      const y1 = e.clientY - rect.top;
+      setBand({
+        left: Math.min(sd.x, x1),
+        top: Math.min(sd.y, y1),
+        width: Math.abs(x1 - sd.x),
+        height: Math.abs(y1 - sd.y),
+      });
+      return;
+    }
+    if (editorTab === 'landscape' && cursorMode === 'paint') {
+      if (!placing) return;
+      const vb = viewportToViewBox(e.clientX, e.clientY);
+      if (!vb) return;
+      const last = paintLastRef.current;
+      const step = Math.max(PAINT_STAMP_SPACING, paintRadius);
+      if (last && Math.hypot(vb.x - last.x, vb.y - last.y) < step) return;
+      paintStampAt(e.clientX, e.clientY);
+      paintLastRef.current = vb;
+      return;
+    }
     const d = dragRef.current;
     if (!d || e.pointerId !== d.id) return;
     const dist = Math.abs(e.clientX - d.x) + Math.abs(e.clientY - d.y);
@@ -466,6 +672,74 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   );
 
   const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const sd = selectDragRef.current;
+    if (sd && e.pointerId === sd.id) {
+      try {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      selectDragRef.current = null;
+      const el = wrapRef.current;
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        const x2 = e.clientX - rect.left;
+        const y2 = e.clientY - rect.top;
+        const vx1 = Math.min(sd.x, x2);
+        const vy1 = Math.min(sd.y, y2);
+        const vx2 = Math.max(sd.x, x2);
+        const vy2 = Math.max(sd.y, y2);
+        if (vx2 - vx1 < 4 && vy2 - vy1 < 4) {
+          // Bare click: plain click clears the selection; modifier clicks leave it alone.
+          if (!e.shiftKey && !e.ctrlKey && !e.metaKey) setMultiSel(new Set());
+        } else {
+          const bx1 = (vx1 - transform.x) / transform.scale;
+          const by1 = (vy1 - transform.y) / transform.scale;
+          const bx2 = (vx2 - transform.x) / transform.scale;
+          const by2 = (vy2 - transform.y) / transform.scale;
+          const hits: string[] = [];
+          for (const row of landscapeMarkers) {
+            const p = row.placement;
+            if (p.x >= bx1 && p.x <= bx2 && p.y >= by1 && p.y <= by2) {
+              hits.push(placementKey(row.tid, row.index));
+            }
+          }
+          setMultiSel((prev) => {
+            if (e.ctrlKey || e.metaKey) {
+              const next = new Set(prev);
+              for (const h of hits) next.delete(h);
+              return next;
+            }
+            if (e.shiftKey) {
+              const next = new Set(prev);
+              for (const h of hits) next.add(h);
+              return next;
+            }
+            return new Set(hits);
+          });
+        }
+      }
+      setBand(null);
+      return;
+    }
+    if (editorTab === 'landscape' && cursorMode === 'paint') {
+      try {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      paintLastRef.current = null;
+      return;
+    }
+    if (editorTab === 'landscape' && cursorMode === 'select') {
+      // Band was cancelled (Escape) or never started — don't fall through to territory selection.
+      try {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     const d = dragRef.current;
     if (d && e.pointerId === d.id) {
       try {
@@ -596,7 +870,64 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     updateLandscape(() => undefined);
     setSelectedPlacement(null);
     setPlacing(null);
+    setMultiSel(new Set());
   }, [updateLandscape]);
+
+  const setBulkScale = useCallback(
+    (s: number) => {
+      if (!multiSel.size) return;
+      const clamped = Math.min(4, Math.max(0.25, s));
+      updateLandscape((prev) => {
+        const map = { ...(prev?.territories ?? {}) };
+        const cloned = new Set<string>();
+        let changed = false;
+        for (const key of multiSel) {
+          const parsed = parsePlacementKey(key);
+          if (!parsed) continue;
+          const list = map[parsed.tid];
+          const p = list?.[parsed.index];
+          if (!p || (p.s ?? 1) === clamped) continue;
+          if (!cloned.has(parsed.tid)) {
+            map[parsed.tid] = [...list!];
+            cloned.add(parsed.tid);
+          }
+          map[parsed.tid]![parsed.index] = { ...p, s: clamped };
+          changed = true;
+        }
+        return changed ? { territories: map } : prev;
+      });
+    },
+    [multiSel, updateLandscape],
+  );
+
+  const deleteSelectedPlacements = useCallback(() => {
+    if (!multiSel.size) return;
+    updateLandscape((prev) => {
+      const map = { ...(prev?.territories ?? {}) };
+      const byTid = new Map<string, number[]>();
+      for (const key of multiSel) {
+        const parsed = parsePlacementKey(key);
+        if (!parsed) continue;
+        const arr = byTid.get(parsed.tid) ?? [];
+        arr.push(parsed.index);
+        byTid.set(parsed.tid, arr);
+      }
+      for (const [tid, indices] of byTid) {
+        const list = map[tid];
+        if (!list) continue;
+        const next = [...list];
+        // Splice highest-index-first so earlier indices stay valid.
+        for (const index of [...indices].sort((a, b) => b - a)) {
+          if (index >= 0 && index < next.length) next.splice(index, 1);
+        }
+        if (next.length) map[tid] = next;
+        else delete map[tid];
+      }
+      return Object.keys(map).length ? { territories: map } : undefined;
+    });
+    setMultiSel(new Set());
+    setSelectedPlacement(null);
+  }, [multiSel, updateLandscape]);
 
   const autoGenerateLandscape = useCallback(() => {
     if (!paths.size) return;
@@ -614,6 +945,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
           seedAcc = (seedAcc * 1103515245 + 12345) % 2147483647;
           return seedAcc || 1;
         };
+        let totalPlaced = Object.values(map).reduce((n, list) => n + list.length, 0);
         for (const tid of paths.keys()) {
           const defKey = resolveTid(territories, tid) ?? tid;
           const def = territories[defKey];
@@ -631,8 +963,15 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
             const images = manifest[cat] ?? [];
             if (!images.length) continue;
             const key = resolveTid(map, tid) ?? tid;
-            const generated = autoGenerateForTerritory(pathEl, cat, images, nextSeed());
-            if (generated.length) map[key] = [...(map[key] ?? []), ...generated];
+            const existing = map[key] ?? [];
+            const room = Math.min(50 - existing.length, 2500 - totalPlaced);
+            if (room <= 0) continue;
+            const generated = autoGenerateForTerritory(pathEl, cat, images, nextSeed()).slice(0, room);
+            if (generated.length) {
+              map[key] = [...existing, ...generated];
+              totalPlaced += generated.length;
+            }
+            if (totalPlaced >= 2500) return Object.keys(map).length ? { territories: map } : undefined;
           }
         }
         return Object.keys(map).length ? { territories: map } : undefined;
@@ -642,17 +981,21 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     }
   }, [paths, territories, manifest, updateLandscape]);
 
-  const selectedTerrainType = useMemo(() => {
-    if (!selected) return '';
-    const defKey = resolveTid(territories, selected) ?? selected;
-    const def = territories[defKey];
-    if (!def) return '';
-    return typeof def.terrain_type === 'string'
-      ? def.terrain_type
-      : typeof def.terrain === 'string'
-        ? def.terrain
-        : '';
-  }, [selected, territories]);
+  const terrainTypeFor = useCallback(
+    (tid: string): string => {
+      const defKey = resolveTid(territories, tid) ?? tid;
+      const def = territories[defKey];
+      if (!def) return '';
+      return typeof def.terrain_type === 'string'
+        ? def.terrain_type
+        : typeof def.terrain === 'string'
+          ? def.terrain
+          : '';
+    },
+    [territories],
+  );
+
+  const selectedTerrainType = useMemo(() => (selected ? terrainTypeFor(selected) : ''), [selected, terrainTypeFor]);
 
   const selectedCategories = useMemo(() => {
     const cats = landscapeCategoriesForTerrain(selectedTerrainType, manifest);
@@ -706,6 +1049,78 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
       return true;
     },
     [placing, borderMode, viewportToViewBox, current, updateLandscape],
+  );
+
+  /**
+   * Paint-mode stamp: fills a disk of `paintRadius` viewBox units (0 = a single
+   * point) around the cursor. Candidates are tested against the territory under
+   * the cursor only; border mode snaps them to the outline. Points closer than
+   * PAINT_MIN_DIST to an existing piece are skipped so re-tracing never stacks.
+   */
+  const paintStampAt = useCallback(
+    (clientX: number, clientY: number) => {
+      if (!placing) return;
+      const tid = territoryIdFromPoint(clientX, clientY);
+      if (!tid) return;
+      const pathEl = territoryPathEl(tid);
+      if (!pathEl) return;
+      const vb = viewportToViewBox(clientX, clientY);
+      if (!vb) return;
+      const radius = paintRadius;
+      const offsets: Pt[] = [{ x: 0, y: 0 }];
+      if (radius > 0) {
+        const step = Math.min(PAINT_MIN_DIST, radius);
+        const n = Math.ceil(radius / step);
+        for (let i = -n; i <= n; i += 1) {
+          for (let j = -n; j <= n; j += 1) {
+            if (i === 0 && j === 0) continue;
+            const dx = i * step;
+            const dy = j * step;
+            if (dx * dx + dy * dy > radius * radius) continue;
+            offsets.push({ x: dx, y: dy });
+          }
+        }
+      }
+      const accepted: Pt[] = [];
+      for (const o of offsets) {
+        let x = vb.x + o.x;
+        let y = vb.y + o.y;
+        if (borderMode) {
+          const snapped = nearestPointOnOutline(pathEl, x, y);
+          if (!snapped) continue;
+          // In brush mode only keep outline points within reach of the cursor.
+          if (radius > 0 && Math.hypot(snapped.x - vb.x, snapped.y - vb.y) > radius) continue;
+          x = snapped.x;
+          y = snapped.y;
+        } else if (!isPointInTerritoryPath(pathEl, x, y)) {
+          continue;
+        }
+        accepted.push({ x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 });
+      }
+      if (!accepted.length) return;
+      const cat = placing.cat;
+      const img = placing.img;
+      const layer = borderMode ? ('border' as const) : ('interior' as const);
+      updateLandscape((prev) => {
+        const map = { ...(prev?.territories ?? {}) };
+        const key = resolveTid(map, tid) ?? tid;
+        const list = [...(map[key] ?? [])];
+        const before = list.length;
+        const minD2 = PAINT_MIN_DIST * PAINT_MIN_DIST;
+        for (const p of accepted) {
+          if (list.length >= 50) break;
+          const tooClose = list.some((q) => (q.x - p.x) ** 2 + (q.y - p.y) ** 2 < minD2);
+          if (tooClose) continue;
+          list.push({ cat, img, x: p.x, y: p.y, layer });
+        }
+        if (list.length === before) return prev;
+        map[key] = list;
+        return { territories: map };
+      });
+      setSelected(tid);
+      setSelectedPlacement(null);
+    },
+    [placing, paintRadius, borderMode, viewportToViewBox, updateLandscape],
   );
 
   const setFocus = (tid: string, focus: 'calculated' | 'override') => {
@@ -809,6 +1224,42 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     e.stopPropagation();
     e.preventDefault();
     if (e.button !== 0) return;
+    if (editorTab === 'landscape' && cursorMode === 'paint') return; // paint owns left-drag on the viewport
+    if (editorTab === 'landscape' && cursorMode === 'select') {
+      const key = placementKey(tid, index);
+      if (e.shiftKey || e.ctrlKey || e.metaKey) {
+        setMultiSel((prev) => {
+          const next = new Set(prev);
+          if (next.has(key)) next.delete(key);
+          else next.add(key);
+          return next;
+        });
+        return;
+      }
+      // Clicking a member drags the whole group; clicking a non-member selects just it.
+      const inGroup = multiSel.has(key);
+      const keys = inGroup ? Array.from(multiSel) : [key];
+      if (!inGroup) setMultiSel(new Set([key]));
+      const map = current?.landscape?.territories;
+      const items: { tid: string; index: number; x: number; y: number; layer: 'interior' | 'border' }[] = [];
+      for (const k of keys) {
+        const parsed = parsePlacementKey(k);
+        if (!parsed) continue;
+        const p = map?.[parsed.tid]?.[parsed.index];
+        if (!p) continue;
+        items.push({ tid: parsed.tid, index: parsed.index, x: p.x, y: p.y, layer: p.layer });
+      }
+      if (!items.length) return;
+      try {
+        (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      bulkDragRef.current = { id: e.pointerId, sx: e.clientX, sy: e.clientY, scale: transform.scale, items };
+      setSelected(tid);
+      return;
+    }
+    if (editorTab === 'landscape' && cursorMode !== 'navigate') return; // select/paint own left-drag
     if (placing) return; // placing mode takes priority; don't start a drag
     const placement = landscapeFor(tid)[index];
     if (!placement) return;
@@ -833,6 +1284,54 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
 
   const onPlacementPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
+    const bd = bulkDragRef.current;
+    if (bd && e.pointerId === bd.id) {
+      const el = wrapRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const startVb = {
+        x: (bd.sx - rect.left - transform.x) / bd.scale,
+        y: (bd.sy - rect.top - transform.y) / bd.scale,
+      };
+      const vb = viewportToViewBox(e.clientX, e.clientY);
+      if (!vb) return;
+      const dx = vb.x - startVb.x;
+      const dy = vb.y - startVb.y;
+      updateLandscape((prev) => {
+        const map = { ...(prev?.territories ?? {}) };
+        const cloned = new Set<string>();
+        let changed = false;
+        for (const item of bd.items) {
+          const list = map[item.tid];
+          const p = list?.[item.index];
+          if (!p) continue;
+          let x = item.x + dx;
+          let y = item.y + dy;
+          const pathEl = territoryPathEl(item.tid);
+          if (item.layer === 'border') {
+            if (pathEl) {
+              const snapped = nearestPointOnOutline(pathEl, x, y);
+              if (snapped) {
+                x = snapped.x;
+                y = snapped.y;
+              }
+            }
+          } else if (pathEl && !isPointInTerritoryPath(pathEl, x, y)) {
+            continue; // interior pieces stay inside their territory
+          }
+          x = Math.max(0, Math.min(viewBox.width, x));
+          y = Math.max(0, Math.min(viewBox.height, y));
+          if (!cloned.has(item.tid)) {
+            map[item.tid] = [...list!];
+            cloned.add(item.tid);
+          }
+          map[item.tid]![item.index] = { ...p, x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 };
+          changed = true;
+        }
+        return changed ? { territories: map } : prev;
+      });
+      return;
+    }
     const d = placeDragRef.current;
     if (!d || e.pointerId !== d.id) return;
     const el = wrapRef.current;
@@ -863,6 +1362,16 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
 
   const onPlacementPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
+    const bd = bulkDragRef.current;
+    if (bd && e.pointerId === bd.id) {
+      try {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      bulkDragRef.current = null;
+      return;
+    }
     const d = placeDragRef.current;
     if (!d || e.pointerId !== d.id) return;
     try {
@@ -906,11 +1415,24 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
 
   const filteredChoices = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return territoryChoices;
-    return territoryChoices.filter(
-      (row) => row.label.toLowerCase().includes(q) || row.id.toLowerCase().includes(q),
-    );
-  }, [territoryChoices, search]);
+    const type = terrainFilter;
+    return territoryChoices.filter((row) => {
+      if (type && (terrainTypeFor(row.id) || 'land') !== type) return false;
+      if (!q) return true;
+      return row.label.toLowerCase().includes(q) || row.id.toLowerCase().includes(q);
+    });
+  }, [territoryChoices, search, terrainFilter, terrainTypeFor]);
+
+  const terrainFilterOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const row of territoryChoices) {
+      const t = terrainTypeFor(row.id) || 'land';
+      counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([type, count]) => ({ type, count }));
+  }, [territoryChoices, terrainTypeFor]);
 
   const dots = useMemo(() => {
     if (!spots) return [];
@@ -964,6 +1486,258 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     [current],
   );
 
+  // Slider value for the bulk scale control: first selected piece's scale (mixed sets just start there).
+  const bulkScaleValue = useMemo(() => {
+    for (const key of multiSel) {
+      const parsed = parsePlacementKey(key);
+      if (!parsed) continue;
+      const p = current?.landscape?.territories?.[parsed.tid]?.[parsed.index];
+      if (p) return p.s ?? 1;
+    }
+    return 1;
+  }, [multiSel, current]);
+
+  // --- copy from another map ----------------------------------------------
+
+  const otherMaps = useMemo(() => maps.filter((m) => m !== mapBase), [maps, mapBase]);
+
+  const copyPlacements = useMemo(() => {
+    const map = copyOverrides?.landscape?.territories;
+    if (!map) return [];
+    const rows: { tid: string; index: number; p: LandscapePlacement }[] = [];
+    for (const [tid, list] of Object.entries(map)) {
+      list.forEach((p, index) => rows.push({ tid, index, p }));
+    }
+    return rows;
+  }, [copyOverrides]);
+
+  const normCopyRegion = useMemo<RegionRect | null>(() => {
+    if (!copyRegion) return null;
+    return {
+      x1: Math.min(copyRegion.x1, copyRegion.x2),
+      y1: Math.min(copyRegion.y1, copyRegion.y2),
+      x2: Math.max(copyRegion.x1, copyRegion.x2),
+      y2: Math.max(copyRegion.y1, copyRegion.y2),
+    };
+  }, [copyRegion]);
+
+  /** Position-based plan: scale each source piece into this map's viewBox and
+   *  assign it to whichever target territory contains the point. Respects the
+   *  50/territory and 2500/map caps against the current draft. */
+  const copyPlan = useMemo<CopyPlan | null>(() => {
+    if (copyLoading || copyErr || !copyOverrides || !copyViewBox.width || !viewBox.width) return null;
+    if (!targetHitAreas.length) return null;
+    const existing = current?.landscape?.territories ?? {};
+    const counts: Record<string, number> = {};
+    let total = 0;
+    for (const [tid, list] of Object.entries(existing)) {
+      counts[tid] = list.length;
+      total += list.length;
+    }
+    const scaleX = viewBox.width / copyViewBox.width;
+    const scaleY = viewBox.height / copyViewBox.height;
+    const region = normCopyRegion;
+    const items: CopyPlanItem[] = [];
+    let inRegion = 0;
+    let outsideRegion = 0;
+    let unmatched = 0;
+    let capped = 0;
+    for (const { p } of copyPlacements) {
+      if (region && (p.x < region.x1 || p.x > region.x2 || p.y < region.y1 || p.y > region.y2)) {
+        outsideRegion += 1;
+        continue;
+      }
+      inRegion += 1;
+      const x = p.x * scaleX;
+      const y = p.y * scaleY;
+      if (x < 0 || y < 0 || x > viewBox.width || y > viewBox.height) {
+        unmatched += 1;
+        continue;
+      }
+      let hit: string | null = null;
+      for (const area of targetHitAreas) {
+        const b = area.bbox;
+        if (x < b.x || y < b.y || x > b.x + b.width || y > b.y + b.height) continue;
+        if (isPointInTerritoryPath(area.el, x, y)) {
+          hit = area.tid;
+          break;
+        }
+      }
+      if (!hit) {
+        unmatched += 1;
+        continue;
+      }
+      const key = resolveTid(counts, hit) ?? hit;
+      if ((counts[key] ?? 0) >= 50 || total >= 2500) {
+        capped += 1;
+        continue;
+      }
+      counts[key] = (counts[key] ?? 0) + 1;
+      total += 1;
+      const placement: LandscapePlacement = {
+        cat: p.cat,
+        img: p.img,
+        x: Math.round(x * 100) / 100,
+        y: Math.round(y * 100) / 100,
+        layer: p.layer,
+      };
+      // Copied pieces are a deliberate import: keep them across the next auto pass.
+      if (typeof p.s === 'number' && p.s !== 1) placement.s = Math.min(4, Math.max(0.25, p.s));
+      items.push({ tid: key, placement });
+    }
+    return { items, inRegion, outsideRegion, unmatched, capped };
+  }, [
+    copyLoading,
+    copyErr,
+    copyOverrides,
+    copyViewBox,
+    viewBox,
+    targetHitAreas,
+    normCopyRegion,
+    copyPlacements,
+    current,
+  ]);
+
+  const copySummary = useMemo(() => {
+    if (!otherMaps.length) return 'No other map to copy from.';
+    if (copyLoading) return `Loading ${copySource}…`;
+    if (copyErr) return copyErr;
+    if (!copyPlan) return 'Select a source map to preview its landscape placements.';
+    const bits = [`${copyPlan.items.length} of ${copyPlan.inRegion} pieces ready to copy`];
+    if (copyPlan.outsideRegion) bits.push(`${copyPlan.outsideRegion} outside the region`);
+    if (copyPlan.unmatched) bits.push(`${copyPlan.unmatched} land off this map`);
+    if (copyPlan.capped) bits.push(`${copyPlan.capped} skipped by the 50-per-territory / 2500-per-map caps`);
+    return bits.join(' · ');
+  }, [otherMaps.length, copyLoading, copyErr, copySource, copyPlan]);
+
+  const openCopyDialog = () => {
+    setCopyErr(null);
+    setCopyRegion(null);
+    setCopyDrag(null);
+    setCopySource(otherMaps[0] ?? '');
+    setCopyOpen(true);
+  };
+
+  const applyCopy = () => {
+    const plan = copyPlan;
+    if (!plan || !plan.items.length) return;
+    const map: Record<string, LandscapePlacement[]> = { ...(current?.landscape?.territories ?? {}) };
+    const newKeys: string[] = [];
+    let total = 0;
+    for (const list of Object.values(map)) total += list.length;
+    const byTid = new Map<string, CopyPlanItem[]>();
+    for (const item of plan.items) {
+      const arr = byTid.get(item.tid);
+      if (arr) arr.push(item);
+      else byTid.set(item.tid, [item]);
+    }
+    for (const [tid, items] of byTid) {
+      const key = resolveTid(map, tid) ?? tid;
+      const existingList = map[key] ?? [];
+      const room = Math.min(50 - existingList.length, 2500 - total);
+      const add = items.slice(0, Math.max(0, room));
+      if (!add.length) continue;
+      map[key] = [...existingList, ...add.map((it) => it.placement)];
+      add.forEach((_, i) => newKeys.push(placementKey(key, existingList.length + i)));
+      total += add.length;
+    }
+    updateLandscape(() => (Object.keys(map).length ? { territories: map } : undefined));
+    if (newKeys.length) {
+      // Select the import so it can be bulk-dragged/scaled immediately.
+      setMultiSel(new Set(newKeys));
+      setSelectedPlacement(null);
+      setCursorMode('select');
+      setBand(null);
+      selectDragRef.current = null;
+      bulkDragRef.current = null;
+    }
+    setCopyOpen(false);
+  };
+
+  const copyVbFromEvent = (e: ReactPointerEvent<SVGSVGElement>): Pt | null => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1 || !copyViewBox.width || !copyViewBox.height) return null;
+    return {
+      x: ((e.clientX - rect.left) / rect.width) * copyViewBox.width,
+      y: ((e.clientY - rect.top) / rect.height) * copyViewBox.height,
+    };
+  };
+
+  const onCopyPreviewDown = (e: ReactPointerEvent<SVGSVGElement>) => {
+    if (e.button !== 0) return;
+    const vb = copyVbFromEvent(e);
+    if (!vb) return;
+    e.preventDefault();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    copyDragRef.current = { id: e.pointerId, sx: e.clientX, sy: e.clientY, x1: vb.x, y1: vb.y };
+    setCopyDrag({ x1: vb.x, y1: vb.y, x2: vb.x, y2: vb.y });
+  };
+
+  const onCopyPreviewMove = (e: ReactPointerEvent<SVGSVGElement>) => {
+    const d = copyDragRef.current;
+    if (!d || e.pointerId !== d.id) return;
+    const vb = copyVbFromEvent(e);
+    if (!vb) return;
+    setCopyDrag({ x1: d.x1, y1: d.y1, x2: vb.x, y2: vb.y });
+  };
+
+  const onCopyPreviewUp = (e: ReactPointerEvent<SVGSVGElement>) => {
+    const d = copyDragRef.current;
+    if (!d || e.pointerId !== d.id) return;
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    copyDragRef.current = null;
+    const moved = Math.abs(e.clientX - d.sx) + Math.abs(e.clientY - d.sy) >= 4;
+    const vb = copyVbFromEvent(e);
+    setCopyDrag(null);
+    // A bare click clears the region; a real drag commits it.
+    if (!moved) setCopyRegion(null);
+    else setCopyRegion({ x1: d.x1, y1: d.y1, x2: vb?.x ?? d.x1, y2: vb?.y ?? d.y1 });
+  };
+
+  const copyMarkerR = copyViewBox.width
+    ? Math.max(6, Math.min(copyViewBox.width, copyViewBox.height) / 120)
+    : 10;
+
+  const copyMarkers = useMemo(
+    () =>
+      copyPlacements.map((row) => (
+        <circle
+          key={`${row.tid}|${row.index}`}
+          className="mapov-copy__marker"
+          cx={row.p.x}
+          cy={row.p.y}
+          r={copyMarkerR}
+        />
+      )),
+    [copyPlacements, copyMarkerR],
+  );
+
+  const copyRegionMarkers = useMemo(() => {
+    if (!normCopyRegion) return null;
+    const r = normCopyRegion;
+    return copyPlacements
+      .filter((row) => row.p.x >= r.x1 && row.p.x <= r.x2 && row.p.y >= r.y1 && row.p.y <= r.y2)
+      .map((row) => (
+        <circle
+          key={`${row.tid}|${row.index}`}
+          className="mapov-copy__marker mapov-copy__marker--hit"
+          cx={row.p.x}
+          cy={row.p.y}
+          r={copyMarkerR}
+        />
+      ));
+  }, [copyPlacements, normCopyRegion, copyMarkerR]);
+
+  const copyBand = copyDrag ?? normCopyRegion;
+
   const selectedEntry = selected ? entryFor(current, selected) : undefined;
   const selectedFocus: 'calculated' | 'override' = selectedEntry?.focus === 'override' ? 'override' : 'calculated';
   const selectedCalc = useMemo(
@@ -1011,6 +1785,9 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                   setEditorTab('icon');
                   setPlacing(null);
                   setSelectedPlacement(null);
+                  setCursorMode('navigate');
+                  setBand(null);
+                  setMultiSel(new Set());
                 }}
               >
                 Icon
@@ -1044,6 +1821,32 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
           <div className="admin-graph__header-actions">
             {editorTab === 'landscape' ? (
               <>
+                <div className="admin-mapview__toggle" role="group" aria-label="Cursor mode">
+                  {(
+                    [
+                      ['navigate', 'Navigate'],
+                      ['select', 'Select'],
+                      ['paint', 'Paint'],
+                    ] as const
+                  ).map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`admin-mapview__toggle-btn${cursorMode === mode ? ' admin-mapview__toggle-btn--active' : ''}`}
+                      aria-pressed={cursorMode === mode}
+                      onClick={() => {
+                        setCursorMode(mode);
+                        setBand(null);
+                        setMultiSel(new Set());
+                        selectDragRef.current = null;
+                        paintLastRef.current = null;
+                        bulkDragRef.current = null;
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
                 <button
                   type="button"
                   className="admin-page__btn"
@@ -1052,6 +1855,15 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                   title="Place interior art on every territory whose terrain type has landscape images (keeps manual placements)"
                 >
                   {autoBusy ? 'Generating…' : 'Auto-generate'}
+                </button>
+                <button
+                  type="button"
+                  className="admin-page__btn"
+                  disabled={otherMaps.length === 0}
+                  onClick={openCopyDialog}
+                  title="Copy landscape placements from another map at the same positions (optionally limited to a region)"
+                >
+                  Copy from…
                 </button>
                 <button
                   type="button"
@@ -1091,9 +1903,15 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
             </ul>
           ) : (
             <p className="admin-form__micro mapov-landscape-hint">
-              {placing
-                ? `Click the map to place ${placing.img}${borderMode ? ' on the territory border' : ' inside the territory'} · Esc to cancel`
-                : 'Pick an image below, then click the map. Drag existing art to move it.'}
+              {cursorMode === 'select'
+                ? 'Select mode: drag a rectangle to select pieces · shift adds · ctrl removes · drag a selected piece to move the group · Esc clears'
+                : cursorMode === 'paint'
+                  ? placing
+                    ? `Paint mode: drag to stamp ${placing.img}${paintRadius ? ` in a ${paintRadius}-unit brush` : ' along the cursor'}${borderMode ? ' on borders' : ' inside territories'} · pick another image below to switch`
+                    : 'Paint mode: pick an image below, then drag on the map to stamp.'
+                  : placing
+                    ? `Click the map to place ${placing.img}${borderMode ? ' on the territory border' : ' inside the territory'} · Esc to cancel`
+                    : 'Pick an image below, then click the map. Drag existing art to move it.'}
               {landscapeCount ? ` · ${landscapeCount} placed` : ''}
             </p>
           )}
@@ -1112,6 +1930,19 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
+              <select
+                className="admin-page__select admin-graph__filter"
+                aria-label="Filter by territory type"
+                value={terrainFilter}
+                onChange={(e) => setTerrainFilter(e.target.value)}
+              >
+                <option value="">All territory types</option>
+                {terrainFilterOptions.map((opt) => (
+                  <option key={opt.type} value={opt.type}>
+                    {prettifyId(opt.type)} ({opt.count})
+                  </option>
+                ))}
+              </select>
               <div className="admin-graph__list" role="listbox" aria-label="Territories">
                 {filteredChoices.map((row) => {
                   const overridden = entryFor(current, row.id)?.focus === 'override';
@@ -1322,7 +2153,11 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
             </div>
             <div
               ref={wrapRef}
-              className={`admin-graph__viewport${placing ? ' admin-graph__viewport--placing' : ''}`}
+              className={`admin-graph__viewport${placing ? ' admin-graph__viewport--placing' : ''}${
+                editorTab === 'landscape' && cursorMode === 'select'
+                  ? ' admin-graph__viewport--select'
+                  : ''
+              }${editorTab === 'landscape' && cursorMode === 'paint' ? ' admin-graph__viewport--paint' : ''}`}
               onWheel={onWheel}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
@@ -1363,11 +2198,84 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                   ))}
                 </svg>
               </div>
+              {band ? (
+                <div
+                  className="mapov-band"
+                  style={{ left: band.left, top: band.top, width: band.width, height: band.height }}
+                  aria-hidden
+                />
+              ) : null}
+              {editorTab === 'landscape' && cursorMode === 'select' && multiSel.size > 0 ? (
+                <div
+                  className="mapov-bulk"
+                  role="toolbar"
+                  aria-label="Selection actions"
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  <span className="mapov-bulk__count">{multiSel.size} selected</span>
+                  <label className="mapov-bulk__scale" title="Scale all selected pieces">
+                    Scale
+                    <input
+                      type="range"
+                      min={0.25}
+                      max={4}
+                      step={0.05}
+                      value={bulkScaleValue}
+                      onChange={(e) => setBulkScale(Number(e.target.value))}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="admin-page__btn admin-page__btn--danger"
+                    onClick={deleteSelectedPlacements}
+                  >
+                    Delete
+                  </button>
+                  <button type="button" className="admin-page__btn" onClick={() => setMultiSel(new Set())}>
+                    Clear
+                  </button>
+                </div>
+              ) : null}
+              {editorTab === 'landscape' && cursorMode === 'paint' ? (
+                <div
+                  className="mapov-brush"
+                  role="toolbar"
+                  aria-label="Paint brush"
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  {placing ? (
+                    <img
+                      className="mapov-brush__thumb"
+                      src={landscapeSrc(placing)}
+                      alt={placing.img}
+                      title={`${placing.cat} · ${placing.img}`}
+                    />
+                  ) : (
+                    <span className="mapov-brush__none">No image armed</span>
+                  )}
+                  <label
+                    className="mapov-brush__scale"
+                    title="Brush radius in map units (0 = stamp a single line along the cursor)"
+                  >
+                    Thickness
+                    <input
+                      type="range"
+                      min={0}
+                      max={200}
+                      step={10}
+                      value={paintRadius}
+                      onChange={(e) => setPaintRadius(Number(e.target.value))}
+                    />
+                  </label>
+                  <span className="mapov-brush__value">{paintRadius ? String(paintRadius) : 'line'}</span>
+                </div>
+              ) : null}
               {editorTab === 'landscape' ? (
                 <div className="mapov-dots mapov-landscape-markers">
                   {landscapeMarkers.map((row) => {
                     const isActive =
                       selectedPlacement?.tid === row.tid && selectedPlacement?.index === row.index;
+                    const isMulti = multiSel.has(placementKey(row.tid, row.index));
                     const x = transform.x + row.placement.x * transform.scale;
                     const y = transform.y + row.placement.y * transform.scale;
                     const size = Math.max(18, 36 * (row.placement.s ?? 1) * Math.min(transform.scale, 1.4));
@@ -1377,7 +2285,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                         role="button"
                         tabIndex={0}
                         aria-label={`${territoryLabel(row.tid, territories)} ${row.placement.img}`}
-                        className={`mapov-placement${isActive ? ' mapov-placement--active' : ''}${row.placement.layer === 'border' ? ' mapov-placement--border' : ''}${row.placement.auto ? ' mapov-placement--auto' : ''}`}
+                        className={`mapov-placement${isActive ? ' mapov-placement--active' : ''}${isMulti ? ' mapov-placement--multi' : ''}${row.placement.layer === 'border' ? ' mapov-placement--border' : ''}${row.placement.auto ? ' mapov-placement--auto' : ''}`}
                         style={{ left: x, top: y, width: size, height: size }}
                         title={`${territoryLabel(row.tid, territories)} · ${row.placement.img} · ${row.placement.layer}${placing ? '' : ' — drag to move'}`}
                         onPointerDown={(e) => onPlacementPointerDown(e, row.tid, row.index)}
@@ -1469,6 +2377,99 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
             onSpotsCalculated={onSpotsCalculated}
           />
         </div>
+        {copyOpen ? (
+          <div
+            className="admin-modal-overlay admin-graph__confirm"
+            role="presentation"
+            onClick={() => setCopyOpen(false)}
+          >
+            <div
+              className="admin-modal mapov-copy"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="admin-mapov-copy-title"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 id="admin-mapov-copy-title" className="admin-modal__title">
+                Copy landscape from another map
+              </h2>
+              <div className="mapov-copy__source">
+                <label className="admin-form__label" htmlFor="mapov-copy-source">
+                  Source map
+                </label>
+                <select
+                  id="mapov-copy-source"
+                  className="admin-page__select"
+                  value={copySource}
+                  onChange={(e) => setCopySource(e.target.value)}
+                  disabled={copyLoading || otherMaps.length === 0}
+                >
+                  {otherMaps.length === 0 ? <option value="">No other maps</option> : null}
+                  {otherMaps.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="mapov-copy__preview">
+                {copyLoading ? (
+                  <p className="admin-form__micro mapov-copy__note">Loading {copySource}…</p>
+                ) : copyErr ? (
+                  <p className="admin-page__error mapov-copy__note">{copyErr}</p>
+                ) : copyPaths.size ? (
+                  <svg
+                    className="mapov-copy__svg"
+                    viewBox={`0 0 ${copyViewBox.width} ${copyViewBox.height}`}
+                    style={{ aspectRatio: `${copyViewBox.width} / ${copyViewBox.height}` }}
+                    onPointerDown={onCopyPreviewDown}
+                    onPointerMove={onCopyPreviewMove}
+                    onPointerUp={onCopyPreviewUp}
+                    onPointerCancel={onCopyPreviewUp}
+                  >
+                    {Array.from(copyPaths.entries()).map(([tid, pd]) => (
+                      <path key={tid} className="mapov-copy__path" d={pd.d} transform={pd.transform} />
+                    ))}
+                    <g>{copyMarkers}</g>
+                    {copyRegionMarkers ? <g>{copyRegionMarkers}</g> : null}
+                    {copyBand ? (
+                      <rect
+                        className="mapov-copy__band"
+                        x={Math.min(copyBand.x1, copyBand.x2)}
+                        y={Math.min(copyBand.y1, copyBand.y2)}
+                        width={Math.abs(copyBand.x2 - copyBand.x1)}
+                        height={Math.abs(copyBand.y2 - copyBand.y1)}
+                      />
+                    ) : null}
+                  </svg>
+                ) : (
+                  <p className="admin-form__micro mapov-copy__note">
+                    No other map available to copy from.
+                  </p>
+                )}
+              </div>
+              <p className="admin-form__micro mapov-copy__hint">
+                {copyPaths.size && !copyLoading
+                  ? 'Drag on the preview to copy only that area; click it to clear the region. Pieces are placed at the same position on this map.'
+                  : ''}
+              </p>
+              <p className="mapov-copy__summary">{copySummary}</p>
+              <div className="admin-modal__actions">
+                <button type="button" className="admin-page__btn" onClick={() => setCopyOpen(false)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="admin-page__btn admin-page__btn--primary"
+                  disabled={!copyPlan?.items.length}
+                  onClick={applyCopy}
+                >
+                  {copyPlan?.items.length ? `Copy ${copyPlan.items.length} pieces` : 'Copy'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {discardOpen ? (
           <div className="admin-modal-overlay admin-graph__confirm" role="presentation" onClick={() => { setDiscardOpen(false); setPendingMap(null); }}>
             <div
