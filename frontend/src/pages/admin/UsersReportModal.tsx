@@ -3,6 +3,7 @@ import { api } from '../../services/api';
 import type { AdminUserItem, ProgressionConfig } from '../../services/api';
 import { NumberField } from './NumberField';
 import { TierXpPanel } from './TierXpPanel';
+import { ColorField } from './ColorField';
 
 function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return '—';
@@ -237,26 +238,23 @@ export function UsersReportModal({ onClose }: { onClose: () => void }) {
                 Default avatar color for players who have not picked one. A chosen color stays put.
               </p>
               <div className="users-report__defaults-row">
-                <input
-                  type="color"
-                  className="users-report__color-input"
+                <ColorField
                   value={defaultColor}
+                  ariaLabel="Default avatar color"
                   disabled={defaultsLoading || defaultsSaving}
-                  aria-label="Default avatar color"
-                  onChange={(e) => {
-                    setDefaultColor(e.target.value);
+                  onApply={(color) => {
+                    setDefaultColor(color);
                     setDefaultColorDirty(true);
                     setDefaultsSaved(false);
                     setDefaultsError(null);
                   }}
                 />
-                <span className="admin-form__micro users-report__color-value">{defaultColor}</span>
                 {defaultColorDirty && (
                   <button
                     type="button"
                     className="admin-page__btn"
                     onClick={() => void saveDefaults()}
-                    disabled={defaultsSaving}
+                    disabled={defaultsSaving || !/^#[0-9a-fA-F]{6}$/.test(defaultColor.trim())}
                   >
                     {defaultsSaving ? 'Saving…' : 'Save Default Color'}
                   </button>

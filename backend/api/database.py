@@ -178,6 +178,22 @@ def _ensure_player_last_login_column():
             conn.execute(text("ALTER TABLE players ADD COLUMN IF NOT EXISTS last_login TIMESTAMP"))
 
 
+def _ensure_player_last_opened_columns():
+    """Add players.last_opened_game_id / last_opened_at if missing (home-page recent game)."""
+    if DATABASE_URL.startswith("sqlite"):
+        with engine.begin() as conn:
+            rows = conn.execute(text("PRAGMA table_info(players)")).fetchall()
+            names = {row[1] for row in rows}
+            if "last_opened_game_id" not in names:
+                conn.execute(text("ALTER TABLE players ADD COLUMN last_opened_game_id VARCHAR(36)"))
+            if "last_opened_at" not in names:
+                conn.execute(text("ALTER TABLE players ADD COLUMN last_opened_at DATETIME"))
+    else:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE players ADD COLUMN IF NOT EXISTS last_opened_game_id VARCHAR(36)"))
+            conn.execute(text("ALTER TABLE players ADD COLUMN IF NOT EXISTS last_opened_at TIMESTAMP"))
+
+
 def _ensure_player_temp_password_columns():
     """Add players.temp_password_hash / temp_password_expires_at if missing (forgot-password flow)."""
     if DATABASE_URL.startswith("sqlite"):
@@ -231,6 +247,7 @@ def init_db():
     _ensure_player_preferences_column()
     _ensure_games_completed_at_column()
     _ensure_player_last_login_column()
+    _ensure_player_last_opened_columns()
     _ensure_player_temp_password_columns()
     _ensure_player_xp_column()
     _sync_admin_column_and_flags()

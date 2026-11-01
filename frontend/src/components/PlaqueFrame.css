@@ -1,0 +1,34 @@
+.plaque-frame {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.plaque-frame__top,
+.plaque-frame__bottom {
+  flex: 0 0 auto;
+  width: 100%;
+  aspect-ratio: var(--frame-w) / calc(var(--frame-h) / 2);
+  background-image: var(--frame-img);
+  background-repeat: no-repeat;
+  background-size: 100% auto;
+  background-position: 0 0;
+}
+
+.plaque-frame__bottom {
+  background-position: 0 100%;
+}
+
+/* One source row scaled to the gap height: ornaments cross as straight lines. */
+.plaque-frame__mid {
+  flex: 1 1 auto;
+  min-height: 0;
+  background-image: var(--frame-img);
+  background-repeat: no-repeat;
+  background-size: 100% calc(var(--frame-h) * 100%);
+  background-position: 0 var(--frame-mid-pos);
+}

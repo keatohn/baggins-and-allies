@@ -1344,6 +1344,9 @@ export const api = {
     if (status) qs.set('status', status);
     return fetchJson<{ games: GameListItem[] }>(`/games?${qs.toString()}`, { cache: 'no-store' });
   },
+  /** Most recently opened game still on this player's load list, or null. */
+  recentGame: () =>
+    fetchJson<{ game: GameListItem | null }>(`/games/recent?_=${Date.now()}`, { cache: 'no-store' }),
   /** Public (any logged-in user): career stats for a player. */
   getPlayerStats: (playerId: string, query?: PlayerStatsQuery) => {
     const qs = new URLSearchParams();

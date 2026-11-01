@@ -13,6 +13,7 @@ import JoinGame from './pages/JoinGame.tsx'
 import Admin from './pages/Admin.tsx'
 import { MenuScrollProvider } from './components/MenuScrollContext'
 import MenuScrollOverlay from './components/MenuScrollOverlay'
+import MenuMapBackdrop from './components/MenuMapBackdrop'
 import api, { AUTH_CHANGED_EVENT, getAuthToken } from './services/api'
 import {
   playUiClickSound,
@@ -223,7 +224,9 @@ if (!rootEl) {
         <BrowserRouter>
           <MenuAmbienceController />
           <MenuScrollProvider>
+            <MenuMapBackdrop />
             <MenuScrollOverlay />
+            <div className="app-routes">
             <Routes>
               <Route path="/" element={<MainMenu />} />
               <Route path="/login" element={<Login />} />
@@ -237,6 +240,7 @@ if (!rootEl) {
               <Route path="/admin" element={<Admin />} />
               <Route path="/game/:gameId" element={<GameRoute />} />
             </Routes>
+            </div>
           </MenuScrollProvider>
         </BrowserRouter>
       </AppErrorBoundary>
