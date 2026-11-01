@@ -1100,26 +1100,6 @@
   z-index: 30;
 }
 
-/* Touch: keep comfortable targets; mouse/trackpad uses explicit smaller widths below */
-@media (pointer: fine) {
-  .map-controls .controls-row button,
-  .map-controls-key-btn,
-  .map-controls-toggle {
-    min-width: 0;
-    min-height: 0;
-  }
-}
-
-@media (pointer: coarse) {
-  .map-controls .controls-row button,
-  .map-controls-key-btn,
-  .map-controls-toggle {
-    min-width: 2.75rem;
-    min-height: 2.75rem;
-    padding: 0.5rem;
-  }
-}
-
 /* Map controls */
 .map-controls {
   position: absolute;
@@ -1247,6 +1227,26 @@
 
 .map-controls .controls-row button:active {
   transform: scale(0.95);
+}
+
+/* Touch: keep comfortable targets; mouse/trackpad uses explicit smaller widths below */
+@media (pointer: fine) {
+  .map-controls .controls-row button,
+  .map-controls-key-btn,
+  .map-controls-toggle {
+    min-width: 0;
+    min-height: 0;
+  }
+}
+
+@media (pointer: coarse) {
+  .map-controls .controls-row button,
+  .map-controls-key-btn,
+  .map-controls-toggle {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    padding: 0.5rem;
+  }
 }
 
 /* Map key strip above the map (in flow) when key button is toggled */

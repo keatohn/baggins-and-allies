@@ -275,6 +275,47 @@
   flex-shrink: 0;
 }
 
+.combat-sim-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--ink-faded);
+  flex-shrink: 0;
+}
+
+.combat-sim-modal-header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.combat-sim-modal .close-btn {
+  background: none;
+  border: none;
+  font-size: 1.6rem;
+  color: var(--ink-faded);
+  cursor: pointer;
+  padding: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.combat-sim-modal .close-btn:hover {
+  color: var(--ink);
+}
+
+.combat-sim-modal-body {
+  padding: 1rem;
+  overflow: auto;
+  flex: 1;
+  min-height: 320px;
+}
+
 /* Phone / narrow: bottom sheet + compact chrome (do not tie this to short desktop windows) */
 @media (max-width: 767px) {
   .combat-sim-modal-overlay {
@@ -328,47 +369,6 @@
   .combat-sim-modal {
     max-height: min(92dvh, 92vh) !important;
   }
-}
-
-.combat-sim-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--ink-faded);
-  flex-shrink: 0;
-}
-
-.combat-sim-modal-header h2 {
-  margin: 0;
-  font-size: 1.15rem;
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.combat-sim-modal .close-btn {
-  background: none;
-  border: none;
-  font-size: 1.6rem;
-  color: var(--ink-faded);
-  cursor: pointer;
-  padding: 0;
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.combat-sim-modal .close-btn:hover {
-  color: var(--ink);
-}
-
-.combat-sim-modal-body {
-  padding: 1rem;
-  overflow: auto;
-  flex: 1;
-  min-height: 320px;
 }
 
 .map-wrap {
