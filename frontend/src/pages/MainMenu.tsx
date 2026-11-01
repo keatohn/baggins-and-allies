@@ -3,8 +3,7 @@ import { useMenuScroll } from '../components/MenuScrollContext';
 import AccountMenu from '../components/AccountMenu';
 import { api, getAuthToken } from '../services/api';
 import type { AuthPlayer, GameListItem } from '../services/api';
-import GameCardSummary from '../components/GameCardSummary';
-import PlaqueFrame, { type PlaqueFrameVariant } from '../components/PlaqueFrame';
+import PlaqueFrame, { plaqueFrameVars, type PlaqueFrameVariant } from '../components/PlaqueFrame';
 import './MainMenu.css';
 
 export default function MainMenu() {
@@ -84,14 +83,12 @@ export default function MainMenu() {
             <button
               type="button"
               className="main-menu__panel main-menu__panel--recent"
+              style={plaqueFrameVars('dwarven')}
               onClick={() => navigateWithScroll('/game/' + recent.id)}
               aria-label={`Recent game: ${recent.name}`}
             >
               <PlaqueFrame variant="dwarven" />
-              <span className="main-menu__panel-body">
-                <span className="main-menu__panel-kicker">Recent</span>
-                <GameCardSummary game={recent} />
-              </span>
+              <RecentGameBody game={recent} />
             </button>
           ) : null}
         </div>
@@ -115,9 +112,61 @@ function MenuPlaque({
   onClick: () => void;
 }) {
   return (
-    <button type="button" className="main-menu__panel" onClick={onClick}>
+    <button type="button" className="main-menu__panel" style={plaqueFrameVars(variant)} onClick={onClick}>
       <PlaqueFrame variant={variant} />
       <span className="main-menu__panel-label">{label}</span>
     </button>
+  );
+}
+
+function formatCreatedAt(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return iso;
+  }
+}
+
+function truncateUsername(username: string, maxChars = 12): string {
+  if (username.length <= maxChars) return username;
+  return `${username.slice(0, maxChars)}...`;
+}
+
+/** Name, the load-page faction row, and a small created date — sized to the unstretched frame. */
+function RecentGameBody({ game }: { game: GameListItem }) {
+  const faction =
+    game.current_faction_display_name ?? game.current_faction ?? (game.status === 'lobby' ? null : '—');
+  const showFactionRow =
+    game.status !== 'lobby' &&
+    (game.current_faction_icon != null ||
+      game.current_faction_display_name != null ||
+      (game.current_player_username != null && game.current_player_username !== ''));
+  return (
+    <span className="main-menu__panel-body">
+      <span className="main-menu__recent-name">{game.name}</span>
+      {game.status === 'lobby' ? (
+        <span className="main-menu__recent-faction">Lobby</span>
+      ) : showFactionRow ? (
+        <span className="main-menu__recent-faction">
+          {game.current_faction_icon ? (
+            <img src={game.current_faction_icon} alt="" className="main-menu__recent-faction-icon" />
+          ) : null}
+          <span className="main-menu__recent-faction-name">{faction}</span>
+          {game.current_player_username ? (
+            <span className="main-menu__recent-player" title={game.current_player_username}>
+              {' | '}
+              {truncateUsername(game.current_player_username)}
+            </span>
+          ) : null}
+        </span>
+      ) : (
+        <span className="main-menu__recent-faction" />
+      )}
+      {game.created_at ? (
+        <span className="main-menu__recent-created">Created {formatCreatedAt(game.created_at)}</span>
+      ) : (
+        <span className="main-menu__recent-created" />
+      )}
+    </span>
   );
 }
