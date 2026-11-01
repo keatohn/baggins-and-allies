@@ -76,6 +76,60 @@
   color: var(--ink-faded);
 }
 
+.game-list__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+}
+
+.game-list__tab {
+  font-family: 'Cinzel', serif;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.85rem;
+  background: var(--parchment-dark, #e8e0d0);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 999px;
+  color: var(--ink);
+  cursor: pointer;
+  text-transform: none;
+}
+
+.game-list__tab:hover {
+  border-color: var(--gold-dark, #8b7355);
+}
+
+.game-list__tab--active {
+  background: var(--ink);
+  color: var(--parchment);
+  border-color: var(--ink);
+}
+
+.game-list__turn-meta--finished {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.game-list__status-pill {
+  display: inline-block;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--ink-faded);
+  font-size: 0.8rem;
+}
+
+.game-list__status-pill--finished {
+  background: var(--ink);
+  color: var(--parchment);
+  border-color: var(--ink);
+}
+
+.game-list__winner {
+  font-weight: 600;
+}
+
 .game-list {
   list-style: none;
   padding: 0;
