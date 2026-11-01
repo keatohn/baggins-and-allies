@@ -22,6 +22,7 @@ export function plaqueFrameVars(variant: PlaqueFrameVariant): CSSProperties {
   const f = FRAMES[variant];
   return {
     '--frame-img': `url('/frames/${f.file}')`,
+    '--frame-interior': `url('/frames/${f.file.replace('_frame.png', '_frame_interior.png')}')`,
     '--frame-w': f.w,
     '--frame-h': f.h,
     '--plaque-pad-top': f.padTop,

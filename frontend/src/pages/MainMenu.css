@@ -5,7 +5,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: space-between;
+  justify-content: safe center;
   padding: 1.25rem 1.5rem 1.5rem;
   background: transparent;
   box-sizing: border-box;
@@ -76,29 +76,23 @@
   padding: 0 0.7rem;
 }
 
-.main-menu__actions {
+.main-menu__actions,
+.main-menu__actions--three,
+.main-menu__actions--guest {
   position: relative;
   z-index: 1;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.85rem;
-  width: min(1180px, 100%);
-  margin-top: auto;
-  align-items: end;
-}
-
-.main-menu__actions--three {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.main-menu__actions--guest {
-  grid-template-columns: repeat(2, minmax(160px, 280px));
-  width: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
+  gap: 0.65rem;
+  width: min(520px, 86vw);
+  margin-top: 1.35rem;
 }
 
 .main-menu__panel {
   position: relative;
+  container-type: inline-size;
   display: block;
   width: 100%;
   margin: 0;
@@ -110,19 +104,35 @@
   text-transform: none;
   letter-spacing: normal;
   color: var(--ink);
-  /* Parchment halo keeps ink legible over the map showing through. */
-  text-shadow: 0 0 2px rgba(244, 236, 214, 0.95), 0 0 8px rgba(244, 236, 214, 0.85), 0 0 16px rgba(244, 236, 214, 0.6);
-  transition: background 0.15s ease;
+  text-shadow: 0 1px 0 rgba(244, 236, 214, 0.45);
+  transition: color 0.15s ease;
+}
+
+/* Soft parchment film shaped to each frame's open center. The frame art paints above it. */
+.main-menu__panel::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background: rgba(236, 224, 196, 0.4);
+  -webkit-mask-image: var(--frame-interior);
+  mask-image: var(--frame-interior);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  pointer-events: none;
 }
 
 .main-menu__panel:hover:not(:disabled) {
-  background: rgba(244, 236, 214, 0.22);
+  background: transparent;
   border: none;
   box-shadow: none;
+  color: #b08d3a;
 }
 
-.main-menu__panel:hover:not(:disabled) .plaque-frame {
-  filter: brightness(0.9);
+.main-menu__panel:hover:not(:disabled) .main-menu__recent-created {
+  color: #967832;
 }
 
 .main-menu__panel-label,
@@ -141,7 +151,8 @@
   align-items: center;
   justify-content: center;
   font-family: 'Cinzel', serif;
-  font-size: clamp(0.72rem, 1.25vw, 1.05rem);
+  font-weight: 700;
+  font-size: clamp(0.95rem, 8cqi, 1.7rem);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   text-align: center;
@@ -152,17 +163,19 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  align-items: stretch;
+  align-items: center;
   gap: 0.05rem;
-  text-align: left;
+  text-align: center;
   overflow: hidden;
 }
 
 .main-menu__recent-name {
-  font-size: clamp(0.65rem, 0.9vw, 0.78rem);
-  font-weight: 600;
+  width: 100%;
+  font-size: clamp(0.8rem, 6.2cqi, 1.25rem);
+  font-weight: 700;
   line-height: 1.05;
   color: var(--ink);
+  text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -171,9 +184,12 @@
 .main-menu__recent-faction {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0.28rem;
+  max-width: 100%;
   min-width: 0;
-  font-size: clamp(0.6rem, 0.8vw, 0.72rem);
+  font-weight: 700;
+  font-size: clamp(0.72rem, 5.2cqi, 1.05rem);
   line-height: 1.05;
   color: var(--ink);
   white-space: nowrap;
@@ -196,12 +212,16 @@
 }
 
 .main-menu__recent-created {
-  font-size: clamp(0.52rem, 0.65vw, 0.62rem);
+  width: 100%;
+  font-weight: 600;
+  font-size: clamp(0.52rem, 3.1cqi, 0.68rem);
   line-height: 1.05;
   color: var(--ink-faded);
+  text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: color 0.15s ease;
 }
 
 /* Clear decorative scroll-end rolls (menu overlay). Desktop + landscape: pads
@@ -216,7 +236,6 @@
 
 @media (max-width: 767px) and (orientation: portrait) {
   .main-menu {
-    justify-content: flex-start;
     padding-top: max(0.75rem, calc(var(--scroll-roll-w, 24px) + 0.35rem));
     padding-bottom: max(1.25rem, calc(var(--scroll-roll-w, 24px) + 0.75rem));
     padding-left: max(0.85rem, env(safe-area-inset-left, 0px));
@@ -233,16 +252,10 @@
     right: calc(0.75rem + 8.6rem);
   }
 
-  .main-menu__hero {
-    margin-top: 2.4rem;
-  }
-
   .main-menu__actions,
   .main-menu__actions--three,
   .main-menu__actions--guest {
-    grid-template-columns: minmax(0, 1fr);
     width: min(440px, 100%);
-    margin-top: 1.25rem;
   }
 
 }

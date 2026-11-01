@@ -23,8 +23,16 @@ export default function MenuScrollOverlay() {
 
   return (
     <div className={`menu-scroll-overlay${stateClass}`} aria-hidden="true">
+      <svg className="menu-scroll-overlay__filters" aria-hidden="true">
+        <filter id="scroll-paper-ruffle" x="-8%" y="-8%" width="116%" height="116%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.012 0.02" numOctaves="3" seed="7" result="warp" />
+          <feDisplacementMap in="SourceGraphic" in2="warp" scale="46" xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+      </svg>
       <div className="menu-scroll-panel menu-scroll-panel--left">
-        <div className="menu-scroll-panel__face" />
+        <div className="menu-scroll-panel__face">
+          <div className="menu-scroll-panel__paper" />
+        </div>
         <div className="menu-scroll-panel__roll">
           <div className="menu-scroll-panel__roll-body" />
         </div>
@@ -33,7 +41,9 @@ export default function MenuScrollOverlay() {
         <div className="menu-scroll-panel__roll">
           <div className="menu-scroll-panel__roll-body" />
         </div>
-        <div className="menu-scroll-panel__face" />
+        <div className="menu-scroll-panel__face">
+          <div className="menu-scroll-panel__paper" />
+        </div>
       </div>
     </div>
   )

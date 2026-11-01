@@ -3,27 +3,38 @@
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background:
+  /* The map is 4:3. Fit the whole image on a wide screen instead of cropping it. */
+  background-color: #b7812d;
+  background-image:
     linear-gradient(180deg, rgba(212, 196, 160, 0.72) 0%, rgba(212, 196, 160, 0.78) 100%),
-    url('/middle-earth.webp') center 40% / cover no-repeat;
+    url('/middle-earth.webp');
+  background-repeat: no-repeat;
+  background-position: center, center;
+  background-size: auto, contain;
   opacity: 0.55;
 }
 
 .menu-map-backdrop--home {
-  background:
+  background-image:
     linear-gradient(180deg, rgba(212, 196, 160, 0.18) 0%, rgba(212, 196, 160, 0.28) 70%, rgba(212, 196, 160, 0.55) 100%),
-    url('/middle-earth.webp') center 42% / cover no-repeat;
+    url('/middle-earth.webp');
+  background-position: center, center;
+  background-size: auto, contain;
   opacity: 0.72;
 }
 
 @media (max-width: 767px) and (orientation: portrait) {
+  .menu-map-backdrop,
+  .menu-map-backdrop--home {
+    background-position: center, center 30%;
+    background-size: auto, cover;
+  }
+
   .menu-map-backdrop {
-    background-position: center 30%;
     opacity: 0.42;
   }
 
   .menu-map-backdrop--home {
-    background-position: center 30%;
     opacity: 0.62;
   }
 }
