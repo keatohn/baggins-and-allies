@@ -25,6 +25,13 @@ function hexOr(value: string, fallback: string): string {
   return /^#[0-9a-fA-F]{6}$/.test(value) ? value : fallback;
 }
 
+/** Rank 1 is the lowest tier. Matches the order the server uses after a save. */
+function rankedTiers(tiers: ProgressionTier[]): { tier: ProgressionTier; rank: number }[] {
+  return [...tiers]
+    .sort((a, b) => a.min_xp - b.min_xp || a.id.localeCompare(b.id))
+    .map((tier, index) => ({ tier, rank: index + 1 }));
+}
+
 function newTier(tiers: ProgressionTier[]): ProgressionTier {
   const min = tiers.length ? Math.max(...tiers.map((t) => t.min_xp)) + 250 : 0;
   return {
@@ -91,9 +98,11 @@ function DecimalField({
 export function TierXpPanel({
   config,
   onChange,
+  unitIcons,
 }: {
   config: ProgressionConfig;
   onChange: (next: ProgressionConfig) => void;
+  unitIcons: string[];
 }) {
   const setTier = (id: string, patch: Partial<ProgressionTier>) => {
     onChange({
@@ -116,6 +125,20 @@ export function TierXpPanel({
       frames: config.frames.map((f) => (f.id === id ? { ...f, ...patch } : f)),
     });
   };
+  const ranked = rankedTiers(config.tiers);
+  const rankById = new Map(ranked.map((row) => [row.tier.id, row.rank]));
+  const lowestId = ranked[0]?.tier.id ?? '';
+  const unlocks = config.icon_min_tier ?? {};
+  const [iconQuery, setIconQuery] = useState('');
+  const iconQueryNorm = iconQuery.trim().toLowerCase();
+  const visibleIcons = unitIcons.filter((name) => name.toLowerCase().includes(iconQueryNorm));
+
+  const setIconTier = (name: string, tierId: string) => {
+    const next = { ...unlocks };
+    if (!tierId || tierId === lowestId) delete next[name];
+    else next[name] = tierId;
+    onChange({ ...config, icon_min_tier: next });
+  };
 
   return (
     <div className="admin-form admin-tier-form">
@@ -123,8 +146,8 @@ export function TierXpPanel({
         <h3 className="admin-form__subtitle">Tiers</h3>
         <p className="admin-form__micro">
           A player is in the highest tier whose minimum they have reached. The lowest tier must start at 0,
-          and each threshold has to be higher than the one before it. Saving sorts tiers by that minimum.
-          Raising a threshold can move players down. The ring color and glow wrap the profile circle.
+          and each threshold has to be higher than the one before it. Tier 1 is the lowest. Saving sorts
+          tiers by that minimum. Raising a threshold can move players down. The ring color and glow wrap the profile circle.
           A frame is optional and only used when that image exists.
         </p>
         <label className="admin-form__label">
@@ -138,6 +161,7 @@ export function TierXpPanel({
         </label>
         {config.tiers.map((tier) => (
           <div key={tier.id} className="admin-form__card admin-tier-card">
+            <p className="admin-form__micro admin-tier-card__rank">Tier {rankById.get(tier.id) ?? ''}</p>
             <div className="admin-tier-card__line">
               <label className="admin-form__label">
                 Name
@@ -221,7 +245,17 @@ export function TierXpPanel({
             <button
               type="button"
               className="admin-page__btn admin-page__btn--danger"
-              onClick={() => onChange({ ...config, tiers: config.tiers.filter((t) => t.id !== tier.id) })}
+              onClick={() => {
+                const nextUnlocks = { ...(config.icon_min_tier ?? {}) };
+                for (const [icon, tierId] of Object.entries(nextUnlocks)) {
+                  if (tierId === tier.id) delete nextUnlocks[icon];
+                }
+                onChange({
+                  ...config,
+                  tiers: config.tiers.filter((t) => t.id !== tier.id),
+                  icon_min_tier: nextUnlocks,
+                });
+              }}
               disabled={config.tiers.length <= 1}
             >
               Remove tier
@@ -300,6 +334,51 @@ export function TierXpPanel({
         >
           Add frame
         </button>
+      </section>
+
+      <section>
+        <h3 className="admin-form__subtitle">Profile icons</h3>
+        <p className="admin-form__micro">
+          Each unit icon has a minimum tier. Players only see icons at or below their own tier. An icon left
+          on tier 1 is available from the start. Icons that unlock at the player’s current tier, other than
+          tier 1, get a mark in the picker.
+        </p>
+        <label className="admin-form__label">
+          Find an icon
+          <input
+            className="admin-form__input"
+            value={iconQuery}
+            placeholder="archer, hobbit…"
+            onChange={(e) => setIconQuery(e.target.value)}
+          />
+        </label>
+        {unitIcons.length === 0 ? <p className="admin-form__micro">Loading icons…</p> : null}
+        {unitIcons.length > 0 && visibleIcons.length === 0 ? (
+          <p className="admin-form__micro">No icons match.</p>
+        ) : null}
+        <div className="admin-icon-unlocks">
+          {visibleIcons.map((name) => {
+            const minTier = unlocks[name] && rankById.has(unlocks[name]) ? unlocks[name] : lowestId;
+            return (
+              <label key={name} className="admin-icon-unlock">
+                <img src={`/assets/units/${name}`} alt="" />
+                <span>{name.replace(/\.png$/i, '').replace(/_/g, ' ')}</span>
+                <select
+                  className="admin-form__input"
+                  aria-label={`Minimum tier for ${name}`}
+                  value={minTier}
+                  onChange={(e) => setIconTier(name, e.target.value)}
+                >
+                  {ranked.map(({ tier, rank }) => (
+                    <option key={tier.id} value={tier.id}>
+                      {rank} · {tier.name || tier.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            );
+          })}
+        </div>
       </section>
 
       <section>

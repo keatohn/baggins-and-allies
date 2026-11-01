@@ -101,9 +101,11 @@ def _rules(**overrides):
 def test_defaults_and_threshold_order():
     cfg = default_progression()
     assert cfg["tiers"][0]["min_xp"] == 0
+    assert cfg["tiers"][0]["rank"] == 1
     mins = [t["min_xp"] for t in cfg["tiers"]]
     assert mins == sorted(mins)
     assert mins[0] == 0
+    assert [t["rank"] for t in cfg["tiers"]] == list(range(1, len(cfg["tiers"]) + 1))
     with pytest.raises(ProgressionError, match="start at 0"):
         normalize_progression({
             **cfg,
@@ -442,3 +444,52 @@ def test_admin_endpoints_and_profile_tier(db_session, players, make_client):
     cfg["tiers"][0]["min_xp"] = 5
     rejected = client.put("/admin/progression", json=cfg)
     assert rejected.status_code == 400
+
+
+def test_avatar_icons_follow_tier(db_session, players, make_client):
+    admin, user = players
+    client = make_client(user)
+    listed = client.get("/profile/avatar-icons")
+    assert listed.status_code == 200
+    names = [row["name"] for row in listed.json()["icons"]]
+    assert "hobbit.png" in names
+    assert all(row["new"] is False for row in listed.json()["icons"])
+    locked = next(name for name in names if name != "hobbit.png")
+
+    cfg = default_progression()
+    cfg["icon_min_tier"] = {"hobbit.png": "hobbit", locked: "ranger"}
+    saved = make_client(admin).put("/admin/progression", json=cfg)
+    assert saved.status_code == 200, saved.text
+    stored = saved.json()["progression"]["icon_min_tier"]
+    assert stored[locked] == "ranger"
+    assert "hobbit.png" not in stored
+    assert saved.json()["progression"]["tiers"][2]["rank"] == 3
+
+    client = make_client(user)
+    hidden = client.get("/profile/avatar-icons")
+    assert locked not in [row["name"] for row in hidden.json()["icons"]]
+    denied = client.patch("/auth/me", json={"avatar": {"image": locked}})
+    assert denied.status_code == 400
+
+    user.xp = 750
+    db_session.commit()
+    unlocked = client.get("/profile/avatar-icons")
+    row = next(item for item in unlocked.json()["icons"] if item["name"] == locked)
+    assert row["new"] is True
+    assert client.patch("/auth/me", json={"avatar": {"image": locked}}).status_code == 200
+
+    user.xp = 1500
+    db_session.commit()
+    later = client.get("/profile/avatar-icons")
+    row = next(item for item in later.json()["icons"] if item["name"] == locked)
+    assert row["new"] is False
+
+    user.xp = 0
+    db_session.commit()
+    kept = client.patch("/auth/me", json={"avatar": {"image": locked, "color": "#445566"}})
+    assert kept.status_code == 200, kept.text
+
+    bad = default_progression()
+    bad["icon_min_tier"] = {"hobbit.png": "no-such-tier"}
+    assert make_client(admin).put("/admin/progression", json=bad).status_code == 400
+    make_client(user)

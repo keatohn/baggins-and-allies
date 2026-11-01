@@ -38,6 +38,7 @@ export function UsersReportModal({ onClose }: { onClose: () => void }) {
   const [backfillArmed, setBackfillArmed] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
   const [backfillNote, setBackfillNote] = useState<string | null>(null);
+  const [unitIcons, setUnitIcons] = useState<string[]>([]);
 
   const [defaultColor, setDefaultColor] = useState<string>('#2d5a27');
   const [defaultColorDirty, setDefaultColorDirty] = useState(false);
@@ -87,6 +88,14 @@ export function UsersReportModal({ onClose }: { onClose: () => void }) {
       })
       .catch((e: unknown) => {
         if (!cancelled) setProgressionError(e instanceof Error ? e.message : 'Could not load tiers');
+      });
+    api
+      .adminListUnitIcons()
+      .then((r) => {
+        if (!cancelled) setUnitIcons(r.icons ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setUnitIcons([]);
       });
     return () => {
       cancelled = true;
@@ -383,7 +392,7 @@ export function UsersReportModal({ onClose }: { onClose: () => void }) {
             {backfillNote ? <p className="admin-form__micro">{backfillNote}</p> : null}
             <div className="games-report__table-scroll">
               {progression ? (
-                <TierXpPanel config={progression} onChange={setProgression} />
+                <TierXpPanel config={progression} onChange={setProgression} unitIcons={unitIcons} />
               ) : !progressionError ? (
                 <p className="admin-form__micro">Loading…</p>
               ) : null}

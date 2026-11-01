@@ -105,10 +105,11 @@ class ProgressionError(ValueError):
 
 def _default_tiers() -> list[dict[str, Any]]:
     tiers: list[dict[str, Any]] = []
-    for tid, name, min_xp, color in _DEFAULT_TIER_SEED:
+    for rank, (tid, name, min_xp, color) in enumerate(_DEFAULT_TIER_SEED, start=1):
         tiers.append({
             "id": tid,
             "name": name,
+            "rank": rank,
             "min_xp": min_xp,
             "color": color,
             "icon": "",
@@ -124,6 +125,7 @@ def default_progression() -> dict[str, Any]:
         "currency_label": "XP",
         "frames": [],
         "tiers": _default_tiers(),
+        "icon_min_tier": {},
         "rules": dict(DEFAULT_RULES),
     }
 
@@ -316,6 +318,32 @@ def _parse_tiers(raw: Any, frame_ids: set[str]) -> list[dict[str, Any]]:
                 f"Tier thresholds must increase. '{cur['name']}' ({cur['min_xp']}) "
                 f"is not above '{prev['name']}' ({prev['min_xp']})."
             )
+    for rank, tier in enumerate(out, start=1):
+        tier["rank"] = rank
+    return out
+
+
+def _parse_icon_min_tier(raw: Any, tier_ids: set[str], lowest_id: str) -> dict[str, str]:
+    """Filename -> tier id. Missing icons use the lowest tier, so those are not stored."""
+    from backend.avatar import IMAGE_RE
+
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ProgressionError("Profile icon tiers must be an object of filename to tier id.")
+    if len(raw) > 500:
+        raise ProgressionError("At most 500 profile icon tier overrides.")
+    out: dict[str, str] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or not IMAGE_RE.match(key.strip()):
+            raise ProgressionError(f"Profile icon '{key}' must be a .png filename.")
+        name = key.strip()
+        if not isinstance(value, str) or value.strip() not in tier_ids:
+            raise ProgressionError(f"Profile icon '{name}' uses an unknown tier.")
+        tier_id = value.strip()
+        if tier_id == lowest_id:
+            continue
+        out[name] = tier_id
     return out
 
 
@@ -329,11 +357,17 @@ def normalize_progression(raw: Any) -> dict[str, Any]:
     frames = _parse_frames(raw.get("frames") if "frames" in raw else [])
     tiers = _parse_tiers(raw.get("tiers"), {f["id"] for f in frames})
     rules = _parse_rules(raw.get("rules"))
+    icon_min_tier = _parse_icon_min_tier(
+        raw.get("icon_min_tier"),
+        {t["id"] for t in tiers},
+        tiers[0]["id"],
+    )
     return {
         "version": PROGRESSION_VERSION,
         "currency_label": label,
         "frames": frames,
         "tiers": tiers,
+        "icon_min_tier": icon_min_tier,
         "rules": rules,
     }
 
@@ -462,6 +496,36 @@ def next_tier_for_xp(xp: int, tiers: list[dict[str, Any]]) -> dict[str, Any] | N
         if int(tier["min_xp"]) > xp:
             return tier
     return None
+
+
+def profile_avatar_choices(player: Any, db: Session | None) -> list[dict[str, Any]]:
+    """Unit icons this player may use, with a flag for ones that unlock at their current tier.
+
+    The flag stays off for the lowest tier, since those icons are available from the start.
+    """
+    from backend.setup_data import list_all_unit_icons
+
+    cfg = load_progression(db)
+    tiers = cfg["tiers"]
+    if not tiers:
+        return []
+    ranks = {str(t["id"]): int(t["rank"]) for t in tiers}
+    lowest_id = str(tiers[0]["id"])
+    lowest_rank = int(tiers[0]["rank"])
+    current = tier_for_xp(int(getattr(player, "xp", 0) or 0), tiers)
+    player_rank = int(current["rank"]) if current else 0
+    unlocks = cfg.get("icon_min_tier") or {}
+    choices: list[dict[str, Any]] = []
+    for name in list_all_unit_icons(db):
+        min_id = str(unlocks.get(name) or lowest_id)
+        min_rank = ranks.get(min_id, lowest_rank)
+        if min_rank > player_rank:
+            continue
+        choices.append({
+            "name": name,
+            "new": min_rank == player_rank and min_rank > lowest_rank,
+        })
+    return choices
 
 
 def player_progression_view(player: Any, db: Session | None) -> dict[str, Any]:

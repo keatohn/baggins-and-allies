@@ -41,6 +41,23 @@ def normalize_avatar_image(raw: object) -> str | None:
     return value
 
 
+def stored_avatar_image(player: object) -> str | None:
+    """The icon filename saved on the player, before response-time defaults."""
+    raw = getattr(player, "preferences", None)
+    if not raw:
+        return None
+    try:
+        prefs = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(prefs, dict):
+        return None
+    avatar = prefs.get("avatar")
+    if not isinstance(avatar, dict):
+        return None
+    return normalize_avatar_image(avatar.get("image"))
+
+
 def _read_setting(db: Session, key: str) -> object | None:
     from backend.api.models import AppSetting
 

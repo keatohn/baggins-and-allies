@@ -106,18 +106,18 @@ def test_register_includes_avatar_defaults(make_client, players):
 def test_patch_avatar_merges_and_returns(make_client, players, db_session):
     _admin, user = players
     client = make_client(user)
-    r = client.patch("/auth/me", json={"avatar": {"image": "aragorn.png"}})
+    r = client.patch("/auth/me", json={"avatar": {"image": "sauron.png"}})
     assert r.status_code == 200
-    assert r.json()["avatar"]["image"] == "aragorn.png"
+    assert r.json()["avatar"]["image"] == "sauron.png"
     assert r.json()["avatar"]["color"] == "#2d5a27"
 
     r = client.patch("/auth/me", json={"avatar": {"color": "#1234Ab"}})
     assert r.status_code == 200
-    assert r.json()["avatar"] == {"image": "aragorn.png", "color": "#1234ab"}
+    assert r.json()["avatar"] == {"image": "sauron.png", "color": "#1234ab"}
 
     db_session.refresh(user)
     stored = user.preferences
-    assert "aragorn.png" in stored
+    assert "sauron.png" in stored
 
 
 def test_patch_avatar_rejects_bad_values(make_client, players):
@@ -193,5 +193,7 @@ def test_avatar_icons_endpoint_lists_hobbit(make_client, players):
     assert r.status_code == 200
     icons = r.json()["icons"]
     assert isinstance(icons, list)
-    assert "hobbit.png" in icons
-    assert icons == sorted(icons)
+    names = [row["name"] for row in icons]
+    assert "hobbit.png" in names
+    assert names == sorted(names)
+    assert all(row["new"] is False for row in icons)

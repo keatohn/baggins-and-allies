@@ -2785,11 +2785,49 @@
   padding-bottom: 1rem;
 }
 
+.admin-tier-card__rank {
+  margin: 0 0 0.35rem;
+  font-family: 'Cinzel', serif;
+  letter-spacing: 0.04em;
+}
+
 .admin-tier-card__line {
   display: flex;
   flex-wrap: wrap;
   gap: 0.65rem 0.85rem;
   align-items: flex-end;
+}
+
+.admin-icon-unlocks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 28rem;
+  overflow: auto;
+  margin-top: 0.5rem;
+}
+
+.admin-icon-unlock {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  font-size: 0.92rem;
+}
+
+.admin-icon-unlock img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.admin-icon-unlock span {
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-icon-unlock select {
+  flex: 0 0 11rem;
 }
 
 .admin-tier-card__line .admin-form__label {

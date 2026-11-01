@@ -54,6 +54,7 @@ from backend.avatar import (
     normalize_avatar_color,
     normalize_avatar_image,
     save_default_avatar_color,
+    stored_avatar_image,
 )
 
 from backend.balance.starting_strength import compute_starting_strength
@@ -65,6 +66,7 @@ from backend.progression import (
     backfill_finished_games,
     load_progression,
     player_progression_view,
+    profile_avatar_choices,
     public_progression,
     save_progression,
     tier_for_xp,
@@ -1535,6 +1537,9 @@ def update_profile(
             image = normalize_avatar_image(request.avatar.image)
             if image is None or not IMAGE_RE.match(image):
                 raise HTTPException(status_code=400, detail="Image must be a plain .png filename")
+            allowed = {choice["name"] for choice in profile_avatar_choices(player, db)}
+            if image not in allowed and image != stored_avatar_image(player):
+                raise HTTPException(status_code=400, detail="That icon isn't available at your tier")
             avatar["image"] = image
         if request.avatar.color is not None:
             color = normalize_avatar_color(request.avatar.color)
@@ -1572,8 +1577,20 @@ def update_profile(
 
 
 @app.get("/profile/avatar-icons")
-def get_profile_avatar_icons(db: Session = Depends(get_db)):
-    """Distinct unit icon filenames across all setups, for the profile avatar picker."""
+def get_profile_avatar_icons(
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Unit icons this player can use. `new` marks icons that unlock at their current tier."""
+    return {"icons": profile_avatar_choices(player, db)}
+
+
+@app.get("/admin/unit-icons")
+def admin_unit_icons(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Every unit icon, so admin can set the tier required to use it as a profile picture."""
     return {"icons": list_all_unit_icons(db)}
 
 
@@ -2176,6 +2193,7 @@ class AdminProgressionBody(BaseModel):
     currency_label: str | None = None
     frames: list[dict[str, Any]] = Field(default_factory=list)
     tiers: list[dict[str, Any]]
+    icon_min_tier: dict[str, str] = Field(default_factory=dict)
     rules: dict[str, Any]
 
 

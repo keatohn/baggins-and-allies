@@ -657,6 +657,8 @@ export interface TierVisual {
 export interface ProgressionTier {
   id: string;
   name: string;
+  /** 1 is the lowest tier. Derived from minimum XP, not stored on the player. */
+  rank?: number;
   min_xp: number;
   color: string;
   icon: string;
@@ -744,11 +746,19 @@ export interface ProgressionRules {
 }
 
 /** Admin-edited XP and tier catalog. Tier is derived from XP; it is not stored on the player. */
+export interface AvatarIconChoice {
+  name: string;
+  /** True when this icon's minimum tier is the player's current tier, and that tier is not the lowest. */
+  new: boolean;
+}
+
 export interface ProgressionConfig {
   version: number;
   currency_label: string;
   frames: ProgressionFrame[];
   tiers: ProgressionTier[];
+  /** Unit icon filename -> minimum tier id. Icons omitted here use the lowest tier. */
+  icon_min_tier?: Record<string, string>;
   rules: ProgressionRules;
 }
 
@@ -1156,7 +1166,8 @@ export const api = {
   },
 
   /** Distinct unit icon filenames across all setups (profile avatar picker). */
-  getAvatarIcons: () => fetchJson<{ icons: string[] }>('/profile/avatar-icons'),
+  getAvatarIcons: () => fetchJson<{ icons: AvatarIconChoice[] }>('/profile/avatar-icons'),
+  adminListUnitIcons: () => fetchJson<{ icons: string[] }>('/admin/unit-icons'),
 
   /** Prefix search for usernames with the viewer's relation to each (max 20). */
   searchFriends: (username: string) =>

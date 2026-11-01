@@ -484,6 +484,7 @@
 }
 
 .profile-avatar-icon {
+  position: relative;
   width: 46px;
   height: 46px;
   padding: 0;
@@ -494,6 +495,19 @@
   border: 2px solid var(--ink-faded);
   border-radius: 6px;
   cursor: pointer;
+}
+
+.profile-avatar-icon__new {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gold, #c4a35a);
+  border: 1px solid var(--ink);
+  box-shadow: 0 0 0 1px var(--parchment);
+  pointer-events: none;
 }
 
 .profile-avatar-icon img {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, setAuthToken } from '../../services/api';
-import type { AuthPlayer, PlayerStats } from '../../services/api';
+import type { AuthPlayer, AvatarIconChoice, PlayerStats } from '../../services/api';
 import ModalShell from './ModalShell';
 import { tierRingProps } from './tierRing';
 
@@ -61,7 +61,7 @@ export default function ProfileModal({ player, onPlayerChange, onClose }: Profil
   const [usernameSuccess, setUsernameSuccess] = useState(false);
   const [savingUsername, setSavingUsername] = useState(false);
 
-  const [avatarIcons, setAvatarIcons] = useState<string[]>([]);
+  const [avatarIcons, setAvatarIcons] = useState<AvatarIconChoice[]>([]);
   const [iconsError, setIconsError] = useState<string | null>(null);
   const [avatarImage, setAvatarImage] = useState(player.avatar?.image ?? 'hobbit.png');
   const [avatarColor, setAvatarColor] = useState(player.avatar?.color ?? '#2d5a27');
@@ -84,8 +84,9 @@ export default function ProfileModal({ player, onPlayerChange, onClose }: Profil
   }, [player.avatar?.image, player.avatar?.color]);
 
   useEffect(() => {
-    if (!editingAvatar || avatarIcons.length > 0) return;
+    if (!editingAvatar) return;
     let cancelled = false;
+    setIconsError(null);
     api
       .getAvatarIcons()
       .then((r) => {
@@ -97,7 +98,7 @@ export default function ProfileModal({ player, onPlayerChange, onClose }: Profil
     return () => {
       cancelled = true;
     };
-  }, [editingAvatar, avatarIcons.length]);
+  }, [editingAvatar]);
 
   useEffect(() => {
     let cancelled = false;
@@ -239,22 +240,24 @@ export default function ProfileModal({ player, onPlayerChange, onClose }: Profil
               </p>
             )}
             <div className="profile-avatar-icons" role="listbox" aria-label="Unit icons">
-              {avatarIcons.map((name) => {
-                const selected = name === avatarImage;
+              {avatarIcons.map((icon) => {
+                const selected = icon.name === avatarImage;
+                const label = icon.name.replace(/\.png$/i, '').replace(/_/g, ' ');
                 return (
                   <button
-                    key={name}
+                    key={icon.name}
                     type="button"
                     role="option"
                     aria-selected={selected}
-                    aria-label={name.replace(/\.png$/i, '').replace(/_/g, ' ')}
+                    aria-label={icon.new ? `${label}, newly available` : label}
                     className={`profile-avatar-icon${selected ? ' profile-avatar-icon--selected' : ''}`}
                     onClick={() => {
-                      setAvatarImage(name);
+                      setAvatarImage(icon.name);
                       setAvatarSuccess(false);
                     }}
                   >
-                    <img src={`/assets/units/${name}`} alt="" />
+                    <img src={`/assets/units/${icon.name}`} alt="" />
+                    {icon.new ? <span className="profile-avatar-icon__new" title="Newly available" /> : null}
                   </button>
                 );
               })}
