@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../services/api';
+import { useMenuScroll } from '../components/MenuScrollContext';
+import MenuLink from '../components/MenuLink';
 import type { GameListItem, AuthPlayer, ForfeitOptionsResponse } from '../services/api';
 import StrongholdAllianceBar from '../components/StrongholdAllianceBar';
 import './GameList.css';
@@ -47,7 +48,7 @@ function playerNames(g: GameListItem): string | null {
 }
 
 export default function GameList() {
-  const navigate = useNavigate();
+  const { navigateWithScroll } = useMenuScroll();
   const [player, setPlayer] = useState<AuthPlayer | null>(null);
   const [games, setGames] = useState<GameListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -187,7 +188,7 @@ export default function GameList() {
     return (
       <div className="game-list-page">
         <p className="game-list__error">{error}</p>
-        <Link to="/">Back</Link>
+        <MenuLink to="/">Back</MenuLink>
       </div>
     );
   }
@@ -199,7 +200,7 @@ export default function GameList() {
   return (
     <div className="game-list-page" data-page="load-game">
       <header className="game-list-page__header">
-        <Link to="/" className="page-menu-btn">Menu</Link>
+        <MenuLink to="/" className="page-menu-btn">Menu</MenuLink>
       </header>
       {forfeitResult && (
         <div className="game-list__result" role="status">
@@ -228,8 +229,8 @@ export default function GameList() {
                 className="game-list__card"
                 role="button"
                 tabIndex={0}
-                onClick={() => navigate('/game/' + g.id)}
-                onKeyDown={(e) => e.key === 'Enter' && navigate('/game/' + g.id)}
+                onClick={() => navigateWithScroll('/game/' + g.id)}
+                onKeyDown={(e) => e.key === 'Enter' && navigateWithScroll('/game/' + g.id)}
               >
                 <div className="game-list__card-main">
                   <h3 className="game-list__name">{g.name}</h3>

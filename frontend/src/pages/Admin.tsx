@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
+import MenuLink from '../components/MenuLink';
 import { api, getAuthToken, getResolvedApiBase, usesViteApiProxy } from '../services/api';
 import type { AdminSetupBundle, AdminSetupListItem, AuthPlayer, Catalog, UnitFormulas } from '../services/api';
 import {
@@ -835,9 +836,9 @@ export default function Admin() {
   return (
     <div className="admin-page">
       <div className="admin-page__nav">
-        <Link to="/" className="page-menu-btn">
+        <MenuLink to="/" className="page-menu-btn">
           Menu
-        </Link>
+        </MenuLink>
         <div className="admin-page__nav-tools">
           <button
             type="button"

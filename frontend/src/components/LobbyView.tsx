@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import api, { type GameMeta, type AuthPlayer, type Definitions } from '../services/api';
+import { useMenuScroll } from './MenuScrollContext';
 import './LobbyView.css';
 
 const ALLIANCE_ORDER = ['good', 'evil'];
@@ -40,6 +41,7 @@ export default function LobbyView({
   onMetaUpdate,
   onGameStarted,
 }: LobbyViewProps) {
+  const { navigateWithScroll } = useMenuScroll();
   const [player, setPlayer] = useState<AuthPlayer | null>(null);
   const [claimingFactionId, setClaimingFactionId] = useState<string | null>(null);
   const [claimingAlliance, setClaimingAlliance] = useState<string | null>(null);
@@ -373,7 +375,16 @@ export default function LobbyView({
         </section>
 
         <footer className="lobby-view__footer">
-          <Link to="/" className="lobby-view__menu-btn">Menu</Link>
+          <Link
+            to="/"
+            className="lobby-view__menu-btn"
+            onClick={(e) => {
+              e.preventDefault();
+              navigateWithScroll('/');
+            }}
+          >
+            Menu
+          </Link>
           <div className="lobby-view__start-area">
           {player == null ? (
             <span className="lobby-view__waiting">Loading…</span>

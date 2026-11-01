@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../services/api';
+import { useMenuScroll } from '../components/MenuScrollContext';
+import MenuLink from '../components/MenuLink';
 import './JoinGame.css';
 
 export default function JoinGame() {
-  const navigate = useNavigate();
+  const { navigateWithScroll } = useMenuScroll();
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -20,7 +21,7 @@ export default function JoinGame() {
     setLoading(true);
     try {
       const res = await api.joinGame(trimmed);
-      navigate(`/game/${res.game_id}`, { replace: true });
+      navigateWithScroll(`/game/${res.game_id}`, { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to join');
     } finally {
@@ -49,7 +50,7 @@ export default function JoinGame() {
           {loading ? 'Joining…' : 'Join game'}
         </button>
       </form>
-      <Link to="/" className="page-menu-btn join-game-page__menu-anchor">Menu</Link>
+      <MenuLink to="/" className="page-menu-btn join-game-page__menu-anchor">Menu</MenuLink>
     </div>
   );
 }
