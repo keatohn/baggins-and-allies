@@ -1550,6 +1550,77 @@
   text-align: right;
 }
 
+/* Copy-from-another-map dialog (Landscape tab) */
+.mapov-copy {
+  width: min(100%, 46rem);
+  max-height: min(88vh, 46rem);
+}
+
+.mapov-copy__source {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.mapov-copy__source .admin-form__label {
+  padding-top: 0;
+}
+
+.mapov-copy__preview {
+  border: 1px solid var(--ink-faded);
+  border-radius: 8px;
+  background: var(--parchment);
+  overflow: hidden;
+}
+
+.mapov-copy__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.mapov-copy__path {
+  fill: rgba(61, 41, 20, 0.1);
+  stroke: var(--ink);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.mapov-copy__marker {
+  fill: rgba(37, 99, 235, 0.5);
+  stroke: rgba(255, 255, 255, 0.7);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.mapov-copy__marker--hit {
+  fill: #ea580c;
+}
+
+.mapov-copy__band {
+  fill: rgba(61, 41, 20, 0.14);
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.mapov-copy__note,
+.mapov-copy__hint {
+  margin: 0.5rem 0 0;
+}
+
+.mapov-copy__summary {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+  color: var(--ink);
+}
+
 .mapov-placement {
   position: absolute;
   transform: translate(-50%, -50%);

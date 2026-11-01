@@ -37,6 +37,26 @@ const PAINT_STAMP_SPACING = 36;
 /** Minimum viewBox-space distance between painted pieces (dedupe vs existing stamps). */
 const PAINT_MIN_DIST = 36;
 
+/** Axis-aligned region in some map's viewBox space (used by the copy dialog). */
+type RegionRect = { x1: number; y1: number; x2: number; y2: number };
+
+/** Target territory geometry used to place copied pieces by position. */
+type TargetHitArea = {
+  tid: string;
+  el: SVGPathElement;
+  bbox: { x: number; y: number; width: number; height: number };
+};
+
+type CopyPlanItem = { tid: string; placement: LandscapePlacement };
+
+type CopyPlan = {
+  items: CopyPlanItem[];
+  inRegion: number;
+  outsideRegion: number;
+  unmatched: number;
+  capped: number;
+};
+
 /** Multi-select key for a placement: landscape territory key + index in its list. */
 function placementKey(tid: string, index: number): string {
   return `${tid}#${index}`;
@@ -194,6 +214,17 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   const [band, setBand] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [multiSel, setMultiSel] = useState<Set<string>>(() => new Set());
   const [paintRadius, setPaintRadius] = useState(0);
+  // Copy-from-another-map dialog: source map preview + optional region filter.
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copySource, setCopySource] = useState('');
+  const [copyLoading, setCopyLoading] = useState(false);
+  const [copyErr, setCopyErr] = useState<string | null>(null);
+  const [copyPaths, setCopyPaths] = useState<Map<string, TerritoryPathData>>(new Map());
+  const [copyViewBox, setCopyViewBox] = useState({ width: 0, height: 0 });
+  const [copyOverrides, setCopyOverrides] = useState<MapOverridesData | null>(null);
+  const [copyRegion, setCopyRegion] = useState<RegionRect | null>(null);
+  const [copyDrag, setCopyDrag] = useState<RegionRect | null>(null);
+  const [targetHitAreas, setTargetHitAreas] = useState<TargetHitArea[]>([]);
 
   const dragRef = useRef<{ x: number; y: number; tx: number; ty: number; id: number } | null>(null);
   const didDragRef = useRef(false);
@@ -218,6 +249,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   } | null>(null);
   const selectDragRef = useRef<{ x: number; y: number; id: number } | null>(null);
   const paintLastRef = useRef<Pt | null>(null);
+  const copyDragRef = useRef<{ id: number; sx: number; sy: number; x1: number; y1: number } | null>(null);
   const bulkDragRef = useRef<{
     id: number;
     sx: number;
@@ -313,6 +345,63 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     };
   }, [mapBase]);
 
+  // --- copy-from-another-map: source data + target hit-test geometry ------
+
+  useEffect(() => {
+    if (!copyOpen || !copySource) {
+      setCopyLoading(false);
+      setCopyErr(null);
+      return;
+    }
+    let cancelled = false;
+    setCopyLoading(true);
+    setCopyErr(null);
+    setCopyOverrides(null);
+    setCopyPaths(new Map());
+    setCopyRegion(null);
+    setCopyDrag(null);
+    Promise.all([
+      api.getMapOverrides(copySource).then((r) => normalizeMapOverrides(r?.overrides)),
+      loadTerritorySvgPaths(copySource),
+    ])
+      .then(([overrides, { paths: srcPaths, viewBox: srcViewBox }]) => {
+        if (cancelled) return;
+        setCopyOverrides(overrides);
+        setCopyPaths(srcPaths);
+        setCopyViewBox(srcViewBox);
+        setCopyLoading(false);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setCopyErr(e instanceof Error ? e.message : 'Failed to load source map');
+        setCopyLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [copyOpen, copySource]);
+
+  // Target territory fills for position-based copy. Runs after paint so the
+  // freshly loaded SVG paths are in the DOM; bboxes prefilter isPointInFill.
+  useEffect(() => {
+    if (loading || !wrapRef.current) return;
+    const out: TargetHitArea[] = [];
+    for (const node of wrapRef.current.querySelectorAll('path.admin-graph__path')) {
+      const el = node as SVGPathElement;
+      const tid = el.dataset.tid;
+      if (!tid) continue;
+      try {
+        const b = el.getBBox();
+        if (Number.isFinite(b.x + b.y + b.width + b.height) && b.width > 0 && b.height > 0) {
+          out.push({ tid, el, bbox: { x: b.x, y: b.y, width: b.width, height: b.height } });
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    setTargetHitAreas(out);
+  }, [loading, paths]);
+
   // --- calculated spot oracle (hidden GameMap) ----------------------------
 
   const onSpotsCalculated = useCallback((next: CalculatedSpots) => {
@@ -391,6 +480,11 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && copyOpen) {
+        e.stopPropagation();
+        setCopyOpen(false);
+        return;
+      }
       if (e.key === 'Escape' && band) {
         e.stopPropagation();
         selectDragRef.current = null;
@@ -423,7 +517,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [discardOpen, saving, dirty, onClose, placing, band, multiSel]);
+  }, [discardOpen, saving, dirty, onClose, placing, band, multiSel, copyOpen]);
 
   const changeMap = (next: string) => {
     if (!next || next === mapBase) return;
@@ -1124,7 +1218,6 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     e.stopPropagation();
     e.preventDefault();
     if (e.button !== 0) return;
-    if (placing) return; // placing mode takes priority; don't start a drag
     if (editorTab === 'landscape' && cursorMode === 'paint') return; // paint owns left-drag on the viewport
     if (editorTab === 'landscape' && cursorMode === 'select') {
       const key = placementKey(tid, index);
@@ -1161,6 +1254,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
       return;
     }
     if (editorTab === 'landscape' && cursorMode !== 'navigate') return; // select/paint own left-drag
+    if (placing) return; // placing mode takes priority; don't start a drag
     const placement = landscapeFor(tid)[index];
     if (!placement) return;
     setSelected(tid);
@@ -1384,6 +1478,247 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     return 1;
   }, [multiSel, current]);
 
+  // --- copy from another map ----------------------------------------------
+
+  const otherMaps = useMemo(() => maps.filter((m) => m !== mapBase), [maps, mapBase]);
+
+  const copyPlacements = useMemo(() => {
+    const map = copyOverrides?.landscape?.territories;
+    if (!map) return [];
+    const rows: { tid: string; index: number; p: LandscapePlacement }[] = [];
+    for (const [tid, list] of Object.entries(map)) {
+      list.forEach((p, index) => rows.push({ tid, index, p }));
+    }
+    return rows;
+  }, [copyOverrides]);
+
+  const normCopyRegion = useMemo<RegionRect | null>(() => {
+    if (!copyRegion) return null;
+    return {
+      x1: Math.min(copyRegion.x1, copyRegion.x2),
+      y1: Math.min(copyRegion.y1, copyRegion.y2),
+      x2: Math.max(copyRegion.x1, copyRegion.x2),
+      y2: Math.max(copyRegion.y1, copyRegion.y2),
+    };
+  }, [copyRegion]);
+
+  /** Position-based plan: scale each source piece into this map's viewBox and
+   *  assign it to whichever target territory contains the point. Respects the
+   *  50/territory and 2500/map caps against the current draft. */
+  const copyPlan = useMemo<CopyPlan | null>(() => {
+    if (copyLoading || copyErr || !copyOverrides || !copyViewBox.width || !viewBox.width) return null;
+    if (!targetHitAreas.length) return null;
+    const existing = current?.landscape?.territories ?? {};
+    const counts: Record<string, number> = {};
+    let total = 0;
+    for (const [tid, list] of Object.entries(existing)) {
+      counts[tid] = list.length;
+      total += list.length;
+    }
+    const scaleX = viewBox.width / copyViewBox.width;
+    const scaleY = viewBox.height / copyViewBox.height;
+    const region = normCopyRegion;
+    const items: CopyPlanItem[] = [];
+    let inRegion = 0;
+    let outsideRegion = 0;
+    let unmatched = 0;
+    let capped = 0;
+    for (const { p } of copyPlacements) {
+      if (region && (p.x < region.x1 || p.x > region.x2 || p.y < region.y1 || p.y > region.y2)) {
+        outsideRegion += 1;
+        continue;
+      }
+      inRegion += 1;
+      const x = p.x * scaleX;
+      const y = p.y * scaleY;
+      if (x < 0 || y < 0 || x > viewBox.width || y > viewBox.height) {
+        unmatched += 1;
+        continue;
+      }
+      let hit: string | null = null;
+      for (const area of targetHitAreas) {
+        const b = area.bbox;
+        if (x < b.x || y < b.y || x > b.x + b.width || y > b.y + b.height) continue;
+        if (isPointInTerritoryPath(area.el, x, y)) {
+          hit = area.tid;
+          break;
+        }
+      }
+      if (!hit) {
+        unmatched += 1;
+        continue;
+      }
+      const key = resolveTid(counts, hit) ?? hit;
+      if ((counts[key] ?? 0) >= 50 || total >= 2500) {
+        capped += 1;
+        continue;
+      }
+      counts[key] = (counts[key] ?? 0) + 1;
+      total += 1;
+      const placement: LandscapePlacement = {
+        cat: p.cat,
+        img: p.img,
+        x: Math.round(x * 100) / 100,
+        y: Math.round(y * 100) / 100,
+        layer: p.layer,
+      };
+      // Copied pieces are a deliberate import: keep them across the next auto pass.
+      if (typeof p.s === 'number' && p.s !== 1) placement.s = Math.min(4, Math.max(0.25, p.s));
+      items.push({ tid: key, placement });
+    }
+    return { items, inRegion, outsideRegion, unmatched, capped };
+  }, [
+    copyLoading,
+    copyErr,
+    copyOverrides,
+    copyViewBox,
+    viewBox,
+    targetHitAreas,
+    normCopyRegion,
+    copyPlacements,
+    current,
+  ]);
+
+  const copySummary = useMemo(() => {
+    if (!otherMaps.length) return 'No other map to copy from.';
+    if (copyLoading) return `Loading ${copySource}…`;
+    if (copyErr) return copyErr;
+    if (!copyPlan) return 'Select a source map to preview its landscape placements.';
+    const bits = [`${copyPlan.items.length} of ${copyPlan.inRegion} pieces ready to copy`];
+    if (copyPlan.outsideRegion) bits.push(`${copyPlan.outsideRegion} outside the region`);
+    if (copyPlan.unmatched) bits.push(`${copyPlan.unmatched} land off this map`);
+    if (copyPlan.capped) bits.push(`${copyPlan.capped} skipped by the 50-per-territory / 2500-per-map caps`);
+    return bits.join(' · ');
+  }, [otherMaps.length, copyLoading, copyErr, copySource, copyPlan]);
+
+  const openCopyDialog = () => {
+    setCopyErr(null);
+    setCopyRegion(null);
+    setCopyDrag(null);
+    setCopySource(otherMaps[0] ?? '');
+    setCopyOpen(true);
+  };
+
+  const applyCopy = () => {
+    const plan = copyPlan;
+    if (!plan || !plan.items.length) return;
+    const map: Record<string, LandscapePlacement[]> = { ...(current?.landscape?.territories ?? {}) };
+    const newKeys: string[] = [];
+    let total = 0;
+    for (const list of Object.values(map)) total += list.length;
+    const byTid = new Map<string, CopyPlanItem[]>();
+    for (const item of plan.items) {
+      const arr = byTid.get(item.tid);
+      if (arr) arr.push(item);
+      else byTid.set(item.tid, [item]);
+    }
+    for (const [tid, items] of byTid) {
+      const key = resolveTid(map, tid) ?? tid;
+      const existingList = map[key] ?? [];
+      const room = Math.min(50 - existingList.length, 2500 - total);
+      const add = items.slice(0, Math.max(0, room));
+      if (!add.length) continue;
+      map[key] = [...existingList, ...add.map((it) => it.placement)];
+      add.forEach((_, i) => newKeys.push(placementKey(key, existingList.length + i)));
+      total += add.length;
+    }
+    updateLandscape(() => (Object.keys(map).length ? { territories: map } : undefined));
+    if (newKeys.length) {
+      // Select the import so it can be bulk-dragged/scaled immediately.
+      setMultiSel(new Set(newKeys));
+      setSelectedPlacement(null);
+      setCursorMode('select');
+      setBand(null);
+      selectDragRef.current = null;
+      bulkDragRef.current = null;
+    }
+    setCopyOpen(false);
+  };
+
+  const copyVbFromEvent = (e: ReactPointerEvent<SVGSVGElement>): Pt | null => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1 || !copyViewBox.width || !copyViewBox.height) return null;
+    return {
+      x: ((e.clientX - rect.left) / rect.width) * copyViewBox.width,
+      y: ((e.clientY - rect.top) / rect.height) * copyViewBox.height,
+    };
+  };
+
+  const onCopyPreviewDown = (e: ReactPointerEvent<SVGSVGElement>) => {
+    if (e.button !== 0) return;
+    const vb = copyVbFromEvent(e);
+    if (!vb) return;
+    e.preventDefault();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    copyDragRef.current = { id: e.pointerId, sx: e.clientX, sy: e.clientY, x1: vb.x, y1: vb.y };
+    setCopyDrag({ x1: vb.x, y1: vb.y, x2: vb.x, y2: vb.y });
+  };
+
+  const onCopyPreviewMove = (e: ReactPointerEvent<SVGSVGElement>) => {
+    const d = copyDragRef.current;
+    if (!d || e.pointerId !== d.id) return;
+    const vb = copyVbFromEvent(e);
+    if (!vb) return;
+    setCopyDrag({ x1: d.x1, y1: d.y1, x2: vb.x, y2: vb.y });
+  };
+
+  const onCopyPreviewUp = (e: ReactPointerEvent<SVGSVGElement>) => {
+    const d = copyDragRef.current;
+    if (!d || e.pointerId !== d.id) return;
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    copyDragRef.current = null;
+    const moved = Math.abs(e.clientX - d.sx) + Math.abs(e.clientY - d.sy) >= 4;
+    const vb = copyVbFromEvent(e);
+    setCopyDrag(null);
+    // A bare click clears the region; a real drag commits it.
+    if (!moved) setCopyRegion(null);
+    else setCopyRegion({ x1: d.x1, y1: d.y1, x2: vb?.x ?? d.x1, y2: vb?.y ?? d.y1 });
+  };
+
+  const copyMarkerR = copyViewBox.width
+    ? Math.max(6, Math.min(copyViewBox.width, copyViewBox.height) / 120)
+    : 10;
+
+  const copyMarkers = useMemo(
+    () =>
+      copyPlacements.map((row) => (
+        <circle
+          key={`${row.tid}|${row.index}`}
+          className="mapov-copy__marker"
+          cx={row.p.x}
+          cy={row.p.y}
+          r={copyMarkerR}
+        />
+      )),
+    [copyPlacements, copyMarkerR],
+  );
+
+  const copyRegionMarkers = useMemo(() => {
+    if (!normCopyRegion) return null;
+    const r = normCopyRegion;
+    return copyPlacements
+      .filter((row) => row.p.x >= r.x1 && row.p.x <= r.x2 && row.p.y >= r.y1 && row.p.y <= r.y2)
+      .map((row) => (
+        <circle
+          key={`${row.tid}|${row.index}`}
+          className="mapov-copy__marker mapov-copy__marker--hit"
+          cx={row.p.x}
+          cy={row.p.y}
+          r={copyMarkerR}
+        />
+      ));
+  }, [copyPlacements, normCopyRegion, copyMarkerR]);
+
+  const copyBand = copyDrag ?? normCopyRegion;
+
   const selectedEntry = selected ? entryFor(current, selected) : undefined;
   const selectedFocus: 'calculated' | 'override' = selectedEntry?.focus === 'override' ? 'override' : 'calculated';
   const selectedCalc = useMemo(
@@ -1501,6 +1836,15 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                   title="Place interior art on every territory whose terrain type has landscape images (keeps manual placements)"
                 >
                   {autoBusy ? 'Generating…' : 'Auto-generate'}
+                </button>
+                <button
+                  type="button"
+                  className="admin-page__btn"
+                  disabled={otherMaps.length === 0}
+                  onClick={openCopyDialog}
+                  title="Copy landscape placements from another map at the same positions (optionally limited to a region)"
+                >
+                  Copy from…
                 </button>
                 <button
                   type="button"
@@ -2001,6 +2345,99 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
             onSpotsCalculated={onSpotsCalculated}
           />
         </div>
+        {copyOpen ? (
+          <div
+            className="admin-modal-overlay admin-graph__confirm"
+            role="presentation"
+            onClick={() => setCopyOpen(false)}
+          >
+            <div
+              className="admin-modal mapov-copy"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="admin-mapov-copy-title"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 id="admin-mapov-copy-title" className="admin-modal__title">
+                Copy landscape from another map
+              </h2>
+              <div className="mapov-copy__source">
+                <label className="admin-form__label" htmlFor="mapov-copy-source">
+                  Source map
+                </label>
+                <select
+                  id="mapov-copy-source"
+                  className="admin-page__select"
+                  value={copySource}
+                  onChange={(e) => setCopySource(e.target.value)}
+                  disabled={copyLoading || otherMaps.length === 0}
+                >
+                  {otherMaps.length === 0 ? <option value="">No other maps</option> : null}
+                  {otherMaps.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="mapov-copy__preview">
+                {copyLoading ? (
+                  <p className="admin-form__micro mapov-copy__note">Loading {copySource}…</p>
+                ) : copyErr ? (
+                  <p className="admin-page__error mapov-copy__note">{copyErr}</p>
+                ) : copyPaths.size ? (
+                  <svg
+                    className="mapov-copy__svg"
+                    viewBox={`0 0 ${copyViewBox.width} ${copyViewBox.height}`}
+                    style={{ aspectRatio: `${copyViewBox.width} / ${copyViewBox.height}` }}
+                    onPointerDown={onCopyPreviewDown}
+                    onPointerMove={onCopyPreviewMove}
+                    onPointerUp={onCopyPreviewUp}
+                    onPointerCancel={onCopyPreviewUp}
+                  >
+                    {Array.from(copyPaths.entries()).map(([tid, pd]) => (
+                      <path key={tid} className="mapov-copy__path" d={pd.d} transform={pd.transform} />
+                    ))}
+                    <g>{copyMarkers}</g>
+                    {copyRegionMarkers ? <g>{copyRegionMarkers}</g> : null}
+                    {copyBand ? (
+                      <rect
+                        className="mapov-copy__band"
+                        x={Math.min(copyBand.x1, copyBand.x2)}
+                        y={Math.min(copyBand.y1, copyBand.y2)}
+                        width={Math.abs(copyBand.x2 - copyBand.x1)}
+                        height={Math.abs(copyBand.y2 - copyBand.y1)}
+                      />
+                    ) : null}
+                  </svg>
+                ) : (
+                  <p className="admin-form__micro mapov-copy__note">
+                    No other map available to copy from.
+                  </p>
+                )}
+              </div>
+              <p className="admin-form__micro mapov-copy__hint">
+                {copyPaths.size && !copyLoading
+                  ? 'Drag on the preview to copy only that area; click it to clear the region. Pieces are placed at the same position on this map.'
+                  : ''}
+              </p>
+              <p className="mapov-copy__summary">{copySummary}</p>
+              <div className="admin-modal__actions">
+                <button type="button" className="admin-page__btn" onClick={() => setCopyOpen(false)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="admin-page__btn admin-page__btn--primary"
+                  disabled={!copyPlan?.items.length}
+                  onClick={applyCopy}
+                >
+                  {copyPlan?.items.length ? `Copy ${copyPlan.items.length} pieces` : 'Copy'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {discardOpen ? (
           <div className="admin-modal-overlay admin-graph__confirm" role="presentation" onClick={() => { setDiscardOpen(false); setPendingMap(null); }}>
             <div
