@@ -3,7 +3,7 @@ SQLAlchemy models for players, games, and game setups.
 """
 
 from datetime import datetime
-from sqlalchemy import Boolean, Column, String, DateTime, Text, ForeignKey
+from sqlalchemy import Boolean, Column, String, DateTime, Integer, Text, ForeignKey, UniqueConstraint
 
 from .database import Base
 
@@ -79,3 +79,71 @@ class MapOverride(Base):
     map_base = Column(String(64), primary_key=True)
     overrides_json = Column(Text, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class GameResult(Base):
+    """One denormalized row per human participant per finished game.
+
+    Written once when a game flips to status=finished (idempotent per game).
+    AI factions have no roster entries today; is_ai is reserved for future use.
+    forfeited=true marks players who left mid-game — exclude from headline W-L.
+    """
+
+    __tablename__ = "game_results"
+    __table_args__ = (
+        UniqueConstraint("game_id", "player_id", "faction_id", name="uq_game_results_game_player_faction"),
+    )
+
+    id = Column(String(36), primary_key=True)  # uuid
+    game_id = Column(String(36), ForeignKey("games.id"), nullable=False, index=True)
+    player_id = Column(String(36), ForeignKey("players.id"), nullable=False, index=True)
+    faction_id = Column(String(64), nullable=False)
+    alliance = Column(String(16), nullable=False)  # good | evil | neutral
+    won = Column(Boolean, nullable=False, default=False)
+    forfeited = Column(Boolean, nullable=False, default=False)
+    is_ai = Column(Boolean, nullable=False, default=False)  # reserved; human rows only for now
+    setup_id = Column(String(128), nullable=True, index=True)
+    scenario_name = Column(String(255), nullable=True)  # display-name snapshot at game end
+    turn_count = Column(Integer, nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+    rings_of_power = Column(Boolean, nullable=False, default=False)
+    shadow_of_war = Column(Boolean, nullable=False, default=False)
+    # JSON array of human player_ids in this game (vs/with breakdowns without re-joining games)
+    participant_ids = Column(Text, nullable=False, default="[]")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Achievement(Base):
+    """Admin-defined achievement; criteria_json is a DSL evaluated by the generic engine.
+
+    Admins never write game-logic code — they compose JSON criteria from a whitelist
+    of stat keys (see backend/api/achievements.py).
+    """
+
+    __tablename__ = "achievements"
+
+    id = Column(String(36), primary_key=True)  # uuid
+    key = Column(String(64), unique=True, nullable=False, index=True)  # stable slug, e.g. "first_victory"
+    name = Column(String(128), nullable=False)
+    description = Column(Text, nullable=False, default="")
+    icon = Column(String(64), nullable=True)  # optional client-side icon key
+    category = Column(String(64), nullable=True)  # free-form grouping for the profile
+    tier = Column(String(16), nullable=True)  # optional bronze|silver|gold|...
+    criteria_json = Column(Text, nullable=False)  # JSON criteria DSL (validated on write)
+    sort_order = Column(Integer, nullable=False, default=0)
+    active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PlayerAchievement(Base):
+    """Awarded achievement for a player (unique pair). Written by the evaluator only."""
+
+    __tablename__ = "player_achievements"
+    __table_args__ = (
+        UniqueConstraint("player_id", "achievement_id", name="uq_player_achievements_player_achievement"),
+    )
+
+    id = Column(String(36), primary_key=True)  # uuid
+    player_id = Column(String(36), ForeignKey("players.id"), nullable=False, index=True)
+    achievement_id = Column(String(36), ForeignKey("achievements.id"), nullable=False, index=True)
+    awarded_at = Column(DateTime, default=datetime.utcnow)

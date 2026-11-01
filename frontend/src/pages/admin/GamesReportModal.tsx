@@ -4,6 +4,10 @@ import type { GameListItem } from '../../services/api';
 
 type FilterKey = 'all' | 'lobby' | 'active' | 'finished';
 
+const END_CONFIRM_PHRASE = 'END GAME';
+
+type EndWinner = 'good' | 'evil' | 'none';
+
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'lobby', label: 'Lobby' },
@@ -70,6 +74,20 @@ function scenarioOptionLabel(game: GameListItem): string {
   return name ?? id ?? 'Unknown scenario';
 }
 
+function allianceLabel(key: string): string {
+  if (key === 'good') return 'Good';
+  if (key === 'evil') return 'Evil';
+  if (key === 'none' || key === 'neither') return 'Neither';
+  return key;
+}
+
+/** Winner-pill keys for a game: alliances from faction_stats, fallback good/evil. */
+function winnerPillKeys(game: GameListItem): string[] {
+  const keys = Object.keys(game.faction_stats?.alliances ?? {});
+  const filtered = keys.filter((k) => k === 'good' || k === 'evil');
+  return filtered.length > 0 ? filtered.sort() : ['good', 'evil'];
+}
+
 export function GamesReportModal({ onClose }: { onClose: () => void }) {
   const [games, setGames] = useState<GameListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +96,50 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
   const [selectedScenario, setSelectedScenario] = useState<string>('');
   const [playersOpen, setPlayersOpen] = useState(false);
   const playersMenuRef = useRef<HTMLDivElement | null>(null);
+  const [endTarget, setEndTarget] = useState<GameListItem | null>(null);
+  const [endWinner, setEndWinner] = useState<EndWinner | null>(null);
+  const [endConfirm, setEndConfirm] = useState('');
+  const [endBusy, setEndBusy] = useState(false);
+  const [endError, setEndError] = useState<string | null>(null);
+
+  const refreshGames = () => {
+    api
+      .adminListGames()
+      .then((r) => setGames(r.games ?? []))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Could not load games'));
+  };
+
+  const openEndGame = (game: GameListItem) => {
+    setEndTarget(game);
+    setEndWinner(null);
+    setEndConfirm('');
+    setEndError(null);
+  };
+
+  const closeEndGame = () => {
+    if (endBusy) return;
+    setEndTarget(null);
+    setEndWinner(null);
+    setEndConfirm('');
+    setEndError(null);
+  };
+
+  const submitEndGame = async () => {
+    if (!endTarget || !endWinner || endConfirm !== END_CONFIRM_PHRASE || endBusy) return;
+    setEndBusy(true);
+    setEndError(null);
+    try {
+      await api.adminEndGame(endTarget.id, endWinner);
+      setEndTarget(null);
+      setEndWinner(null);
+      setEndConfirm('');
+      refreshGames();
+    } catch (e: unknown) {
+      setEndError(e instanceof Error ? e.message : 'Could not end game');
+    } finally {
+      setEndBusy(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -276,6 +338,7 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
                   <col className="games-report__col-winner" />
                   <col className="games-report__col-created" />
                   <col className="games-report__col-completed" />
+                  <col className="games-report__col-end" />
                 </colgroup>
                 <thead>
                   <tr>
@@ -287,6 +350,7 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
                     <th>Winner</th>
                     <th>Created</th>
                     <th>Completed</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -306,6 +370,17 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
                       <td>{winnerLabel(g)}</td>
                       <td>{formatDate(g.created_at)}</td>
                       <td>{formatDate(g.completed_at)}</td>
+                      <td>
+                        {g.status === 'active' ? (
+                          <button
+                            type="button"
+                            className="games-report__end-btn"
+                            onClick={() => openEndGame(g)}
+                          >
+                            End
+                          </button>
+                        ) : null}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -313,6 +388,68 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
             )
           ) : null}
         </div>
+        {endTarget ? (
+          <div
+            className="admin-modal-overlay games-report__end-overlay"
+            role="presentation"
+            onClick={closeEndGame}
+          >
+            <div
+              className="admin-modal games-report__end-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="admin-end-game-title"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 id="admin-end-game-title" className="admin-modal__title">
+                End game?
+              </h2>
+              <p className="admin-form__micro games-report__end-text">
+                This will permanently end <strong>{endTarget.name}</strong>. Choose the winner, or Neither to
+                void the game (no stats recorded). Type <strong>{END_CONFIRM_PHRASE}</strong> to confirm.
+              </p>
+              <div className="games-report__end-pills" role="group" aria-label="Winner">
+                {[...winnerPillKeys(endTarget), 'none'].map((key) => {
+                  const value = key as EndWinner;
+                  const selected = endWinner === value;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      className={`games-report__end-pill${selected ? ' games-report__end-pill--active' : ''}`}
+                      aria-pressed={selected}
+                      onClick={() => setEndWinner(value)}
+                    >
+                      {allianceLabel(key)}
+                    </button>
+                  );
+                })}
+              </div>
+              <input
+                type="text"
+                className="games-report__end-input"
+                value={endConfirm}
+                onChange={(e) => setEndConfirm(e.target.value)}
+                placeholder={END_CONFIRM_PHRASE}
+                autoFocus
+              />
+              {endError ? <p className="admin-page__error games-report__end-error">{endError}</p> : null}
+              <div className="games-report__end-actions">
+                <button type="button" className="admin-page__btn" onClick={closeEndGame} disabled={endBusy}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="admin-page__btn games-report__end-confirm"
+                  onClick={submitEndGame}
+                  disabled={!endWinner || endConfirm !== END_CONFIRM_PHRASE || endBusy}
+                >
+                  {endBusy ? 'Ending…' : 'End game'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -153,10 +153,21 @@ def test_sole_human_forfeit_ends_game(make_client, players, db_session):
     ai = set(config.get("ai_factions") or [])
     assert "gondor" in ai
     assert user.id in (config.get("forfeited_player_ids") or [])
+    assert config.get("forfeited_player_factions", {}).get(user.id) == ["gondor"]
     log = config.get("event_log") or []
     victory_events = [e for e in log if e.get("type") == "victory"]
     assert victory_events, "expected a victory event in the log"
     assert victory_events[-1]["payload"]["winner"] == "evil"
+
+    # The forfeiter still gets a game_results row (from forfeited_player_factions).
+    from backend.api.models import GameResult
+
+    rows = db_session.query(GameResult).filter(GameResult.game_id == str(game.id)).all()
+    assert len(rows) == 1
+    assert rows[0].player_id == user.id
+    assert rows[0].faction_id == "gondor"
+    assert rows[0].forfeited is True
+    assert rows[0].won is False
 
 
 def test_last_evil_human_forfeit_good_wins(make_client, players, db_session):

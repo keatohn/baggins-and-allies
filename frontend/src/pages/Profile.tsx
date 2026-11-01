@@ -8,12 +8,25 @@ import {
   setMenuMusicVolume,
 } from '../audio/gameAudio';
 import { api, getAuthToken, setAuthToken } from '../services/api';
-import type { AuthPlayer } from '../services/api';
+import type { AuthPlayer, PlayerStats } from '../services/api';
 import './Profile.css';
 
 const DEFAULT_MENU_MUSIC_PCT = 0;
 const DEFAULT_GAME_MUSIC_PCT = 0;
 const DEFAULT_SFX_PCT = 0;
+
+function formatPct(pct: number | null | undefined): string {
+  if (pct == null) return '—';
+  return `${pct}%`;
+}
+
+function formatDuration(totalSeconds: number | null | undefined): string {
+  if (totalSeconds == null) return '—';
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.round((totalSeconds % 3600) / 60);
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -33,6 +46,10 @@ export default function Profile() {
   const [muted, setMuted] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [audioSaving, setAudioSaving] = useState(false);
+  const [stats, setStats] = useState<PlayerStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [scenarioFilter, setScenarioFilter] = useState('');
   const isMountedRef = useRef(true);
   const audioSavedSnapshotRef = useRef({
     menuMusic: DEFAULT_MENU_MUSIC_PCT,
@@ -110,6 +127,29 @@ export default function Profile() {
       isMountedRef.current = false;
     };
   }, []);
+
+  const loadStats = useCallback((playerId: string, scenario?: string) => {
+    setStatsLoading(true);
+    setStatsError(null);
+    api
+      .getPlayerStats(playerId, scenario ? { scenario } : undefined)
+      .then((s) => {
+        if (!isMountedRef.current) return;
+        setStats(s);
+      })
+      .catch((e) => {
+        if (!isMountedRef.current) return;
+        setStatsError(e instanceof Error ? e.message : 'Could not load stats');
+      })
+      .finally(() => {
+        if (isMountedRef.current) setStatsLoading(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!player) return;
+    loadStats(player.id, scenarioFilter || undefined);
+  }, [player, scenarioFilter, loadStats]);
 
   const handleLogout = () => {
     setAuthToken(null);
@@ -291,6 +331,127 @@ export default function Profile() {
           <button type="button" className="profile-page__username-action profile-page__logout" onClick={handleLogout}>
             Log out
           </button>
+        </div>
+
+        <div className="profile-page__panel profile-page__panel--stats">
+          <section className="profile-page__stats" aria-labelledby="profile-stats-heading">
+            <h2 id="profile-stats-heading" className="profile-page__stats-title">
+              Stats
+            </h2>
+            {statsError && <p className="profile-page__msg profile-page__msg--error">{statsError}</p>}
+            {statsLoading && !stats && <p className="profile-page__msg profile-page__msg--subtle">Loading stats…</p>}
+            {stats && (
+              <>
+                <div className="profile-page__stats-headline">
+                  <span className="profile-page__stats-record">
+                    <strong>{stats.overall.wins}W</strong>
+                    <span className="profile-page__stats-sep">–</span>
+                    <strong>{stats.overall.losses}L</strong>
+                    <span className="profile-page__stats-pct">({formatPct(stats.overall.win_pct)})</span>
+                  </span>
+                  <span className="profile-page__stats-games">{stats.overall.games} games</span>
+                </div>
+
+                <div className="profile-page__stats-alliances">
+                  <span className="profile-page__stats-alliance profile-page__stats-alliance--good">
+                    Good: {stats.by_alliance.good.wins}–{stats.by_alliance.good.games - stats.by_alliance.good.wins}{' '}
+                    ({formatPct(stats.by_alliance.good.win_pct)})
+                  </span>
+                  <span className="profile-page__stats-alliance profile-page__stats-alliance--evil">
+                    Evil: {stats.by_alliance.evil.wins}–{stats.by_alliance.evil.games - stats.by_alliance.evil.wins}{' '}
+                    ({formatPct(stats.by_alliance.evil.win_pct)})
+                  </span>
+                </div>
+
+                <div className="profile-page__stats-row">
+                  <label className="profile-page__stats-filter-label" htmlFor="profile-scenario-filter">
+                    Scenario
+                  </label>
+                  <select
+                    id="profile-scenario-filter"
+                    className="profile-page__stats-select"
+                    value={scenarioFilter}
+                    onChange={(e) => setScenarioFilter(e.target.value)}
+                  >
+                    <option value="">All scenarios</option>
+                    {stats.by_scenario.map((s) => (
+                      <option key={s.setup_id ?? s.scenario_name} value={s.setup_id ?? ''}>
+                        {s.scenario_name} ({s.games})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {stats.by_scenario.length > 0 && (
+                  <div className="profile-page__stats-table-wrap">
+                    <table className="profile-page__stats-table">
+                      <thead>
+                        <tr>
+                          <th>Scenario</th>
+                          <th>Games</th>
+                          <th>Wins</th>
+                          <th>Win %</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stats.by_scenario.map((s) => (
+                          <tr key={s.setup_id ?? s.scenario_name}>
+                            <td>{s.scenario_name}</td>
+                            <td>{s.games}</td>
+                            <td>{s.wins}</td>
+                            <td>{formatPct(s.win_pct)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {stats.head_to_head.length > 0 && (
+                  <>
+                    <h3 className="profile-page__stats-subhead">Head to head</h3>
+                    <div className="profile-page__stats-table-wrap">
+                      <table className="profile-page__stats-table">
+                        <thead>
+                          <tr>
+                            <th>Player</th>
+                            <th>Vs/With</th>
+                            <th>Games</th>
+                            <th>W–L</th>
+                            <th>Win %</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {stats.head_to_head.map((h) => (
+                            <tr key={h.player_id}>
+                              <td>{h.username ?? h.player_id.slice(0, 8)}</td>
+                              <td>{h.kind === 'against' ? 'vs' : 'with'}</td>
+                              <td>{h.games}</td>
+                              <td>
+                                {h.wins}–{h.losses}
+                              </td>
+                              <td>{formatPct(h.win_pct)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+
+                <dl className="profile-page__stats-extras">
+                  <div className="profile-page__stats-extra">
+                    <dt>Best win streak</dt>
+                    <dd>{stats.streaks.best_win_streak}</dd>
+                  </div>
+                  <div className="profile-page__stats-extra">
+                    <dt>Longest game</dt>
+                    <dd>{formatDuration(stats.longest_game_seconds)}</dd>
+                  </div>
+                </dl>
+              </>
+            )}
+          </section>
         </div>
 
         <div className="profile-page__panel profile-page__panel--audio">

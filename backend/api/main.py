@@ -15,7 +15,7 @@ from dataclasses import asdict
 from datetime import datetime, timedelta
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
 from fastapi.responses import JSONResponse
@@ -25,6 +25,18 @@ from sqlalchemy.orm import Session
 
 from .database import get_db, get_db_file_path, init_db, SessionLocal
 from .models import Game as GameModel, Player
+from .player_stats import compute_player_stats, player_headline_record
+from .achievements import (
+    AchievementError,
+    achievement_to_dict,
+    create_achievement,
+    delete_achievement,
+    get_achievement,
+    list_achievements,
+    list_granted,
+    list_stats_catalog,
+    update_achievement,
+)
 from .auth import (
     create_access_token,
     get_current_player,
@@ -223,6 +235,22 @@ async def lifespan(app: FastAPI):
                     starting_setup = su["starting_setup"]
             except FileNotFoundError:
                 pass
+        try:
+            from .game_results import backfill_game_results
+
+            n = backfill_game_results(db)
+            if n:
+                print(f"[game_results] backfilled {n} row(s) for finished games", flush=True)
+        except Exception as e:
+            print(f"[game_results] startup backfill failed: {e}", flush=True)
+        try:
+            from .achievements import seed_default_achievements
+
+            seeded = seed_default_achievements(db)
+            if seeded:
+                print(f"[achievements] seeded {seeded} default achievement(s)", flush=True)
+        except Exception as e:
+            print(f"[achievements] startup seed failed: {e}", flush=True)
     finally:
         db.close()
     yield
@@ -929,6 +957,25 @@ def save_game(
         if state.winner is not None and row.status != "finished":
             row.status = "finished"
             row.completed_at = datetime.utcnow()
+            wrote_results = 0
+            try:
+                from .game_results import ensure_game_results_for_row
+
+                wrote_results = ensure_game_results_for_row(db, row)
+            except Exception as e:
+                # Results are stats-only; never block the game save.
+                print(f"[game_results] write failed for game {game_id}: {e}", flush=True)
+            if wrote_results:
+                try:
+                    from .achievement_eval import evaluate_for_game
+
+                    awards = evaluate_for_game(db, game_id)
+                    if awards:
+                        keys = [a["key"] for a in awards]
+                        print(f"[achievements] awarded {keys} for game {game_id}", flush=True)
+                except Exception as e:
+                    # Achievements are cosmetic; never block the game save.
+                    print(f"[achievements] evaluation failed for game {game_id}: {e}", flush=True)
         if events:
             try:
                 config = json.loads(row.config) if isinstance(row.config, str) else {}
@@ -1443,6 +1490,79 @@ def update_profile(
         raise HTTPException(status_code=500, detail=f"Update failed: {str(e)}")
 
 
+# ----- Player profile & stats (public to any logged-in player) -----
+
+
+def _parse_date_param(value: str | None, field: str) -> datetime | None:
+    if value is None or value.strip() == "":
+        return None
+    try:
+        return datetime.fromisoformat(value.strip())
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid {field} date (expected ISO 8601)")
+
+
+@app.get("/players/{player_id}/stats")
+def get_player_stats(
+    player_id: str,
+    scenario: str | None = Query(None, description="Filter by setup_id"),
+    opponent: str | None = Query(None, description="Only games against this player_id"),
+    teammate: str | None = Query(None, description="Only games with this player_id as teammate"),
+    alliance: str | None = Query(None, pattern="^(good|evil)$", description="Filter by alliance played"),
+    date_from: str | None = Query(None, alias="from", description="ISO date lower bound"),
+    date_to: str | None = Query(None, alias="to", description="ISO date upper bound"),
+    _viewer: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Public (any logged-in player) career stats from game_results.
+
+    Headline W-L includes every finished game (forfeits count as normal results).
+    Filters: scenario (setup_id), opponent/teammate (player_id),
+    alliance (good|evil), from/to (ISO dates on game end).
+    """
+    target = db.query(Player).filter(Player.id == str(player_id)).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return compute_player_stats(
+        db,
+        str(target.id),
+        scenario=scenario,
+        opponent=opponent,
+        teammate=teammate,
+        alliance=alliance,
+        date_from=_parse_date_param(date_from, "from"),
+        date_to=_parse_date_param(date_to, "to"),
+    )
+
+
+@app.get("/players/{player_id}/profile")
+def get_player_profile(
+    player_id: str,
+    _viewer: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Public-lite profile card: username + headline record + achievements (for player-vs-player UI)."""
+    target = db.query(Player).filter(Player.id == str(player_id)).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Player not found")
+    try:
+        from .achievement_eval import player_achievement_grants, recompute_for_player
+
+        recompute_for_player(db, str(target.id))
+        achievements = player_achievement_grants(db, str(target.id))
+    except Exception as e:
+        print(f"[achievements] profile read failed for {target.id}: {e}", flush=True)
+        achievements = []
+    headline = player_headline_record(db, str(target.id))
+    return {
+        "id": str(target.id),
+        "username": target.username,
+        "headline": headline,
+        "tier": None,
+        "achievements": achievements,
+    }
+
+
 # ----- Games (create, list, join) -----
 
 @app.get("/setups")
@@ -1652,6 +1772,12 @@ def admin_balance(
     return compute_starting_strength(body.model_dump(), rings=rings)
 
 
+class AdminEndGameBody(BaseModel):
+    """Admin end-game: winning alliance, or none to void the game (no stats rows)."""
+
+    winner: str  # "good" | "evil" | "none" ("neither" accepted as alias for "none")
+
+
 @app.get("/admin/games")
 def admin_list_games(
     _admin: Player = Depends(get_current_admin),
@@ -1679,6 +1805,211 @@ def admin_list_users(
             for p in rows
         ]
     }
+
+
+@app.post("/admin/games/{game_id}/end")
+def admin_end_game(
+    game_id: str,
+    body: AdminEndGameBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin: end an in-progress game now, choosing the winner or voiding it.
+
+    good/evil: sets state.winner, emits a victory event, and saves (writes game_results).
+    none: finishes the game with no winner and no game_results rows (void — no stats impact).
+    """
+    winner = (body.winner or "").strip().lower()
+    if winner == "neither":
+        winner = "none"
+    if winner not in ("good", "evil", "none"):
+        raise HTTPException(status_code=400, detail="winner must be good, evil, or none")
+
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Game not found")
+    if row.status == "finished":
+        raise HTTPException(status_code=400, detail="Game is already finished")
+    if row.status != "active":
+        raise HTTPException(status_code=400, detail="Only in-progress games can be ended")
+
+    try:
+        raw = json.loads(row.game_state) if isinstance(row.game_state, str) else row.game_state
+        state = GameState.from_dict(raw) if isinstance(raw, dict) else None
+    except (TypeError, json.JSONDecodeError):
+        state = None
+    if state is None:
+        raise HTTPException(status_code=400, detail="Game state is corrupt; cannot end game")
+
+    if winner == "none":
+        # Void: finish with no winner and no game_results rows (no stats impact).
+        state.winner = None
+        row.game_state = json.dumps(state.to_dict())
+        row.status = "finished"
+        row.completed_at = datetime.utcnow()
+        db.commit()
+    else:
+        _, td, fd, _, _ = get_game_definitions(game_id, db)
+        if not isinstance(fd, dict):
+            fd = {}
+        if not isinstance(td, dict):
+            td = {}
+        state.winner = winner
+        stronghold_counts: dict[str, int] = {}
+        controlled: list[str] = []
+        for territory_id, territory_state in state.territories.items():
+            territory_def = td.get(territory_id)
+            if not territory_def or not getattr(territory_def, "is_stronghold", False):
+                continue
+            owner = territory_state.owner
+            if not owner:
+                continue
+            faction_def = fd.get(owner)
+            if not faction_def:
+                continue
+            alliance = getattr(faction_def, "alliance", None)
+            if not alliance:
+                continue
+            stronghold_counts[alliance] = stronghold_counts.get(alliance, 0) + 1
+            if alliance == winner:
+                controlled.append(territory_id)
+        strongholds_criteria = state.victory_criteria.get("strongholds") or {}
+        strongholds_required = (
+            int(strongholds_criteria.get(winner, 0))
+            if isinstance(strongholds_criteria, dict)
+            else 0
+        )
+        from backend.engine.events import victory as victory_event
+
+        save_game(
+            game_id,
+            state,
+            db,
+            events=[
+                victory_event(
+                    winner,
+                    stronghold_counts,
+                    strongholds_required,
+                    controlled,
+                )
+            ],
+        )
+
+    if game_id in games:
+        del games[game_id]
+    if game_id in game_defs:
+        del game_defs[game_id]
+    return {"ok": True, "game_id": game_id, "winner": None if winner == "none" else winner, "status": "finished"}
+
+
+class AdminAchievementCreateBody(BaseModel):
+    key: str
+    name: str
+    description: str = ""
+    icon: str | None = None
+    category: str | None = None
+    tier: str | None = None
+    criteria: dict[str, Any]
+    sort_order: int = 0
+    active: bool = True
+
+
+class AdminAchievementPatchBody(BaseModel):
+    key: str | None = None
+    name: str | None = None
+    description: str | None = None
+    icon: str | None = None
+    category: str | None = None
+    tier: str | None = None
+    criteria: dict[str, Any] | None = None
+    sort_order: int | None = None
+    active: bool | None = None
+
+
+@app.get("/admin/achievements")
+def admin_list_achievements(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """All achievement definitions (including inactive) for the admin panel."""
+    rows = list_achievements(db, include_inactive=True)
+    return {"achievements": [achievement_to_dict(r) for r in rows]}
+
+
+@app.get("/admin/achievements/stats-catalog")
+def admin_achievement_stats_catalog(
+    _admin: Player = Depends(get_current_admin),
+):
+    """Whitelisted stat keys the criteria DSL accepts (for admin form dropdowns)."""
+    return {"stats": list_stats_catalog()}
+
+
+@app.get("/admin/achievements/granted")
+def admin_list_granted_achievements(
+    player: str | None = Query(None, description="Filter by player id"),
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Granted rows for debugging (optionally filtered by player)."""
+    return {"granted": list_granted(db, player_id=player)}
+
+
+@app.post("/admin/achievements")
+def admin_create_achievement(
+    body: AdminAchievementCreateBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Create an achievement definition. criteria is validated against the DSL whitelist."""
+    try:
+        row = create_achievement(
+            db,
+            key=body.key,
+            name=body.name,
+            description=body.description,
+            icon=body.icon,
+            category=body.category,
+            tier=body.tier,
+            criteria=body.criteria,
+            sort_order=body.sort_order,
+            active=body.active,
+        )
+    except AchievementError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return achievement_to_dict(row)
+
+
+@app.patch("/admin/achievements/{achievement_id}")
+def admin_patch_achievement(
+    achievement_id: str,
+    body: AdminAchievementPatchBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Update fields on an existing achievement definition."""
+    row = get_achievement(db, achievement_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Achievement not found")
+    changes = body.model_dump(exclude_unset=True)
+    try:
+        row = update_achievement(db, row, changes)
+    except AchievementError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return achievement_to_dict(row)
+
+
+@app.delete("/admin/achievements/{achievement_id}")
+def admin_delete_achievement(
+    achievement_id: str,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Delete an achievement definition and any grants."""
+    row = get_achievement(db, achievement_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Achievement not found")
+    delete_achievement(db, row)
+    return {"ok": True, "id": achievement_id}
 
 
 @app.get("/admin/setups")
@@ -1920,18 +2251,31 @@ def _get_scenario_from_config(row, db: Session) -> dict[str, Any] | None:
     return None
 
 
-def _build_games_list(player: Player, db: Session, *, include_all: bool = False) -> list[dict[str, Any]]:
+def _build_games_list(
+    player: Player,
+    db: Session,
+    *,
+    include_all: bool = False,
+    status: str | None = None,
+) -> list[dict[str, Any]]:
     """Build list of game dicts (with faction_stats and current_player_username).
 
     Default: games the player is in, excluding finished and games they forfeited.
+    status="finished": finished games the player was in (includes games they forfeited).
+    status="all": every game the player is in (any status; includes forfeited).
     include_all=True: every game (admin report) — no membership/status/forfeit filter,
     newest first.
     """
     query = db.query(GameModel)
-    if not include_all:
-        rows = query.filter(GameModel.status != "finished").all()
-    else:
+    include_forfeited = bool(include_all or status in ("finished", "all"))
+    if include_all:
         rows = query.order_by(GameModel.created_at.desc()).all()
+    elif status == "finished":
+        rows = query.filter(GameModel.status == "finished").order_by(GameModel.created_at.desc()).all()
+    elif status == "all":
+        rows = query.order_by(GameModel.created_at.desc()).all()
+    else:
+        rows = query.filter(GameModel.status != "finished").all()
     mine = []
     player_ids = set()
     player_id_str = str(player.id)
@@ -1942,9 +2286,12 @@ def _build_games_list(player: Player, db: Session, *, include_all: bool = False)
             if not isinstance(pl, list):
                 continue
             if not include_all:
-                if player_id_str not in {str(p.get("player_id")) for p in pl}:
+                roster_ids = {str(p.get("player_id")) for p in pl}
+                if include_forfeited:
+                    roster_ids |= set(_get_forfeited_player_ids(r))
+                if player_id_str not in roster_ids:
                     continue
-                if player_id_str in _get_forfeited_player_ids(r):
+                if not include_forfeited and player_id_str in _get_forfeited_player_ids(r):
                     continue
             for p in pl:
                 pid = p.get("player_id")
@@ -1970,9 +2317,12 @@ def _build_games_list(player: Player, db: Session, *, include_all: bool = False)
             if not isinstance(pl, list):
                 continue
             if not include_all:
-                if player_id_str not in {str(p.get("player_id")) for p in pl}:
+                roster_ids = {str(p.get("player_id")) for p in pl}
+                if include_forfeited:
+                    roster_ids |= set(_get_forfeited_player_ids(r))
+                if player_id_str not in roster_ids:
                     continue
-                if player_id_str in _get_forfeited_player_ids(r):
+                if not include_forfeited and player_id_str in _get_forfeited_player_ids(r):
                     continue
         except (json.JSONDecodeError, TypeError):
             continue
@@ -2118,11 +2468,19 @@ def _build_games_list(player: Player, db: Session, *, include_all: bool = False)
 
 @app.get("/games")
 def list_my_games(
+    status: str | None = Query(None, pattern="^(active|finished|all)$", description="Filter by game status; default excludes finished"),
     player: Player = Depends(get_current_player),
     db: Session = Depends(get_db),
 ):
-    """List games the current player is in. Includes turn info, current player username, and faction_stats for the stronghold bar."""
-    mine = _build_games_list(player, db)
+    """List games the current player is in.
+
+    Default: active/lobby games (excludes finished and games this player forfeited).
+    status=finished: finished games this player was in (includes games they forfeited).
+    status=active: alias for the default.
+    status=all: every game this player is in.
+    """
+    query_status = status if status not in (None, "active") else None
+    mine = _build_games_list(player, db, status=query_status)
     # Return plain dict so FastAPI serializes it; include marker so client can confirm this handler ran
     return {"games": mine, "_list_version": 2}
 
@@ -2916,6 +3274,14 @@ def forfeit_game(
         forfeited = list(forfeited) + [player_id_str]
     forfeited_set = set(str(x) for x in forfeited)
     config["forfeited_player_ids"] = forfeited
+    # Record the factions this player controlled so game_results can write rows for them
+    # after they are removed from the roster (stats keep the forfeit as a normal W-L game).
+    if row.status != "lobby":
+        factions_cfg = config.get("forfeited_player_factions")
+        if not isinstance(factions_cfg, dict):
+            factions_cfg = {}
+        factions_cfg[player_id_str] = sorted(str(f) for f in my_faction_ids)
+        config["forfeited_player_factions"] = factions_cfg
     # Persist a player-readable reassignment summary so the toast can be specific after refresh/rejoin.
     reassign_cfg = config.get("forfeit_reassignments")
     if not isinstance(reassign_cfg, dict):
