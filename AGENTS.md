@@ -55,7 +55,7 @@ When assigned a GitHub issue:
 - Give the feature branch a reasonable and brief name based on the work.
 - Each work session should commit and push to that feature branch so we don't lose changes.
 - Commit messages should also be brief and high-level.
-- Open a draft pull request linked to the issue.
+- Open a pull request linked to the issue.
 - Never push directly to main.
 - Never merge pull requests automatically.
 - Do not modify unrelated functionality.
