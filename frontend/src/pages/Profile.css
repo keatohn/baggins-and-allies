@@ -286,3 +286,19 @@
   margin-top: 1.5rem;
   margin-bottom: 0;
 }
+
+/* Clear decorative scroll-end rolls (menu overlay). Desktop + landscape: pads
+   sides past the left/right rolls. Mobile portrait: pads top/bottom instead. */
+@media (min-width: 768px), (orientation: landscape) {
+  .profile-page {
+    padding-left: max(2rem, calc(var(--scroll-roll-w, 40px) + 1rem));
+    padding-right: max(2rem, calc(var(--scroll-roll-w, 40px) + 1rem));
+  }
+}
+
+@media (max-width: 767px) and (orientation: portrait) {
+  .profile-page {
+    padding-top: max(1rem, calc(var(--scroll-roll-w, 24px) + 0.75rem));
+    padding-bottom: max(1.25rem, calc(var(--scroll-roll-w, 24px) + 0.75rem));
+  }
+}

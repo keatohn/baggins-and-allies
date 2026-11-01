@@ -24,6 +24,7 @@ import api, {
   type GameMeta,
 } from './services/api';
 import LobbyView from './components/LobbyView';
+import { useMenuScroll } from './components/MenuScrollContext';
 import { sortSeaZoneIdsByNumericSuffix, canonicalSeaZoneId } from './seaZoneSort';
 import {
   fordShortcutRequiresEscortLead,
@@ -641,6 +642,7 @@ function factionAssetUrl(filename: string | null | undefined): string | undefine
 
 function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   const GAME_ID = gameIdProp ?? DEFAULT_GAME_ID;
+  const { holdScroll, revealScroll } = useMenuScroll();
   // Backend state (use initialState from navigation when we just created this game)
   const [definitions, setDefinitions] = useState<Definitions | null>(null);
   const [backendState, setBackendState] = useState<ApiGameState | null>(initialStateProp ?? null);
@@ -656,6 +658,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   const [canAct, setCanAct] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const heldForLoadRef = useRef(false);
 
   // UI state
   const [selectedTerritory, setSelectedTerritory] = useState<string | null>(null);
@@ -1753,6 +1756,9 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   useEffect(() => {
     async function init() {
       setLoading(true);
+      // Hold the scroll closed while the game loads so "Loading game…" isn't revealed.
+      heldForLoadRef.current = true;
+      holdScroll();
       try {
         let gotDefinitionsFromGame = false;
         try {
@@ -1829,7 +1835,14 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       }
     }
     init();
-  }, [addLogEntry, GAME_ID]);
+  }, [addLogEntry, GAME_ID, holdScroll]);
+
+  useEffect(() => {
+    if (!loading && heldForLoadRef.current) {
+      heldForLoadRef.current = false;
+      revealScroll();
+    }
+  }, [loading, revealScroll]);
 
   // Poll game state only in multiplayer (2s default; 1s while spectating a battle for faster combat sync)
   const isMultiplayer = gameMeta?.is_multiplayer ?? Boolean(gameMeta?.game_code);

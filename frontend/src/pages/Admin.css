@@ -2439,3 +2439,19 @@
     flex-basis: 9.5rem;
   }
 }
+
+/* Clear decorative scroll-end rolls (menu overlay). Desktop + landscape: pads
+   sides past the left/right rolls. Mobile portrait: pads top/bottom instead. */
+@media (min-width: 768px), (orientation: landscape) {
+  .admin-page {
+    padding-left: max(clamp(1rem, 3vw, 2rem), calc(var(--scroll-roll-w, 40px) + 1rem));
+    padding-right: max(clamp(1rem, 3vw, 2rem), calc(var(--scroll-roll-w, 40px) + 1rem));
+  }
+}
+
+@media (max-width: 767px) and (orientation: portrait) {
+  .admin-page {
+    padding-top: max(1.5rem, calc(var(--scroll-roll-w, 24px) + 0.75rem));
+    padding-bottom: max(1.5rem, calc(var(--scroll-roll-w, 24px) + 0.75rem));
+  }
+}

@@ -28,6 +28,15 @@
   --font-size-sm: clamp(0.75rem, 1.2vw + 0.55rem, 0.875rem);
   --font-size-lg: clamp(0.9rem, 1.8vw + 0.6rem, 1.1rem);
   --space-touch: clamp(0.5rem, 2vmin, 0.75rem);
+
+  /* Scroll-end roll width; menu pages use it to pad content clear of the rolls. */
+  --scroll-roll-w: 40px;
+}
+
+@media (max-width: 767px) {
+  :root {
+    --scroll-roll-w: 24px;
+  }
 }
 
 * {

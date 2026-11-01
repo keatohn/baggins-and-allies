@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../services/api';
 import { useMenuScroll } from '../components/MenuScrollContext';
 import MenuLink from '../components/MenuLink';
@@ -48,7 +48,7 @@ function playerNames(g: GameListItem): string | null {
 }
 
 export default function GameList() {
-  const { navigateWithScroll } = useMenuScroll();
+  const { navigateWithScroll, holdScroll, revealScroll } = useMenuScroll();
   const [player, setPlayer] = useState<AuthPlayer | null>(null);
   const [games, setGames] = useState<GameListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,6 +64,7 @@ export default function GameList() {
   const [forfeitResult, setForfeitResult] = useState<
     { gameName: string; allianceLabel: string; winningLabel?: string } | null
   >(null);
+  const heldForLoadRef = useRef(false);
 
   const loadGames = () => {
     api.listGames()
@@ -73,9 +74,19 @@ export default function GameList() {
   };
 
   useEffect(() => {
+    // Hold the scroll closed while the games list loads so "Loading…" isn't revealed.
+    heldForLoadRef.current = true;
+    holdScroll();
     loadGames();
     api.authMe().then(setPlayer).catch(() => setPlayer(null));
-  }, []);
+  }, [holdScroll]);
+
+  useEffect(() => {
+    if (!loading && heldForLoadRef.current) {
+      heldForLoadRef.current = false;
+      revealScroll();
+    }
+  }, [loading, revealScroll]);
 
   useEffect(() => {
     if (!gameToForfeit) {

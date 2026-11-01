@@ -13,7 +13,7 @@ export default function MenuScrollOverlay() {
   const { phase } = useMenuScroll()
 
   let stateClass = ''
-  if (phase === 'closing') {
+  if (phase === 'closing' || phase === 'covering') {
     stateClass = ' menu-scroll-overlay--closing'
   } else if (phase === 'opening' || phase === 'entering') {
     stateClass = ' menu-scroll-overlay--opening'
