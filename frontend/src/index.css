@@ -45,6 +45,12 @@
   box-sizing: border-box;
 }
 
+/* Above the fixed menu map (z-index 0); the scroll overlay stays at 50. */
+.app-routes {
+  position: relative;
+  z-index: 1;
+}
+
 body {
   font-family: 'IM Fell English', Georgia, serif;
   /* Parchment: base tan + age mottling + wrinkle creases + fine fiber grain.

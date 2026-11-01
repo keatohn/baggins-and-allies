@@ -2569,12 +2569,34 @@ def _get_scenario_from_config(row, db: Session) -> dict[str, Any] | None:
     return None
 
 
+def _note_last_opened_game(db: Session, player: Player | None, game_id: str, row: GameModel | None) -> None:
+    """Remember the game this player just opened. Skips repeats so multiplayer polling does not write."""
+    if player is None or row is None:
+        return
+    if row.status == "finished":
+        return
+    if getattr(player, "last_opened_game_id", None) == game_id:
+        return
+    if str(player.id) in _get_forfeited_player_ids(row):
+        return
+    try:
+        pl = json.loads(row.players) if isinstance(row.players, str) else row.players
+    except (TypeError, json.JSONDecodeError):
+        return
+    if not isinstance(pl, list) or not any(str(p.get("player_id")) == str(player.id) for p in pl):
+        return
+    player.last_opened_game_id = game_id
+    player.last_opened_at = datetime.utcnow()
+    db.commit()
+
+
 def _build_games_list(
     player: Player,
     db: Session,
     *,
     include_all: bool = False,
     status: str | None = None,
+    only_game_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Build list of game dicts (with faction_stats and current_player_username).
 
@@ -2585,6 +2607,8 @@ def _build_games_list(
     newest first.
     """
     query = db.query(GameModel)
+    if only_game_id:
+        query = query.filter(GameModel.id == only_game_id)
     include_forfeited = bool(include_all or status in ("finished", "all"))
     if include_all:
         rows = query.order_by(GameModel.created_at.desc()).all()
@@ -2801,6 +2825,19 @@ def list_my_games(
     mine = _build_games_list(player, db, status=query_status)
     # Return plain dict so FastAPI serializes it; include marker so client can confirm this handler ran
     return {"games": mine, "_list_version": 2}
+
+
+@app.get("/games/recent")
+def get_recent_game(
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """The game this player opened most recently, if they can still load it."""
+    gid = getattr(player, "last_opened_game_id", None)
+    if not gid:
+        return {"game": None}
+    mine = _build_games_list(player, db, only_game_id=str(gid))
+    return {"game": mine[0] if mine else None}
 
 
 @app.post("/games/join")
@@ -3084,6 +3121,7 @@ def get_game_state(
                     event_log = events_for_viewer(el, state, game_id, db, player)
         except (TypeError, json.JSONDecodeError):
             pass
+    _note_last_opened_game(db, player, game_id, row)
     return {
         "game_id": game_id,
         "state": state_dict,
