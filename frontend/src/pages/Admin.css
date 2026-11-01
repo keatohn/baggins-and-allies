@@ -257,8 +257,14 @@
 .admin-page__nav-tools {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 0.5rem;
   margin-left: auto;
+}
+
+.admin-page--query {
+  max-width: 1400px;
 }
 
 /* Shrink the top-right admin section buttons without touching the global page-menu-btn used elsewhere. */
@@ -2861,4 +2867,200 @@
 
 .admin-tier-adjust__reason {
   flex: 1 1 12rem;
+}
+
+.admin-query {
+  display: grid;
+  grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr);
+  gap: 1rem 1.25rem;
+  align-items: start;
+}
+
+.admin-query__schema {
+  max-height: min(70vh, 40rem);
+  overflow: auto;
+  padding: 0.65rem 0.7rem;
+  border: 1px solid var(--ink-faded);
+  border-radius: 8px;
+  background: rgba(255, 254, 248, 0.55);
+}
+
+.admin-query__schema-title {
+  margin: 0 0 0.25rem;
+  font-family: 'Cinzel', serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.admin-query__hint {
+  margin: 0.25rem 0 0.55rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--ink-faded);
+}
+
+.admin-query__tables,
+.admin-query__columns {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.admin-query__table + .admin-query__table {
+  margin-top: 0.15rem;
+}
+
+.admin-query__table-row {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.admin-query__expand,
+.admin-query__name,
+.admin-query__column,
+.admin-query__more {
+  font-family: var(--font-parchment), Georgia, serif;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.admin-query__expand {
+  width: 1.25rem;
+  padding: 0.1rem 0;
+  flex: 0 0 auto;
+}
+
+.admin-query__name {
+  padding: 0.12rem 0.2rem;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.admin-query__name:hover,
+.admin-query__column:hover,
+.admin-query__more:hover {
+  text-decoration: underline;
+}
+
+.admin-query__kind {
+  margin-left: 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--ink-faded);
+}
+
+.admin-query__columns {
+  margin: 0.1rem 0 0.35rem 1.35rem;
+}
+
+.admin-query__column {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 0.12rem 0.2rem;
+  font-size: 0.8rem;
+}
+
+.admin-query__column-type {
+  font-size: 0.68rem;
+  color: var(--ink-faded);
+}
+
+.admin-query__label {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-family: 'Cinzel', serif;
+  font-size: 0.85rem;
+}
+
+.admin-query__sql {
+  width: 100%;
+  min-height: 9rem;
+  box-sizing: border-box;
+  padding: 0.6rem 0.7rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  border: 1px solid var(--ink-faded);
+  border-radius: 8px;
+  background: #fffef8;
+  color: var(--ink);
+  resize: vertical;
+}
+
+.admin-query__run-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
+  margin-top: 0.55rem;
+}
+
+.admin-query__run-row .admin-query__hint {
+  margin: 0;
+  flex: 1 1 16rem;
+}
+
+.admin-query__results {
+  margin-top: 0.85rem;
+}
+
+.admin-query__table-wrap {
+  overflow: auto;
+  max-height: min(60vh, 36rem);
+  border: 1px solid var(--ink-faded);
+  border-radius: 8px;
+  background: rgba(255, 254, 248, 0.72);
+}
+
+.admin-query__table-wrap table {
+  border-collapse: collapse;
+  width: max-content;
+  min-width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+}
+
+.admin-query__table-wrap th,
+.admin-query__table-wrap td {
+  padding: 0.35rem 0.55rem;
+  border-bottom: 1px solid rgba(90, 70, 45, 0.18);
+  text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 28rem;
+}
+
+.admin-query__table-wrap th {
+  position: sticky;
+  top: 0;
+  background: #f3ecdf;
+  font-family: var(--font-parchment), Georgia, serif;
+  font-size: 0.78rem;
+}
+
+.admin-query__null {
+  color: var(--ink-faded);
+  font-style: italic;
+}
+
+.admin-query__more {
+  font-size: 0.72rem;
+  color: var(--ink-faded);
+  text-decoration: underline;
+}
+
+@media (max-width: 800px) {
+  .admin-query {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-query__schema {
+    max-height: 16rem;
+  }
 }

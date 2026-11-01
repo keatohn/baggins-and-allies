@@ -724,6 +724,25 @@ export interface AdminUserItem {
   tier_name?: string | null;
 }
 
+export interface AdminQueryColumn {
+  name: string;
+  type: string;
+  nullable: boolean;
+}
+
+export interface AdminQuerySchemaTable {
+  name: string;
+  kind: 'table' | 'view' | string;
+  columns: AdminQueryColumn[];
+}
+
+export interface AdminQueryResult {
+  columns: string[];
+  rows: unknown[][];
+  row_count: number;
+  truncated: boolean;
+}
+
 export interface ProgressionFrame {
   id: string;
   label: string;
@@ -1207,6 +1226,14 @@ export const api = {
     fetchJson<{ setups: AdminSetupListItem[] }>('/admin/setups'),
   adminListGames: () => fetchJson<{ games: GameListItem[] }>('/admin/games'),
   adminListUsers: () => fetchJson<{ users: AdminUserItem[] }>('/admin/users'),
+  /** Tables and columns on the database this server is using. */
+  adminQuerySchema: () => fetchJson<{ tables: AdminQuerySchemaTable[] }>('/admin/query/schema'),
+  /** Run one SELECT against the database this server is using. */
+  adminQuery: (sql: string) =>
+    fetchJson<AdminQueryResult>('/admin/query', {
+      method: 'POST',
+      body: JSON.stringify({ sql }),
+    }),
   /** Public tier list and avatar frames. Does not include XP amounts. */
   getProgression: () =>
     fetchJson<{ currency_label: string; frames: ProgressionFrame[]; tiers: ProgressionTier[] }>('/progression'),

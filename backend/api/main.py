@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from .admin_query import SelectOnlyError, list_db_schema, run_admin_select
 from .database import get_db, get_db_file_path, init_db, SessionLocal
 from .models import FriendRequest, Game as GameModel, Player
 from .player_stats import compute_player_stats, player_headline_record
@@ -2171,6 +2172,32 @@ def admin_list_users(
             "tier_name": tier["name"] if tier else None,
         })
     return {"users": users}
+
+
+@app.get("/admin/query/schema")
+def admin_query_schema(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Tables and columns on this server's database, for the admin query console."""
+    return list_db_schema(db)
+
+
+class AdminQueryBody(BaseModel):
+    sql: str = Field(..., min_length=1, max_length=20_000)
+
+
+@app.post("/admin/query")
+def admin_run_query(
+    body: AdminQueryBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Run one SELECT against this server's database. Writes and other statement types are rejected."""
+    try:
+        return run_admin_select(db, body.sql)
+    except SelectOnlyError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.get("/progression")
