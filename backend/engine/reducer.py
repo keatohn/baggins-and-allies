@@ -4922,6 +4922,13 @@ def _handle_end_phase(
     if state.phase == "mobilization":
         faction_id = state.current_faction or ""
         cd = camp_defs or {}
+        # Enforce the same "deploy all units" rule as validate_action, before flushing
+        # pending (post-flush the pending list is empty and free capacity reappears).
+        blocked = mobilization_block_reason(
+            state, faction_id, unit_defs, territory_defs, camp_defs, port_defs, faction_defs,
+        )
+        if blocked:
+            raise ValueError(blocked)
         camp_cost = int(getattr(state, "camp_cost", 10) or 10)
         queued_mob = {p.camp_index for p in getattr(state, "pending_camp_placements", []) or []}
         for i, p in enumerate(state.pending_camps or []):
@@ -4957,6 +4964,7 @@ def _handle_end_phase(
         events.append(phase_changed(old_phase, "turn_end", state.current_faction))
         state, turn_events = _handle_end_turn(
             state, territory_defs, faction_defs, camp_defs or {}, unit_defs, port_defs=port_defs,
+            force=True,
         )
         events.extend(turn_events)
         return state, events

@@ -8,7 +8,7 @@ from before the capital fell cannot be deployed — AI must end_phase instead of
 from backend.engine.definitions import UnitDefinition, load_static_definitions, load_starting_setup
 from backend.engine.actions import end_phase, mobilize_units
 from backend.engine.reducer import apply_action
-from backend.engine.state import UnitStack
+from backend.engine.state import PendingMobilization, UnitStack
 from backend.engine.utils import initialize_game_state
 from backend.engine.queries import get_mobilization_capacity, validate_action
 
@@ -133,3 +133,61 @@ def test_mobilization_home_capacity_excludes_other_factions_home_defs():
     h = west.get("home_unit_capacity") or {}
     assert "_fake_gondor_home_westfold" not in h
     assert "rohan_peasant" in h
+
+
+def test_end_phase_applies_when_pending_fills_all_capacity():
+    """
+    Pending mobilizations consume all camp capacity, leaving one unit in the pool.
+    validate_action accepts end_phase (pool unit has no free destination), so
+    apply_action must not raise a post-flush phantom-capacity error.
+    """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(
+        setup_id="wotr_1.1"
+    )
+    state = initialize_game_state(
+        faction_defs,
+        territory_defs,
+        camp_defs=camp_defs,
+        starting_setup=load_starting_setup(setup_id="wotr_1.1"),
+    )
+    state.current_faction = "rohan"
+    state.phase = "mobilization"
+    state.faction_territories_at_turn_start["rohan"] = [
+        t for t, ts in state.territories.items() if ts.owner == "rohan"
+    ]
+    state.faction_purchased_units["rohan"] = [
+        UnitStack(unit_id="rohirrim_soldier", count=1),
+    ]
+    # Edoras (power 5) + dunharrow (power 3) fully occupied by pending
+    state.pending_mobilizations = [
+        PendingMobilization(
+            destination="edoras", units=[{"unit_id": "rohirrim_soldier", "count": 5}]
+        ),
+        PendingMobilization(
+            destination="dunharrow", units=[{"unit_id": "rohirrim_soldier", "count": 3}]
+        ),
+    ]
+
+    vr = validate_action(
+        state,
+        end_phase("rohan"),
+        unit_defs,
+        territory_defs,
+        faction_defs,
+        camp_defs,
+        port_defs,
+    )
+    assert vr.valid, vr.error
+
+    state, _events = apply_action(
+        state,
+        end_phase("rohan"),
+        unit_defs,
+        territory_defs,
+        faction_defs,
+        camp_defs,
+        port_defs,
+    )
+    assert state.pending_mobilizations == []
+    assert state.faction_purchased_units["rohan"] == []
+    assert state.current_faction != "rohan"
