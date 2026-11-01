@@ -4,6 +4,7 @@ import type { CollisionDetection, DragEndEvent, DragStartEvent } from '@dnd-kit/
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import type { GameState, SelectedUnit, MapTransform, PendingMove, MapOverridesData, MapSpotKind, LandscapePlacement } from '../types/game';
+import { normalizeMapOverrides } from '../types/game';
 import type { TerritorySignalMap } from '../territorySignals';
 import { landscapeSrc, terrainEmojiSuppressed } from '../pages/admin/landscape';
 import DraggableUnit from './DraggableUnit';
@@ -1044,6 +1045,12 @@ function GameMap({
   mapOverrides = null,
   onSpotsCalculated,
 }: GameMapProps) {
+  // Backend stores override points as [x,y] arrays; normalize once so every consumer
+  // (hint anchors, position merge, landscape) sees {x,y} objects.
+  const normalizedMapOverrides = useMemo(
+    () => (mapOverrides ? normalizeMapOverrides(mapOverrides) : null),
+    [mapOverrides],
+  );
   const navalUnitIds = useMemo(
     () => new Set([...seaHullIds, ...riverUnitIds]),
     [seaHullIds, riverUnitIds],
@@ -1391,7 +1398,7 @@ function GameMap({
    */
   const effectiveHintAnchors = useMemo<SvgHintAnchorsByTerritory>(() => {
     const out: SvgHintAnchorsByTerritory = { ...svgHintAnchors };
-    const entries = mapOverrides?.territories;
+    const entries = normalizedMapOverrides?.territories;
     if (!entries) return out;
     const KIND_TO_HINT: Partial<Record<MapSpotKind, SvgHintKind>> = {
       unit: 'units',
@@ -1420,7 +1427,7 @@ function GameMap({
       }
     }
     return out;
-  }, [svgHintAnchors, mapOverrides]);
+  }, [svgHintAnchors, normalizedMapOverrides]);
 
   // Use two spots (marker + unit) when territory is large enough in any dimension: by area (big blobs) or by
   // width/height (long thin territories). Kept high so circular capitals stay single-spot.
@@ -1901,7 +1908,7 @@ function GameMap({
       }
       // Map-level overrides sit on top of everything (hints, per-territory nudges, ring harbours,
       // Osgiliath/river/sea-lobe special cases). Omitted kinds keep their calculated position.
-      const overrideEntries = mapOverrides?.territories;
+      const overrideEntries = normalizedMapOverrides?.territories;
       if (overrideEntries) {
         for (const [rawTid, entry] of Object.entries(overrideEntries)) {
           if (!entry || entry.focus !== 'override' || !entry.positions) continue;
@@ -1938,7 +1945,7 @@ function GameMap({
       clearTimeout(timer1);
       if (timer2 != null) clearTimeout(timer2);
     };
-  }, [svgPaths, svgHintAnchors, SVG_VIEWBOX.width, SVG_VIEWBOX.height, mapBase, territoryData, mapOverrides]);
+  }, [svgPaths, svgHintAnchors, SVG_VIEWBOX.width, SVG_VIEWBOX.height, mapBase, territoryData, normalizedMapOverrides]);
 
   // Compute move arrows to render - only for current phase moves
   const moveArrows = useMemo(() => {
@@ -3927,7 +3934,7 @@ function GameMap({
   };
 
   /** Admin-placed landscape art + per-territory emoji-suppression flags. */
-  const landscapeByTerritory = useMemo(() => mapOverrides?.landscape?.territories ?? {}, [mapOverrides]);
+  const landscapeByTerritory = useMemo(() => normalizedMapOverrides?.landscape?.territories ?? {}, [normalizedMapOverrides]);
   const landscapeRows = useMemo(() => {
     const rows: { tid: string; placement: LandscapePlacement }[] = [];
     for (const [tid, list] of Object.entries(landscapeByTerritory)) {

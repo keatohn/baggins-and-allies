@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import type { GameState, GamePhase, FactionId, GameEvent, SelectedUnit, DeclaredBattle, MapOverridesData } from './types/game';
+import { normalizeMapOverrides } from './types/game';
 import { boostingRingsFromRules, highestPowerHeroUnitId, ringHoldingFactionId, ringsOnUnit } from './ringsDisplay';
 import Header from './components/Header';
 import type { RingsOfPowerData, UnitForStats } from './components/StatsModals';
@@ -1059,7 +1060,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     let cancelled = false;
     api.getMapOverrides(mapAssetBase)
       .then((r) => {
-        if (!cancelled) setMapOverrides(r?.overrides ?? null);
+        if (!cancelled) setMapOverrides(normalizeMapOverrides(r?.overrides));
       })
       .catch(() => {
         if (!cancelled) setMapOverrides(null);
