@@ -3,7 +3,7 @@
   min-height: 100dvh;
   padding: 2rem;
   padding-top: max(2rem, env(safe-area-inset-top, 0px));
-  background: var(--parchment);
+  background: transparent;
   box-sizing: border-box;
   text-size-adjust: 100%;
   -webkit-text-size-adjust: 100%;

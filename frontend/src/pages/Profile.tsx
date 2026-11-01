@@ -216,6 +216,11 @@ export default function Profile() {
 
   return (
     <div className="profile-page">
+      <header className="profile-page__header">
+        <MenuLink to="/" className="page-menu-btn">
+          Menu
+        </MenuLink>
+      </header>
       <h1 className="profile-page__title">Profile</h1>
 
       <div className="profile-page__panels">
@@ -398,10 +403,6 @@ export default function Profile() {
           </section>
         </div>
       </div>
-
-      <MenuLink to="/" className="page-menu-btn">
-        Menu
-      </MenuLink>
     </div>
   );
 }

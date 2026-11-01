@@ -6,7 +6,7 @@
   align-items: center;
   justify-content: center;
   padding: 2rem;
-  background: var(--parchment);
+  background: transparent;
   box-sizing: border-box;
 }
 

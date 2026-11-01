@@ -5,8 +5,8 @@ import './MenuScrollOverlay.css'
 /**
  * Decorative parchment scroll ends framing menu pages (issue #44).
  * Idle visibility is route-driven; transition phases come from MenuScrollProvider:
- * closing covers the outgoing page, opening/exiting resolve a menu departure,
- * and entering flies the scrolls in as a menu page mounts.
+ * closing/covering hide the outgoing page (game → menu flies the panels in from
+ * off-screen to center), opening/exiting resolve a menu departure.
  */
 export default function MenuScrollOverlay() {
   const { pathname } = useLocation()
@@ -15,7 +15,7 @@ export default function MenuScrollOverlay() {
   let stateClass = ''
   if (phase === 'closing' || phase === 'covering') {
     stateClass = ' menu-scroll-overlay--closing'
-  } else if (phase === 'opening' || phase === 'entering') {
+  } else if (phase === 'opening') {
     stateClass = ' menu-scroll-overlay--opening'
   } else if (phase === 'exiting' || !isMenuScrollRoute(pathname)) {
     stateClass = ' menu-scroll-overlay--hidden'
