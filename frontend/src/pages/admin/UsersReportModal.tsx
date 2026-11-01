@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../services/api';
+import { ColorField } from './ColorField';
 import type { AdminUserItem } from '../../services/api';
 
 function formatDateTime(iso: string | null | undefined): string {
@@ -105,26 +106,23 @@ export function UsersReportModal({ onClose }: { onClose: () => void }) {
             Default avatar color for new users (users who already picked a color keep theirs).
           </p>
           <div className="users-report__defaults-row">
-            <input
-              type="color"
-              className="users-report__color-input"
+            <ColorField
               value={defaultColor}
+              ariaLabel="Default avatar color"
               disabled={defaultsLoading || defaultsSaving}
-              aria-label="Default avatar color"
-              onChange={(e) => {
-                setDefaultColor(e.target.value);
+              onApply={(color) => {
+                setDefaultColor(color);
                 setDefaultColorDirty(true);
                 setDefaultsSaved(false);
                 setDefaultsError(null);
               }}
             />
-            <span className="admin-form__micro users-report__color-value">{defaultColor}</span>
             {defaultColorDirty && (
               <button
                 type="button"
                 className="admin-page__btn"
                 onClick={() => void saveDefaults()}
-                disabled={defaultsSaving}
+                disabled={defaultsSaving || !/^#[0-9a-fA-F]{6}$/.test(defaultColor.trim())}
               >
                 {defaultsSaving ? 'Saving…' : 'Save Default Color'}
               </button>

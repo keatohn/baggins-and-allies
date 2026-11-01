@@ -5,6 +5,7 @@ import FACTION_ICON_PNG from 'virtual:faction-icon-png';
 import TERRITORY_IMAGE_PNG from 'virtual:territory-image-png';
 import SCENARIO_IMAGE from 'virtual:scenario-image';
 import { api, type AdminSetupBundle, type AdminSetupListItem } from '../../services/api';
+import { ColorField } from './ColorField';
 import { NumberField } from './NumberField';
 
 function linesToList(s: string): string[] {
@@ -2013,36 +2014,6 @@ export function TerritoriesPanel({
   );
 }
 
-function parseHexColor(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const s = value.trim();
-  if (/^#[0-9a-fA-F]{6}$/.test(s)) return `#${s.slice(1).toLowerCase()}`;
-  return null;
-}
-
-function FactionColorField({ value, onApply }: { value: unknown; onApply: (c: string) => void }) {
-  const raw = typeof value === 'string' ? value : '';
-  const hex = parseHexColor(value);
-  return (
-    <div className="admin-color-picker">
-      <input
-        type="color"
-        className="admin-color-picker__swatch"
-        value={hex ?? '#888888'}
-        onChange={(e) => onApply(e.target.value.toLowerCase())}
-        aria-label="Faction color palette"
-      />
-      <input
-        type="text"
-        className="admin-form__input admin-color-picker__hex"
-        spellCheck={false}
-        value={raw}
-        onChange={(e) => onApply(e.target.value)}
-      />
-    </div>
-  );
-}
-
 function SubfactionsField({
   value,
   onChange,
@@ -2086,7 +2057,7 @@ function SubfactionsField({
           )}
           {fieldRow(
             'Color',
-            <FactionColorField value={row.color} onApply={(color) => patchRow(i, { color })} />,
+            <ColorField value={row.color} onApply={(color) => patchRow(i, { color })} />,
           )}
           {fieldRow(
             'Icon filename',
@@ -2148,7 +2119,7 @@ export function FactionsPanel({
           )}
           {fieldRow(
             'Color',
-            <FactionColorField value={f.color} onApply={(color) => patch({ color })} />,
+            <ColorField value={f.color} onApply={(color) => patch({ color })} />,
           )}
           {fieldRow(
             'Icon',

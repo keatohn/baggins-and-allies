@@ -451,20 +451,6 @@
   flex-wrap: wrap;
 }
 
-.users-report__color-input {
-  width: 2.4rem;
-  height: 2.4rem;
-  padding: 0;
-  border: 2px solid var(--ink-faded);
-  border-radius: 6px;
-  background: none;
-  cursor: pointer;
-}
-
-.users-report__color-value {
-  font-variant-numeric: tabular-nums;
-}
-
 .users-report__defaults-error {
   margin-top: 0.35rem;
 }
