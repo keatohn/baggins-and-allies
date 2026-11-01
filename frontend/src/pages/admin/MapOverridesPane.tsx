@@ -34,6 +34,9 @@ type CursorMode = 'navigate' | 'select' | 'paint';
 /** ViewBox-space spacing between paint-mode stamps along a drag path. */
 const PAINT_STAMP_SPACING = 36;
 
+/** Minimum viewBox-space distance between painted pieces (dedupe vs existing stamps). */
+const PAINT_MIN_DIST = 36;
+
 /** Multi-select key for a placement: landscape territory key + index in its list. */
 function placementKey(tid: string, index: number): string {
   return `${tid}#${index}`;
@@ -190,6 +193,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   const [cursorMode, setCursorMode] = useState<CursorMode>('navigate');
   const [band, setBand] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [multiSel, setMultiSel] = useState<Set<string>>(() => new Set());
+  const [paintRadius, setPaintRadius] = useState(0);
 
   const dragRef = useRef<{ x: number; y: number; tx: number; ty: number; id: number } | null>(null);
   const didDragRef = useRef(false);
@@ -504,7 +508,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
         /* ignore */
       }
       // Stamp immediately at the press point, then again along the drag.
-      tryPlaceLandscape(e.clientX, e.clientY);
+      paintStampAt(e.clientX, e.clientY);
       const vb = viewportToViewBox(e.clientX, e.clientY);
       paintLastRef.current = vb;
       return;
@@ -533,8 +537,9 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
       const vb = viewportToViewBox(e.clientX, e.clientY);
       if (!vb) return;
       const last = paintLastRef.current;
-      if (last && Math.hypot(vb.x - last.x, vb.y - last.y) < PAINT_STAMP_SPACING) return;
-      tryPlaceLandscape(e.clientX, e.clientY);
+      const step = Math.max(PAINT_STAMP_SPACING, paintRadius);
+      if (last && Math.hypot(vb.x - last.x, vb.y - last.y) < step) return;
+      paintStampAt(e.clientX, e.clientY);
       paintLastRef.current = vb;
       return;
     }
@@ -936,6 +941,78 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
       return true;
     },
     [placing, borderMode, viewportToViewBox, current, updateLandscape],
+  );
+
+  /**
+   * Paint-mode stamp: fills a disk of `paintRadius` viewBox units (0 = a single
+   * point) around the cursor. Candidates are tested against the territory under
+   * the cursor only; border mode snaps them to the outline. Points closer than
+   * PAINT_MIN_DIST to an existing piece are skipped so re-tracing never stacks.
+   */
+  const paintStampAt = useCallback(
+    (clientX: number, clientY: number) => {
+      if (!placing) return;
+      const tid = territoryIdFromPoint(clientX, clientY);
+      if (!tid) return;
+      const pathEl = territoryPathEl(tid);
+      if (!pathEl) return;
+      const vb = viewportToViewBox(clientX, clientY);
+      if (!vb) return;
+      const radius = paintRadius;
+      const offsets: Pt[] = [{ x: 0, y: 0 }];
+      if (radius > 0) {
+        const step = Math.min(PAINT_MIN_DIST, radius);
+        const n = Math.ceil(radius / step);
+        for (let i = -n; i <= n; i += 1) {
+          for (let j = -n; j <= n; j += 1) {
+            if (i === 0 && j === 0) continue;
+            const dx = i * step;
+            const dy = j * step;
+            if (dx * dx + dy * dy > radius * radius) continue;
+            offsets.push({ x: dx, y: dy });
+          }
+        }
+      }
+      const accepted: Pt[] = [];
+      for (const o of offsets) {
+        let x = vb.x + o.x;
+        let y = vb.y + o.y;
+        if (borderMode) {
+          const snapped = nearestPointOnOutline(pathEl, x, y);
+          if (!snapped) continue;
+          // In brush mode only keep outline points within reach of the cursor.
+          if (radius > 0 && Math.hypot(snapped.x - vb.x, snapped.y - vb.y) > radius) continue;
+          x = snapped.x;
+          y = snapped.y;
+        } else if (!isPointInTerritoryPath(pathEl, x, y)) {
+          continue;
+        }
+        accepted.push({ x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 });
+      }
+      if (!accepted.length) return;
+      const cat = placing.cat;
+      const img = placing.img;
+      const layer = borderMode ? ('border' as const) : ('interior' as const);
+      updateLandscape((prev) => {
+        const map = { ...(prev?.territories ?? {}) };
+        const key = resolveTid(map, tid) ?? tid;
+        const list = [...(map[key] ?? [])];
+        const before = list.length;
+        const minD2 = PAINT_MIN_DIST * PAINT_MIN_DIST;
+        for (const p of accepted) {
+          if (list.length >= 50) break;
+          const tooClose = list.some((q) => (q.x - p.x) ** 2 + (q.y - p.y) ** 2 < minD2);
+          if (tooClose) continue;
+          list.push({ cat, img, x: p.x, y: p.y, layer });
+        }
+        if (list.length === before) return prev;
+        map[key] = list;
+        return { territories: map };
+      });
+      setSelected(tid);
+      setSelectedPlacement(null);
+    },
+    [placing, paintRadius, borderMode, viewportToViewBox, updateLandscape],
   );
 
   const setFocus = (tid: string, focus: 'calculated' | 'override') => {
@@ -1459,7 +1536,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                 ? 'Select mode: drag a rectangle to select pieces · shift adds · ctrl removes · drag a selected piece to move the group · Esc clears'
                 : cursorMode === 'paint'
                   ? placing
-                    ? `Paint mode: drag on the map to stamp ${placing.img}${borderMode ? ' on borders' : ' inside territories'}.`
+                    ? `Paint mode: drag to stamp ${placing.img}${paintRadius ? ` in a ${paintRadius}-unit brush` : ' along the cursor'}${borderMode ? ' on borders' : ' inside territories'} · pick another image below to switch`
                     : 'Paint mode: pick an image below, then drag on the map to stamp.'
                   : placing
                     ? `Click the map to place ${placing.img}${borderMode ? ' on the territory border' : ' inside the territory'} · Esc to cancel`
@@ -1773,6 +1850,40 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                   <button type="button" className="admin-page__btn" onClick={() => setMultiSel(new Set())}>
                     Clear
                   </button>
+                </div>
+              ) : null}
+              {editorTab === 'landscape' && cursorMode === 'paint' ? (
+                <div
+                  className="mapov-brush"
+                  role="toolbar"
+                  aria-label="Paint brush"
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  {placing ? (
+                    <img
+                      className="mapov-brush__thumb"
+                      src={landscapeSrc(placing)}
+                      alt={placing.img}
+                      title={`${placing.cat} · ${placing.img}`}
+                    />
+                  ) : (
+                    <span className="mapov-brush__none">No image armed</span>
+                  )}
+                  <label
+                    className="mapov-brush__scale"
+                    title="Brush radius in map units (0 = stamp a single line along the cursor)"
+                  >
+                    Thickness
+                    <input
+                      type="range"
+                      min={0}
+                      max={200}
+                      step={10}
+                      value={paintRadius}
+                      onChange={(e) => setPaintRadius(Number(e.target.value))}
+                    />
+                  </label>
+                  <span className="mapov-brush__value">{paintRadius ? String(paintRadius) : 'line'}</span>
                 </div>
               ) : null}
               {editorTab === 'landscape' ? (

@@ -1500,6 +1500,56 @@
   margin: 0;
 }
 
+.mapov-brush {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.7rem;
+  background: #fffef8;
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(61, 41, 20, 0.25);
+  z-index: 6;
+}
+
+.mapov-brush__thumb {
+  width: 1.75rem;
+  height: 1.75rem;
+  object-fit: contain;
+}
+
+.mapov-brush__none {
+  font-size: 0.75rem;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+.mapov-brush__scale {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 7rem;
+  margin: 0;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.mapov-brush__scale input[type='range'] {
+  width: 9rem;
+  margin: 0;
+}
+
+.mapov-brush__value {
+  min-width: 3rem;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .mapov-placement {
   position: absolute;
   transform: translate(-50%, -50%);
