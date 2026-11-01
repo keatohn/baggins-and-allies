@@ -222,6 +222,7 @@ def initialize_game_state(
     camp_defs: dict[str, CampDefinition] | None = None,
     victory_criteria: dict[str, Any] | None = None,
     camp_cost: int | None = None,
+    destroy_camp_on_conquer: bool | None = None,
     stronghold_repair_cost: int | None = None,
     prefire_penalty: bool | None = None,
     heroes_enabled: bool | None = None,
@@ -361,6 +362,7 @@ def initialize_game_state(
         first_faction: [tid for tid, ts in territories.items() if ts.owner == first_faction]
     }
     camp_cost_val = camp_cost if camp_cost is not None else 0
+    destroy_camp_on_conquer_val = True if destroy_camp_on_conquer is None else bool(destroy_camp_on_conquer)
     stronghold_repair_cost_val = stronghold_repair_cost if stronghold_repair_cost is not None else 0
     prefire_penalty_val = True if prefire_penalty is None else bool(prefire_penalty)
     heroes_enabled_val = True if heroes_enabled is None else bool(heroes_enabled)
@@ -385,6 +387,7 @@ def initialize_game_state(
         mobilization_camps=initial_mobilization_camps,
         victory_criteria=vc,
         camp_cost=camp_cost_val,
+        destroy_camp_on_conquer=destroy_camp_on_conquer_val,
         stronghold_repair_cost=stronghold_repair_cost_val,
         prefire_penalty=prefire_penalty_val,
         heroes_enabled=heroes_enabled_val,

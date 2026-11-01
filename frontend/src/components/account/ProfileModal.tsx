@@ -291,6 +291,16 @@ export default function ProfileModal({ player, onPlayerChange, onClose }: Profil
       </section>
 
       <section className="account-section account-section--last">
+        <button
+          type="button"
+          className="account-btn account-btn--ghost"
+          onClick={() => {
+            onClose();
+            navigate('/profile/stats');
+          }}
+        >
+          View career stats
+        </button>
         <button type="button" className="account-btn account-btn--danger" onClick={handleLogout}>
           Log out
         </button>

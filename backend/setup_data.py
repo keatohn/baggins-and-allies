@@ -162,6 +162,9 @@ def load_setup_dict_from_db(db: Session, setup_id: str) -> dict[str, Any] | None
         result["camp_cost"] = int(m["camp_cost"])
     except (TypeError, ValueError, KeyError):
         pass
+    result["destroy_camp_on_conquer"] = parse_prefire_penalty_from_manifest(
+        m.get("destroy_camp_on_conquer")
+    )
     try:
         result["stronghold_repair_cost"] = int(m["stronghold_repair_cost"])
     except (TypeError, ValueError, KeyError):

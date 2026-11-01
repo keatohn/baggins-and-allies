@@ -67,3 +67,45 @@ def test_conquest_without_alliance_goes_to_capturer(defs):
     state, _ = apply_action(state, end_phase("mordor"), ud, td, fd, cd, None)
 
     assert state.territories["pelennor"].owner == "mordor"
+
+
+def test_conquer_destroys_non_capital_camp_by_default(defs):
+    ud, td, fd, cd, start = defs
+    state = initialize_game_state(fd, td, ud, starting_setup=start, camp_defs=cd)
+    assert state.destroy_camp_on_conquer is True
+    assert "dunharrow_camp" in state.camps_standing
+    state.phase = "combat"
+    state.current_faction = "mordor"
+    state.territories["dunharrow"].owner = "rohan"
+    state.pending_captures["dunharrow"] = "mordor"
+
+    state, _ = apply_action(state, end_phase("mordor"), ud, td, fd, cd, None)
+
+    assert state.territories["dunharrow"].owner == "mordor"
+    assert "dunharrow_camp" not in state.camps_standing
+
+
+def test_saved_game_without_flag_still_destroys_camps(defs):
+    ud, td, fd, cd, start = defs
+    state = initialize_game_state(fd, td, ud, starting_setup=start, camp_defs=cd)
+    payload = state.to_dict()
+    del payload["destroy_camp_on_conquer"]
+    loaded = type(state).from_dict(payload)
+    assert loaded.destroy_camp_on_conquer is True
+
+
+def test_conquer_keeps_camp_when_destroy_camp_on_conquer_is_false(defs):
+    ud, td, fd, cd, start = defs
+    state = initialize_game_state(
+        fd, td, ud, starting_setup=start, camp_defs=cd, destroy_camp_on_conquer=False,
+    )
+    assert "dunharrow_camp" in state.camps_standing
+    state.phase = "combat"
+    state.current_faction = "mordor"
+    state.territories["dunharrow"].owner = "rohan"
+    state.pending_captures["dunharrow"] = "mordor"
+
+    state, _ = apply_action(state, end_phase("mordor"), ud, td, fd, cd, None)
+
+    assert state.territories["dunharrow"].owner == "mordor"
+    assert "dunharrow_camp" in state.camps_standing

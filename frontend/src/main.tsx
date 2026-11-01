@@ -10,6 +10,7 @@ import ForgotPassword from './pages/ForgotPassword.tsx'
 import CreateGame from './pages/CreateGame.tsx'
 import GameList from './pages/GameList.tsx'
 import JoinGame from './pages/JoinGame.tsx'
+import Profile from './pages/Profile.tsx'
 import Admin from './pages/Admin.tsx'
 import { MenuScrollProvider } from './components/MenuScrollContext'
 import MenuScrollOverlay from './components/MenuScrollOverlay'
@@ -42,6 +43,7 @@ function isLoggedInMenuRoute(pathname: string): boolean {
     pathname === '/' ||
     pathname === '/games' ||
     pathname === '/join' ||
+    pathname === '/profile/stats' ||
     pathname === '/admin' ||
     pathname === '/game/new'
   )
@@ -231,6 +233,7 @@ if (!rootEl) {
               <Route path="/forgot-password" element={<ForgotPassword />} />
               <Route path="/games" element={<GameList />} />
               <Route path="/join" element={<JoinGame />} />
+              <Route path="/profile/stats" element={<Profile />} />
               {/* Old profile page → menu with the Profile modal open. */}
               <Route path="/profile" element={<Navigate to="/?modal=profile" replace />} />
               <Route path="/admin" element={<Admin />} />

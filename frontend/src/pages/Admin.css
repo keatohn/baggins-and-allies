@@ -628,6 +628,109 @@
   border-color: var(--ink);
 }
 
+.games-report__col-end {
+  width: 5%;
+}
+
+.games-report__end-btn {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.15rem 0.5rem;
+  background: var(--parchment);
+  color: var(--ink);
+  border: 1px solid var(--ink-faded);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.games-report__end-btn:hover {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--parchment);
+}
+
+/* Nested end-game confirm: sits above the parent games modal (z-index 1000). */
+.games-report__end-overlay {
+  z-index: 1100;
+}
+
+.games-report__end-modal {
+  width: min(100%, 24rem);
+  max-height: min(90vh, 30rem);
+}
+
+.games-report__end-text {
+  margin: 0.5rem 0 0.85rem;
+  line-height: 1.4;
+}
+
+.games-report__end-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+
+.games-report__end-pill {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.9rem;
+  background: var(--parchment);
+  color: var(--ink);
+  border: 1px solid var(--ink-faded);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.games-report__end-pill:hover {
+  border-color: var(--ink);
+}
+
+.games-report__end-pill--active {
+  background: var(--ink);
+  color: var(--parchment);
+  border-color: var(--ink);
+}
+
+.games-report__end-input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 0.4rem 0.6rem;
+  background: var(--parchment-light);
+  color: var(--ink);
+  border: 1px solid var(--ink-faded);
+  border-radius: 6px;
+  margin-bottom: 0.6rem;
+}
+
+.games-report__end-input:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+
+.games-report__end-error {
+  margin: 0 0 0.5rem;
+}
+
+.games-report__end-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 0.35rem;
+}
+
+.admin-page button.games-report__end-confirm {
+  background: var(--ink);
+  color: var(--parchment);
+  border-color: var(--ink);
+}
+
+.admin-page button.games-report__end-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .balance-modal__header {
   display: flex;
   justify-content: space-between;

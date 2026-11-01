@@ -897,6 +897,72 @@ export interface GameListPlayer {
   forfeited?: boolean;
 }
 
+/** Aggregated W-L block from GET /players/{id}/stats (forfeits count as normal results). */
+export interface PlayerStatsOverall {
+  games: number;
+  wins: number;
+  losses: number;
+  win_pct: number | null;
+}
+
+export interface PlayerStatsAlliance {
+  games: number;
+  wins: number;
+  win_pct: number | null;
+}
+
+export interface PlayerStatsScenario {
+  setup_id: string | null;
+  scenario_name: string;
+  games: number;
+  wins: number;
+  win_pct: number | null;
+}
+
+export interface PlayerStatsHeadToHead {
+  player_id: string;
+  username: string | null;
+  kind: 'against' | 'with';
+  games: number;
+  wins: number;
+  losses: number;
+  win_pct: number | null;
+}
+
+export interface PlayerStats {
+  player_id: string;
+  overall: PlayerStatsOverall;
+  by_alliance: Record<'good' | 'evil', PlayerStatsAlliance>;
+  by_scenario: PlayerStatsScenario[];
+  head_to_head: PlayerStatsHeadToHead[];
+  streaks: {
+    current_win: number;
+    current_loss: number;
+    best_win_streak: number;
+    best_loss_streak: number;
+  };
+  most_played_scenario: { setup_id: string | null; scenario_name: string; games: number } | null;
+  favorite_faction: string | null;
+  longest_game_seconds: number | null;
+}
+
+export interface PlayerProfileCard {
+  id: string;
+  username: string;
+  headline: PlayerStatsOverall;
+  tier: string | null;
+  achievements: unknown[];
+}
+
+export interface PlayerStatsQuery {
+  scenario?: string;
+  opponent?: string;
+  teammate?: string;
+  alliance?: 'good' | 'evil';
+  from?: string;
+  to?: string;
+}
+
 export interface GameListItem {
   id: string;
   name: string;
@@ -1071,6 +1137,15 @@ export const api = {
     fetchJson<{ setups: AdminSetupListItem[] }>('/admin/setups'),
   adminListGames: () => fetchJson<{ games: GameListItem[] }>('/admin/games'),
   adminListUsers: () => fetchJson<{ users: AdminUserItem[] }>('/admin/users'),
+  /** Admin: end an in-progress game now. winner: "good" | "evil" | "none" (void, no stats rows). */
+  adminEndGame: (gameId: string, winner: 'good' | 'evil' | 'none') =>
+    fetchJson<{ ok: boolean; game_id: string; winner: string | null; status: string }>(
+      `/admin/games/${encodeURIComponent(gameId)}/end`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ winner }),
+      },
+    ),
   getAudioGains: async () => {
     const r = await fetchJson<{ gains: AudioGainsMap; menu_music?: string[] }>('/audio/gains');
     setAudioFileGains(r.gains);
@@ -1183,8 +1258,26 @@ export const api = {
         ...(setupId != null && { setup_id: setupId }),
       }),
     }),
-  listGames: () =>
-    fetchJson<{ games: GameListItem[] }>(`/games?_=${Date.now()}`, { cache: 'no-store' }),
+  listGames: (status?: 'active' | 'finished' | 'all') => {
+    const qs = new URLSearchParams({ _: String(Date.now()) });
+    if (status) qs.set('status', status);
+    return fetchJson<{ games: GameListItem[] }>(`/games?${qs.toString()}`, { cache: 'no-store' });
+  },
+  /** Public (any logged-in user): career stats for a player. */
+  getPlayerStats: (playerId: string, query?: PlayerStatsQuery) => {
+    const qs = new URLSearchParams();
+    if (query?.scenario) qs.set('scenario', query.scenario);
+    if (query?.opponent) qs.set('opponent', query.opponent);
+    if (query?.teammate) qs.set('teammate', query.teammate);
+    if (query?.alliance) qs.set('alliance', query.alliance);
+    if (query?.from) qs.set('from', query.from);
+    if (query?.to) qs.set('to', query.to);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return fetchJson<PlayerStats>(`/players/${encodeURIComponent(playerId)}/stats${suffix}`);
+  },
+  /** Public-lite profile card (username + headline record). */
+  getPlayerProfile: (playerId: string) =>
+    fetchJson<PlayerProfileCard>(`/players/${encodeURIComponent(playerId)}/profile`),
   joinGame: (gameCode: string) =>
     fetchJson<{ game_id: string; name: string }>('/games/join', {
       method: 'POST',

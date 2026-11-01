@@ -1332,6 +1332,14 @@ export function ManifestPanel({
         />,
       )}
       {fieldRow(
+        'Destroy camp on conquer',
+        <input
+          type="checkbox"
+          checked={manifest.destroy_camp_on_conquer !== false}
+          onChange={(e) => onManifestChange({ ...manifest, destroy_camp_on_conquer: e.target.checked })}
+        />,
+      )}
+      {fieldRow(
         'Stronghold repair cost',
         <NumberField
           className="admin-form__input admin-form__input--narrow"
