@@ -5,7 +5,7 @@
   min-height: 100dvh;
   padding: 2rem;
   padding-top: max(2rem, env(safe-area-inset-top, 0px));
-  background: var(--parchment);
+  background: transparent;
   box-sizing: border-box;
 }
 
@@ -17,6 +17,16 @@
   .profile-page__panels {
     max-width: none;
   }
+}
+
+.profile-page__header {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 0.5rem;
+}
+
+.profile-page__header .page-menu-btn {
+  margin-bottom: 0;
 }
 
 .profile-page__title {
@@ -280,11 +290,6 @@
 
 .profile-page__logout {
   margin-top: 0.25rem;
-}
-
-.profile-page .page-menu-btn {
-  margin-top: 1.5rem;
-  margin-bottom: 0;
 }
 
 /* Clear decorative scroll-end rolls (menu overlay). Desktop + landscape: pads

@@ -53,7 +53,7 @@ function RuleLabel({ name, description }: { name: string; description?: string }
 }
 
 export default function CreateGame() {
-  const { navigateWithScroll, holdScroll, revealScroll } = useMenuScroll();
+  const { navigateWithScroll, holdScroll, revealScroll, withScrollTransition } = useMenuScroll();
   const [name, setName] = useState('');
   const [isMultiplayer, setIsMultiplayer] = useState(false);
   const [heroesEnabled, setHeroesEnabled] = useState(true);
@@ -178,7 +178,7 @@ export default function CreateGame() {
               type="button"
               className="create-game-form__submit primary create-game-form__continue"
               disabled={loadingSetups || selectedSetupId == null}
-              onClick={() => setStep('settings')}
+              onClick={() => withScrollTransition(() => setStep('settings'))}
             >
               Continue
             </button>
@@ -186,7 +186,7 @@ export default function CreateGame() {
         </div>
       ) : (
         <form className="create-game-form create-game-form--settings" onSubmit={handleSubmit}>
-          <button type="button" className="page-menu-btn" onClick={() => setStep('scenario')}>
+          <button type="button" className="page-menu-btn" onClick={() => withScrollTransition(() => setStep('scenario'))}>
             Back
           </button>
           {selectedScenario && (

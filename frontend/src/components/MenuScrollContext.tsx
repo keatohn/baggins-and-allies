@@ -39,11 +39,10 @@ const SCROLL_TRANSITION_MS = 300
 const AUTO_REVEAL_MS = 150
 
 /**
- * `closing`  — panels slide to center, covering the outgoing menu page.
+ * `closing`  — panels slide to center, covering the outgoing page.
  * `covering` — panels stay met in the center while the destination page loads.
- * `opening`  — panels reopen to the screen edges (menu → menu).
+ * `opening`  — panels reopen to the screen edges (menu destination).
  * `exiting`  — panels continue off-screen and stay hidden (menu → game).
- * `entering` — panels fly in from off-screen to the edges (game → menu).
  */
 type ScrollTransitionPhase =
   | 'idle'
@@ -51,12 +50,17 @@ type ScrollTransitionPhase =
   | 'covering'
   | 'opening'
   | 'exiting'
-  | 'entering'
 
 interface MenuScrollContextValue {
   phase: ScrollTransitionPhase
   /** Animate the scroll ends around an in-app navigation. No-op while animating. */
   navigateWithScroll: (to: string, opts?: NavigateOptions) => void
+  /**
+   * Close the scroll ends, run `action` while covered (e.g. an in-page step
+   * swap), then reopen. No-ops the animation if already animating or reduced
+   * motion is preferred — `action` still runs.
+   */
+  withScrollTransition: (action: () => void) => void
   /**
    * Cancel the auto-reveal timer. Call from a destination page's mount effect
    * when it has async loading, so the scroll stays closed until revealScroll().
@@ -127,6 +131,28 @@ export function MenuScrollProvider({ children }: { children: ReactNode }) {
     scheduleSettle()
   }, [applyPhase, scheduleSettle, clearTimer])
 
+  /**
+   * Shared "close, swap content underneath, reopen" step for navigateWithScroll
+   * and withScrollTransition. Destination pages may claim holdScroll() while
+   * covered; otherwise auto-reveal runs after a short grace period.
+   */
+  const coverThenReveal = useCallback(
+    (runUnderCover: () => void, toMenu: boolean) => {
+      pendingToMenuRef.current = toMenu
+      holdClaimedRef.current = false
+      runUnderCover()
+      applyPhase('covering')
+      autoRevealTimerRef.current = window.setTimeout(() => {
+        autoRevealTimerRef.current = null
+        // Auto-reveal only if no page claimed the hold (no async loading).
+        if (!holdClaimedRef.current && phaseRef.current === 'covering') {
+          proceedToReveal()
+        }
+      }, AUTO_REVEAL_MS)
+    },
+    [applyPhase, proceedToReveal],
+  )
+
   const holdScroll = useCallback(() => {
     if (phaseRef.current !== 'covering') return
     holdClaimedRef.current = true
@@ -151,35 +177,38 @@ export function MenuScrollProvider({ children }: { children: ReactNode }) {
         return
       }
 
-      if (!fromMenu) {
-        applyPhase('entering')
-        navigate(to, opts)
-        scheduleSettle()
-        return
-      }
-
+      // Game → menu: fly the panels in from off-screen to cover the game view
+      // (same close phase as menu → menu; --closing forces them to center from
+      // wherever they are), then open onto the freshly mounted menu page.
       applyPhase('closing')
       closeTimerRef.current = window.setTimeout(() => {
         closeTimerRef.current = null
-        pendingToMenuRef.current = toMenu
-        holdClaimedRef.current = false
-        navigate(to, opts)
-        applyPhase('covering')
-        autoRevealTimerRef.current = window.setTimeout(() => {
-          autoRevealTimerRef.current = null
-          // Auto-reveal only if no page claimed the hold (no async loading).
-          if (!holdClaimedRef.current && phaseRef.current === 'covering') {
-            proceedToReveal()
-          }
-        }, AUTO_REVEAL_MS)
+        coverThenReveal(() => navigate(to, opts), toMenu)
       }, SCROLL_TRANSITION_MS)
     },
-    [navigate, location.pathname, applyPhase, scheduleSettle, proceedToReveal],
+    [navigate, location.pathname, applyPhase, coverThenReveal],
+  )
+
+  const withScrollTransition = useCallback(
+    (action: () => void) => {
+      if (phaseRef.current !== 'idle' || prefersReducedMotion()) {
+        action()
+        return
+      }
+      applyPhase('closing')
+      closeTimerRef.current = window.setTimeout(() => {
+        closeTimerRef.current = null
+        // No route change, so no destination page to hold — auto-reveal opens.
+        coverThenReveal(action, true)
+      }, SCROLL_TRANSITION_MS)
+    },
+    [applyPhase, coverThenReveal],
   )
 
   const contextValue: MenuScrollContextValue = {
     phase,
     navigateWithScroll,
+    withScrollTransition,
     holdScroll,
     revealScroll,
   }
