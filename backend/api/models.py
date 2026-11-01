@@ -3,7 +3,7 @@ SQLAlchemy models for players, games, and game setups.
 """
 
 from datetime import datetime
-from sqlalchemy import Boolean, Column, String, DateTime, Text, ForeignKey
+from sqlalchemy import Boolean, Column, String, DateTime, Text, ForeignKey, UniqueConstraint
 
 from .database import Base
 
@@ -23,6 +23,19 @@ class Player(Base):
     temp_password_expires_at = Column(DateTime, nullable=True)
     # JSON string: preferences, e.g. { "audio": { "menu_music_volume": 0, "game_music_volume": 0, "sfx_volume": 0, "muted": false } }
     preferences = Column(Text, nullable=True)
+
+
+class FriendRequest(Base):
+    """Friend relationship row: pending until the addressee accepts; declined rows are deleted."""
+
+    __tablename__ = "friend_requests"
+    __table_args__ = (UniqueConstraint("requester_id", "addressee_id", name="uq_friend_requests_pair"),)
+
+    id = Column(String(36), primary_key=True)  # uuid
+    requester_id = Column(String(36), ForeignKey("players.id"), nullable=False, index=True)
+    addressee_id = Column(String(36), ForeignKey("players.id"), nullable=False, index=True)
+    status = Column(String(16), nullable=False, default="pending")  # pending | accepted
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class Game(Base):

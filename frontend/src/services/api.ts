@@ -643,6 +643,12 @@ export interface PlayerAudioSettings {
   master_volume?: number;
 }
 
+/** Avatar circle: unit icon filename + #rrggbb background color. */
+export interface PlayerAvatarSettings {
+  image: string;
+  color: string;
+}
+
 export interface AuthPlayer {
   id: string;
   email: string;
@@ -651,6 +657,23 @@ export interface AuthPlayer {
   is_admin?: boolean;
   /** From server when preferences exist; omitted on older API responses. */
   audio?: PlayerAudioSettings;
+  /** Avatar with response-time defaults (hobbit icon on the default color). */
+  avatar?: PlayerAvatarSettings;
+}
+
+/** Search result / friend-list row with the viewer's relation to that user. */
+export interface FriendUser {
+  id: string;
+  username: string;
+  /** none | friend | pending_out (viewer sent) | pending_in (viewer must act). */
+  relation?: 'none' | 'friend' | 'pending_out' | 'pending_in';
+}
+
+/** A pending friend request row (incoming = act on it; outgoing = awaiting reply). */
+export interface FriendRequestItem {
+  id: string;
+  username: string;
+  created_at?: string | null;
 }
 
 export interface AdminSetupListItem {
@@ -806,6 +829,12 @@ export interface PatchProfileBody {
     sfx_volume?: number;
     master_volume?: number;
     muted?: boolean;
+  };
+  avatar?: {
+    /** Plain .png unit icon filename. */
+    image?: string;
+    /** #rrggbb background color. */
+    color?: string;
   };
 }
 
@@ -1000,6 +1029,43 @@ export const api = {
     syncAudioFromAuthPlayer(p);
     return p;
   },
+
+  /** Distinct unit icon filenames across all setups (profile avatar picker). */
+  getAvatarIcons: () => fetchJson<{ icons: string[] }>('/profile/avatar-icons'),
+
+  /** Prefix search for usernames with the viewer's relation to each (max 20). */
+  searchFriends: (username: string) =>
+    fetchJson<{ users: FriendUser[] }>(`/friends/search?username=${encodeURIComponent(username)}`),
+  /** Send a friend request by username. 409 on duplicate/existing friendship. */
+  sendFriendRequest: (username: string) =>
+    fetchJson<{ ok: boolean; request: FriendRequestItem }>('/friends/requests', {
+      method: 'POST',
+      body: JSON.stringify({ username }),
+    }),
+  /** Pending requests: incoming (act on these) + outgoing (awaiting reply). */
+  listFriendRequests: () =>
+    fetchJson<{ incoming: FriendRequestItem[]; outgoing: FriendRequestItem[] }>('/friends/requests'),
+  /** Badge count of pending requests awaiting this player. */
+  getPendingFriendCount: () => fetchJson<{ count: number }>('/friends/requests/pending-count'),
+  acceptFriendRequest: (requestId: string) =>
+    fetchJson<{ ok: boolean }>(`/friends/requests/${encodeURIComponent(requestId)}/accept`, {
+      method: 'POST',
+    }),
+  declineFriendRequest: (requestId: string) =>
+    fetchJson<{ ok: boolean }>(`/friends/requests/${encodeURIComponent(requestId)}/decline`, {
+      method: 'POST',
+    }),
+  /** Accepted friends list. */
+  listFriends: () => fetchJson<{ friends: FriendUser[] }>('/friends'),
+
+  /** Admin: default avatar color applied to users who never picked one. */
+  adminGetProfileDefaults: () =>
+    fetchJson<{ default_avatar_color: string }>('/admin/profile-defaults'),
+  adminPutProfileDefaults: (defaultAvatarColor: string) =>
+    fetchJson<{ ok: boolean; default_avatar_color: string }>('/admin/profile-defaults', {
+      method: 'PUT',
+      body: JSON.stringify({ default_avatar_color: defaultAvatarColor }),
+    }),
 
   adminListSetups: () =>
     fetchJson<{ setups: AdminSetupListItem[] }>('/admin/setups'),

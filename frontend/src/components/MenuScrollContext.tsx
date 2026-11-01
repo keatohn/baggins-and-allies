@@ -23,7 +23,6 @@ export function isMenuScrollRoute(pathname: string): boolean {
     pathname === '/forgot-password' ||
     pathname === '/games' ||
     pathname === '/join' ||
-    pathname === '/profile' ||
     pathname === '/admin' ||
     pathname === '/game/new'
   )

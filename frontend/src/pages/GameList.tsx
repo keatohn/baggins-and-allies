@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../services/api';
 import { useMenuScroll } from '../components/MenuScrollContext';
 import MenuLink from '../components/MenuLink';
+import AccountMenu from '../components/AccountMenu';
 import type { GameListItem, AuthPlayer, ForfeitOptionsResponse } from '../services/api';
 import StrongholdAllianceBar from '../components/StrongholdAllianceBar';
 import './GameList.css';
@@ -194,13 +195,23 @@ export default function GameList() {
     }
   };
 
-  if (loading) return <div className="game-list-page">Loading…</div>;
+  if (loading) {
+    return (
+      <>
+        <AccountMenu />
+        <div className="game-list-page">Loading…</div>
+      </>
+    );
+  }
   if (error) {
     return (
-      <div className="game-list-page">
-        <p className="game-list__error">{error}</p>
-        <MenuLink to="/">Back</MenuLink>
-      </div>
+      <>
+        <AccountMenu />
+        <div className="game-list-page">
+          <p className="game-list__error">{error}</p>
+          <MenuLink to="/">Back</MenuLink>
+        </div>
+      </>
     );
   }
 
@@ -210,6 +221,7 @@ export default function GameList() {
 
   return (
     <div className="game-list-page" data-page="load-game">
+      <AccountMenu />
       <header className="game-list-page__header">
         <MenuLink to="/" className="page-menu-btn">Menu</MenuLink>
       </header>

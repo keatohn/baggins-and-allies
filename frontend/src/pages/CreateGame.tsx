@@ -3,6 +3,7 @@ import { api, type SetupInfo } from '../services/api';
 import ScenarioTimeline from '../components/ScenarioTimeline';
 import { useMenuScroll } from '../components/MenuScrollContext';
 import MenuLink from '../components/MenuLink';
+import AccountMenu from '../components/AccountMenu';
 import './CreateGame.css';
 
 function RuleLabel({ name, description }: { name: string; description?: string }) {
@@ -152,6 +153,7 @@ export default function CreateGame() {
 
   return (
     <div className="create-game-page">
+      <AccountMenu />
       <h1 className="create-game-page__title">Create game</h1>
       {step === 'scenario' ? (
         <div className="create-game-form">

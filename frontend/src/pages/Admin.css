@@ -433,6 +433,42 @@
   overflow: auto;
 }
 
+/* New-user profile defaults (avatar color) in the users report. */
+.users-report__defaults {
+  flex-shrink: 0;
+  margin-bottom: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--parchment-light);
+  border: 1px solid var(--ink-faded);
+  border-radius: 6px;
+}
+
+.users-report__defaults-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.users-report__color-input {
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: 0;
+  border: 2px solid var(--ink-faded);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
+.users-report__color-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.users-report__defaults-error {
+  margin-top: 0.35rem;
+}
+
 /* Fixed layout + colgroup widths: cell content can never resize columns or spill into neighbors.
    border-collapse: separate keeps th borders visible on the sticky header while scrolling. */
 .games-report__table {

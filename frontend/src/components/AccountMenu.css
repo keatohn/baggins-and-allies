@@ -1,0 +1,655 @@
+/* Account cluster (Profile · Friends · Settings) + the three account modals.
+   Menu variant sits fixed top-right on menu pages; header variant matches the
+   in-game header icon buttons. Modal chrome is self-contained (no dependency
+   on game CSS) so menu pages render it without importing App/game styles. */
+
+/* ---------- Cluster ---------- */
+
+.account-menu {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* Fixed top-right on menu pages, inside the decorative scroll rolls. */
+.account-menu--menu {
+  position: fixed;
+  top: max(0.75rem, calc(env(safe-area-inset-top, 0px) + 0.5rem));
+  right: 0.75rem;
+  /* Under the scroll overlay (z 50) so transitions cover the buttons and
+     block clicks while the panels are in flight. */
+  z-index: 40;
+}
+
+@media (min-width: 768px), (orientation: landscape) {
+  .account-menu--menu {
+    right: calc(var(--scroll-roll-w, 40px) + 0.75rem);
+  }
+}
+
+@media (max-width: 767px) and (orientation: portrait) {
+  .account-menu--menu {
+    top: calc(var(--scroll-roll-w, 24px) + 0.55rem);
+  }
+}
+
+/* In-game: inline in the header flow, styled like the other header icon buttons. */
+.account-menu--header {
+  flex: 0 0 auto;
+  gap: clamp(0.22rem, 0.55vw, 0.55rem);
+}
+
+.account-menu__btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  width: clamp(34px, 4.2vw, 40px);
+  height: clamp(34px, 4.2vw, 40px);
+  background: var(--parchment-dark);
+  border: 2px solid var(--ink-faded);
+  border-radius: 4px;
+  color: var(--ink);
+  cursor: pointer;
+  font-family: var(--font-parchment);
+  font-size: 0.75rem;
+  text-transform: none;
+  letter-spacing: normal;
+  line-height: 1;
+  box-shadow: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.account-menu__btn:hover:not(:disabled) {
+  border-color: var(--ink);
+  background: var(--parchment);
+  box-shadow: 0 1px 4px var(--shadow);
+}
+
+.account-menu__btn--active {
+  border-color: var(--gold-dark);
+  background: var(--parchment-light);
+}
+
+/* Avatar button: the circle IS the button background (user color fills it). */
+.account-menu__btn--avatar {
+  border-radius: 50%;
+  overflow: hidden;
+  padding: 2px;
+}
+
+.account-menu__avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  display: block;
+}
+
+.account-menu__icon {
+  width: clamp(20px, 2.6vw, 24px);
+  height: clamp(20px, 2.6vw, 24px);
+  display: block;
+  pointer-events: none;
+}
+
+/* Pending friend-request count badge (red). */
+.account-menu__badge {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: #c62828;
+  border: 1.5px solid var(--parchment);
+  color: #fff;
+  font-family: system-ui, sans-serif;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+/* ---------- Modal shell ---------- */
+
+.account-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+  padding: 1rem;
+  animation: accountModalOverlayIn 0.25s ease-out;
+}
+
+.account-modal {
+  background: var(--parchment);
+  border: 3px solid var(--ink-faded);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  width: min(460px, 94vw);
+  max-width: 100%;
+  max-height: min(88vh, 88dvh);
+  display: flex;
+  flex-direction: column;
+  animation: accountModalIn 0.3s ease-out;
+}
+
+.account-modal--friends {
+  width: min(480px, 94vw);
+}
+
+@keyframes accountModalOverlayIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes accountModalIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .account-modal-overlay,
+  .account-modal {
+    animation: none;
+  }
+}
+
+.account-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 2px solid var(--ink-faded);
+}
+
+.account-modal__title {
+  margin: 0;
+  font-family: 'Cinzel', serif;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.account-modal__close {
+  width: 2.1rem;
+  height: 2.1rem;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.35rem;
+  line-height: 1;
+  background: var(--parchment-dark);
+  border: 2px solid var(--ink-faded);
+  border-radius: 6px;
+  color: var(--ink);
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.account-modal__close:hover:not(:disabled) {
+  border-color: var(--ink);
+  background: var(--parchment);
+  box-shadow: none;
+}
+
+.account-modal__body {
+  padding: 1rem;
+  overflow-y: auto;
+  font-family: var(--font-parchment);
+}
+
+/* ---------- Shared bits ---------- */
+
+.account-section {
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid rgba(139, 115, 85, 0.4);
+}
+
+.account-section--last {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.account-section__title {
+  margin: 0 0 0.5rem;
+  font-family: 'Cinzel', serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.account-subtle {
+  margin: 0.35rem 0 0;
+  font-size: 0.88rem;
+  color: var(--ink-faded);
+}
+
+.account-msg {
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+}
+
+.account-msg--error {
+  color: #c62828;
+}
+
+.account-msg--success {
+  color: #2e7d32;
+}
+
+.account-msg--subtle {
+  color: var(--ink-faded);
+  font-style: italic;
+}
+
+.account-btn {
+  padding: 0.45rem 1rem;
+  font-family: var(--font-parchment);
+  font-size: 0.95rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--ink);
+  background: var(--parchment-dark, #e8e0d0);
+  border: 2px solid var(--ink-faded);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  box-shadow: none;
+}
+
+.account-btn:hover:not(:disabled) {
+  border-color: var(--gold-dark, #8b7355);
+  background: rgba(139, 115, 85, 0.12);
+  box-shadow: none;
+}
+
+.account-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.account-btn--small {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.88rem;
+}
+
+.account-btn--ghost {
+  background: transparent;
+  border: none;
+  color: var(--ink-faded);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  padding-left: 0.35rem;
+  padding-right: 0.35rem;
+}
+
+.account-btn--ghost:hover:not(:disabled) {
+  background: transparent;
+  border: none;
+  color: var(--ink);
+}
+
+.account-btn--danger {
+  color: #7f1d1d;
+  border-color: #b08968;
+}
+
+.account-btn--danger:hover:not(:disabled) {
+  border-color: #c62828;
+  background: rgba(198, 40, 40, 0.08);
+}
+
+.account-input {
+  padding: 0.5rem 0.75rem;
+  font-size: 1rem;
+  font-family: var(--font-parchment);
+  border: 2px solid var(--ink-faded);
+  border-radius: 4px;
+  background: var(--parchment-light);
+  color: var(--ink);
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.account-field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+
+.account-email {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--ink);
+  line-height: 1.35;
+}
+
+/* ---------- Profile modal ---------- */
+
+.profile-avatar-preview-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+}
+
+.profile-avatar-preview {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  border: 3px solid var(--ink-faded);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  box-shadow: 0 2px 8px var(--shadow);
+}
+
+.profile-avatar-preview__img {
+  width: 78%;
+  height: 78%;
+  object-fit: contain;
+  display: block;
+}
+
+.profile-avatar-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.profile-avatar-icon {
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--parchment-light);
+  border: 2px solid var(--ink-faded);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.profile-avatar-icon img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.profile-avatar-icon:hover:not(:disabled) {
+  border-color: var(--gold-dark);
+  background: rgba(139, 115, 85, 0.1);
+  box-shadow: none;
+}
+
+.profile-avatar-icon--selected {
+  border-color: var(--gold-dark);
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+}
+
+.profile-avatar-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.75rem;
+}
+
+.profile-avatar-color {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--ink-faded);
+  cursor: pointer;
+}
+
+.profile-avatar-color:hover:not(:disabled) {
+  border-color: var(--ink);
+  box-shadow: 0 1px 4px var(--shadow);
+}
+
+.profile-avatar-color--selected {
+  border-color: var(--gold-dark);
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.profile-username-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.profile-username-display {
+  margin: 0;
+  font-size: 0.98rem;
+  color: var(--ink);
+}
+
+.profile-username-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.profile-username-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-top: 0.25rem;
+}
+
+/* Tier/XP placeholder — filled in by the XP issue. */
+.account-xp {
+  background: var(--parchment-light);
+  border: 2px solid var(--ink-faded);
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+.account-xp__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.45rem;
+  font-size: 0.92rem;
+  color: var(--ink);
+}
+
+.account-xp__tier {
+  font-weight: 700;
+}
+
+.account-xp__xp {
+  color: var(--ink-faded);
+  font-style: italic;
+  font-size: 0.85rem;
+}
+
+.account-xp__bar {
+  height: 12px;
+  border-radius: 6px;
+  background: rgba(61, 41, 20, 0.18);
+  border: 1px solid var(--ink-faded);
+  overflow: hidden;
+}
+
+.account-xp__fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold), var(--gold-light));
+}
+
+/* ---------- Settings modal (audio lifted from the Profile page) ---------- */
+
+.settings-audio-slider {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.65rem;
+}
+
+.settings-audio-label {
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+
+.settings-audio-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.settings-audio-range {
+  flex: 1;
+  min-width: 0;
+  height: 1.75rem;
+  accent-color: var(--gold-dark);
+  cursor: pointer;
+  touch-action: pan-x;
+}
+
+.settings-audio-range:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.settings-audio-pct {
+  font-size: 0.88rem;
+  color: var(--ink-light);
+  min-width: 2.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-audio-mute {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.92rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.settings-audio-mute input {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: var(--gold-dark);
+  cursor: pointer;
+}
+
+.settings-audio-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.35rem;
+  flex-wrap: wrap;
+}
+
+/* ---------- Friends modal ---------- */
+
+.friends-search {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.friends-search__input {
+  flex: 1;
+  min-width: 0;
+}
+
+.friends-list {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.friends-list__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.45rem 0.6rem;
+  background: var(--parchment-light);
+  border: 1px solid var(--ink-faded);
+  border-radius: 6px;
+}
+
+.friends-list__name {
+  font-size: 0.95rem;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friends-list__tag {
+  font-size: 0.82rem;
+  color: var(--ink-faded);
+  font-style: italic;
+  flex-shrink: 0;
+}
+
+.friends-list__actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.friends-list__empty {
+  font-size: 0.9rem;
+  color: var(--ink-faded);
+}
+
+@media (max-width: 767px) {
+  .account-menu--menu {
+    transform: scale(0.92);
+    transform-origin: top right;
+  }
+}
