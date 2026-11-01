@@ -1,10 +1,10 @@
-/* Responsive token size: scale with viewport on small screens, cap at 42px on desktop */
+/* Responsive token size: scale with viewport on small screens, cap at 46px on desktop */
 .unit-token {
   position: relative;
-  width: clamp(36px, 10vmin, 42px);
-  height: clamp(36px, 10vmin, 42px);
+  width: clamp(40px, 10vmin, 46px);
+  height: clamp(40px, 10vmin, 46px);
   background: var(--parchment);
-  border: 2px solid var(--ink-faded);
+  border: 3px solid var(--ink-faded);
   border-radius: 4px;
   box-shadow: 1px 1px 3px var(--shadow);
   overflow: visible;
@@ -54,17 +54,17 @@
   cursor: inherit !important;
 }
 
-/* Sea units and heroes 1.5× larger on map only (not in territory panel) */
+/* Sea units and heroes larger on map only (not in territory panel) */
 .unit-token.unit-token--naval,
 .unit-token.unit-token--hero {
-  width: clamp(52px, 15vmin, 63px);
-  height: clamp(52px, 15vmin, 63px);
+  width: clamp(54px, 15vmin, 64px);
+  height: clamp(54px, 15vmin, 64px);
 }
 
 @media (hover: hover) and (pointer: fine) {
   .unit-token-tap-wrapper:not(.unit-token-tap-wrapper--selected):hover
     .unit-token:not(.unit-token--naval):not(.unit-token--hero):not(.dragging):not(.dragging-overlay):not(.disabled) {
-    transform: scale(1.5);
+    transform: scale(1.55);
     border-color: var(--ink);
     box-shadow: 2px 2px 6px var(--shadow);
     z-index: 10;
@@ -74,7 +74,7 @@
     .unit-token.unit-token--naval:not(.dragging):not(.dragging-overlay):not(.disabled),
   .unit-token-tap-wrapper:not(.unit-token-tap-wrapper--selected):hover
     .unit-token.unit-token--hero:not(.dragging):not(.dragging-overlay):not(.disabled) {
-    transform: scale(1.15);
+    transform: scale(1.185);
     border-color: var(--ink);
     box-shadow: 2px 2px 6px var(--shadow);
     z-index: 10;
@@ -83,7 +83,7 @@
 
 .unit-token-tap-wrapper--selected
   .unit-token:not(.unit-token--naval):not(.unit-token--hero):not(.dragging):not(.dragging-overlay) {
-  transform: scale(1.5);
+  transform: scale(1.55);
   border-color: var(--gold);
   box-shadow: 0 0 8px var(--gold);
   z-index: 10;
@@ -92,14 +92,14 @@
 .unit-token-tap-wrapper--selected
   .unit-token.unit-token--naval:not(.dragging):not(.dragging-overlay),
 .unit-token-tap-wrapper--selected .unit-token.unit-token--hero:not(.dragging):not(.dragging-overlay) {
-  transform: scale(1.15);
+  transform: scale(1.185);
   border-color: var(--gold);
   box-shadow: 0 0 8px var(--gold);
   z-index: 10;
 }
 
 .unit-token.selected:not(.dragging):not(.dragging-overlay) {
-  transform: scale(1.5);
+  transform: scale(1.55);
   border-color: var(--gold);
   box-shadow: 0 0 8px var(--gold);
   z-index: 10;
@@ -107,7 +107,7 @@
 
 .unit-token.unit-token--naval.selected:not(.dragging):not(.dragging-overlay),
 .unit-token.unit-token--hero.selected:not(.dragging):not(.dragging-overlay) {
-  transform: scale(1.15);
+  transform: scale(1.185);
   border-color: var(--gold);
   box-shadow: 0 0 8px var(--gold);
   z-index: 10;
