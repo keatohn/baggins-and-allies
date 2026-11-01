@@ -1039,6 +1039,13 @@
   box-sizing: border-box;
 }
 
+.admin-graph__filter {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
 .admin-graph__list {
   flex: 1 1 auto;
   min-height: 0;

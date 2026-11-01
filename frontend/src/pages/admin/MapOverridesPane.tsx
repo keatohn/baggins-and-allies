@@ -198,6 +198,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   const [selected, setSelected] = useState<string | null>(null);
   const [activeKind, setActiveKind] = useState<UiKind>('unit');
   const [search, setSearch] = useState('');
+  const [terrainFilter, setTerrainFilter] = useState('');
   const [stored, setStored] = useState<MapOverridesData | null>(null);
   const [draft, setDraft] = useState<MapOverridesData | null>(null);
   const [spots, setSpots] = useState<CalculatedSpots | null>(null);
@@ -312,6 +313,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     setSelected(null);
     setPngFailed(false);
     setSearch('');
+    setTerrainFilter('');
     setPlacing(null);
     setBorderMode(false);
     setSelectedPlacement(null);
@@ -979,17 +981,21 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     }
   }, [paths, territories, manifest, updateLandscape]);
 
-  const selectedTerrainType = useMemo(() => {
-    if (!selected) return '';
-    const defKey = resolveTid(territories, selected) ?? selected;
-    const def = territories[defKey];
-    if (!def) return '';
-    return typeof def.terrain_type === 'string'
-      ? def.terrain_type
-      : typeof def.terrain === 'string'
-        ? def.terrain
-        : '';
-  }, [selected, territories]);
+  const terrainTypeFor = useCallback(
+    (tid: string): string => {
+      const defKey = resolveTid(territories, tid) ?? tid;
+      const def = territories[defKey];
+      if (!def) return '';
+      return typeof def.terrain_type === 'string'
+        ? def.terrain_type
+        : typeof def.terrain === 'string'
+          ? def.terrain
+          : '';
+    },
+    [territories],
+  );
+
+  const selectedTerrainType = useMemo(() => (selected ? terrainTypeFor(selected) : ''), [selected, terrainTypeFor]);
 
   const selectedCategories = useMemo(() => {
     const cats = landscapeCategoriesForTerrain(selectedTerrainType, manifest);
@@ -1409,11 +1415,24 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
 
   const filteredChoices = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return territoryChoices;
-    return territoryChoices.filter(
-      (row) => row.label.toLowerCase().includes(q) || row.id.toLowerCase().includes(q),
-    );
-  }, [territoryChoices, search]);
+    const type = terrainFilter;
+    return territoryChoices.filter((row) => {
+      if (type && (terrainTypeFor(row.id) || 'land') !== type) return false;
+      if (!q) return true;
+      return row.label.toLowerCase().includes(q) || row.id.toLowerCase().includes(q);
+    });
+  }, [territoryChoices, search, terrainFilter, terrainTypeFor]);
+
+  const terrainFilterOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const row of territoryChoices) {
+      const t = terrainTypeFor(row.id) || 'land';
+      counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([type, count]) => ({ type, count }));
+  }, [territoryChoices, terrainTypeFor]);
 
   const dots = useMemo(() => {
     if (!spots) return [];
@@ -1911,6 +1930,19 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
+              <select
+                className="admin-page__select admin-graph__filter"
+                aria-label="Filter by territory type"
+                value={terrainFilter}
+                onChange={(e) => setTerrainFilter(e.target.value)}
+              >
+                <option value="">All territory types</option>
+                {terrainFilterOptions.map((opt) => (
+                  <option key={opt.type} value={opt.type}>
+                    {prettifyId(opt.type)} ({opt.count})
+                  </option>
+                ))}
+              </select>
               <div className="admin-graph__list" role="listbox" aria-label="Territories">
                 {filteredChoices.map((row) => {
                   const overridden = entryFor(current, row.id)?.focus === 'override';
