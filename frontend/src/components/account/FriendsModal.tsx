@@ -22,6 +22,10 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
   const [listError, setListError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [playedOpen, setPlayedOpen] = useState(false);
+  const [playedWith, setPlayedWith] = useState<FriendUser[] | null>(null);
+  const [playedLoading, setPlayedLoading] = useState(false);
+  const [playedError, setPlayedError] = useState<string | null>(null);
 
   const loadLists = useCallback(async () => {
     try {
@@ -41,11 +45,33 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
     void loadLists();
   }, [loadLists]);
 
+  const loadPlayedWith = useCallback(async () => {
+    setPlayedLoading(true);
+    try {
+      const r = await api.listPlayedWith();
+      setPlayedWith(r.users ?? []);
+      setPlayedError(null);
+    } catch (err) {
+      setPlayedError(err instanceof Error ? err.message : 'Could not load players');
+    } finally {
+      setPlayedLoading(false);
+    }
+  }, []);
+
+  const togglePlayedWith = () => {
+    setPlayedOpen((open) => {
+      const next = !open;
+      if (next) void loadPlayedWith();
+      return next;
+    });
+  };
+
   const runAction = async (action: () => Promise<unknown>) => {
     setActionError(null);
     try {
       await action();
       await loadLists();
+      if (playedOpen) await loadPlayedWith();
       onRequestsChanged();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Action failed';
@@ -112,6 +138,49 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
           </button>
         </form>
         {searchError && <p className="account-msg account-msg--error">{searchError}</p>}
+        <button
+          type="button"
+          className="friends-played-with__toggle"
+          aria-expanded={playedOpen}
+          onClick={togglePlayedWith}
+        >
+          Who have I played with?
+        </button>
+        {playedOpen && (
+          <>
+            {playedLoading && playedWith == null && <p className="account-subtle">Loading…</p>}
+            {playedError && <p className="account-msg account-msg--error">{playedError}</p>}
+            {playedWith && (
+              <ul className="friends-list" aria-label="Players you have played with">
+                {playedWith.length === 0 ? (
+                  <li className="friends-list__empty">You have not played with anyone yet.</li>
+                ) : (
+                  playedWith.map((u) => (
+                    <li key={u.id} className="friends-list__row">
+                      <span className="friends-list__name">{u.username}</span>
+                      {u.relation === 'friend' ? (
+                        <span className="friends-list__tag">Friends</span>
+                      ) : u.relation === 'pending_out' ? (
+                        <span className="friends-list__tag">Request sent</span>
+                      ) : u.relation === 'pending_in' ? (
+                        <span className="friends-list__tag">Wants to be friends</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="account-btn account-btn--small"
+                          onClick={() => sendRequest(u.username)}
+                          disabled={busyId === `send:${u.username}`}
+                        >
+                          {busyId === `send:${u.username}` ? 'Sending…' : 'Send Friend Request'}
+                        </button>
+                      )}
+                    </li>
+                  ))
+                )}
+              </ul>
+            )}
+          </>
+        )}
         {results && (
           <ul className="friends-list" aria-label="Search results">
             {results.length === 0 ? (

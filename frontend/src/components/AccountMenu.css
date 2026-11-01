@@ -882,6 +882,25 @@
   min-width: 0;
 }
 
+.friends-played-with__toggle,
+.friends-played-with__toggle:hover:not(:disabled) {
+  align-self: flex-start;
+  margin-top: 0.75rem;
+  padding: 0;
+  background: none;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+  color: var(--ink);
+  font-family: var(--font-parchment);
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
 .friends-list {
   list-style: none;
   margin: 0.6rem 0 0;

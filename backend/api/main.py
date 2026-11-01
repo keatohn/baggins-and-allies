@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from .admin_query import SelectOnlyError, list_db_schema, run_admin_select
 from .database import get_db, get_db_file_path, init_db, SessionLocal
-from .models import FriendRequest, Game as GameModel, Player
+from .models import FriendRequest, Game as GameModel, GameResult, Player
 from .player_stats import compute_player_stats, player_headline_record
 from .achievements import (
     AchievementError,
@@ -1664,6 +1664,56 @@ def friends_search(
         .all()
     )
     return {"users": [_friend_user_payload(db, player.id, p) for p in rows if p.id != player.id]}
+
+
+def _roster_player_ids(raw: str | None) -> list[str]:
+    try:
+        roster = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(roster, list):
+        return []
+    ids: list[str] = []
+    for entry in roster:
+        if not isinstance(entry, dict):
+            continue
+        pid = entry.get("player_id")
+        if isinstance(pid, str):
+            pid = pid.strip()
+            if pid and pid != "__computer__":
+                ids.append(pid)
+    return ids
+
+
+@app.get("/friends/played-with")
+def friends_played_with(
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Humans this player has shared an active or finished game with."""
+    ids: set[str] = set()
+    for (raw,) in (
+        db.query(GameResult.participant_ids).filter(GameResult.player_id == player.id).all()
+    ):
+        try:
+            parts = json.loads(raw or "[]")
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(parts, list):
+            continue
+        for pid in parts:
+            if isinstance(pid, str) and pid.strip() and pid.strip() not in (player.id, "__computer__"):
+                ids.add(pid.strip())
+    for (raw,) in db.query(GameModel.players).filter(GameModel.status == "active").all():
+        roster = _roster_player_ids(raw)
+        if player.id in roster:
+            ids.update(pid for pid in roster if pid != player.id)
+    if not ids:
+        return {"users": []}
+    others = db.query(Player).filter(Player.id.in_(ids)).all()
+    users = [_friend_user_payload(db, player.id, other) for other in others]
+    users.sort(key=lambda row: row["username"].lower())
+    return {"users": users}
 
 
 @app.post("/friends/requests")

@@ -1191,6 +1191,8 @@ export const api = {
   /** Prefix search for usernames with the viewer's relation to each (max 20). */
   searchFriends: (username: string) =>
     fetchJson<{ users: FriendUser[] }>(`/friends/search?username=${encodeURIComponent(username)}`),
+  /** Humans this player has shared an active or finished game with. */
+  listPlayedWith: () => fetchJson<{ users: FriendUser[] }>('/friends/played-with'),
   /** Send a friend request by username. 409 on duplicate/existing friendship. */
   sendFriendRequest: (username: string) =>
     fetchJson<{ ok: boolean; request: FriendRequestItem }>('/friends/requests', {

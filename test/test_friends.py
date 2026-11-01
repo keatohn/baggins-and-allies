@@ -1,5 +1,6 @@
 """Friends lifecycle: search, request, accept/decline, list, pending count."""
 
+import json
 import uuid
 
 import pytest
@@ -12,7 +13,7 @@ from sqlalchemy.pool import StaticPool
 from backend.api.auth import get_current_admin, get_current_player, hash_password
 from backend.api.database import Base, get_db
 from backend.api.main import app
-from backend.api.models import Player
+from backend.api.models import Game, GameResult, Player
 
 
 @pytest.fixture()
@@ -108,6 +109,67 @@ def test_search_prefix_and_self_excluded(make_client, players):
 
     r = client.get("/friends/search", params={"username": ""})
     assert r.json()["users"] == []
+
+
+def test_played_with_active_and_finished_not_lobby(make_client, players, db_session):
+    admin, user, buddy = players
+    active = Game(
+        id=str(uuid.uuid4()),
+        name="Active",
+        status="active",
+        game_state="{}",
+        players=json.dumps(
+            [
+                {"player_id": user.id, "faction_id": "gondor"},
+                {"player_id": buddy.id, "faction_id": "rohan"},
+                {"player_id": "__computer__", "faction_id": "mordor"},
+            ]
+        ),
+    )
+    lobby = Game(
+        id=str(uuid.uuid4()),
+        name="Lobby",
+        status="lobby",
+        game_state="{}",
+        players=json.dumps(
+            [
+                {"player_id": user.id, "faction_id": "gondor"},
+                {"player_id": admin.id, "faction_id": "isengard"},
+            ]
+        ),
+    )
+    db_session.add_all([active, lobby])
+    db_session.commit()
+
+    client = make_client(user)
+    r = client.get("/friends/played-with")
+    assert r.status_code == 200
+    assert [u["username"] for u in r.json()["users"]] == ["buddyone"]
+    assert r.json()["users"][0]["relation"] == "none"
+
+    finished = Game(
+        id=str(uuid.uuid4()),
+        name="Finished",
+        status="finished",
+        game_state="{}",
+        players="[]",
+    )
+    db_session.add(finished)
+    db_session.flush()
+    db_session.add(
+        GameResult(
+            id=str(uuid.uuid4()),
+            game_id=finished.id,
+            player_id=user.id,
+            faction_id="gondor",
+            alliance="good",
+            won=True,
+            participant_ids=json.dumps([user.id, admin.id, "__computer__"]),
+        )
+    )
+    db_session.commit()
+    r = client.get("/friends/played-with")
+    assert [u["username"] for u in r.json()["users"]] == ["adminuser", "buddyone"]
 
 
 def test_request_lifecycle_accept(make_client, players):

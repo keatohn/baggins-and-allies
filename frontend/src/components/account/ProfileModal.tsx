@@ -11,7 +11,7 @@ interface ProfileModalProps {
   onClose: () => void;
 }
 
-/** Discrete background colors. Darker swatches keep the unit readable. */
+/** Discrete background colors, dark rows first and light rows after, including white. */
 const COLOR_PALETTE = [
   '#1c3d18', '#2d5a27', '#3f7a34', '#5c8a3a', '#1e4d3a', '#2f6b4f',
   '#16324f', '#1a3a63', '#24507f', '#2f6b6b', '#3d7a8c', '#1f4d5c',
@@ -19,6 +19,11 @@ const COLOR_PALETTE = [
   '#4a1c1c', '#6b2d2d', '#8a3d3d', '#a85a4a', '#7a3030', '#5c2424',
   '#2a1a40', '#4a2d6b', '#5b3a8a', '#6b4c9a', '#3d3058', '#5c4068',
   '#1f1f1f', '#3a342c', '#5c5346', '#8a6b1f', '#b89a4a', '#6b5a3e',
+  '#c5d6b0', '#dce8c8', '#e7f0d8', '#b7d4c4', '#d4ebe4', '#f2f7ea',
+  '#c5d4e8', '#d6e4f2', '#e8f1f8', '#c9e4ea', '#d8e8f4', '#f4f8fc',
+  '#e6d3b0', '#f0e2c8', '#f7efe0', '#f0d0c0', '#f6e0d4', '#fff6ea',
+  '#e8c8c4', '#f3dcd8', '#f8ecea', '#e4d0ea', '#f0e6f4', '#faf6fc',
+  '#d9d3c8', '#e8e2d6', '#f3efe6', '#f7f4ee', '#fbf9f6', '#ffffff',
 ];
 
 function formatPct(pct: number | null | undefined): string {
