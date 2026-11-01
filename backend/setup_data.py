@@ -429,6 +429,43 @@ def delete_setup(db: Session, setup_id: str) -> None:
     db.commit()
 
 
+def list_all_unit_icons(db: Session | None) -> list[str]:
+    """Distinct unit icon filenames across every setup (db rows when present, else files).
+
+    Falls back to ``{unit_id}.png`` when a unit entry has no icon. Used by the
+    profile avatar picker, which is not tied to any one setup.
+    """
+    icons: set[str] = set()
+
+    def _add_units(units: Any) -> None:
+        if not isinstance(units, dict):
+            return
+        for uid, unit in units.items():
+            if not isinstance(unit, dict):
+                continue
+            icon = unit.get("icon")
+            if isinstance(icon, str) and icon.strip():
+                icons.add(icon.strip())
+            elif isinstance(uid, str) and uid:
+                icons.add(f"{uid}.png")
+
+    if db is not None and not is_files_setup_source() and db_has_any_setup(db):
+        for row in db.query(Setup).all():
+            try:
+                _add_units(json.loads(row.units_json))
+            except (json.JSONDecodeError, TypeError):
+                continue
+    elif SETUPS_DIR.is_dir():
+        for d in sorted(SETUPS_DIR.iterdir()):
+            if not d.is_dir():
+                continue
+            try:
+                _add_units(_read_json_file(d / "units.json"))
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+    return sorted(icons)
+
+
 # ----- Optional DB: helpers used from definitions.py (no Session in tests) -----
 
 def db_has_any_setup(db: Session) -> bool:

@@ -213,10 +213,11 @@ def init_db():
     Migrations here only add missing columns (ALTER TABLE ... ADD COLUMN). They do not drop tables,
     truncate rows, or rewrite game_state — player and game data are preserved.
     """
-    # Register all models on Base before create_all (setups table, etc.)
+    # Register all models on Base before create_all (setups table, friend_requests, etc.)
     from .models import (  # noqa: F401
         Achievement,
         AppSetting,
+        FriendRequest,
         Game,
         GameResult,
         MapOverride,
@@ -236,6 +237,7 @@ def init_db():
     db = SessionLocal()
     try:
         from backend.audio_gains import seed_audio_gains_if_empty
+        from backend.avatar import seed_profile_defaults_if_empty
         from backend.catalog import seed_catalog_if_empty
         from backend.map_overrides import seed_map_overrides_if_empty
         from backend.setup_data import seed_setups_if_empty
@@ -250,5 +252,6 @@ def init_db():
         seed_unit_formulas_if_empty(db)
         seed_map_overrides_if_empty(db)
         seed_progression_if_empty(db)
+        seed_profile_defaults_if_empty(db)
     finally:
         db.close()

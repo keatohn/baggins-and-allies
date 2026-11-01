@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { api } from '../services/api';
 import { useMenuScroll } from '../components/MenuScrollContext';
 import MenuLink from '../components/MenuLink';
+import AccountMenu from '../components/AccountMenu';
 import './JoinGame.css';
 
 export default function JoinGame() {
@@ -31,6 +32,7 @@ export default function JoinGame() {
 
   return (
     <div className="join-game-page">
+      <AccountMenu />
       <h1 className="join-game-page__title">Join game</h1>
       <form className="join-game-form" onSubmit={handleSubmit}>
         {error && <p className="join-game-form__error">{error}</p>}

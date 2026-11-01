@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMenuScroll } from '../components/MenuScrollContext';
+import AccountMenu from '../components/AccountMenu';
 import { api, getAuthToken } from '../services/api';
 import type { AuthPlayer } from '../services/api';
 import './MainMenu.css';
@@ -28,10 +29,18 @@ export default function MainMenu() {
     }
   }, [loading, revealScroll]);
 
-  if (loading) return <div className="main-menu main-menu--loading">Loading…</div>;
+  if (loading) {
+    return (
+      <>
+        <AccountMenu />
+        <div className="main-menu main-menu--loading">Loading…</div>
+      </>
+    );
+  }
 
   return (
     <div className="main-menu">
+      <AccountMenu />
       <h1 className="main-menu__title">Baggins & Allies</h1>
       {player ? (
         <>
@@ -45,9 +54,6 @@ export default function MainMenu() {
           </button>
           <button type="button" className="main-menu__btn" onClick={() => navigateWithScroll('/join')}>
             Join game
-          </button>
-          <button type="button" className="main-menu__btn" onClick={() => navigateWithScroll('/profile')}>
-            Profile
           </button>
           {player.is_admin ? (
             <button

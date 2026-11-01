@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { GameState } from '../types/game';
 import type { ApiFactionStats, SpecialDefinition } from '../services/api';
 import StrongholdAllianceBar from './StrongholdAllianceBar';
+import AccountMenu from './AccountMenu';
 import { useMenuScroll } from './MenuScrollContext';
 import { GameStatsModal, RingsOfPowerModal, UnitStatsModal, type RingsOfPowerData, type StatsRingMark, type UnitForStats } from './StatsModals';
 import './Header.css';
@@ -83,6 +84,7 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
         >
           Menu
         </Link>
+        <AccountMenu variant="header" />
         <button
           type="button"
           className="header-help-btn"

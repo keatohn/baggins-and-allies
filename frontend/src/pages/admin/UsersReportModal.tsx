@@ -38,6 +38,13 @@ export function UsersReportModal({ onClose }: { onClose: () => void }) {
   const [backfilling, setBackfilling] = useState(false);
   const [backfillNote, setBackfillNote] = useState<string | null>(null);
 
+  const [defaultColor, setDefaultColor] = useState<string>('#2d5a27');
+  const [defaultColorDirty, setDefaultColorDirty] = useState(false);
+  const [defaultsLoading, setDefaultsLoading] = useState(true);
+  const [defaultsSaving, setDefaultsSaving] = useState(false);
+  const [defaultsError, setDefaultsError] = useState<string | null>(null);
+  const [defaultsSaved, setDefaultsSaved] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     api
@@ -47,6 +54,20 @@ export function UsersReportModal({ onClose }: { onClose: () => void }) {
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load users');
+      });
+    api
+      .adminGetProfileDefaults()
+      .then((r) => {
+        if (!cancelled) {
+          setDefaultColor(r.default_avatar_color);
+          setDefaultsLoading(false);
+        }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setDefaultsError(e instanceof Error ? e.message : 'Could not load profile defaults');
+          setDefaultsLoading(false);
+        }
       });
     return () => {
       cancelled = true;
@@ -144,6 +165,22 @@ export function UsersReportModal({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const saveDefaults = async () => {
+    setDefaultsSaving(true);
+    setDefaultsError(null);
+    setDefaultsSaved(false);
+    try {
+      const r = await api.adminPutProfileDefaults(defaultColor);
+      setDefaultColor(r.default_avatar_color);
+      setDefaultColorDirty(false);
+      setDefaultsSaved(true);
+    } catch (e: unknown) {
+      setDefaultsError(e instanceof Error ? e.message : 'Could not save profile defaults');
+    } finally {
+      setDefaultsSaving(false);
+    }
+  };
+
   return (
     <div className="admin-modal-overlay" role="presentation" onClick={onClose}>
       <div
@@ -195,6 +232,43 @@ export function UsersReportModal({ onClose }: { onClose: () => void }) {
         {tab === 'users' ? (
           <>
             {error ? <p className="admin-page__error games-report__error">{error}</p> : null}
+            <div className="users-report__defaults">
+              <p className="admin-form__micro">
+                Default avatar color for players who have not picked one. A chosen color stays put.
+              </p>
+              <div className="users-report__defaults-row">
+                <input
+                  type="color"
+                  className="users-report__color-input"
+                  value={defaultColor}
+                  disabled={defaultsLoading || defaultsSaving}
+                  aria-label="Default avatar color"
+                  onChange={(e) => {
+                    setDefaultColor(e.target.value);
+                    setDefaultColorDirty(true);
+                    setDefaultsSaved(false);
+                    setDefaultsError(null);
+                  }}
+                />
+                <span className="admin-form__micro users-report__color-value">{defaultColor}</span>
+                {defaultColorDirty && (
+                  <button
+                    type="button"
+                    className="admin-page__btn"
+                    onClick={() => void saveDefaults()}
+                    disabled={defaultsSaving}
+                  >
+                    {defaultsSaving ? 'Saving…' : 'Save Default Color'}
+                  </button>
+                )}
+                {defaultsSaved && !defaultsError && !defaultColorDirty && (
+                  <span className="admin-form__micro">Saved.</span>
+                )}
+              </div>
+              {defaultsError ? (
+                <p className="admin-page__error users-report__defaults-error">{defaultsError}</p>
+              ) : null}
+            </div>
             <div className="games-report__table-scroll">
               {users != null ? (
                 users.length === 0 ? (

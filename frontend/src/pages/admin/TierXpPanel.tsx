@@ -124,8 +124,8 @@ export function TierXpPanel({
         <p className="admin-form__micro">
           A player is in the highest tier whose minimum they have reached. The lowest tier must start at 0,
           and each threshold has to be higher than the one before it. Saving sorts tiers by that minimum.
-          Raising a threshold can move players down. The frame, ring color, and glow are what the profile
-          circle will use once those images exist.
+          Raising a threshold can move players down. The ring color and glow wrap the profile circle.
+          A frame is optional and only used when that image exists.
         </p>
         <label className="admin-form__label">
           XP label
