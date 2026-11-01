@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MenuLink from '../components/MenuLink';
+import { useMenuScroll } from '../components/MenuScrollContext';
 import { api, getAuthToken, getResolvedApiBase, usesViteApiProxy } from '../services/api';
 import type { AdminSetupBundle, AdminSetupListItem, AuthPlayer, Catalog, UnitFormulas } from '../services/api';
 import {
@@ -317,8 +318,10 @@ function CreateSetupDialog({
 
 export default function Admin() {
   const navigate = useNavigate();
+  const { holdScroll, revealScroll } = useMenuScroll();
   const [player, setPlayer] = useState<AuthPlayer | null>(null);
   const [loading, setLoading] = useState(true);
+  const heldForLoadRef = useRef(false);
   const [setups, setSetups] = useState<AdminSetupListItem[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
   const [activeTab, setActiveTab] = useState<TabKey>('manifest');
@@ -412,6 +415,9 @@ export default function Admin() {
       navigate('/', { replace: true });
       return;
     }
+    // Hold the scroll closed while authMe loads so "Loading…" isn't revealed.
+    heldForLoadRef.current = true;
+    holdScroll();
     api
       .authMe()
       .then((p) => {
@@ -420,7 +426,14 @@ export default function Admin() {
       })
       .catch(() => navigate('/', { replace: true }))
       .finally(() => setLoading(false));
-  }, [navigate]);
+  }, [navigate, holdScroll]);
+
+  useEffect(() => {
+    if (!loading && heldForLoadRef.current) {
+      heldForLoadRef.current = false;
+      revealScroll();
+    }
+  }, [loading, revealScroll]);
 
   const refreshList = useCallback(() => {
     setLoadError(null);

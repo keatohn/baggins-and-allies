@@ -80,3 +80,19 @@
 .join-game-page__menu-anchor {
   margin-top: 4.5rem;
 }
+
+/* Clear decorative scroll-end rolls (menu overlay). Desktop + landscape: pads
+   sides past the left/right rolls. Mobile portrait: pads top/bottom instead. */
+@media (min-width: 768px), (orientation: landscape) {
+  .join-game-page {
+    padding-left: max(2rem, calc(var(--scroll-roll-w, 40px) + 1rem));
+    padding-right: max(2rem, calc(var(--scroll-roll-w, 40px) + 1rem));
+  }
+}
+
+@media (max-width: 767px) and (orientation: portrait) {
+  .join-game-page {
+    padding-top: max(1.5rem, calc(var(--scroll-roll-w, 24px) + 0.75rem));
+    padding-bottom: max(1.5rem, calc(var(--scroll-roll-w, 24px) + 0.75rem));
+  }
+}

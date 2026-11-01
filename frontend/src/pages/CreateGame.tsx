@@ -53,7 +53,7 @@ function RuleLabel({ name, description }: { name: string; description?: string }
 }
 
 export default function CreateGame() {
-  const { navigateWithScroll } = useMenuScroll();
+  const { navigateWithScroll, holdScroll, revealScroll } = useMenuScroll();
   const [name, setName] = useState('');
   const [isMultiplayer, setIsMultiplayer] = useState(false);
   const [heroesEnabled, setHeroesEnabled] = useState(true);
@@ -67,6 +67,7 @@ export default function CreateGame() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<'scenario' | 'settings'>('scenario');
+  const heldForLoadRef = useRef(false);
 
   // Backend returns menu scenarios (public, plus admin-only for admins) that have context.
   const scenariosWithContext = setups.filter(
@@ -76,6 +77,9 @@ export default function CreateGame() {
   useEffect(() => {
     let cancelled = false;
     setSetupsError(null);
+    // Hold the scroll closed while scenarios load so the loading hint isn't revealed.
+    heldForLoadRef.current = true;
+    holdScroll();
     api.getSetups().then(({ setups: list, rule_descriptions: descriptions }) => {
       if (!cancelled) {
         setSetups(Array.isArray(list) ? list : []);
@@ -94,7 +98,14 @@ export default function CreateGame() {
       if (!cancelled) setLoadingSetups(false);
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [holdScroll]);
+
+  useEffect(() => {
+    if (!loadingSetups && heldForLoadRef.current) {
+      heldForLoadRef.current = false;
+      revealScroll();
+    }
+  }, [loadingSetups, revealScroll]);
 
   useEffect(() => {
     if (scenariosWithContext.length > 0 && (selectedSetupId === null || !scenariosWithContext.some((s) => s.id === selectedSetupId)))

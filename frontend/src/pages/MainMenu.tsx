@@ -1,21 +1,32 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMenuScroll } from '../components/MenuScrollContext';
 import { api, getAuthToken } from '../services/api';
 import type { AuthPlayer } from '../services/api';
 import './MainMenu.css';
 
 export default function MainMenu() {
-  const { navigateWithScroll } = useMenuScroll();
+  const { navigateWithScroll, holdScroll, revealScroll } = useMenuScroll();
   const [player, setPlayer] = useState<AuthPlayer | null>(null);
   const [loading, setLoading] = useState(true);
+  const heldForLoadRef = useRef(false);
 
   useEffect(() => {
     if (!getAuthToken()) {
       setLoading(false);
       return;
     }
+    // Hold the scroll closed while authMe loads so "Loading…" isn't revealed.
+    heldForLoadRef.current = true;
+    holdScroll();
     api.authMe().then(setPlayer).catch(() => setPlayer(null)).finally(() => setLoading(false));
-  }, []);
+  }, [holdScroll]);
+
+  useEffect(() => {
+    if (!loading && heldForLoadRef.current) {
+      heldForLoadRef.current = false;
+      revealScroll();
+    }
+  }, [loading, revealScroll]);
 
   if (loading) return <div className="main-menu main-menu--loading">Loading…</div>;
 

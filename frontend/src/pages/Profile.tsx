@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MenuLink from '../components/MenuLink';
+import { useMenuScroll } from '../components/MenuScrollContext';
 import {
   setGameMusicVolume,
   setGameSfxVolume,
@@ -16,6 +17,7 @@ const DEFAULT_SFX_PCT = 0;
 
 export default function Profile() {
   const navigate = useNavigate();
+  const { holdScroll, revealScroll } = useMenuScroll();
   const [player, setPlayer] = useState<AuthPlayer | null>(null);
   const [loading, setLoading] = useState(true);
   const [usernameEditing, setUsernameEditing] = useState(false);
@@ -23,6 +25,7 @@ export default function Profile() {
   const [usernameError, setUsernameError] = useState<string | null>(null);
   const [usernameSuccess, setUsernameSuccess] = useState(false);
   const [savingUsername, setSavingUsername] = useState(false);
+  const heldForLoadRef = useRef(false);
 
   const [menuMusicVolumePct, setMenuMusicVolumePct] = useState(DEFAULT_MENU_MUSIC_PCT);
   const [gameMusicVolumePct, setGameMusicVolumePct] = useState(DEFAULT_GAME_MUSIC_PCT);
@@ -80,6 +83,9 @@ export default function Profile() {
       navigate('/', { replace: true });
       return;
     }
+    // Hold the scroll closed while authMe loads so "Loading…" isn't revealed.
+    heldForLoadRef.current = true;
+    holdScroll();
     api
       .authMe()
       .then((p) => {
@@ -89,7 +95,14 @@ export default function Profile() {
       })
       .catch(() => navigate('/', { replace: true }))
       .finally(() => setLoading(false));
-  }, [navigate, applyPlayerAudio]);
+  }, [navigate, applyPlayerAudio, holdScroll]);
+
+  useEffect(() => {
+    if (!loading && heldForLoadRef.current) {
+      heldForLoadRef.current = false;
+      revealScroll();
+    }
+  }, [loading, revealScroll]);
 
   useEffect(() => {
     isMountedRef.current = true;
