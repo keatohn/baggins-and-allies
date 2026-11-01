@@ -24,7 +24,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .database import get_db, get_db_file_path, init_db, SessionLocal
-from .models import Game as GameModel, Player
+from .models import FriendRequest, Game as GameModel, Player
 from .player_stats import compute_player_stats, player_headline_record
 from .achievements import (
     AchievementError,
@@ -45,6 +45,14 @@ from .auth import (
     hash_password,
     validate_username,
     verify_password,
+)
+from backend.avatar import (
+    DEFAULT_AVATAR_IMAGE,
+    IMAGE_RE,
+    load_default_avatar_color,
+    normalize_avatar_color,
+    normalize_avatar_image,
+    save_default_avatar_color,
 )
 
 from backend.balance.starting_strength import compute_starting_strength
@@ -138,6 +146,7 @@ from backend.setup_data import (
     get_admin_setup_bundle,
     is_files_setup_source,
     list_all_setups_admin,
+    list_all_unit_icons,
     save_setup_bundle,
     try_list_setups_menu,
     try_load_setup,
@@ -385,9 +394,15 @@ class AudioSettingsPatch(BaseModel):
     muted: bool | None = None
 
 
+class AvatarSettingsPatch(BaseModel):
+    image: str | None = Field(None, max_length=64)
+    color: str | None = Field(None, max_length=16)
+
+
 class PatchProfileRequest(BaseModel):
     username: str | None = None
     audio: AudioSettingsPatch | None = None
+    avatar: AvatarSettingsPatch | None = None
 
 
 class CreateGameRequest(BaseModel):
@@ -1324,13 +1339,24 @@ def _player_audio_response(player: Player) -> dict[str, Any]:
     }
 
 
-def _profile_response(player: Player) -> dict[str, Any]:
+def _player_avatar_response(player: Player, db: Session) -> dict[str, Any]:
+    """Avatar with response-time defaults: hobbit icon on the admin default color."""
+    prefs = _player_prefs_dict(player)
+    raw = prefs.get("avatar")
+    avatar = raw if isinstance(raw, dict) else {}
+    image = normalize_avatar_image(avatar.get("image")) or DEFAULT_AVATAR_IMAGE
+    color = normalize_avatar_color(avatar.get("color")) or load_default_avatar_color(db)
+    return {"image": image, "color": color}
+
+
+def _profile_response(player: Player, db: Session) -> dict[str, Any]:
     return {
         "id": player.id,
         "email": player.email,
         "username": player.username,
         "is_admin": bool(getattr(player, "is_admin", False)),
         "audio": _player_audio_response(player),
+        "avatar": _player_avatar_response(player, db),
     }
 
 
@@ -1361,7 +1387,7 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(player)
         token = create_access_token(player_id)
-        return {"access_token": token, "player": _profile_response(player)}
+        return {"access_token": token, "player": _profile_response(player, db)}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
@@ -1378,7 +1404,7 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(player)
     token = create_access_token(player.id)
-    return {"access_token": token, "player": _profile_response(player)}
+    return {"access_token": token, "player": _profile_response(player, db)}
 
 
 # Single-use temp password lifetime; override with TEMP_PASSWORD_EXPIRE_MINUTES (e.g. 15 or 120).
@@ -1430,9 +1456,12 @@ def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db))
 
 
 @app.get("/auth/me")
-def auth_me(player: Player = Depends(get_current_player)):
-    """Return current player (email, username, audio preferences)."""
-    return _profile_response(player)
+def auth_me(
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Return current player (email, username, audio preferences, avatar)."""
+    return _profile_response(player, db)
 
 
 @app.patch("/auth/me")
@@ -1441,11 +1470,12 @@ def update_profile(
     player: Player = Depends(get_current_player),
     db: Session = Depends(get_db),
 ):
-    """Update username and/or audio preferences (merged into stored JSON)."""
-    if request.username is None and request.audio is None:
+    """Update username and/or audio/avatar preferences (merged into stored JSON)."""
+    if request.username is None and request.audio is None and request.avatar is None:
         raise HTTPException(status_code=400, detail="No fields to update")
 
     prefs = _player_prefs_dict(player)
+    prefs_dirty = False
 
     if request.audio is not None:
         audio = prefs.get("audio") or {}
@@ -1467,6 +1497,27 @@ def update_profile(
         if request.audio.muted is not None:
             audio["muted"] = bool(request.audio.muted)
         prefs["audio"] = audio
+        prefs_dirty = True
+
+    if request.avatar is not None:
+        if request.avatar.image is None and request.avatar.color is None:
+            raise HTTPException(status_code=400, detail="Avatar image or color is required")
+        avatar = prefs.get("avatar")
+        avatar = dict(avatar) if isinstance(avatar, dict) else {}
+        if request.avatar.image is not None:
+            image = normalize_avatar_image(request.avatar.image)
+            if image is None or not IMAGE_RE.match(image):
+                raise HTTPException(status_code=400, detail="Image must be a plain .png filename")
+            avatar["image"] = image
+        if request.avatar.color is not None:
+            color = normalize_avatar_color(request.avatar.color)
+            if color is None:
+                raise HTTPException(status_code=400, detail="Color must be a #rrggbb hex value")
+            avatar["color"] = color
+        prefs["avatar"] = avatar
+        prefs_dirty = True
+
+    if prefs_dirty:
         player.preferences = json.dumps(prefs)
 
     if request.username is not None:
@@ -1484,10 +1535,250 @@ def update_profile(
     try:
         db.commit()
         db.refresh(player)
-        return _profile_response(player)
+        return _profile_response(player, db)
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Update failed: {str(e)}")
+
+
+# ----- Friends -----
+
+
+@app.get("/profile/avatar-icons")
+def get_profile_avatar_icons(db: Session = Depends(get_db)):
+    """Distinct unit icon filenames across all setups, for the profile avatar picker."""
+    return {"icons": list_all_unit_icons(db)}
+
+
+class FriendRequestCreateBody(BaseModel):
+    username: str
+
+
+def _friendship_accepted(db: Session, a_id: str, b_id: str) -> bool:
+    return (
+        db.query(FriendRequest)
+        .filter(
+            FriendRequest.status == "accepted",
+            (
+                ((FriendRequest.requester_id == a_id) & (FriendRequest.addressee_id == b_id))
+                | ((FriendRequest.requester_id == b_id) & (FriendRequest.addressee_id == a_id))
+            ),
+        )
+        .first()
+        is not None
+    )
+
+
+def _pending_request_between(db: Session, a_id: str, b_id: str) -> FriendRequest | None:
+    return (
+        db.query(FriendRequest)
+        .filter(
+            FriendRequest.status == "pending",
+            (
+                ((FriendRequest.requester_id == a_id) & (FriendRequest.addressee_id == b_id))
+                | ((FriendRequest.requester_id == b_id) & (FriendRequest.addressee_id == a_id))
+            ),
+        )
+        .first()
+    )
+
+
+def _friend_relation(db: Session, viewer_id: str, other: Player) -> str:
+    """none | friend | pending_out (viewer sent) | pending_in (viewer must act)."""
+    if _friendship_accepted(db, viewer_id, other.id):
+        return "friend"
+    row = _pending_request_between(db, viewer_id, other.id)
+    if row is None:
+        return "none"
+    return "pending_out" if row.requester_id == viewer_id else "pending_in"
+
+
+def _friend_user_payload(db: Session, viewer_id: str, other: Player) -> dict[str, Any]:
+    return {
+        "id": other.id,
+        "username": other.username,
+        "relation": _friend_relation(db, viewer_id, other),
+    }
+
+
+@app.get("/friends/search")
+def friends_search(
+    username: str,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Case-insensitive prefix search for usernames, with the viewer's relation to each."""
+    q = username.strip().lower()
+    if not q:
+        return {"users": []}
+    rows = (
+        db.query(Player)
+        .filter(func.lower(Player.username).like(f"{q}%"))
+        .order_by(Player.username)
+        .limit(20)
+        .all()
+    )
+    return {"users": [_friend_user_payload(db, player.id, p) for p in rows if p.id != player.id]}
+
+
+@app.post("/friends/requests")
+def friends_send_request(
+    body: FriendRequestCreateBody,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Send a friend request by username."""
+    q = body.username.strip()
+    addressee = (
+        db.query(Player).filter(func.lower(Player.username) == func.lower(q)).first()
+        if q
+        else None
+    )
+    if addressee is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    if addressee.id == player.id:
+        raise HTTPException(status_code=400, detail="Cannot send a friend request to yourself")
+    if _friendship_accepted(db, player.id, addressee.id):
+        raise HTTPException(status_code=409, detail="You are already friends")
+    if _pending_request_between(db, player.id, addressee.id) is not None:
+        raise HTTPException(status_code=409, detail="A friend request is already pending")
+    row = FriendRequest(
+        id=str(uuid.uuid4()),
+        requester_id=player.id,
+        addressee_id=addressee.id,
+        status="pending",
+    )
+    db.add(row)
+    db.commit()
+    return {
+        "ok": True,
+        "request": {
+            "id": row.id,
+            "username": addressee.username,
+            "direction": "outgoing",
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        },
+    }
+
+
+@app.get("/friends/requests")
+def friends_list_requests(
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Pending incoming (act on these) and outgoing (awaiting reply) friend requests."""
+    pending = db.query(FriendRequest).filter(FriendRequest.status == "pending").all()
+    incoming: list[dict[str, Any]] = []
+    outgoing: list[dict[str, Any]] = []
+    player_ids = {r.requester_id for r in pending} | {r.addressee_id for r in pending}
+    players = {
+        p.id: p for p in db.query(Player).filter(Player.id.in_(player_ids)).all()
+    } if player_ids else {}
+    for row in pending:
+        if row.addressee_id == player.id:
+            other = players.get(row.requester_id)
+            if other:
+                incoming.append(
+                    {
+                        "id": row.id,
+                        "username": other.username,
+                        "created_at": row.created_at.isoformat() if row.created_at else None,
+                    }
+                )
+        elif row.requester_id == player.id:
+            other = players.get(row.addressee_id)
+            if other:
+                outgoing.append(
+                    {
+                        "id": row.id,
+                        "username": other.username,
+                        "created_at": row.created_at.isoformat() if row.created_at else None,
+                    }
+                )
+    incoming.sort(key=lambda r: r["username"].lower())
+    outgoing.sort(key=lambda r: r["username"].lower())
+    return {"incoming": incoming, "outgoing": outgoing}
+
+
+@app.get("/friends/requests/pending-count")
+def friends_pending_count(
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Badge count: pending requests awaiting this player's accept/decline."""
+    count = (
+        db.query(FriendRequest)
+        .filter(FriendRequest.status == "pending", FriendRequest.addressee_id == player.id)
+        .count()
+    )
+    return {"count": count}
+
+
+def _get_pending_request_for_player(
+    db: Session, request_id: str, player: Player, *, as_addressee: bool
+) -> FriendRequest:
+    row = db.query(FriendRequest).filter(FriendRequest.id == request_id).first()
+    if row is None or row.status != "pending":
+        raise HTTPException(status_code=404, detail="Friend request not found")
+    expected = row.addressee_id if as_addressee else row.requester_id
+    if expected != player.id:
+        raise HTTPException(status_code=404, detail="Friend request not found")
+    return row
+
+
+@app.post("/friends/requests/{request_id}/accept")
+def friends_accept_request(
+    request_id: str,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Accept an incoming pending request (addressee only)."""
+    row = _get_pending_request_for_player(db, request_id, player, as_addressee=True)
+    row.status = "accepted"
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/friends/requests/{request_id}/decline")
+def friends_decline_request(
+    request_id: str,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Decline an incoming pending request (addressee only); the row is removed."""
+    row = _get_pending_request_for_player(db, request_id, player, as_addressee=True)
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/friends")
+def friends_list(
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Accepted friends, sorted by username."""
+    rows = (
+        db.query(FriendRequest)
+        .filter(
+            FriendRequest.status == "accepted",
+            (FriendRequest.requester_id == player.id) | (FriendRequest.addressee_id == player.id),
+        )
+        .all()
+    )
+    other_ids = [
+        (r.addressee_id if r.requester_id == player.id else r.requester_id) for r in rows
+    ]
+    if not other_ids:
+        return {"friends": []}
+    others = {p.id: p for p in db.query(Player).filter(Player.id.in_(other_ids)).all()}
+    friends = [
+        {"id": pid, "username": others[pid].username}
+        for pid in other_ids
+        if pid in others
+    ]
+    friends.sort(key=lambda f: f["username"].lower())
+    return {"friends": friends}
 
 
 # ----- Player profile & stats (public to any logged-in player) -----
@@ -1601,6 +1892,33 @@ def admin_put_audio(
     """Replace the global per-file audio mix and (when sent) the menu music playlist."""
     gains, menu_music = save_audio_settings(db, body.gains, body.menu_music)
     return {"ok": True, "gains": gains, "menu_music": menu_music}
+
+
+class AdminProfileDefaultsBody(BaseModel):
+    default_avatar_color: str
+
+
+@app.get("/admin/profile-defaults")
+def admin_get_profile_defaults(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Current new-user profile defaults (avatar color). Existing users are never rewritten."""
+    return {"default_avatar_color": load_default_avatar_color(db)}
+
+
+@app.put("/admin/profile-defaults")
+def admin_put_profile_defaults(
+    body: AdminProfileDefaultsBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Set the default avatar color applied to users who never picked one."""
+    try:
+        color = save_default_avatar_color(db, body.default_avatar_color)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True, "default_avatar_color": color}
 
 
 @app.get("/signals")

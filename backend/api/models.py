@@ -25,6 +25,19 @@ class Player(Base):
     preferences = Column(Text, nullable=True)
 
 
+class FriendRequest(Base):
+    """Friend relationship row: pending until the addressee accepts; declined rows are deleted."""
+
+    __tablename__ = "friend_requests"
+    __table_args__ = (UniqueConstraint("requester_id", "addressee_id", name="uq_friend_requests_pair"),)
+
+    id = Column(String(36), primary_key=True)  # uuid
+    requester_id = Column(String(36), ForeignKey("players.id"), nullable=False, index=True)
+    addressee_id = Column(String(36), ForeignKey("players.id"), nullable=False, index=True)
+    status = Column(String(16), nullable=False, default="pending")  # pending | accepted
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Game(Base):
     __tablename__ = "games"
 

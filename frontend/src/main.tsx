@@ -43,7 +43,7 @@ function isLoggedInMenuRoute(pathname: string): boolean {
     pathname === '/' ||
     pathname === '/games' ||
     pathname === '/join' ||
-    pathname === '/profile' ||
+    pathname === '/profile/stats' ||
     pathname === '/admin' ||
     pathname === '/game/new'
   )
@@ -233,7 +233,9 @@ if (!rootEl) {
               <Route path="/forgot-password" element={<ForgotPassword />} />
               <Route path="/games" element={<GameList />} />
               <Route path="/join" element={<JoinGame />} />
-              <Route path="/profile" element={<Profile />} />
+              <Route path="/profile/stats" element={<Profile />} />
+              {/* Old profile page → menu with the Profile modal open. */}
+              <Route path="/profile" element={<Navigate to="/?modal=profile" replace />} />
               <Route path="/admin" element={<Admin />} />
               <Route path="/game/:gameId" element={<GameRoute />} />
             </Routes>
