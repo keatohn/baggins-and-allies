@@ -25,10 +25,14 @@ export default function MenuScrollOverlay() {
     <div className={`menu-scroll-overlay${stateClass}`} aria-hidden="true">
       <div className="menu-scroll-panel menu-scroll-panel--left">
         <div className="menu-scroll-panel__face" />
-        <div className="menu-scroll-panel__roll" />
+        <div className="menu-scroll-panel__roll">
+          <div className="menu-scroll-panel__roll-body" />
+        </div>
       </div>
       <div className="menu-scroll-panel menu-scroll-panel--right">
-        <div className="menu-scroll-panel__roll" />
+        <div className="menu-scroll-panel__roll">
+          <div className="menu-scroll-panel__roll-body" />
+        </div>
         <div className="menu-scroll-panel__face" />
       </div>
     </div>

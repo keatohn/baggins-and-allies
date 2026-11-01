@@ -1,10 +1,12 @@
 /* Decorative parchment scroll ends framing menu pages (issue #44).
-   Pure CSS: cylinder-shaded rolls + finials + parchment faces; no image assets.
+   Rolls are the sheet wound on itself: darker tan cylinder, curl on the face
+   side, charred spiral end-caps (scroll-roll-end.svg).
    Desktop + mobile landscape: rolls on left/right edges.
    Mobile portrait: rolls on top/bottom edges (see media query at bottom). */
 
 .menu-scroll-overlay {
   --scroll-roll-w: 40px;
+  --scroll-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23g)' opacity='0.4'/%3E%3C/svg%3E");
   position: fixed;
   inset: 0;
   z-index: 50;
@@ -86,9 +88,9 @@
     radial-gradient(ellipse 60% 50% at 75% 70%, rgba(70, 50, 25, 0.09), transparent 50%),
     radial-gradient(
       120% 100% at 50% 50%,
-      var(--parchment-light) 0%,
-      var(--parchment) 55%,
-      var(--parchment-dark) 100%
+      #d4c4a0 0%,
+      #c2b08a 55%,
+      #a89068 100%
     );
   background-size: 180px 180px, auto, auto, auto, auto, auto;
 }
@@ -101,75 +103,83 @@
   box-shadow: inset 10px 0 18px -6px rgba(61, 41, 20, 0.35);
 }
 
-/* The roll: a cylinder of parchment wrapped around a rod.
-   Muted parchment tones with fiber grain — reads as rolled sheet, not polish. */
+/* The roll: parchment wound into a cylinder. A short curve at each tip keeps
+   the end snug to the screen edge. The sheet joins on the outer side. */
 .menu-scroll-panel__roll {
   position: relative;
   flex-shrink: 0;
   width: var(--scroll-roll-w);
-  background-image:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23g)' opacity='0.2'/%3E%3C/svg%3E"),
-    linear-gradient(
-      90deg,
-      #4a3820 0%,
-      #5c4828 8%,
-      #7a6540 20%,
-      #9a8860 34%,
-      #b0a070 46%,
-      #bcac84 52%,
-      #b0a070 58%,
-      #9a8860 72%,
-      #7a6540 86%,
-      #5c4828 94%,
-      #423418 100%
-    );
+  border-radius: 50% / 8px;
+  overflow: hidden;
+}
+
+.menu-scroll-panel__roll-body {
+  position: absolute;
+  inset: 0;
+  background-color: #d2bc96;
   background-size: 120px 120px, auto;
-  box-shadow: inset 0 0 10px rgba(40, 26, 10, 0.4);
 }
 
 .menu-scroll-panel--left .menu-scroll-panel__roll {
-  box-shadow:
-    inset 0 0 10px rgba(40, 26, 10, 0.4),
-    4px 0 14px rgba(61, 41, 20, 0.3);
+  box-shadow: 5px 0 8px rgba(61, 41, 20, 0.28);
+}
+
+.menu-scroll-panel--left .menu-scroll-panel__roll-body {
+  background-image:
+    var(--scroll-grain),
+    linear-gradient(
+      90deg,
+      #4a3018 0%,
+      #8f6c40 14%,
+      #dcc49a 32%,
+      #e6d3ae 48%,
+      #d2bc96 66%,
+      #c0a878 84%,
+      #a89060 100%
+    );
 }
 
 .menu-scroll-panel--right .menu-scroll-panel__roll {
-  box-shadow:
-    inset 0 0 10px rgba(40, 26, 10, 0.4),
-    -4px 0 14px rgba(61, 41, 20, 0.3);
+  box-shadow: -5px 0 8px rgba(61, 41, 20, 0.28);
 }
 
-/* Finial knobs at top and bottom of the rod. */
+.menu-scroll-panel--right .menu-scroll-panel__roll-body {
+  background-image:
+    var(--scroll-grain),
+    linear-gradient(
+      90deg,
+      #a89060 0%,
+      #c0a878 16%,
+      #d2bc96 34%,
+      #e6d3ae 52%,
+      #dcc49a 68%,
+      #8f6c40 86%,
+      #4a3018 100%
+    );
+}
+
+/* Spiral end. The outer portion stays opaque so the charred rim shows on the
+   page-edge side and along both sides of the tip. */
 .menu-scroll-panel__roll::before,
 .menu-scroll-panel__roll::after {
   content: '';
   position: absolute;
-  left: 50%;
-  width: calc(var(--scroll-roll-w) + 12px);
-  height: 13px;
-  transform: translateX(-50%);
-  border-radius: 45% / 50%;
-  background: radial-gradient(
-    70% 100% at 50% 30%,
-    #d4b860 0%,
-    #a07d1c 45%,
-    #6b5210 100%
-  );
-  box-shadow: 0 1px 3px rgba(40, 26, 10, 0.45);
+  left: 0;
+  z-index: 1;
+  width: 100%;
+  height: 14px;
+  background: url('/scroll-roll-end.svg?v=6') center / 100% 100% no-repeat;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 78%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 78%, transparent 100%);
 }
 
 .menu-scroll-panel__roll::before {
-  top: -3px;
+  top: 0;
 }
 
 .menu-scroll-panel__roll::after {
-  bottom: -3px;
-  background: radial-gradient(
-    70% 100% at 50% 70%,
-    #d4b860 0%,
-    #a07d1c 45%,
-    #6b5210 100%
-  );
+  bottom: 0;
+  transform: scaleY(-1);
 }
 
 @media (max-width: 767px) {
@@ -177,9 +187,12 @@
     --scroll-roll-w: 24px;
   }
 
+  .menu-scroll-panel__roll {
+    border-radius: 50% / 6px;
+  }
+
   .menu-scroll-panel__roll::before,
   .menu-scroll-panel__roll::after {
-    width: calc(var(--scroll-roll-w) + 8px);
     height: 10px;
   }
 }
@@ -234,58 +247,70 @@
     box-shadow: inset 0 10px 18px -6px rgba(61, 41, 20, 0.35);
   }
 
-  /* Horizontal cylinder: shade top-to-bottom instead of left-to-right. */
+  /* Horizontal cylinder. Face is above the top roll and below the bottom roll. */
   .menu-scroll-panel__roll {
     width: auto;
     height: var(--scroll-roll-w);
-    background-image:
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23g)' opacity='0.2'/%3E%3C/svg%3E"),
-      linear-gradient(
-        180deg,
-        #4a3820 0%,
-        #5c4828 8%,
-        #7a6540 20%,
-        #9a8860 34%,
-        #b0a070 46%,
-        #bcac84 52%,
-        #b0a070 58%,
-        #9a8860 72%,
-        #7a6540 86%,
-        #5c4828 94%,
-        #423418 100%
-      );
-    background-size: 120px 120px, auto;
+    border-radius: 7px / 50%;
   }
 
   .menu-scroll-panel--left .menu-scroll-panel__roll {
-    box-shadow:
-      inset 0 0 10px rgba(40, 26, 10, 0.4),
-      0 4px 14px rgba(61, 41, 20, 0.3);
+    box-shadow: 0 4px 8px rgba(61, 41, 20, 0.28);
+  }
+
+  .menu-scroll-panel--left .menu-scroll-panel__roll-body {
+    background-image:
+      var(--scroll-grain),
+      linear-gradient(
+        180deg,
+        #4a3018 0%,
+        #8f6c40 14%,
+        #dcc49a 32%,
+        #e6d3ae 48%,
+        #d2bc96 68%,
+        #c0a878 86%,
+        #a89060 100%
+      );
   }
 
   .menu-scroll-panel--right .menu-scroll-panel__roll {
-    box-shadow:
-      inset 0 0 10px rgba(40, 26, 10, 0.4),
-      0 -4px 14px rgba(61, 41, 20, 0.3);
+    box-shadow: 0 -4px 8px rgba(61, 41, 20, 0.28);
   }
 
-  /* Finials on the left and right ends of the horizontal rod. */
+  .menu-scroll-panel--right .menu-scroll-panel__roll-body {
+    background-image:
+      var(--scroll-grain),
+      linear-gradient(
+        180deg,
+        #a89060 0%,
+        #c0a878 14%,
+        #d2bc96 32%,
+        #e6d3ae 54%,
+        #dcc49a 72%,
+        #8f6c40 86%,
+        #4a3018 100%
+      );
+  }
+
+  /* Same end graphic as landscape, turned onto the left and right tips.
+     Stretching it into a thin slot was squashing the charred rim away. */
   .menu-scroll-panel__roll::before,
   .menu-scroll-panel__roll::after {
-    left: auto;
-    top: 50%;
-    width: 10px;
-    height: calc(var(--scroll-roll-w) + 8px);
-    transform: translateY(-50%);
+    top: calc((var(--scroll-roll-w) - 10px) / 2);
+    width: var(--scroll-roll-w);
+    height: 10px;
+    bottom: auto;
   }
 
   .menu-scroll-panel__roll::before {
-    left: -3px;
+    left: calc((10px - var(--scroll-roll-w)) / 2);
+    transform: rotate(-90deg);
   }
 
   .menu-scroll-panel__roll::after {
-    right: -3px;
-    bottom: auto;
+    left: auto;
+    right: calc((10px - var(--scroll-roll-w)) / 2);
+    transform: rotate(90deg);
   }
 }
 
