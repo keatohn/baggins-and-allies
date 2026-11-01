@@ -1,8 +1,8 @@
 """Achievements: admin-defined criteria DSL + CRUD helpers.
 
 Admins compose JSON criteria from a whitelist of stat keys (no game-logic code).
-Validation is strict on write; evaluation lives in a later slice (game-end hook
-+ on-read recompute).
+Validation is strict on write; evaluation lives in achievement_eval.py
+(game-end hook + on-read recompute). Default achievements are seeded here.
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ from sqlalchemy.orm import Session
 
 from .models import Achievement, Player, PlayerAchievement
 
-# Whitelisted stat keys the evaluator will know how to compute over game_results.
-# Keep this list in sync with the future stats catalog in the evaluator slice.
+# Whitelisted stat keys the evaluator knows how to compute over game_results
+# (see achievement_eval.compute_achievement_stats).
 WHITELISTED_STATS: frozenset[str] = frozenset(
     {
         "games_played",
@@ -340,3 +340,99 @@ def list_granted(db: Session, *, player_id: str | None = None) -> list[dict[str,
 def list_stats_catalog() -> list[dict[str, Any]]:
     """Whitelisted stats for admin UI dropdowns (and docs)."""
     return [{"stat": s, "label": s.replace("_", " ")} for s in sorted(WHITELISTED_STATS)]
+
+
+# Starter set proving the DSL: a leaf stat, an alliance-scoped stat, a derived
+# streak stat, and one game_context (min_turns) achievement. Admins own these
+# after seeding — edit/deactivate freely in the admin panel.
+DEFAULT_ACHIEVEMENTS: list[dict[str, Any]] = [
+    {
+        "key": "first_victory",
+        "name": "First Victory",
+        "description": "Win your first game.",
+        "category": "wins",
+        "tier": "bronze",
+        "sort_order": 10,
+        "criteria": {"stat": "wins", "op": ">=", "value": 1},
+    },
+    {
+        "key": "ten_victories",
+        "name": "Ten Victories",
+        "description": "Win 10 games.",
+        "category": "wins",
+        "tier": "silver",
+        "sort_order": 20,
+        "criteria": {"stat": "wins", "op": ">=", "value": 10},
+    },
+    {
+        "key": "evil_conqueror",
+        "name": "Evil Conqueror",
+        "description": "Win 5 games as Evil.",
+        "category": "alliance",
+        "tier": "silver",
+        "sort_order": 30,
+        "criteria": {"stat": "wins_as_evil", "op": ">=", "value": 5},
+    },
+    {
+        "key": "good_defender",
+        "name": "Good Defender",
+        "description": "Win 5 games as Good.",
+        "category": "alliance",
+        "tier": "silver",
+        "sort_order": 40,
+        "criteria": {"stat": "wins_as_good", "op": ">=", "value": 5},
+    },
+    {
+        "key": "unstreakable",
+        "name": "Unstreakable",
+        "description": "Win 5 games in a row.",
+        "category": "streaks",
+        "tier": "gold",
+        "sort_order": 50,
+        "criteria": {"stat": "best_win_streak", "op": ">=", "value": 5},
+    },
+    {
+        "key": "marathon_battle",
+        "name": "Marathon Battle",
+        "description": "Win a game that lasts at least 25 turns.",
+        "category": "games",
+        "tier": "gold",
+        "sort_order": 60,
+        "criteria": {
+            "stat": "wins",
+            "op": ">=",
+            "value": 1,
+            "game_context": {"won": True, "min_turns": 25},
+        },
+    },
+]
+
+
+def seed_default_achievements(db: Session) -> int:
+    """Insert DEFAULT_ACHIEVEMENTS for keys that don't exist yet. Idempotent.
+
+    Never overwrites or deactivates existing rows — admins own definitions after
+    first seed. Returns number of rows created.
+    """
+    created = 0
+    for spec in DEFAULT_ACHIEVEMENTS:
+        key = spec["key"]
+        if db.query(Achievement.id).filter(Achievement.key == key).first():
+            continue
+        try:
+            create_achievement(
+                db,
+                key=key,
+                name=spec["name"],
+                description=spec.get("description", ""),
+                icon=spec.get("icon"),
+                category=spec.get("category"),
+                tier=spec.get("tier"),
+                criteria=spec["criteria"],
+                sort_order=spec.get("sort_order", 0),
+                active=True,
+            )
+            created += 1
+        except AchievementError as e:
+            print(f"[achievements] seed skipped {key}: {e}", flush=True)
+    return created

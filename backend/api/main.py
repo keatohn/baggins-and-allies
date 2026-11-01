@@ -243,6 +243,14 @@ async def lifespan(app: FastAPI):
                 print(f"[game_results] backfilled {n} row(s) for finished games", flush=True)
         except Exception as e:
             print(f"[game_results] startup backfill failed: {e}", flush=True)
+        try:
+            from .achievements import seed_default_achievements
+
+            seeded = seed_default_achievements(db)
+            if seeded:
+                print(f"[achievements] seeded {seeded} default achievement(s)", flush=True)
+        except Exception as e:
+            print(f"[achievements] startup seed failed: {e}", flush=True)
     finally:
         db.close()
     yield
@@ -949,13 +957,25 @@ def save_game(
         if state.winner is not None and row.status != "finished":
             row.status = "finished"
             row.completed_at = datetime.utcnow()
+            wrote_results = 0
             try:
                 from .game_results import ensure_game_results_for_row
 
-                ensure_game_results_for_row(db, row)
+                wrote_results = ensure_game_results_for_row(db, row)
             except Exception as e:
                 # Results are stats-only; never block the game save.
                 print(f"[game_results] write failed for game {game_id}: {e}", flush=True)
+            if wrote_results:
+                try:
+                    from .achievement_eval import evaluate_for_game
+
+                    awards = evaluate_for_game(db, game_id)
+                    if awards:
+                        keys = [a["key"] for a in awards]
+                        print(f"[achievements] awarded {keys} for game {game_id}", flush=True)
+                except Exception as e:
+                    # Achievements are cosmetic; never block the game save.
+                    print(f"[achievements] evaluation failed for game {game_id}: {e}", flush=True)
         if events:
             try:
                 config = json.loads(row.config) if isinstance(row.config, str) else {}
@@ -1521,17 +1541,25 @@ def get_player_profile(
     _viewer: Player = Depends(get_current_player),
     db: Session = Depends(get_db),
 ):
-    """Public-lite profile card: username + headline record (for player-vs-player UI)."""
+    """Public-lite profile card: username + headline record + achievements (for player-vs-player UI)."""
     target = db.query(Player).filter(Player.id == str(player_id)).first()
     if not target:
         raise HTTPException(status_code=404, detail="Player not found")
+    try:
+        from .achievement_eval import player_achievement_grants, recompute_for_player
+
+        recompute_for_player(db, str(target.id))
+        achievements = player_achievement_grants(db, str(target.id))
+    except Exception as e:
+        print(f"[achievements] profile read failed for {target.id}: {e}", flush=True)
+        achievements = []
     headline = player_headline_record(db, str(target.id))
     return {
         "id": str(target.id),
         "username": target.username,
         "headline": headline,
         "tier": None,
-        "achievements": [],
+        "achievements": achievements,
     }
 
 
