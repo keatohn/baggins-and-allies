@@ -34,6 +34,19 @@ type CursorMode = 'navigate' | 'select' | 'paint';
 /** ViewBox-space spacing between paint-mode stamps along a drag path. */
 const PAINT_STAMP_SPACING = 36;
 
+/** Multi-select key for a placement: landscape territory key + index in its list. */
+function placementKey(tid: string, index: number): string {
+  return `${tid}#${index}`;
+}
+
+function parsePlacementKey(key: string): { tid: string; index: number } | null {
+  const sep = key.lastIndexOf('#');
+  if (sep <= 0) return null;
+  const index = Number(key.slice(sep + 1));
+  if (!Number.isInteger(index) || index < 0) return null;
+  return { tid: key.slice(0, sep), index };
+}
+
 type CalculatedSpots = {
   centroids: Record<string, Pt>;
   positions: Record<string, { marker: Pt; unit: Pt; center?: Pt }>;
@@ -176,6 +189,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   const [autoBusy, setAutoBusy] = useState(false);
   const [cursorMode, setCursorMode] = useState<CursorMode>('navigate');
   const [band, setBand] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const [multiSel, setMultiSel] = useState<Set<string>>(() => new Set());
 
   const dragRef = useRef<{ x: number; y: number; tx: number; ty: number; id: number } | null>(null);
   const didDragRef = useRef(false);
@@ -200,6 +214,13 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   } | null>(null);
   const selectDragRef = useRef<{ x: number; y: number; id: number } | null>(null);
   const paintLastRef = useRef<Pt | null>(null);
+  const bulkDragRef = useRef<{
+    id: number;
+    sx: number;
+    sy: number;
+    scale: number;
+    items: { tid: string; index: number; x: number; y: number; layer: 'interior' | 'border' }[];
+  } | null>(null);
 
   const current = draft ?? stored;
   const dirty = draft != null && stored != null && stableJson(draft) !== stableJson(stored);
@@ -261,6 +282,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     setEditorTab('icon');
     setCursorMode('navigate');
     setBand(null);
+    setMultiSel(new Set());
     api
       .getMapOverrides(mapBase)
       .then((r) => {
@@ -371,6 +393,11 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
         setBand(null);
         return;
       }
+      if (e.key === 'Escape' && multiSel.size) {
+        e.stopPropagation();
+        setMultiSel(new Set());
+        return;
+      }
       if (e.key === 'Escape' && placing) {
         e.stopPropagation();
         setPlacing(null);
@@ -392,7 +419,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [discardOpen, saving, dirty, onClose, placing, band]);
+  }, [discardOpen, saving, dirty, onClose, placing, band, multiSel]);
 
   const changeMap = (next: string) => {
     if (!next || next === mapBase) return;
@@ -552,7 +579,45 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
         /* ignore */
       }
       selectDragRef.current = null;
-      // Band selection is applied in a later phase; clear the transient rect for now.
+      const el = wrapRef.current;
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        const x2 = e.clientX - rect.left;
+        const y2 = e.clientY - rect.top;
+        const vx1 = Math.min(sd.x, x2);
+        const vy1 = Math.min(sd.y, y2);
+        const vx2 = Math.max(sd.x, x2);
+        const vy2 = Math.max(sd.y, y2);
+        if (vx2 - vx1 < 4 && vy2 - vy1 < 4) {
+          // Bare click: plain click clears the selection; modifier clicks leave it alone.
+          if (!e.shiftKey && !e.ctrlKey && !e.metaKey) setMultiSel(new Set());
+        } else {
+          const bx1 = (vx1 - transform.x) / transform.scale;
+          const by1 = (vy1 - transform.y) / transform.scale;
+          const bx2 = (vx2 - transform.x) / transform.scale;
+          const by2 = (vy2 - transform.y) / transform.scale;
+          const hits: string[] = [];
+          for (const row of landscapeMarkers) {
+            const p = row.placement;
+            if (p.x >= bx1 && p.x <= bx2 && p.y >= by1 && p.y <= by2) {
+              hits.push(placementKey(row.tid, row.index));
+            }
+          }
+          setMultiSel((prev) => {
+            if (e.ctrlKey || e.metaKey) {
+              const next = new Set(prev);
+              for (const h of hits) next.delete(h);
+              return next;
+            }
+            if (e.shiftKey) {
+              const next = new Set(prev);
+              for (const h of hits) next.add(h);
+              return next;
+            }
+            return new Set(hits);
+          });
+        }
+      }
       setBand(null);
       return;
     }
@@ -704,7 +769,64 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     updateLandscape(() => undefined);
     setSelectedPlacement(null);
     setPlacing(null);
+    setMultiSel(new Set());
   }, [updateLandscape]);
+
+  const setBulkScale = useCallback(
+    (s: number) => {
+      if (!multiSel.size) return;
+      const clamped = Math.min(4, Math.max(0.25, s));
+      updateLandscape((prev) => {
+        const map = { ...(prev?.territories ?? {}) };
+        const cloned = new Set<string>();
+        let changed = false;
+        for (const key of multiSel) {
+          const parsed = parsePlacementKey(key);
+          if (!parsed) continue;
+          const list = map[parsed.tid];
+          const p = list?.[parsed.index];
+          if (!p || (p.s ?? 1) === clamped) continue;
+          if (!cloned.has(parsed.tid)) {
+            map[parsed.tid] = [...list!];
+            cloned.add(parsed.tid);
+          }
+          map[parsed.tid]![parsed.index] = { ...p, s: clamped };
+          changed = true;
+        }
+        return changed ? { territories: map } : prev;
+      });
+    },
+    [multiSel, updateLandscape],
+  );
+
+  const deleteSelectedPlacements = useCallback(() => {
+    if (!multiSel.size) return;
+    updateLandscape((prev) => {
+      const map = { ...(prev?.territories ?? {}) };
+      const byTid = new Map<string, number[]>();
+      for (const key of multiSel) {
+        const parsed = parsePlacementKey(key);
+        if (!parsed) continue;
+        const arr = byTid.get(parsed.tid) ?? [];
+        arr.push(parsed.index);
+        byTid.set(parsed.tid, arr);
+      }
+      for (const [tid, indices] of byTid) {
+        const list = map[tid];
+        if (!list) continue;
+        const next = [...list];
+        // Splice highest-index-first so earlier indices stay valid.
+        for (const index of [...indices].sort((a, b) => b - a)) {
+          if (index >= 0 && index < next.length) next.splice(index, 1);
+        }
+        if (next.length) map[tid] = next;
+        else delete map[tid];
+      }
+      return Object.keys(map).length ? { territories: map } : undefined;
+    });
+    setMultiSel(new Set());
+    setSelectedPlacement(null);
+  }, [multiSel, updateLandscape]);
 
   const autoGenerateLandscape = useCallback(() => {
     if (!paths.size) return;
@@ -918,6 +1040,41 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     e.preventDefault();
     if (e.button !== 0) return;
     if (placing) return; // placing mode takes priority; don't start a drag
+    if (editorTab === 'landscape' && cursorMode === 'paint') return; // paint owns left-drag on the viewport
+    if (editorTab === 'landscape' && cursorMode === 'select') {
+      const key = placementKey(tid, index);
+      if (e.shiftKey || e.ctrlKey || e.metaKey) {
+        setMultiSel((prev) => {
+          const next = new Set(prev);
+          if (next.has(key)) next.delete(key);
+          else next.add(key);
+          return next;
+        });
+        return;
+      }
+      // Clicking a member drags the whole group; clicking a non-member selects just it.
+      const inGroup = multiSel.has(key);
+      const keys = inGroup ? Array.from(multiSel) : [key];
+      if (!inGroup) setMultiSel(new Set([key]));
+      const map = current?.landscape?.territories;
+      const items: { tid: string; index: number; x: number; y: number; layer: 'interior' | 'border' }[] = [];
+      for (const k of keys) {
+        const parsed = parsePlacementKey(k);
+        if (!parsed) continue;
+        const p = map?.[parsed.tid]?.[parsed.index];
+        if (!p) continue;
+        items.push({ tid: parsed.tid, index: parsed.index, x: p.x, y: p.y, layer: p.layer });
+      }
+      if (!items.length) return;
+      try {
+        (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      bulkDragRef.current = { id: e.pointerId, sx: e.clientX, sy: e.clientY, scale: transform.scale, items };
+      setSelected(tid);
+      return;
+    }
     if (editorTab === 'landscape' && cursorMode !== 'navigate') return; // select/paint own left-drag
     const placement = landscapeFor(tid)[index];
     if (!placement) return;
@@ -942,6 +1099,54 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
 
   const onPlacementPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
+    const bd = bulkDragRef.current;
+    if (bd && e.pointerId === bd.id) {
+      const el = wrapRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const startVb = {
+        x: (bd.sx - rect.left - transform.x) / bd.scale,
+        y: (bd.sy - rect.top - transform.y) / bd.scale,
+      };
+      const vb = viewportToViewBox(e.clientX, e.clientY);
+      if (!vb) return;
+      const dx = vb.x - startVb.x;
+      const dy = vb.y - startVb.y;
+      updateLandscape((prev) => {
+        const map = { ...(prev?.territories ?? {}) };
+        const cloned = new Set<string>();
+        let changed = false;
+        for (const item of bd.items) {
+          const list = map[item.tid];
+          const p = list?.[item.index];
+          if (!p) continue;
+          let x = item.x + dx;
+          let y = item.y + dy;
+          const pathEl = territoryPathEl(item.tid);
+          if (item.layer === 'border') {
+            if (pathEl) {
+              const snapped = nearestPointOnOutline(pathEl, x, y);
+              if (snapped) {
+                x = snapped.x;
+                y = snapped.y;
+              }
+            }
+          } else if (pathEl && !isPointInTerritoryPath(pathEl, x, y)) {
+            continue; // interior pieces stay inside their territory
+          }
+          x = Math.max(0, Math.min(viewBox.width, x));
+          y = Math.max(0, Math.min(viewBox.height, y));
+          if (!cloned.has(item.tid)) {
+            map[item.tid] = [...list!];
+            cloned.add(item.tid);
+          }
+          map[item.tid]![item.index] = { ...p, x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 };
+          changed = true;
+        }
+        return changed ? { territories: map } : prev;
+      });
+      return;
+    }
     const d = placeDragRef.current;
     if (!d || e.pointerId !== d.id) return;
     const el = wrapRef.current;
@@ -972,6 +1177,16 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
 
   const onPlacementPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
+    const bd = bulkDragRef.current;
+    if (bd && e.pointerId === bd.id) {
+      try {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      bulkDragRef.current = null;
+      return;
+    }
     const d = placeDragRef.current;
     if (!d || e.pointerId !== d.id) return;
     try {
@@ -1073,6 +1288,17 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     [current],
   );
 
+  // Slider value for the bulk scale control: first selected piece's scale (mixed sets just start there).
+  const bulkScaleValue = useMemo(() => {
+    for (const key of multiSel) {
+      const parsed = parsePlacementKey(key);
+      if (!parsed) continue;
+      const p = current?.landscape?.territories?.[parsed.tid]?.[parsed.index];
+      if (p) return p.s ?? 1;
+    }
+    return 1;
+  }, [multiSel, current]);
+
   const selectedEntry = selected ? entryFor(current, selected) : undefined;
   const selectedFocus: 'calculated' | 'override' = selectedEntry?.focus === 'override' ? 'override' : 'calculated';
   const selectedCalc = useMemo(
@@ -1122,6 +1348,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                   setSelectedPlacement(null);
                   setCursorMode('navigate');
                   setBand(null);
+                  setMultiSel(new Set());
                 }}
               >
                 Icon
@@ -1171,8 +1398,10 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                       onClick={() => {
                         setCursorMode(mode);
                         setBand(null);
+                        setMultiSel(new Set());
                         selectDragRef.current = null;
                         paintLastRef.current = null;
+                        bulkDragRef.current = null;
                       }}
                     >
                       {label}
@@ -1227,7 +1456,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
           ) : (
             <p className="admin-form__micro mapov-landscape-hint">
               {cursorMode === 'select'
-                ? 'Select mode: drag a rectangle over landscape pieces (box-select actions land next). Esc cancels the band.'
+                ? 'Select mode: drag a rectangle to select pieces · shift adds · ctrl removes · drag a selected piece to move the group · Esc clears'
                 : cursorMode === 'paint'
                   ? placing
                     ? `Paint mode: drag on the map to stamp ${placing.img}${borderMode ? ' on borders' : ' inside territories'}.`
@@ -1515,11 +1744,43 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                   aria-hidden
                 />
               ) : null}
+              {editorTab === 'landscape' && cursorMode === 'select' && multiSel.size > 0 ? (
+                <div
+                  className="mapov-bulk"
+                  role="toolbar"
+                  aria-label="Selection actions"
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  <span className="mapov-bulk__count">{multiSel.size} selected</span>
+                  <label className="mapov-bulk__scale" title="Scale all selected pieces">
+                    Scale
+                    <input
+                      type="range"
+                      min={0.25}
+                      max={4}
+                      step={0.05}
+                      value={bulkScaleValue}
+                      onChange={(e) => setBulkScale(Number(e.target.value))}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="admin-page__btn admin-page__btn--danger"
+                    onClick={deleteSelectedPlacements}
+                  >
+                    Delete
+                  </button>
+                  <button type="button" className="admin-page__btn" onClick={() => setMultiSel(new Set())}>
+                    Clear
+                  </button>
+                </div>
+              ) : null}
               {editorTab === 'landscape' ? (
                 <div className="mapov-dots mapov-landscape-markers">
                   {landscapeMarkers.map((row) => {
                     const isActive =
                       selectedPlacement?.tid === row.tid && selectedPlacement?.index === row.index;
+                    const isMulti = multiSel.has(placementKey(row.tid, row.index));
                     const x = transform.x + row.placement.x * transform.scale;
                     const y = transform.y + row.placement.y * transform.scale;
                     const size = Math.max(18, 36 * (row.placement.s ?? 1) * Math.min(transform.scale, 1.4));
@@ -1529,7 +1790,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                         role="button"
                         tabIndex={0}
                         aria-label={`${territoryLabel(row.tid, territories)} ${row.placement.img}`}
-                        className={`mapov-placement${isActive ? ' mapov-placement--active' : ''}${row.placement.layer === 'border' ? ' mapov-placement--border' : ''}${row.placement.auto ? ' mapov-placement--auto' : ''}`}
+                        className={`mapov-placement${isActive ? ' mapov-placement--active' : ''}${isMulti ? ' mapov-placement--multi' : ''}${row.placement.layer === 'border' ? ' mapov-placement--border' : ''}${row.placement.auto ? ' mapov-placement--auto' : ''}`}
                         style={{ left: x, top: y, width: size, height: size }}
                         title={`${territoryLabel(row.tid, territories)} · ${row.placement.img} · ${row.placement.layer}${placing ? '' : ' — drag to move'}`}
                         onPointerDown={(e) => onPlacementPointerDown(e, row.tid, row.index)}

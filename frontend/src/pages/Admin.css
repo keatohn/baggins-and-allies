@@ -1448,8 +1448,8 @@
   cursor: crosshair;
 }
 
-/* Select/paint own left-drag: markers must not intercept the viewport handlers. */
-.admin-graph__viewport--select .mapov-landscape-markers,
+/* Paint owns left-drag: markers must not intercept the viewport handlers. Select keeps
+   markers interactive so a group can be drag-moved and shift-click toggled. */
 .admin-graph__viewport--paint .mapov-landscape-markers {
   pointer-events: none;
 }
@@ -1461,6 +1461,43 @@
   background: rgba(61, 41, 20, 0.12);
   pointer-events: none;
   z-index: 5;
+}
+
+.mapov-bulk {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.7rem;
+  background: #fffef8;
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(61, 41, 20, 0.25);
+  z-index: 6;
+}
+
+.mapov-bulk__count {
+  font-size: 0.75rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.mapov-bulk__scale {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 7rem;
+  margin: 0;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.mapov-bulk__scale input[type='range'] {
+  width: 100%;
+  margin: 0;
 }
 
 .mapov-placement {
@@ -1496,6 +1533,12 @@
 }
 
 .mapov-placement--active {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 2px rgba(61, 41, 20, 0.35);
+  z-index: 3;
+}
+
+.mapov-placement--multi {
   border-color: var(--ink);
   box-shadow: 0 0 0 2px rgba(61, 41, 20, 0.35);
   z-index: 3;
