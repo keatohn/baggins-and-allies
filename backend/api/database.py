@@ -210,6 +210,19 @@ def _ensure_player_temp_password_columns():
             conn.execute(text("ALTER TABLE players ADD COLUMN IF NOT EXISTS temp_password_expires_at TIMESTAMP"))
 
 
+def _ensure_player_xp_column():
+    """Add players.xp if missing (existing SQLite/Postgres DBs before the tier system)."""
+    if DATABASE_URL.startswith("sqlite"):
+        with engine.begin() as conn:
+            rows = conn.execute(text("PRAGMA table_info(players)")).fetchall()
+            names = {row[1] for row in rows}
+            if "xp" not in names:
+                conn.execute(text("ALTER TABLE players ADD COLUMN xp INTEGER NOT NULL DEFAULT 0"))
+    else:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE players ADD COLUMN IF NOT EXISTS xp INTEGER NOT NULL DEFAULT 0"))
+
+
 def init_db():
     """Create all tables and apply additive schema patches.
 
@@ -227,6 +240,7 @@ def init_db():
         Player,
         PlayerAchievement,
         Setup,
+        XpLedger,
     )
 
     Base.metadata.create_all(bind=engine)
@@ -235,6 +249,7 @@ def init_db():
     _ensure_player_last_login_column()
     _ensure_player_last_opened_columns()
     _ensure_player_temp_password_columns()
+    _ensure_player_xp_column()
     _sync_admin_column_and_flags()
     db = SessionLocal()
     try:
@@ -243,6 +258,7 @@ def init_db():
         from backend.catalog import seed_catalog_if_empty
         from backend.map_overrides import seed_map_overrides_if_empty
         from backend.setup_data import seed_setups_if_empty
+        from backend.progression import seed_progression_if_empty
         from backend.signals import seed_signals_if_empty
         from backend.unit_formulas import seed_unit_formulas_if_empty
 
@@ -252,6 +268,7 @@ def init_db():
         seed_signals_if_empty(db)
         seed_unit_formulas_if_empty(db)
         seed_map_overrides_if_empty(db)
+        seed_progression_if_empty(db)
         seed_profile_defaults_if_empty(db)
     finally:
         db.close()

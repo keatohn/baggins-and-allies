@@ -643,6 +643,27 @@ export interface PlayerAudioSettings {
   master_volume?: number;
 }
 
+export type TierGlow = 'none' | 'soft' | 'pulse';
+
+/** How a tier draws the ring around the profile circle. `frame_src` is resolved by the server. */
+export interface TierVisual {
+  frame_id: string;
+  ring_color: string;
+  glow: TierGlow;
+  frame_src?: string | null;
+  frame_label?: string | null;
+}
+
+export interface ProgressionTier {
+  id: string;
+  name: string;
+  min_xp: number;
+  color: string;
+  icon: string;
+  description: string;
+  visual: TierVisual;
+}
+
 /** Avatar circle: unit icon filename + #rrggbb background color. */
 export interface PlayerAvatarSettings {
   image: string;
@@ -659,6 +680,11 @@ export interface AuthPlayer {
   audio?: PlayerAudioSettings;
   /** Avatar with response-time defaults (hobbit icon on the default color). */
   avatar?: PlayerAvatarSettings;
+  xp?: number;
+  tier?: ProgressionTier | null;
+  next_tier?: ProgressionTier | null;
+  tier_floor_xp?: number;
+  next_tier_xp?: number | null;
 }
 
 /** Search result / friend-list row with the viewer's relation to that user. */
@@ -691,6 +717,39 @@ export interface AdminUserItem {
   email: string;
   /** ISO timestamp of the most recent successful login; null until first login. */
   last_login: string | null;
+  xp?: number;
+  tier_id?: string | null;
+  tier_name?: string | null;
+}
+
+export interface ProgressionFrame {
+  id: string;
+  label: string;
+  src: string;
+}
+
+export interface ProgressionRules {
+  game_completed: number;
+  game_won: number;
+  stronghold_captured: number;
+  territory_captured: number;
+  enemy_unit_destroyed: number;
+  battle_won: number;
+  multiplayer_multiplier: number;
+  vs_ai_multiplier: number;
+  min_rounds_to_count: number;
+  stats_cap_per_game: number;
+  forfeit_xp: number;
+  daily_cap: number;
+}
+
+/** Admin-edited XP and tier catalog. Tier is derived from XP; it is not stored on the player. */
+export interface ProgressionConfig {
+  version: number;
+  currency_label: string;
+  frames: ProgressionFrame[];
+  tiers: ProgressionTier[];
+  rules: ProgressionRules;
 }
 
 /** Full setup document for admin editor (matches backend setup JSON files). */
@@ -1137,6 +1196,28 @@ export const api = {
     fetchJson<{ setups: AdminSetupListItem[] }>('/admin/setups'),
   adminListGames: () => fetchJson<{ games: GameListItem[] }>('/admin/games'),
   adminListUsers: () => fetchJson<{ users: AdminUserItem[] }>('/admin/users'),
+  /** Public tier list and avatar frames. Does not include XP amounts. */
+  getProgression: () =>
+    fetchJson<{ currency_label: string; frames: ProgressionFrame[]; tiers: ProgressionTier[] }>('/progression'),
+  adminGetProgression: () => fetchJson<ProgressionConfig>('/admin/progression'),
+  adminPutProgression: (config: ProgressionConfig) =>
+    fetchJson<{ ok: boolean; progression: ProgressionConfig }>('/admin/progression', {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    }),
+  adminBackfillProgression: () =>
+    fetchJson<{ ok: boolean; games: number; awarded: number; xp: number; unreadable: number }>(
+      '/admin/progression/backfill',
+      { method: 'POST' },
+    ),
+  adminAdjustUserXp: (playerId: string, amount: number, reason: string) =>
+    fetchJson<{ ok: boolean; xp: number; applied: number; tier_id: string | null; tier_name: string | null }>(
+      `/admin/users/${encodeURIComponent(playerId)}/xp`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ amount, reason }),
+      },
+    ),
   /** Admin: end an in-progress game now. winner: "good" | "evil" | "none" (void, no stats rows). */
   adminEndGame: (gameId: string, winner: 'good' | 'evil' | 'none') =>
     fetchJson<{ ok: boolean; game_id: string; winner: string | null; status: string }>(

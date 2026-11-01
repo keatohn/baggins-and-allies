@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api, getAuthToken, AUTH_CHANGED_EVENT } from '../services/api';
 import type { AuthPlayer } from '../services/api';
 import ProfileModal from './account/ProfileModal';
+import { tierRingProps } from './account/tierRing';
 import SettingsModal from './account/SettingsModal';
 import FriendsModal from './account/FriendsModal';
 import './AccountMenu.css';
@@ -106,6 +107,8 @@ export default function AccountMenu({ variant = 'menu' }: AccountMenuProps) {
   if (!loaded || !player) return null;
 
   const avatar = player.avatar ?? DEFAULT_AVATAR;
+  const ring = tierRingProps(player.tier);
+  const profileTitle = player.tier?.name ? `Profile · ${player.tier.name}` : 'Profile';
   const friendsLabel =
     pendingCount > 0
       ? `Open friends (${pendingCount} pending request${pendingCount === 1 ? '' : 's'})`
@@ -116,11 +119,11 @@ export default function AccountMenu({ variant = 'menu' }: AccountMenuProps) {
       <div className={`account-menu account-menu--${variant}`}>
         <button
           type="button"
-          className={`account-menu__btn account-menu__btn--avatar${open === 'profile' ? ' account-menu__btn--active' : ''}`}
-          style={{ backgroundColor: avatar.color }}
+          className={`account-menu__btn account-menu__btn--avatar${ring.className}${open === 'profile' ? ' account-menu__btn--active' : ''}`}
+          style={{ backgroundColor: avatar.color, ...ring.style }}
           onClick={() => setOpen(open === 'profile' ? null : 'profile')}
-          title="Profile"
-          aria-label="Open profile"
+          title={profileTitle}
+          aria-label={profileTitle}
           aria-pressed={open === 'profile'}
         >
           <img
