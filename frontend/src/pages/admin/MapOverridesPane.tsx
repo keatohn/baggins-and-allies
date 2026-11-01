@@ -849,6 +849,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
           seedAcc = (seedAcc * 1103515245 + 12345) % 2147483647;
           return seedAcc || 1;
         };
+        let totalPlaced = Object.values(map).reduce((n, list) => n + list.length, 0);
         for (const tid of paths.keys()) {
           const defKey = resolveTid(territories, tid) ?? tid;
           const def = territories[defKey];
@@ -866,8 +867,15 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
             const images = manifest[cat] ?? [];
             if (!images.length) continue;
             const key = resolveTid(map, tid) ?? tid;
-            const generated = autoGenerateForTerritory(pathEl, cat, images, nextSeed());
-            if (generated.length) map[key] = [...(map[key] ?? []), ...generated];
+            const existing = map[key] ?? [];
+            const room = Math.min(50 - existing.length, 2500 - totalPlaced);
+            if (room <= 0) continue;
+            const generated = autoGenerateForTerritory(pathEl, cat, images, nextSeed()).slice(0, room);
+            if (generated.length) {
+              map[key] = [...existing, ...generated];
+              totalPlaced += generated.length;
+            }
+            if (totalPlaced >= 2500) return Object.keys(map).length ? { territories: map } : undefined;
           }
         }
         return Object.keys(map).length ? { territories: map } : undefined;
