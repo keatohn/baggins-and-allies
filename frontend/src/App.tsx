@@ -4326,11 +4326,9 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   const gameOverDisplay = useMemo(() => {
     if (!gameOverWinner) return null;
     const label = gameOverWinner === 'good' ? 'Good' : gameOverWinner === 'evil' ? 'Evil' : gameOverWinner;
-    const color =
-      Object.values(factionData).find((f) => f.alliance === gameOverWinner)?.color ??
-      (gameOverWinner === 'good' ? '#2d5a27' : '#6b2d2d');
-    return { label, color };
-  }, [gameOverWinner, factionData]);
+    const frame = gameOverWinner === 'evil' ? 'sauron' : 'gondor';
+    return { label, frame } as const;
+  }, [gameOverWinner]);
 
   const dismissForfeitToast = useCallback(() => {
     setForfeitToastDismissed(true);
@@ -4422,12 +4420,12 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           role="alert"
           aria-live="assertive"
         >
-          <div
-            className="game-over-banner"
-            style={{ backgroundColor: `${gameOverDisplay.color}40`, borderColor: gameOverDisplay.color }}
-          >
-            <span className="game-over-title">Game Over</span>
-            <span className="game-over-winner">{gameOverDisplay.label} wins!</span>
+          <div className={`game-over-banner game-over-banner--${gameOverDisplay.frame}`}>
+            <img className="game-over-banner__frame" src={`/frames/${gameOverDisplay.frame}_frame.png`} alt="" />
+            <div className="game-over-banner__text">
+              <span className="game-over-title">Game Over</span>
+              <span className="game-over-winner">{gameOverDisplay.label} wins!</span>
+            </div>
           </div>
         </div>
       )}

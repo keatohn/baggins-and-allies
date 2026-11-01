@@ -16,34 +16,72 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  /* Below the header (100) and every modal overlay (900+), above the map. */
+  z-index: 80;
   pointer-events: none;
 }
 
 .game-over-banner {
-  padding: 1.5rem 2.5rem;
-  border: 3px solid;
-  border-radius: 8px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+  position: relative;
+  box-sizing: border-box;
+  width: min(34rem, 90vw);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: transparent;
+}
+
+.game-over-banner--gondor {
+  aspect-ratio: 857 / 267;
+  padding: 22% 14% 12%;
+}
+
+.game-over-banner--sauron {
+  aspect-ratio: 900 / 300;
+  padding: 26% 15% 14%;
+}
+
+.game-over-banner__frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+}
+
+.game-over-banner__text {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.25rem;
+  text-align: center;
+  text-shadow: 0 1px 1px rgba(244, 236, 214, 0.85), 0 0 8px rgba(244, 236, 214, 0.7);
+}
+
+.game-over-banner--gondor .game-over-banner__text {
+  color: #16346e;
+}
+
+.game-over-banner--sauron .game-over-banner__text {
+  color: #641600;
 }
 
 .game-over-title {
-  font-family: var(--font-display);
-  font-size: 1rem;
+  font-family: 'Cinzel', serif;
+  font-size: 0.95rem;
   font-weight: 600;
-  letter-spacing: 0.1em;
-  color: var(--ink);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .game-over-winner {
-  font-family: var(--font-display);
-  font-size: 1.75rem;
+  font-family: 'Cinzel', serif;
+  font-size: clamp(1.35rem, 3vw, 1.85rem);
   font-weight: 700;
-  color: var(--ink);
 }
 
 /* Centered on the map pane (.map-wrap is position: relative) */
