@@ -1807,6 +1807,7 @@ def create_game(
         camp_defs=cd,
         victory_criteria=victory_criteria,
         camp_cost=camp_cost,
+        destroy_camp_on_conquer=parse_prefire_penalty_from_manifest(setup.get("destroy_camp_on_conquer")),
         stronghold_repair_cost=stronghold_repair_cost,
         prefire_penalty=parse_prefire_penalty_from_manifest(setup.get("prefire_penalty")),
         heroes_enabled=bool(request.heroes_enabled) or rings_on,

@@ -738,6 +738,8 @@ class GameState:
     )
     # Camp purchase cost (from setup manifest). Used in purchase phase.
     camp_cost: int = 0  # From setup manifest; 0 = not set / no camp purchase
+    # When True (default), a non-capital camp is removed when its territory is captured or liberated.
+    destroy_camp_on_conquer: bool = True
     # Stronghold repair cost per HP (from setup manifest). Used in purchase phase.
     stronghold_repair_cost: int = 0  # From setup manifest; 0 = not set / no repair
     # Stealth/archer prefire: when True (default), prefire rolls use -1 to hit stat; when False, no penalty.
@@ -828,6 +830,7 @@ class GameState:
             "map_asset": self.map_asset,
             "victory_criteria": self.victory_criteria,
             "camp_cost": self.camp_cost,
+            "destroy_camp_on_conquer": getattr(self, "destroy_camp_on_conquer", True),
             "stronghold_repair_cost": getattr(self, "stronghold_repair_cost", 0),
             "prefire_penalty": getattr(self, "prefire_penalty", True),
             "heroes_enabled": getattr(self, "heroes_enabled", True),
@@ -946,6 +949,7 @@ class GameState:
                 data.get("victory_criteria") or data.get("victory_strongholds")
             ),
             camp_cost=int(data["camp_cost"]) if data.get("camp_cost") is not None else 0,
+            destroy_camp_on_conquer=parse_prefire_penalty_from_manifest(data.get("destroy_camp_on_conquer")),
             stronghold_repair_cost=int(data["stronghold_repair_cost"]) if data.get("stronghold_repair_cost") is not None else 0,
             prefire_penalty=parse_prefire_penalty_from_manifest(data.get("prefire_penalty")),
             heroes_enabled=parse_prefire_penalty_from_manifest(data.get("heroes_enabled")),
