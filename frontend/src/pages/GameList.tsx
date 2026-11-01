@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../services/api';
 import { useMenuScroll } from '../components/MenuScrollContext';
 import MenuLink from '../components/MenuLink';
@@ -8,6 +9,8 @@ import './GameList.css';
 
 const DELETE_CONFIRM_PHRASE = 'DELETE GAME';
 const FORFEIT_CONFIRM_PHRASE = 'FORFEIT GAME';
+
+type GameListTab = 'active' | 'finished';
 
 function formatPhase(phase: string): string {
   if (phase === 'non_combat_move') return 'Non-Combat Move';
@@ -34,6 +37,11 @@ function allianceLabel(alliance: string | undefined): string {
   return alliance.charAt(0).toUpperCase() + alliance.slice(1).toLowerCase();
 }
 
+function winnerLabel(g: GameListItem): string {
+  if (!g.winner) return 'No winner recorded';
+  return `${allianceLabel(g.winner)} wins`;
+}
+
 function playerNames(g: GameListItem): string | null {
   const names: string[] = [];
   for (const p of g.players ?? []) {
@@ -53,6 +61,7 @@ export default function GameList() {
   const [games, setGames] = useState<GameListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<GameListTab>('active');
   const [gameToDelete, setGameToDelete] = useState<string | null>(null);
   const [gameToForfeit, setGameToForfeit] = useState<string | null>(null);
   const [confirmText, setConfirmText] = useState('');
@@ -65,17 +74,31 @@ export default function GameList() {
     { gameName: string; allianceLabel: string; winningLabel?: string } | null
   >(null);
 
-  const loadGames = () => {
-    api.listGames()
+  const loadGames = useCallback((tab: GameListTab) => {
+    api
+      .listGames(tab)
       .then((r) => setGames(r.games))
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed'))
       .finally(() => setLoading(false));
-  };
+  }, []);
 
   useEffect(() => {
-    loadGames();
+    loadGames(activeTab);
     api.authMe().then(setPlayer).catch(() => setPlayer(null));
-  }, []);
+  }, [activeTab, loadGames]);
+
+  const handleTabChange = (tab: GameListTab) => {
+    if (tab === activeTab) return;
+    setGameToDelete(null);
+    setGameToForfeit(null);
+    setConfirmText('');
+    setDeleteError(null);
+    setForfeitError(null);
+    setForfeitResult(null);
+    setLoading(true);
+    setError(null);
+    setActiveTab(tab);
+  };
 
   useEffect(() => {
     if (!gameToForfeit) {
@@ -219,8 +242,30 @@ export default function GameList() {
           </button>
         </div>
       )}
+      <div className="game-list__tabs" role="tablist" aria-label="Filter games">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'active'}
+          className={`game-list__tab${activeTab === 'active' ? ' game-list__tab--active' : ''}`}
+          onClick={() => handleTabChange('active')}
+        >
+          In Progress
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'finished'}
+          className={`game-list__tab${activeTab === 'finished' ? ' game-list__tab--active' : ''}`}
+          onClick={() => handleTabChange('finished')}
+        >
+          Finished
+        </button>
+      </div>
       {games.length === 0 ? (
-        <p className="game-list__empty">No games yet.</p>
+        <p className="game-list__empty">
+          {activeTab === 'finished' ? 'No finished games yet.' : 'No games yet.'}
+        </p>
       ) : (
         <ul className="game-list">
           {games.map((g) => (
@@ -250,6 +295,32 @@ export default function GameList() {
                       </span>
                       {g.created_at && (
                         <span className="game-list__created">Created {formatCreatedAt(g.created_at)}</span>
+                      )}
+                      {playerNames(g) && (
+                        <span className="game-list__players" title={playerNames(g) ?? undefined}>
+                          Players: {playerNames(g)}
+                        </span>
+                      )}
+                    </div>
+                  ) : g.status === 'finished' ? (
+                    <div className="game-list__turn-info">
+                      <span className="game-list__turn-meta game-list__turn-meta--finished">
+                        <span className="game-list__status-pill game-list__status-pill--finished">Finished</span>
+                        {g.winner && (
+                          <>
+                            <span className="game-list__meta-sep">|</span>
+                            <span className="game-list__winner">{winnerLabel(g)}</span>
+                          </>
+                        )}
+                        {g.scenario?.display_name && (
+                          <>
+                            <span className="game-list__meta-sep">|</span>
+                            <span>{g.scenario.display_name}</span>
+                          </>
+                        )}
+                      </span>
+                      {g.completed_at && (
+                        <span className="game-list__created">Completed {formatCreatedAt(g.completed_at)}</span>
                       )}
                       {playerNames(g) && (
                         <span className="game-list__players" title={playerNames(g) ?? undefined}>
@@ -302,9 +373,9 @@ export default function GameList() {
                     <StrongholdAllianceBar factionStats={g.faction_stats} variant="gameList" />
                   </div>
                 )}
-                {((g.game_code != null && g.status !== 'lobby') || isHost(g)) && (
+                {((g.game_code != null && g.status !== 'lobby' && g.status !== 'finished') || isHost(g)) && (
                   <div className="game-list__card-actions">
-                    {g.game_code != null && g.status !== 'lobby' && (
+                    {g.game_code != null && g.status !== 'lobby' && g.status !== 'finished' && (
                       <button
                         type="button"
                         className="game-list__forfeit-btn"
