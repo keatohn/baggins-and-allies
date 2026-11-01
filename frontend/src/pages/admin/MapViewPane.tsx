@@ -3,6 +3,7 @@ import GameMap from '../../components/GameMap';
 import { api } from '../../services/api';
 import type { RingView } from '../../ringsDisplay';
 import type { GameState, MapOverridesData, PendingMove } from '../../types/game';
+import { normalizeMapOverrides } from '../../types/game';
 import {
   adjacencyEdges,
   computePathCentroids,
@@ -438,7 +439,7 @@ export function MapViewPane({
     let cancelled = false;
     api.getMapOverrides(mapBase)
       .then((r) => {
-        if (!cancelled) setMapOverrides(r?.overrides ?? null);
+        if (!cancelled) setMapOverrides(normalizeMapOverrides(r?.overrides));
       })
       .catch(() => {
         if (!cancelled) setMapOverrides(null);
