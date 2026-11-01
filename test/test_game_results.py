@@ -232,6 +232,47 @@ def test_removed_forfeiter_still_gets_row(db_session, players):
     assert set(participants) == {alice.id, bob.id}
 
 
+def test_forfeit_reassignment_notes_recover_missing_factions(db_session, players):
+    """Older forfeits stored display-name notes, not faction ids. Those players still count."""
+    alice, bob = players
+    state = GameState.from_dict({})
+    state.winner = "good"
+    state.turn_number = 12
+    game = _add_game(
+        db_session,
+        players_list=[],
+        state=state,
+        status="finished",
+        config=_config(
+            forfeited_player_ids=[alice.id, bob.id],
+            forfeit_reassignments={
+                alice.id: ["Gondor → Computer", "Rohan → Computer"],
+                bob.id: ["Mordor → Computer"],
+            },
+            definitions={
+                "factions": {
+                    "gondor": {"alliance": "good", "display_name": "Gondor"},
+                    "rohan": {"alliance": "good", "display_name": "Rohan"},
+                    "mordor": {"alliance": "evil", "display_name": "Mordor"},
+                }
+            },
+        ),
+    )
+    # Already finished with no rows: the same path startup backfill uses.
+    n = ensure_game_results_for_row(db_session, game)
+    db_session.commit()
+    assert n == 3
+    rows = _results_for(db_session, game.id)
+    alice_rows = [r for r in rows if r.player_id == alice.id]
+    bob_rows = [r for r in rows if r.player_id == bob.id]
+    assert {r.faction_id for r in alice_rows} == {"gondor", "rohan"}
+    assert all(r.won is True and r.forfeited is True and r.alliance == "good" for r in alice_rows)
+    assert len(bob_rows) == 1
+    assert bob_rows[0].faction_id == "mordor"
+    assert bob_rows[0].won is False
+    assert bob_rows[0].alliance == "evil"
+
+
 def test_removed_forfeiter_multi_faction_rows(db_session, players):
     """One row per faction the forfeiter controlled."""
     alice, bob = players

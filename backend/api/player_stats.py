@@ -38,8 +38,14 @@ def _win_pct(wins: int, games: int) -> float | None:
     return round(100.0 * wins / games, 1)
 
 
-def _game_key(row: GameResult) -> tuple[str, str]:
-    return (str(row.game_id), str(row.player_id))
+def _game_key(row: GameResult) -> tuple[str, str, str]:
+    """One result per game, player, and alliance.
+
+    Two factions on the same side stay one game. A player who also controlled the
+    other side gets a separate win or loss for that side.
+    """
+    alliance = str(row.alliance) if row.alliance else ""
+    return (str(row.game_id), str(row.player_id), alliance)
 
 
 def _apply_filters(
@@ -102,14 +108,15 @@ def _filter_game_ids_by_peer(
 
 
 def _aggregate_by_game(rows: list[GameResult]) -> list[dict[str, Any]]:
-    """Collapse multi-faction rows (same game+player) into one logical game entry."""
-    games: dict[tuple[str, str], dict[str, Any]] = {}
+    """Collapse faction rows into one result per game, player, and alliance."""
+    games: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in rows:
         key = _game_key(row)
         entry = games.get(key)
         if entry is None:
             games[key] = {
                 "game_id": str(row.game_id),
+                "player_id": str(row.player_id),
                 "won": bool(row.won),
                 "forfeited": bool(row.forfeited),
                 "alliance": str(row.alliance) if row.alliance else None,
@@ -264,38 +271,39 @@ def compute_player_stats(
         key=lambda b: (-b["games"], b["scenario_name"] or ""),
     )
 
-    # Head-to-head vs/with each other human, from peer rows in counted games.
-    subject_alliance_by_game = {g["game_id"]: g["alliance"] for g in games}
-    subject_win_by_game = {g["game_id"]: g["won"] for g in games}
+    # Head-to-head vs/with each other human. One credit per alliance, so a player
+    # who held both sides is not collapsed into a single win for the first faction.
+    subject_by_game: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for g in games:
+        subject_by_game[g["game_id"]].append(g)
     h2h: dict[str, dict[str, Any]] = {}
-    for row in peer_rows:
-        game_id = str(row.game_id)
-        if game_id not in subject_alliance_by_game:
+    for peer in _aggregate_by_game(peer_rows):
+        game_id = peer["game_id"]
+        subject_entries = subject_by_game.get(game_id) or []
+        other_id = peer["player_id"]
+        other_a = peer["alliance"]
+        if not other_a:
             continue
-        other_id = str(row.player_id)
-        subj_a = subject_alliance_by_game.get(game_id)
-        other_a = str(row.alliance) if row.alliance else None
-        if subj_a is None or other_a is None:
-            continue
-        kind = "with" if subj_a == other_a else "against"
-        bucket = h2h.get(other_id)
-        if bucket is None:
-            bucket = {
-                "player_id": other_id,
-                "kind": kind,
-                "games": 0,
-                "wins": 0,
-                "faction_ids": set(),
-            }
-            h2h[other_id] = bucket
-        elif bucket["kind"] != kind:
-            # Same peer across multiple games with different relations: prefer "against".
-            bucket["kind"] = "against"
-        bucket["games"] += 1
-        if subject_win_by_game.get(game_id):
-            bucket["wins"] += 1
-        if row.faction_id:
-            bucket["faction_ids"].add(str(row.faction_id))
+        for subj in subject_entries:
+            subj_a = subj["alliance"]
+            if not subj_a:
+                continue
+            kind = "with" if subj_a == other_a else "against"
+            bucket = h2h.get(other_id)
+            if bucket is None:
+                bucket = {
+                    "player_id": other_id,
+                    "kind": kind,
+                    "games": 0,
+                    "wins": 0,
+                }
+                h2h[other_id] = bucket
+            elif bucket["kind"] != kind:
+                # Same peer across multiple games with different relations: prefer "against".
+                bucket["kind"] = "against"
+            bucket["games"] += 1
+            if subj["won"]:
+                bucket["wins"] += 1
 
     usernames = _usernames_for(db, list(h2h.keys()))
     head_to_head = sorted(

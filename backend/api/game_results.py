@@ -70,6 +70,38 @@ def _duration_seconds(row: GameModel) -> int | None:
         return None
 
 
+def _faction_ids_from_reassignments(config: dict, player_id: str) -> list[str]:
+    """Faction ids a forfeited player gave away, from the older reassignment notes.
+
+    Notes look like ``\"Mordor → Computer\"``. Games forfeited before faction ids were
+    stored have these strings and an empty roster, so this is the only record of
+    who played which side.
+    """
+    notes = config.get("forfeit_reassignments") if isinstance(config, dict) else None
+    entries = notes.get(player_id) if isinstance(notes, dict) else None
+    if not isinstance(entries, list):
+        return []
+    defs = config.get("definitions") if isinstance(config.get("definitions"), dict) else {}
+    factions = defs.get("factions") if isinstance(defs.get("factions"), dict) else {}
+    by_label: dict[str, str] = {}
+    for fid, raw in factions.items():
+        fid_s = str(fid)
+        by_label[fid_s.lower()] = fid_s
+        if isinstance(raw, dict):
+            name = raw.get("display_name")
+            if isinstance(name, str) and name.strip():
+                by_label[name.strip().lower()] = fid_s
+    out: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, str):
+            continue
+        label = entry.split("→", 1)[0].split("->", 1)[0].strip().lower()
+        fid_s = by_label.get(label)
+        if fid_s and fid_s not in out:
+            out.append(fid_s)
+    return out
+
+
 def _human_roster(players_list: Any) -> list[dict]:
     """Roster entries with a real human player_id (not computer / empty)."""
     out: list[dict] = []
@@ -132,19 +164,22 @@ def ensure_game_results_for_row(db: Session, row: GameModel) -> int:
     roster_pids = {e["player_id"] for e in roster}
     entries = list(roster)
     factions_cfg = config.get("forfeited_player_factions")
-    if isinstance(factions_cfg, dict):
-        for pid, fids in factions_cfg.items():
-            pid_s = str(pid)
-            if pid_s in roster_pids or pid_s not in forfeited_ids:
-                continue
-            if isinstance(fids, str):
-                fids = [fids]
-            if not isinstance(fids, list):
-                continue
-            for fid in fids:
-                fid_s = str(fid).strip()
-                if not fid_s:
-                    continue
+    if not isinstance(factions_cfg, dict):
+        factions_cfg = {}
+    recorded: dict[str, list[str]] = {}
+    for pid, fids in factions_cfg.items():
+        pid_s = str(pid)
+        if isinstance(fids, str):
+            fids = [fids]
+        if not isinstance(fids, list):
+            continue
+        recorded[pid_s] = [str(fid).strip() for fid in fids if str(fid).strip()]
+    for pid_s in forfeited_ids:
+        if pid_s in roster_pids:
+            continue
+        fids = recorded.get(pid_s) or _faction_ids_from_reassignments(config, pid_s)
+        for fid_s in fids:
+            if fid_s:
                 entries.append({"player_id": pid_s, "faction_id": fid_s})
 
     participant_ids = sorted({e["player_id"] for e in entries})

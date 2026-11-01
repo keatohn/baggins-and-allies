@@ -386,3 +386,25 @@ def test_multi_faction_rows_collapse_to_one_game(db_session, players, make_clien
     data = client.get(f"/players/{alice.id}/stats").json()
     assert data["overall"]["games"] == 1
     assert data["overall"]["wins"] == 1
+
+
+def test_both_alliances_count_win_and_loss(db_session, players, make_client):
+    """A player who held both sides gets the winning side and the losing side."""
+    alice, _bob, _carol = players
+    _finish_game(
+        db_session,
+        players_list=[
+            {"player_id": alice.id, "faction_id": "gondor"},
+            {"player_id": alice.id, "faction_id": "rohan"},
+            {"player_id": alice.id, "faction_id": "mordor"},
+            {"player_id": alice.id, "faction_id": "isengard"},
+        ],
+        winner="evil",
+    )
+    client = make_client(alice)
+    data = client.get(f"/players/{alice.id}/stats").json()
+    assert data["overall"]["games"] == 2
+    assert data["overall"]["wins"] == 1
+    assert data["overall"]["losses"] == 1
+    assert data["by_alliance"]["evil"] == {"games": 1, "wins": 1, "win_pct": 100.0}
+    assert data["by_alliance"]["good"] == {"games": 1, "wins": 0, "win_pct": 0.0}

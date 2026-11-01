@@ -104,7 +104,7 @@ class GameResult(Base):
 
     Written once when a game flips to status=finished (idempotent per game).
     AI factions have no roster entries today; is_ai is reserved for future use.
-    forfeited=true marks players who left mid-game — exclude from headline W-L.
+    forfeited=true marks players who left mid-game. Headline W-L still counts them.
     """
 
     __tablename__ = "game_results"
