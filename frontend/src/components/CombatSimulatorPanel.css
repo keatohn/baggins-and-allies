@@ -279,185 +279,6 @@
   min-width: min(160px, 100%);
 }
 
-@media (max-width: 640px) {
-  .combat-sim-attacker-stack {
-    flex: 1 1 100%;
-    min-width: 100%;
-  }
-
-  .combat-sim-dropdowns-row > .combat-sim-field {
-    flex: 1 1 100%;
-    min-width: 100%;
-  }
-
-  .combat-sim-options-row {
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-
-  .combat-sim-units-row {
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  .combat-sim-attack-defense-section::before {
-    display: none;
-  }
-
-  .combat-sim-unit-name-text {
-    white-space: normal;
-    word-break: break-word;
-    overflow: visible;
-    text-overflow: unset;
-  }
-
-  .combat-sim-add-defender-list {
-    left: 0;
-    right: 0;
-    min-width: 0;
-    width: 100%;
-    max-width: none;
-    max-height: min(50vh, 16rem);
-  }
-
-  .combat-sim-add-defender-option {
-    padding: 0.65rem 0.85rem;
-    font-size: 0.9rem;
-  }
-
-  .combat-sim-pill {
-    min-height: 44px;
-    padding: 0.4rem 1rem;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .combat-sim-pill--small {
-    min-height: 40px;
-    padding: 0.35rem 0.7rem;
-    font-size: 0.82rem;
-  }
-
-  .combat-sim-swap-btn {
-    width: 44px;
-    height: 44px;
-    font-size: 1.35rem;
-  }
-
-  .combat-sim-select {
-    min-height: 44px;
-    padding: 0.5rem 0.6rem;
-    font-size: 1rem;
-  }
-
-  .combat-sim-special-unit {
-    word-break: break-word;
-    white-space: normal;
-  }
-}
-
-/* Narrow modals / phones: keep shelf columns readable; scroll if needed */
-@media (max-width: 767px) {
-  .combat-sim-preview-shelf-row {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    gap: 0.5rem;
-    grid-template-columns: minmax(110px, 1fr) minmax(110px, 1fr);
-  }
-
-  .combat-sim-preview-unit-stack {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overflow-y: hidden;
-    -webkit-overflow-scrolling: touch;
-    padding: 0.15rem 0;
-  }
-}
-
-/*
- * Portrait phones/tablets: tiny steppers + single-line rows with horizontal scroll
- * (matches combat modal full-width breakpoint; wider than 640px so iPad portrait is included)
- */
-@media (max-width: 767px) and (orientation: portrait) {
-  .combat-sim-unit-row {
-    flex-wrap: nowrap;
-    align-items: center;
-    gap: 0.3rem;
-    max-width: 100%;
-    overflow-x: auto;
-    overflow-y: visible;
-    -webkit-overflow-scrolling: touch;
-    padding-bottom: 2px;
-  }
-
-  .combat-sim-unit-icon-wrap {
-    flex-shrink: 0;
-  }
-
-  .combat-sim-unit-main {
-    flex: 1 1 auto;
-    min-width: 0;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.08rem;
-  }
-
-  .combat-sim-unit-name-text {
-    font-size: 0.82rem;
-    line-height: 1.2;
-  }
-
-  .combat-sim-unit-stat {
-    font-size: 0.7rem;
-    line-height: 1.25;
-    font-weight: 500;
-  }
-
-  .combat-sim-unit-row-controls {
-    flex: 0 0 auto;
-    flex-shrink: 0;
-    margin-left: auto;
-    padding-top: 0;
-  }
-
-  .combat-sim-unit-row--defender .combat-sim-unit-row-controls {
-    flex-wrap: nowrap;
-    gap: 0.25rem;
-  }
-
-  .combat-sim-count-stepper {
-    flex-shrink: 0;
-  }
-
-  .combat-sim-count-btn {
-    min-width: 26px;
-    width: 26px;
-    min-height: 28px;
-    height: 28px;
-    font-size: 0.85rem;
-  }
-
-  .combat-sim-input--stepper {
-    width: 1.65rem;
-    min-width: 1.5rem;
-    max-width: 2.1rem;
-    min-height: 28px;
-    height: 28px;
-    font-size: 0.72rem;
-    padding: 0 0.04rem;
-  }
-
-  .combat-sim-defender-remove {
-    min-width: 26px;
-    min-height: 28px;
-    width: 26px;
-    height: 28px;
-    font-size: 0.9rem;
-    padding: 0;
-  }
-}
-
 .combat-sim-select {
   box-sizing: border-box;
   width: 100%;
@@ -1131,6 +952,185 @@
   min-width: 0;
   /* overflow-x: auto + overflow-y: visible computes to auto on both axes → bogus vertical scrollbars on desktop */
   overflow: visible;
+}
+
+@media (max-width: 640px) {
+  .combat-sim-attacker-stack {
+    flex: 1 1 100%;
+    min-width: 100%;
+  }
+
+  .combat-sim-dropdowns-row > .combat-sim-field {
+    flex: 1 1 100%;
+    min-width: 100%;
+  }
+
+  .combat-sim-options-row {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .combat-sim-units-row {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .combat-sim-attack-defense-section::before {
+    display: none;
+  }
+
+  .combat-sim-unit-name-text {
+    white-space: normal;
+    word-break: break-word;
+    overflow: visible;
+    text-overflow: unset;
+  }
+
+  .combat-sim-add-defender-list {
+    left: 0;
+    right: 0;
+    min-width: 0;
+    width: 100%;
+    max-width: none;
+    max-height: min(50vh, 16rem);
+  }
+
+  .combat-sim-add-defender-option {
+    padding: 0.65rem 0.85rem;
+    font-size: 0.9rem;
+  }
+
+  .combat-sim-pill {
+    min-height: 44px;
+    padding: 0.4rem 1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .combat-sim-pill--small {
+    min-height: 40px;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.82rem;
+  }
+
+  .combat-sim-swap-btn {
+    width: 44px;
+    height: 44px;
+    font-size: 1.35rem;
+  }
+
+  .combat-sim-select {
+    min-height: 44px;
+    padding: 0.5rem 0.6rem;
+    font-size: 1rem;
+  }
+
+  .combat-sim-special-unit {
+    word-break: break-word;
+    white-space: normal;
+  }
+}
+
+/* Narrow modals / phones: keep shelf columns readable; scroll if needed */
+@media (max-width: 767px) {
+  .combat-sim-preview-shelf-row {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 0.5rem;
+    grid-template-columns: minmax(110px, 1fr) minmax(110px, 1fr);
+  }
+
+  .combat-sim-preview-unit-stack {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding: 0.15rem 0;
+  }
+}
+
+/*
+ * Portrait phones/tablets: tiny steppers + single-line rows with horizontal scroll
+ * (matches combat modal full-width breakpoint; wider than 640px so iPad portrait is included)
+ */
+@media (max-width: 767px) and (orientation: portrait) {
+  .combat-sim-unit-row {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.3rem;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+  }
+
+  .combat-sim-unit-icon-wrap {
+    flex-shrink: 0;
+  }
+
+  .combat-sim-unit-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.08rem;
+  }
+
+  .combat-sim-unit-name-text {
+    font-size: 0.82rem;
+    line-height: 1.2;
+  }
+
+  .combat-sim-unit-stat {
+    font-size: 0.7rem;
+    line-height: 1.25;
+    font-weight: 500;
+  }
+
+  .combat-sim-unit-row-controls {
+    flex: 0 0 auto;
+    flex-shrink: 0;
+    margin-left: auto;
+    padding-top: 0;
+  }
+
+  .combat-sim-unit-row--defender .combat-sim-unit-row-controls {
+    flex-wrap: nowrap;
+    gap: 0.25rem;
+  }
+
+  .combat-sim-count-stepper {
+    flex-shrink: 0;
+  }
+
+  .combat-sim-count-btn {
+    min-width: 26px;
+    width: 26px;
+    min-height: 28px;
+    height: 28px;
+    font-size: 0.85rem;
+  }
+
+  .combat-sim-input--stepper {
+    width: 1.65rem;
+    min-width: 1.5rem;
+    max-width: 2.1rem;
+    min-height: 28px;
+    height: 28px;
+    font-size: 0.72rem;
+    padding: 0 0.04rem;
+  }
+
+  .combat-sim-defender-remove {
+    min-width: 26px;
+    min-height: 28px;
+    width: 26px;
+    height: 28px;
+    font-size: 0.9rem;
+    padding: 0;
+  }
 }
 
 .combat-sim-preview-unit-group {
