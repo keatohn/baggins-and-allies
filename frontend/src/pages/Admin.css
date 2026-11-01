@@ -2758,3 +2758,47 @@
     padding-bottom: max(1.5rem, calc(var(--scroll-roll-w, 24px) + 0.75rem));
   }
 }
+
+.admin-tier-form {
+  padding-bottom: 1rem;
+}
+
+.admin-tier-card__line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 0.85rem;
+  align-items: flex-end;
+}
+
+.admin-tier-card__line .admin-form__label {
+  flex: 1 1 8rem;
+}
+
+.admin-tier-frame-src {
+  flex: 2 1 14rem;
+}
+
+.admin-tier-frame-preview {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  align-self: center;
+}
+
+.admin-tier-rules {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 0.65rem 1rem;
+}
+
+.admin-tier-adjust {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 0.85rem;
+  align-items: flex-end;
+  padding: 0.35rem 0;
+}
+
+.admin-tier-adjust__reason {
+  flex: 1 1 12rem;
+}

@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "currency_label": "XP",
+  "frames": [],
+  "tiers": [
+    {
+      "id": "hobbit",
+      "name": "Hobbit",
+      "min_xp": 0,
+      "color": "#8c6a3f",
+      "icon": "",
+      "description": "",
+      "visual": {
+        "frame_id": "",
+        "ring_color": "#8c6a3f",
+        "glow": "none"
+      }
+    },
+    {
+      "id": "wanderer",
+      "name": "Wanderer",
+      "min_xp": 250,
+      "color": "#6b7c4a",
+      "icon": "",
+      "description": "",
+      "visual": {
+        "frame_id": "",
+        "ring_color": "#6b7c4a",
+        "glow": "none"
+      }
+    },
+    {
+      "id": "ranger",
+      "name": "Ranger",
+      "min_xp": 750,
+      "color": "#3d6b4f",
+      "icon": "",
+      "description": "",
+      "visual": {
+        "frame_id": "",
+        "ring_color": "#3d6b4f",
+        "glow": "none"
+      }
+    },
+    {
+      "id": "warden",
+      "name": "Warden",
+      "min_xp": 1500,
+      "color": "#2c6e9a",
+      "icon": "",
+      "description": "",
+      "visual": {
+        "frame_id": "",
+        "ring_color": "#2c6e9a",
+        "glow": "none"
+      }
+    },
+    {
+      "id": "captain",
+      "name": "Captain",
+      "min_xp": 3000,
+      "color": "#8a3d3d",
+      "icon": "",
+      "description": "",
+      "visual": {
+        "frame_id": "",
+        "ring_color": "#8a3d3d",
+        "glow": "none"
+      }
+    },
+    {
+      "id": "lord",
+      "name": "Lord",
+      "min_xp": 5000,
+      "color": "#c4a35a",
+      "icon": "",
+      "description": "",
+      "visual": {
+        "frame_id": "",
+        "ring_color": "#c4a35a",
+        "glow": "none"
+      }
+    },
+    {
+      "id": "istar",
+      "name": "Istar",
+      "min_xp": 8000,
+      "color": "#6b4c9a",
+      "icon": "",
+      "description": "",
+      "visual": {
+        "frame_id": "",
+        "ring_color": "#6b4c9a",
+        "glow": "none"
+      }
+    }
+  ],
+  "rules": {
+    "game_completed": 50,
+    "game_won": 100,
+    "stronghold_captured": 15,
+    "territory_captured": 2,
+    "enemy_unit_destroyed": 1,
+    "battle_won": 3,
+    "multiplayer_multiplier": 1.0,
+    "vs_ai_multiplier": 0.5,
+    "min_rounds_to_count": 3,
+    "stats_cap_per_game": 300,
+    "forfeit_xp": 0,
+    "daily_cap": 0
+  }
+}

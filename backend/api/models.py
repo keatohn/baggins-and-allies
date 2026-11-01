@@ -23,6 +23,8 @@ class Player(Base):
     temp_password_expires_at = Column(DateTime, nullable=True)
     # JSON string: preferences, e.g. { "audio": { "menu_music_volume": 0, "game_music_volume": 0, "sfx_volume": 0, "muted": false } }
     preferences = Column(Text, nullable=True)
+    # Cached sum of xp_ledger. The ledger is the source of truth; tier is derived from this and the admin config.
+    xp = Column(Integer, nullable=False, default=0)
 
 
 class Game(Base):
@@ -147,3 +149,20 @@ class PlayerAchievement(Base):
     player_id = Column(String(36), ForeignKey("players.id"), nullable=False, index=True)
     achievement_id = Column(String(36), ForeignKey("achievements.id"), nullable=False, index=True)
     awarded_at = Column(DateTime, default=datetime.utcnow)
+
+
+class XpLedger(Base):
+    """One XP grant. ``game`` rows are unique per player and game, so a finished game pays out once."""
+
+    __tablename__ = "xp_ledger"
+    __table_args__ = (
+        UniqueConstraint("player_id", "game_id", "source", name="uq_xp_ledger_player_game_source"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    player_id = Column(String(36), ForeignKey("players.id"), nullable=False, index=True)
+    game_id = Column(String(36), nullable=True, index=True)
+    source = Column(String(32), nullable=False)  # "game" | "admin_adjust"
+    amount = Column(Integer, nullable=False)
+    meta_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)

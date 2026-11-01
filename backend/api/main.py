@@ -4,6 +4,7 @@ Provides REST API endpoints for game state management and actions.
 """
 
 import json
+import logging
 import os
 import random
 import secrets
@@ -48,6 +49,18 @@ from .auth import (
 )
 
 from backend.balance.starting_strength import compute_starting_strength
+from backend.progression import (
+    ProgressionError,
+    accumulate_xp_stats,
+    adjust_player_xp,
+    award_game_xp,
+    backfill_finished_games,
+    load_progression,
+    player_progression_view,
+    public_progression,
+    save_progression,
+    tier_for_xp,
+)
 from backend.engine.state import GameState, PendingMove
 from backend.engine.actions import (
     Action,
@@ -945,7 +958,11 @@ def save_game(
     db: Session | None = None,
     events: list | None = None,
 ) -> None:
-    """Persist game state to DB and cache. If events is provided, append to config event_log (capped)."""
+    """Persist game state to DB and cache. If events is provided, append to config event_log (capped).
+
+    The first save that records a winner also awards XP. A failure there is logged and
+    does not block the finished game; the admin backfill can award it later.
+    """
     from backend.engine.events import GameEvent
 
     games[game_id] = state
@@ -954,7 +971,8 @@ def save_game(
     row = db.query(GameModel).filter(GameModel.id == game_id).first()
     if row:
         row.game_state = json.dumps(state.to_dict())
-        if state.winner is not None and row.status != "finished":
+        just_finished = state.winner is not None and row.status != "finished"
+        if just_finished:
             row.status = "finished"
             row.completed_at = datetime.utcnow()
             wrote_results = 0
@@ -984,6 +1002,7 @@ def save_game(
                 log = config.get("event_log")
                 if not isinstance(log, list):
                     log = []
+                accepted: list[dict] = []
                 for e in events:
                     if isinstance(e, GameEvent):
                         event_dict = e.to_dict()
@@ -991,17 +1010,26 @@ def save_game(
                         if isinstance(payload, dict) and payload.get("debug_only") is True:
                             continue
                         log.append(event_dict)
+                        accepted.append(event_dict)
                     elif isinstance(e, dict):
                         payload = e.get("payload") if isinstance(e, dict) else None
                         if isinstance(payload, dict) and payload.get("debug_only") is True:
                             continue
                         log.append(e)
+                        accepted.append(e)
                 if len(log) > EVENT_LOG_MAX:
                     log = log[-EVENT_LOG_MAX:]
                 config["event_log"] = log
+                accumulate_xp_stats(config, accepted)
                 row.config = json.dumps(config)
             except (TypeError, json.JSONDecodeError):
                 pass
+        if just_finished:
+            try:
+                with db.begin_nested():
+                    award_game_xp(db, row, state)
+            except Exception:
+                logging.getLogger(__name__).exception("XP award failed for game %s", game_id)
         db.commit()
 
 
@@ -1324,14 +1352,16 @@ def _player_audio_response(player: Player) -> dict[str, Any]:
     }
 
 
-def _profile_response(player: Player) -> dict[str, Any]:
-    return {
+def _profile_response(player: Player, db: Session | None = None) -> dict[str, Any]:
+    body = {
         "id": player.id,
         "email": player.email,
         "username": player.username,
         "is_admin": bool(getattr(player, "is_admin", False)),
         "audio": _player_audio_response(player),
     }
+    body.update(player_progression_view(player, db))
+    return body
 
 
 @app.post("/auth/register")
@@ -1361,7 +1391,7 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(player)
         token = create_access_token(player_id)
-        return {"access_token": token, "player": _profile_response(player)}
+        return {"access_token": token, "player": _profile_response(player, db)}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
@@ -1378,7 +1408,7 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(player)
     token = create_access_token(player.id)
-    return {"access_token": token, "player": _profile_response(player)}
+    return {"access_token": token, "player": _profile_response(player, db)}
 
 
 # Single-use temp password lifetime; override with TEMP_PASSWORD_EXPIRE_MINUTES (e.g. 15 or 120).
@@ -1430,9 +1460,9 @@ def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db))
 
 
 @app.get("/auth/me")
-def auth_me(player: Player = Depends(get_current_player)):
-    """Return current player (email, username, audio preferences)."""
-    return _profile_response(player)
+def auth_me(player: Player = Depends(get_current_player), db: Session = Depends(get_db)):
+    """Return current player (email, username, audio preferences, XP and tier)."""
+    return _profile_response(player, db)
 
 
 @app.patch("/auth/me")
@@ -1484,7 +1514,7 @@ def update_profile(
     try:
         db.commit()
         db.refresh(player)
-        return _profile_response(player)
+        return _profile_response(player, db)
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Update failed: {str(e)}")
@@ -1793,17 +1823,104 @@ def admin_list_users(
     db: Session = Depends(get_db),
 ):
     """Every registered user for the admin users report."""
+    cfg = load_progression(db)
     rows = db.query(Player).order_by(Player.username).all()
+    users = []
+    for p in rows:
+        xp = int(p.xp or 0)
+        tier = tier_for_xp(xp, cfg["tiers"])
+        users.append({
+            "id": p.id,
+            "username": p.username,
+            "email": p.email,
+            "last_login": p.last_login.isoformat() if p.last_login else None,
+            "xp": xp,
+            "tier_id": tier["id"] if tier else None,
+            "tier_name": tier["name"] if tier else None,
+        })
+    return {"users": users}
+
+
+@app.get("/progression")
+def get_progression(db: Session = Depends(get_db)):
+    """Tier names, thresholds, and avatar-frame assignments. Event XP values stay on the admin route."""
+    return public_progression(db)
+
+
+@app.get("/admin/progression")
+def admin_get_progression(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Full progression document, including how much XP each event is worth."""
+    return load_progression(db)
+
+
+class AdminProgressionBody(BaseModel):
+    version: int | None = None
+    currency_label: str | None = None
+    frames: list[dict[str, Any]] = Field(default_factory=list)
+    tiers: list[dict[str, Any]]
+    rules: dict[str, Any]
+
+
+@app.put("/admin/progression")
+def admin_put_progression(
+    body: AdminProgressionBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Replace tier names, thresholds, frames, and XP rules."""
+    try:
+        cfg = save_progression(db, body.model_dump())
+    except ProgressionError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True, "progression": cfg}
+
+
+@app.post("/admin/progression/backfill")
+def admin_backfill_progression(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Award XP for finished games that have not been awarded yet. Safe to run again."""
+    result = backfill_finished_games(db)
+    db.commit()
+    return {"ok": True, **result}
+
+
+class AdminXpAdjustBody(BaseModel):
+    amount: int
+    reason: str = Field(min_length=1, max_length=200)
+
+
+@app.post("/admin/users/{player_id}/xp")
+def admin_adjust_user_xp(
+    player_id: str,
+    body: AdminXpAdjustBody,
+    admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Grant or remove XP. The change is a ledger row with the reason."""
+    if body.amount == 0:
+        raise HTTPException(status_code=400, detail="Amount cannot be 0")
+    reason = body.reason.strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="A reason is required")
+    player = db.query(Player).filter(Player.id == player_id).first()
+    if not player:
+        raise HTTPException(status_code=404, detail="User not found")
+    applied = adjust_player_xp(db, player, body.amount, reason, admin.id)
+    db.commit()
+    db.refresh(player)
+    cfg = load_progression(db)
+    tier = tier_for_xp(int(player.xp or 0), cfg["tiers"])
     return {
-        "users": [
-            {
-                "id": p.id,
-                "username": p.username,
-                "email": p.email,
-                "last_login": p.last_login.isoformat() if p.last_login else None,
-            }
-            for p in rows
-        ]
+        "ok": True,
+        "xp": int(player.xp or 0),
+        "applied": applied,
+        "tier_id": tier["id"] if tier else None,
+        "tier_name": tier["name"] if tier else None,
     }
 
 
