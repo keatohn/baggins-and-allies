@@ -2300,7 +2300,7 @@ def admin_run_sim(
     raw_factions = {
         fid: setting.model_dump()
         for fid, setting in (body.factions or {}).items()
-        if fid
+        if fid and _sim_faction_plays(fd.get(fid))
     }
     factions = {
         fid: normalize_faction_ai(
@@ -2309,8 +2309,8 @@ def admin_run_sim(
             ai_defaults["levels"],
             ai_defaults["algorithm"],
         )
-        for fid in fd
-        if fid
+        for fid, fdef in fd.items()
+        if fid and _sim_faction_plays(fdef)
     }
     try:
         record = _run_admin_sim(
@@ -2330,6 +2330,15 @@ def admin_run_sim(
     record["created_at"] = datetime.utcnow().isoformat() + "Z"
     runs = save_sim_run(db, record)
     return {"ok": "error" not in record, "run": record, "runs": runs}
+
+
+def _sim_faction_plays(fdef) -> bool:
+    """Neutral factions only roll in defense. A sim never asks them to decide."""
+    alliance = getattr(fdef, "alliance", None) if fdef is not None else None
+    if not isinstance(alliance, str):
+        return False
+    text = alliance.strip().lower()
+    return bool(text) and text != "neutral"
 
 
 def _run_admin_sim(setup, setup_id, ud, td, fd, cd, port_d, *, factions, max_cycles, seed, levels=None):

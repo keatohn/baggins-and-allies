@@ -205,6 +205,7 @@ def test_admin_sim_uses_faction_settings_and_turn_cap(make_client, players, monk
     assert factions["mordor"]["algorithm"] == "heuristic"
     assert factions["mordor"]["difficulty"] == "easy"
     assert factions["rohan"]["algorithm"] == "heuristic"
+    assert "neutral" not in factions
     assert "matchup" not in captured["kwargs"]
     body = response.json()["run"]
     assert body["max_cycles"] == 10

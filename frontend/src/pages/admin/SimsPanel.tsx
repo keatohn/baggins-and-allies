@@ -54,7 +54,8 @@ function factionsFromBundle(factions: Record<string, unknown> | undefined): SimF
       : typeof row.name === 'string' && row.name.trim()
         ? row.name
         : id;
-    const alliance = typeof row.alliance === 'string' ? row.alliance : 'neutral';
+    const alliance = typeof row.alliance === 'string' ? row.alliance.trim().toLowerCase() : '';
+    if (!alliance || alliance === 'neutral') continue;
     rows.push({ id, name, alliance });
   }
   return rows.sort((a, b) => {
