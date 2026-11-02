@@ -587,6 +587,45 @@ def alliances_from_config(config: dict) -> dict[str, str]:
     return out
 
 
+def alliance_by_faction(config: dict) -> dict[str, str]:
+    """Faction and subfaction id → alliance. Subfactions use their parent's alliance."""
+    defs = config.get("definitions")
+    if not isinstance(defs, dict):
+        return {}
+    factions = defs.get("factions")
+    if not isinstance(factions, dict):
+        return {}
+    out: dict[str, str] = {}
+    for fid, raw in factions.items():
+        if not isinstance(raw, dict):
+            continue
+        alliance = str(raw.get("alliance") or "neutral")
+        out[str(fid)] = alliance
+        subs = raw.get("subfactions")
+        if not isinstance(subs, list):
+            continue
+        for sub in subs:
+            if isinstance(sub, dict) and str(sub.get("id") or "").strip():
+                out[str(sub["id"]).strip()] = alliance
+    return out
+
+
+def original_owners_from_config(config: dict) -> dict[str, str] | None:
+    """Starting owner by territory. None when this game has no starting setup saved."""
+    start = config.get("starting_setup")
+    if not isinstance(start, dict):
+        return None
+    owners = start.get("territory_owners")
+    if not isinstance(owners, dict):
+        return {}
+    out: dict[str, str] = {}
+    for tid, owner in owners.items():
+        owner_s = str(owner or "").strip()
+        if owner_s:
+            out[str(tid)] = owner_s
+    return out
+
+
 def _event_parts(event: Any) -> tuple[str, dict]:
     if isinstance(event, dict):
         payload = event.get("payload")
@@ -618,7 +657,48 @@ def _list_len(payload: dict, *keys: str) -> int:
     return 0
 
 
-def fold_events(stats: dict, events: list, stronghold_ids: set[str]) -> dict:
+def _same_alliance(alliances: dict[str, str], left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    left_all = alliances.get(left, "")
+    right_all = alliances.get(right, "")
+    return bool(left_all and right_all and left_all == right_all)
+
+
+def _enemy_stronghold_capture(
+    territory: str,
+    new_owner: str,
+    old_owner: str,
+    stronghold_ids: set[str],
+    original_owners: dict[str, str] | None,
+    alliances: dict[str, str] | None,
+) -> bool:
+    """Enemy stronghold taken from the other side.
+
+    Retaking a stronghold that started with you or an ally, and liberating one
+    back to that ally, do not count. Without a starting-owner map, every
+    stronghold capture still counts.
+    """
+    if territory not in stronghold_ids or not new_owner:
+        return False
+    if original_owners is None or alliances is None:
+        return True
+    original = original_owners.get(territory, "")
+    if original:
+        return not _same_alliance(alliances, original, new_owner)
+    return not _same_alliance(alliances, old_owner, new_owner)
+
+
+def fold_events(
+    stats: dict,
+    events: list,
+    stronghold_ids: set[str],
+    *,
+    original_owners: dict[str, str] | None = None,
+    alliances: dict[str, str] | None = None,
+) -> dict:
     """Add capture, kill, and battle counts from these events onto ``stats``."""
     by = stats.get("by_faction")
     if not isinstance(by, dict):
@@ -631,8 +711,14 @@ def fold_events(stats: dict, events: list, stronghold_ids: set[str]) -> dict:
         if etype == "territory_captured":
             owner = str(payload.get("new_owner") or "").strip()
             territory = str(payload.get("territory") or "")
-            key = "strongholds_captured" if territory in stronghold_ids else "territories_captured"
-            _bump(by, owner, key, 1)
+            old_owner = str(payload.get("old_owner") or "").strip()
+            if territory in stronghold_ids:
+                if _enemy_stronghold_capture(
+                    territory, owner, old_owner, stronghold_ids, original_owners, alliances,
+                ):
+                    _bump(by, owner, "strongholds_captured", 1)
+            else:
+                _bump(by, owner, "territories_captured", 1)
         elif etype == "combat_ended":
             attacker = str(payload.get("attacker_faction") or "").strip()
             defender = str(payload.get("defender_faction") or "").strip()
@@ -657,7 +743,13 @@ def accumulate_xp_stats(config: dict, events: list) -> None:
     stats = config.get("xp_stats")
     if not isinstance(stats, dict):
         stats = {"by_faction": {}}
-    fold_events(stats, events, stronghold_ids_from_config(config))
+    fold_events(
+        stats,
+        events,
+        stronghold_ids_from_config(config),
+        original_owners=original_owners_from_config(config),
+        alliances=alliance_by_faction(config),
+    )
     config["xp_stats"] = stats
 
 
@@ -780,6 +872,57 @@ def faction_result_counts(config: dict, faction_id: str) -> dict[str, int]:
     current = _int_counts(_xp_by_faction(config).get(str(faction_id)))
     base = _int_counts(_faction_baselines(config).get(str(faction_id)))
     return {key: max(0, current[key] - base[key]) for key in STAT_KEYS}
+
+
+# Matches the event log cap in the API. A log that long may have dropped earlier events.
+_EVENT_LOG_MAY_BE_TRIMMED = 5000
+
+
+def replayed_faction_counts(config: dict) -> dict[str, dict[str, int]] | None:
+    """Recount from the event log when it still holds the whole game.
+
+    Returns None when the log is missing or long enough that the cap may have
+    dropped the opening events. Those games keep the saved ``xp_stats`` totals.
+    """
+    log = config.get("event_log")
+    if not isinstance(log, list) or not log or len(log) >= _EVENT_LOG_MAY_BE_TRIMMED:
+        return None
+    stats = {"by_faction": {}}
+    fold_events(
+        stats,
+        log,
+        stronghold_ids_from_config(config),
+        original_owners=original_owners_from_config(config),
+        alliances=alliance_by_faction(config),
+    )
+    by = stats.get("by_faction")
+    if not isinstance(by, dict):
+        return {}
+    return {str(fid): _int_counts(row) for fid, row in by.items()}
+
+
+def profile_counts_for_faction(
+    config: dict,
+    player_id: str,
+    faction_id: str,
+    forfeit_round: int | None,
+) -> dict[str, int]:
+    """Counts to store on a finished-game result row.
+
+    A stored forfeit snapshot is what that player had earned when they left, so
+    it wins over a full-game replay. A complete event log is recounted so
+    strongholds are enemy strongholds only. Otherwise the saved xp totals are
+    used, and those strongholds still include retaking your own.
+    """
+    if forfeit_round is not None:
+        snap = faction_snapshot_counts(config, player_id, faction_id)
+        if snap is not None:
+            return snap
+    if str(faction_id) not in _faction_baselines(config):
+        replayed = replayed_faction_counts(config)
+        if replayed is not None:
+            return replayed.get(str(faction_id), {key: 0 for key in STAT_KEYS})
+    return faction_result_counts(config, faction_id)
 
 
 def counts_for_player(
@@ -984,7 +1127,13 @@ def _stats_for_award(row: Any, config: dict) -> dict:
     stats = {"by_faction": {}}
     log_entries = config.get("event_log")
     if isinstance(log_entries, list):
-        fold_events(stats, log_entries, stronghold_ids_from_config(config))
+        fold_events(
+            stats,
+            log_entries,
+            stronghold_ids_from_config(config),
+            original_owners=original_owners_from_config(config),
+            alliances=alliance_by_faction(config),
+        )
     config["xp_stats"] = stats
     row.config = json.dumps(config)
     return stats

@@ -139,6 +139,7 @@ class GameResult(Base):
     forfeit_round = Column(Integer, nullable=True)
     battles_won = Column(Integer, nullable=False, default=0)
     strongholds_captured = Column(Integer, nullable=False, default=0)
+    units_destroyed = Column(Integer, nullable=False, default=0)
     is_ai = Column(Boolean, nullable=False, default=False)  # computer rows use a difficulty id, not a player
     setup_id = Column(String(128), nullable=True, index=True)
     scenario_name = Column(String(255), nullable=True)  # display-name snapshot at game end

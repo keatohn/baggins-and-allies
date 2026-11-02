@@ -13,6 +13,7 @@ from backend.api.database import Base
 from backend.api.game_results import (
     backfill_game_results,
     ensure_game_results_for_row,
+    refresh_game_result_counts,
 )
 from backend.api.main import games as games_cache
 from backend.api.models import Game, GameResult, Player
@@ -359,6 +360,90 @@ def test_backfill_existing_finished_games(db_session, players):
     # Second backfill is a no-op
     assert backfill_game_results(db_session) == 0
     assert len(_results_for(db_session, game.id)) == 2
+
+
+def test_refresh_backfills_saved_totals_and_recounts_enemy_strongholds(db_session, players):
+    alice, bob = players
+    state = GameState.from_dict({})
+    state.winner = "good"
+    state.turn_number = 6
+    saved = _add_game(
+        db_session,
+        players_list=[
+            {"player_id": alice.id, "faction_id": "gondor"},
+            {"player_id": bob.id, "faction_id": "mordor"},
+        ],
+        state=state,
+        status="finished",
+        completed_at=datetime.utcnow(),
+        config=_config(
+            xp_stats={"by_faction": {
+                "gondor": {"battles_won": 4, "strongholds_captured": 2, "enemy_units_destroyed": 9, "territories_captured": 0},
+                "mordor": {"battles_won": 1, "strongholds_captured": 0, "enemy_units_destroyed": 3, "territories_captured": 0},
+            }},
+        ),
+    )
+    assert ensure_game_results_for_row(db_session, saved) == 2
+    for row in _results_for(db_session, saved.id):
+        row.battles_won = 0
+        row.strongholds_captured = 0
+        row.units_destroyed = 0
+    db_session.commit()
+
+    assert refresh_game_result_counts(db_session) == 2
+    by_pid = {r.player_id: r for r in _results_for(db_session, saved.id)}
+    assert by_pid[alice.id].battles_won == 4
+    assert by_pid[alice.id].strongholds_captured == 2
+    assert by_pid[alice.id].units_destroyed == 9
+    assert by_pid[bob.id].units_destroyed == 3
+
+    recounted = _add_game(
+        db_session,
+        players_list=[
+            {"player_id": alice.id, "faction_id": "gondor"},
+            {"player_id": bob.id, "faction_id": "mordor"},
+        ],
+        state=state,
+        status="finished",
+        completed_at=datetime.utcnow(),
+        config=_config(
+            definitions={
+                "factions": FACTION_DEFS,
+                "territories": {
+                    "minas_tirith": {"is_stronghold": True},
+                    "barad_dur": {"is_stronghold": True},
+                },
+            },
+            starting_setup={"territory_owners": {"minas_tirith": "gondor", "barad_dur": "mordor"}},
+            xp_stats={"by_faction": {
+                "gondor": {"battles_won": 2, "strongholds_captured": 2, "enemy_units_destroyed": 5, "territories_captured": 0},
+            }},
+            event_log=[
+                {"type": "territory_captured", "payload": {"territory": "minas_tirith", "old_owner": "mordor", "new_owner": "gondor"}},
+                {"type": "territory_captured", "payload": {"territory": "barad_dur", "old_owner": "mordor", "new_owner": "gondor"}},
+                {"type": "combat_ended", "payload": {
+                    "winner": "attacker",
+                    "attacker_faction": "gondor",
+                    "defender_faction": "mordor",
+                    "defender_casualty_ids": ["a", "b", "c", "d", "e"],
+                }},
+            ],
+        ),
+    )
+    assert ensure_game_results_for_row(db_session, recounted) == 2
+    alice_row = next(r for r in _results_for(db_session, recounted.id) if r.player_id == alice.id)
+    assert alice_row.strongholds_captured == 1
+    assert alice_row.battles_won == 1
+    assert alice_row.units_destroyed == 5
+    alice_row.strongholds_captured = 2
+    alice_row.battles_won = 0
+    alice_row.units_destroyed = 0
+    db_session.commit()
+    assert refresh_game_result_counts(db_session) >= 1
+    db_session.refresh(alice_row)
+    assert alice_row.strongholds_captured == 1
+    assert alice_row.battles_won == 1
+    assert alice_row.units_destroyed == 5
 
 
 def test_active_game_no_rows(db_session, players):

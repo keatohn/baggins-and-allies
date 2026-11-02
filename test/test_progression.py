@@ -179,6 +179,30 @@ def test_fold_events_counts_strongholds_kills_and_battles():
     assert stats["by_faction"]["mordor"].get("battles_won", 0) == 0
 
 
+def test_fold_events_counts_enemy_strongholds_only():
+    stats = {"by_faction": {}}
+    owners = {"minas_tirith": "gondor", "barad_dur": "mordor", "dol_guldur": "gondor"}
+    alliances = {"gondor": "good", "rohan": "good", "mordor": "evil"}
+    fold_events(
+        stats,
+        [
+            {"type": "territory_captured", "payload": {"territory": "minas_tirith", "old_owner": "mordor", "new_owner": "gondor"}},
+            {"type": "territory_captured", "payload": {"territory": "minas_tirith", "old_owner": "mordor", "new_owner": "rohan"}},
+            {"type": "territory_captured", "payload": {"territory": "barad_dur", "old_owner": "mordor", "new_owner": "gondor"}},
+            {"type": "territory_captured", "payload": {"territory": "dol_guldur", "old_owner": "gondor", "new_owner": "mordor"}},
+            {"type": "territory_captured", "payload": {"territory": "pelennor", "old_owner": "mordor", "new_owner": "gondor"}},
+        ],
+        {"minas_tirith", "barad_dur", "dol_guldur"},
+        original_owners=owners,
+        alliances=alliances,
+    )
+    gondor = stats["by_faction"]["gondor"]
+    assert gondor["strongholds_captured"] == 1
+    assert gondor["territories_captured"] == 1
+    assert "rohan" not in stats["by_faction"]
+    assert stats["by_faction"]["mordor"]["strongholds_captured"] == 1
+
+
 def test_score_applies_multiplier_cap_rounds_and_forfeit():
     rules = _rules()
     by = {"gondor": {

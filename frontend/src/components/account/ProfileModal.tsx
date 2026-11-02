@@ -374,34 +374,40 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
         {stats && (
           <div className="account-stats">
             <div className="account-stats__headline">
-              <span className="account-stats__record">
-                <RecordLine wins={stats.overall.wins} losses={stats.overall.losses} pct={stats.overall.win_pct} />
-              </span>
+              <div className="account-stats__record-block">
+                <span className="account-stats__record">
+                  <RecordLine wins={stats.overall.wins} losses={stats.overall.losses} pct={stats.overall.win_pct} />
+                </span>
+                <div className="account-stats__alliances">
+                  <span className="account-stats__alliance account-stats__alliance--good">
+                    Good {stats.by_alliance.good.wins}
+                    <span className="account-stats__sep">–</span>
+                    {stats.by_alliance.good.games - stats.by_alliance.good.wins}{' '}
+                    <span className="account-stats__pct">({formatPct(stats.by_alliance.good.win_pct)})</span>
+                  </span>
+                  <span className="account-stats__alliance account-stats__alliance--evil">
+                    Evil {stats.by_alliance.evil.wins}
+                    <span className="account-stats__sep">–</span>
+                    {stats.by_alliance.evil.games - stats.by_alliance.evil.wins}{' '}
+                    <span className="account-stats__pct">({formatPct(stats.by_alliance.evil.win_pct)})</span>
+                  </span>
+                </div>
+              </div>
               <span className="account-stats__totals">
                 <span>
                   {stats.overall.games} {stats.overall.games === 1 ? 'game' : 'games'} completed
                 </span>
                 <span>
-                  {stats.overall.battles_won ?? 0} {(stats.overall.battles_won ?? 0) === 1 ? 'battle' : 'battles'} won
-                </span>
-                <span>
                   {stats.overall.strongholds_captured ?? 0}{' '}
                   {(stats.overall.strongholds_captured ?? 0) === 1 ? 'stronghold' : 'strongholds'} conquered
                 </span>
-              </span>
-            </div>
-            <div className="account-stats__alliances">
-              <span className="account-stats__alliance account-stats__alliance--good">
-                Good {stats.by_alliance.good.wins}
-                <span className="account-stats__sep">–</span>
-                {stats.by_alliance.good.games - stats.by_alliance.good.wins}{' '}
-                <span className="account-stats__pct">({formatPct(stats.by_alliance.good.win_pct)})</span>
-              </span>
-              <span className="account-stats__alliance account-stats__alliance--evil">
-                Evil {stats.by_alliance.evil.wins}
-                <span className="account-stats__sep">–</span>
-                {stats.by_alliance.evil.games - stats.by_alliance.evil.wins}{' '}
-                <span className="account-stats__pct">({formatPct(stats.by_alliance.evil.win_pct)})</span>
+                <span>
+                  {stats.overall.battles_won ?? 0} {(stats.overall.battles_won ?? 0) === 1 ? 'battle' : 'battles'} won
+                </span>
+                <span>
+                  {stats.overall.units_destroyed ?? 0}{' '}
+                  {(stats.overall.units_destroyed ?? 0) === 1 ? 'unit' : 'units'} destroyed
+                </span>
               </span>
             </div>
             {scenarioChoices.length > 0 && (

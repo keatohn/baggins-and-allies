@@ -259,10 +259,9 @@ def ensure_game_results_for_row(db: Session, row: GameModel) -> int:
     participant_json = json.dumps(participant_ids)
 
     from backend.progression import (
-        faction_result_counts,
-        faction_snapshot_counts,
         forfeit_counts_as_leave,
         forfeit_round_of,
+        profile_counts_for_faction,
     )
 
     now = datetime.utcnow()
@@ -277,12 +276,9 @@ def ensure_game_results_for_row(db: Session, row: GameModel) -> int:
         # No stored round: older forfeits keep forfeited=true and still count as completed.
         forfeited = left_early or (pid in forfeited_ids and round_at is None and not is_ai)
         if is_ai:
-            counts = {"battles_won": 0, "strongholds_captured": 0}
-        elif round_at is not None:
-            snap = faction_snapshot_counts(config, pid, entry["faction_id"])
-            counts = snap if snap is not None else faction_result_counts(config, entry["faction_id"])
+            counts = {"battles_won": 0, "strongholds_captured": 0, "enemy_units_destroyed": 0}
         else:
-            counts = faction_result_counts(config, entry["faction_id"])
+            counts = profile_counts_for_faction(config, pid, entry["faction_id"], round_at)
         rows.append(
             GameResult(
                 id=str(uuid.uuid4()),
@@ -295,6 +291,7 @@ def ensure_game_results_for_row(db: Session, row: GameModel) -> int:
                 forfeit_round=round_at,
                 battles_won=int(counts.get("battles_won") or 0),
                 strongholds_captured=int(counts.get("strongholds_captured") or 0),
+                units_destroyed=int(counts.get("enemy_units_destroyed") or 0),
                 is_ai=is_ai,
                 setup_id=setup_id,
                 scenario_name=scenario_name,
@@ -314,6 +311,55 @@ def ensure_game_results_for_row(db: Session, row: GameModel) -> int:
     return len(rows)
 
 
+def _apply_profile_counts(result: GameResult, counts: dict) -> bool:
+    battles = int(counts.get("battles_won") or 0)
+    strongholds = int(counts.get("strongholds_captured") or 0)
+    units = int(counts.get("enemy_units_destroyed") or 0)
+    changed = (
+        int(result.battles_won or 0) != battles
+        or int(result.strongholds_captured or 0) != strongholds
+        or int(result.units_destroyed or 0) != units
+    )
+    if changed:
+        result.battles_won = battles
+        result.strongholds_captured = strongholds
+        result.units_destroyed = units
+    return changed
+
+
+def refresh_game_result_counts(db: Session) -> int:
+    """Fill battle, stronghold, and unit totals on finished games that still have them.
+
+    A complete event log is recounted, so strongholds are enemy strongholds only.
+    A trimmed log, or a game that only kept xp totals, fills battles and units from
+    those totals. Its stronghold number still includes retaking a friendly stronghold,
+    because the individual captures are gone. Games with neither record stay at zero.
+    """
+    from backend.progression import profile_counts_for_faction
+
+    updated = 0
+    games = db.query(GameModel).filter(GameModel.status == "finished").all()
+    for game in games:
+        config = _parse_json(game.config, {})
+        if not isinstance(config, dict):
+            continue
+        results = db.query(GameResult).filter(GameResult.game_id == game.id).all()
+        for result in results:
+            if result.is_ai:
+                continue
+            counts = profile_counts_for_faction(
+                config,
+                str(result.player_id),
+                str(result.faction_id),
+                int(result.forfeit_round) if result.forfeit_round is not None else None,
+            )
+            if _apply_profile_counts(result, counts):
+                updated += 1
+    if updated:
+        db.flush()
+    return updated
+
+
 def backfill_game_results(db: Session) -> int:
     """Write missing results for all finished games. Safe to run on every startup."""
     total = 0
@@ -327,6 +373,10 @@ def backfill_game_results(db: Session) -> int:
             total += ensure_game_results_for_row(db, row)
         except Exception as e:
             print(f"[game_results] backfill failed for game {row.id}: {e}", flush=True)
+    try:
+        total += refresh_game_result_counts(db)
+    except Exception as e:
+        print(f"[game_results] stat refresh failed: {e}", flush=True)
     if total:
         db.commit()
     return total

@@ -131,6 +131,7 @@ def _aggregate_by_game(rows: list[GameResult]) -> list[dict[str, Any]]:
                 "forfeit_round": int(row.forfeit_round) if row.forfeit_round is not None else None,
                 "battles_won": int(row.battles_won or 0),
                 "strongholds_captured": int(row.strongholds_captured or 0),
+                "units_destroyed": int(row.units_destroyed or 0),
                 "alliance": str(row.alliance) if row.alliance else None,
                 "setup_id": str(row.setup_id) if row.setup_id else None,
                 "scenario_name": str(row.scenario_name) if row.scenario_name else None,
@@ -149,6 +150,7 @@ def _aggregate_by_game(rows: list[GameResult]) -> list[dict[str, Any]]:
                 entry["forfeit_round"] = int(row.forfeit_round)
             entry["battles_won"] += int(row.battles_won or 0)
             entry["strongholds_captured"] += int(row.strongholds_captured or 0)
+            entry["units_destroyed"] += int(row.units_destroyed or 0)
             if row.alliance and not entry["alliance"]:
                 entry["alliance"] = str(row.alliance)
             if row.faction_id:
@@ -253,6 +255,7 @@ def compute_player_stats(
     wins = sum(1 for g in games if g["won"])
     battles_won = sum(int(g["battles_won"]) for g in games)
     strongholds_captured = sum(int(g["strongholds_captured"]) for g in games)
+    units_destroyed = sum(int(g["units_destroyed"]) for g in games)
     games_played = len(games)
 
     by_alliance: dict[str, dict[str, Any]] = {}
@@ -376,6 +379,7 @@ def compute_player_stats(
             "win_pct": _win_pct(wins, games_played),
             "battles_won": battles_won,
             "strongholds_captured": strongholds_captured,
+            "units_destroyed": units_destroyed,
         },
         "by_alliance": by_alliance,
         "by_scenario": by_scenario,
@@ -405,6 +409,7 @@ def _empty_stats(player_id: str) -> dict[str, Any]:
             "win_pct": None,
             "battles_won": 0,
             "strongholds_captured": 0,
+            "units_destroyed": 0,
         },
         "by_alliance": {
             "good": {"games": 0, "wins": 0, "win_pct": None},

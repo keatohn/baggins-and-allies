@@ -645,15 +645,24 @@
 
 .account-stats__headline {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
+  flex-wrap: nowrap;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 0.35rem 1rem;
-  margin-bottom: 0.5rem;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.account-stats__record-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  min-width: 0;
 }
 
 .account-stats__record {
   font-size: 1.15rem;
+  white-space: nowrap;
 }
 
 .account-stats__sep {
@@ -668,13 +677,12 @@
 
 .account-stats__totals {
   margin-left: auto;
+  flex: 0 0 auto;
   text-align: right;
   display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: baseline;
-  gap: 0.15rem 0.85rem;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.1rem;
   color: var(--ink-light);
   font-size: 0.95rem;
 }
@@ -685,10 +693,14 @@
 
 .account-stats__alliances {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.75rem 1.25rem;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0;
   font-size: 0.95rem;
+}
+
+.account-stats__alliance {
+  white-space: nowrap;
 }
 
 .account-stats__alliance--good {

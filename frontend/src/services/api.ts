@@ -1095,6 +1095,7 @@ export interface PlayerStatsOverall {
   win_pct: number | null;
   battles_won?: number;
   strongholds_captured?: number;
+  units_destroyed?: number;
 }
 
 export interface PlayerStatsAlliance {

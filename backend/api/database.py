@@ -216,6 +216,7 @@ def _ensure_game_result_stat_columns():
         "ALTER TABLE game_results ADD COLUMN forfeit_round INTEGER",
         "ALTER TABLE game_results ADD COLUMN battles_won INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE game_results ADD COLUMN strongholds_captured INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE game_results ADD COLUMN units_destroyed INTEGER NOT NULL DEFAULT 0",
     )
     if DATABASE_URL.startswith("sqlite"):
         with engine.begin() as conn:
@@ -227,6 +228,8 @@ def _ensure_game_result_stat_columns():
                 conn.execute(text(statements[1]))
             if "strongholds_captured" not in names:
                 conn.execute(text(statements[2]))
+            if "units_destroyed" not in names:
+                conn.execute(text(statements[3]))
     else:
         with engine.begin() as conn:
             conn.execute(text(
@@ -237,6 +240,9 @@ def _ensure_game_result_stat_columns():
             ))
             conn.execute(text(
                 "ALTER TABLE game_results ADD COLUMN IF NOT EXISTS strongholds_captured INTEGER NOT NULL DEFAULT 0"
+            ))
+            conn.execute(text(
+                "ALTER TABLE game_results ADD COLUMN IF NOT EXISTS units_destroyed INTEGER NOT NULL DEFAULT 0"
             ))
 
 
