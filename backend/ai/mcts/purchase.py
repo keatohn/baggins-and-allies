@@ -1,14 +1,15 @@
 """
 Purchase-phase MCTS Problem: legal-action enumerator + leaf evaluator.
 
-Enumerates a capped set of candidate purchase bundles (plus end_phase) so the
-domain-agnostic PUCT search in `search.py` can compose multi-step purchase plans.
-Heuristics from the existing greedy policy are reused as evaluators, not deciders.
+Enumerates purchase bundles that spend the power still on hand, plus end_phase.
+Mixes are drawn with probability proportional to 1/cost. A single copy of one
+type is offered only when nothing else still fits.
 """
 
 from __future__ import annotations
 
 import os
+import random
 from typing import Any
 
 from backend.engine.actions import Action, end_phase, purchase_units
@@ -30,10 +31,11 @@ from backend.ai.habits import MIN_POWER_RESERVE
 from backend.ai.style import roster_evenness
 from backend.ai.mcts.action_key import HashableAction
 from backend.ai.mcts.eval_weights import get_eval_weights
+from backend.ai.mcts.budget import BRANCH_LIMITS, branch_limit, resolve_game_difficulty
 from backend.ai.mcts.search import Problem
 
-# Cap on branching factor per node. Keeps the combinatorial space tractable.
-MAX_BUNDLE_ACTIONS = 24
+# Default cap when no difficulty level is loaded. A level can raise this up to the admin ceiling.
+MAX_BUNDLE_ACTIONS = BRANCH_LIMITS["purchase"][0]
 
 def _use_mcts() -> bool:
     """True when the AI_ALGORITHM env flag selects MCTS. Default remains heuristic."""
@@ -182,12 +184,12 @@ class PurchaseProblem(Problem):
 
     def _enumerate_bundles(self, state: Any) -> list[dict[str, int]]:
         """
-        Generate candidate purchase bundles, capped at MAX_BUNDLE_ACTIONS.
+        Bundles that spend this turn's power until nothing else fits.
 
-        Candidates:
-        - Individual single-unit purchases (enables multi-step MCTS composition).
-        - Focused bundles: fill remaining slots with one unit type where affordable.
-        - A greedy-mix bundle: cheapest-first mix across land then sea.
+        A stack of one type is offered only when buying more of it, or anything
+        else, no longer fits. The rest of the list is mixes drawn one unit at a
+        time with probability proportional to 1/cost, so cheaper units show up
+        more often. Drawing stops when the leftover power cannot buy another unit.
         """
         budget = self._remaining_budget(state)
         if budget <= 0:
@@ -196,7 +198,57 @@ class PurchaseProblem(Problem):
         if land_rem <= 0 and sea_rem <= 0:
             return []
 
-        # Candidate unit rows with positive power cost, affordable at least x1.
+        candidates = self._affordable_candidates(budget, land_rem, sea_rem)
+        if not candidates:
+            return []
+
+        power = self._power_on_hand(state)
+        cap = branch_limit("purchase", resolve_game_difficulty(state))
+        seen: set[tuple] = set()
+        unique: list[dict[str, int]] = []
+
+        def add(bundle: dict[str, int]) -> None:
+            key = tuple(sorted((uid, cnt) for uid, cnt in bundle.items() if cnt > 0))
+            if not key or key in seen:
+                return
+            if self._bundle_power_cost(bundle) > power:
+                return
+            if _something_still_fits(candidates, bundle, budget, land_rem, sea_rem):
+                return
+            seen.add(key)
+            unique.append({uid: cnt for uid, cnt in key})
+
+        for candidate in candidates:
+            kind_cap = sea_rem if candidate["is_naval"] else land_rem
+            count = min(candidate["max_affordable"], kind_cap, budget // candidate["cost"])
+            if count <= 0:
+                continue
+            add({candidate["unit_id"]: count})
+            if len(unique) >= cap:
+                return unique
+
+        seed = (
+            str(self.faction_id),
+            int(getattr(state, "turn", 0) or 0),
+            budget,
+            land_rem,
+            sea_rem,
+            tuple(c["unit_id"] for c in candidates),
+        )
+        rng = random.Random(str(seed))
+        # Stop once new mixes stop appearing. The limit scales with the option cap
+        # and the roster, so a larger cap is allowed to search longer for new mixes.
+        misses = 0
+        miss_limit = cap + len(candidates)
+        while len(unique) < cap and misses < miss_limit:
+            before = len(unique)
+            add(_fill_inverse_cost(candidates, budget, land_rem, sea_rem, rng))
+            misses = 0 if len(unique) > before else misses + 1
+        return unique
+
+    def _affordable_candidates(
+        self, budget: int, land_rem: int, sea_rem: int
+    ) -> list[dict[str, Any]]:
         candidates: list[dict[str, Any]] = []
         for row in self._purchasable:
             uid = row.get("unit_id")
@@ -215,76 +267,30 @@ class PurchaseProblem(Problem):
             candidates.append(
                 {
                     "unit_id": uid,
-                    "cost": cost,
-                    "max_affordable": min(max_aff, kind_rem),
+                    "cost": int(cost),
+                    "max_affordable": min(max_aff, kind_rem, budget // int(cost)),
                     "is_naval": is_naval,
-                    "row": row,
                 }
             )
+        candidates.sort(key=lambda c: c["unit_id"])
+        return candidates
 
-        if not candidates:
-            return []
+    def _power_on_hand(self, state: Any) -> int:
+        """Power this faction can still spend this purchase phase. Already-bought units have been deducted."""
+        resources = (getattr(state, "faction_resources", None) or {}).get(self.faction_id, {}) or {}
+        try:
+            return max(0, int(resources.get("power", 0) or 0))
+        except (TypeError, ValueError):
+            return 0
 
-        bundles: list[dict[str, int]] = []
-
-        # 1) Single-unit purchases (depth for MCTS composition).
-        for c in candidates:
-            bundles.append({c["unit_id"]: 1})
-
-        # 2) Focused bundles: fill as many remaining slots of this kind as budget allows.
-        for c in candidates:
-            count = min(c["max_affordable"], budget // c["cost"])
-            if count >= 2:
-                bundles.append({c["unit_id"]: count})
-
-        # 3) Greedy-mix: cheapest-first across land, then sea (approximates the heuristic blend).
-        greedy = self._greedy_mix_bundle(candidates, budget, land_rem, sea_rem)
-        if greedy:
-            bundles.append(greedy)
-
-        # Dedupe by frozen bundle key, preserve order, cap.
-        seen: set[tuple] = set()
-        unique: list[dict[str, int]] = []
-        for b in bundles:
-            key = tuple(sorted((uid, cnt) for uid, cnt in b.items() if cnt > 0))
-            if not key or key in seen:
+    def _bundle_power_cost(self, bundle: dict[str, int]) -> int:
+        total = 0
+        for uid, count in bundle.items():
+            cost = get_unit_power_cost(self.ud.get(uid))
+            if not cost:
                 continue
-            seen.add(key)
-            unique.append(b)
-            if len(unique) >= MAX_BUNDLE_ACTIONS:
-                break
-        return unique
-
-    def _greedy_mix_bundle(
-        self,
-        candidates: list[dict[str, Any]],
-        budget: int,
-        land_rem: int,
-        sea_rem: int,
-    ) -> dict[str, int]:
-        """Cheapest-first fill of remaining land then sea slots within budget."""
-        bundle: dict[str, int] = {}
-        spent = 0
-        # Land first (defense matters more pre-combat), then sea.
-        for naval_pass in (False, True):
-            kind_rem = sea_rem if naval_pass else land_rem
-            used = 0
-            for c in sorted(candidates, key=lambda x: x["cost"]):
-                if c["is_naval"] != naval_pass:
-                    continue
-                room = kind_rem - used
-                if room <= 0:
-                    break
-                afford = (budget - spent) // c["cost"]
-                take = min(room, afford, c["max_affordable"])
-                if take <= 0:
-                    continue
-                bundle[c["unit_id"]] = bundle.get(c["unit_id"], 0) + take
-                spent += take * c["cost"]
-                used += take
-        return bundle
-
-    # ----- Scoring -----
+            total += int(cost) * int(count)
+        return total
 
     def _score_purchased(self, state: Any) -> float:
         """
@@ -294,9 +300,8 @@ class PurchaseProblem(Problem):
         fpu = (getattr(state, "faction_purchased_units", None) or {}).get(self.faction_id, [])
         if not fpu:
             return 0.0
-        # Blend: defense-leaning (matches purchase phase intent).
-        w_def = self._eval_weights.purchase_defense_weight
-        w_off = 1.0 - w_def
+        w_att = self._eval_weights.purchase_attack_weight
+        w_def = 1.0 - w_att
         raw = 0.0
         for stack in fpu:
             uid = getattr(stack, "unit_id", "")
@@ -309,16 +314,15 @@ class PurchaseProblem(Problem):
                 continue
             d = defense_value_per_power(udef, cost, 0)
             a = attack_value_per_power(udef, cost, 0)
-            raw += count * (w_def * d + w_off * a)
+            raw += count * (w_def * d + w_att * a)
         raw *= self._purchase_evenness(state, None)
-        # Soft-normalize: tanh-like squash keeps values in [-1, 1] without hard clipping.
         return raw / (1.0 + abs(raw))
 
     def _bundle_prior_score(self, state: Any, bundle: dict[str, int]) -> float:
         """Cheap formula-only score for a bundle (no sims) — used as MCTS prior weight."""
         total = 0.0
-        w_def = self._eval_weights.purchase_defense_weight
-        w_off = 1.0 - w_def
+        w_att = self._eval_weights.purchase_attack_weight
+        w_def = 1.0 - w_att
         for uid, count in bundle.items():
             if count <= 0:
                 continue
@@ -328,7 +332,7 @@ class PurchaseProblem(Problem):
                 continue
             d = defense_value_per_power(udef, cost, 0)
             a = attack_value_per_power(udef, cost, 0)
-            total += count * (w_def * d + w_off * a)
+            total += count * (w_def * d + w_att * a)
         total *= self._purchase_evenness(state, bundle)
         return max(0.05, total)
 
@@ -350,6 +354,73 @@ class PurchaseProblem(Problem):
             if row.get("unit_id")
         ]
         return roster_evenness(counts, roster)
+
+
+def _something_still_fits(
+    candidates: list[dict[str, Any]],
+    bundle: dict[str, int],
+    budget: int,
+    land_rem: int,
+    sea_rem: int,
+) -> bool:
+    """True when leftover power and slots can still buy one more unit."""
+    spent = 0
+    land_used = 0
+    sea_used = 0
+    for candidate in candidates:
+        count = int(bundle.get(candidate["unit_id"], 0) or 0)
+        spent += count * candidate["cost"]
+        if candidate["is_naval"]:
+            sea_used += count
+        else:
+            land_used += count
+    leftover = budget - spent
+    for candidate in candidates:
+        have = int(bundle.get(candidate["unit_id"], 0) or 0)
+        if have >= candidate["max_affordable"] or candidate["cost"] > leftover:
+            continue
+        if candidate["is_naval"] and sea_used >= sea_rem:
+            continue
+        if not candidate["is_naval"] and land_used >= land_rem:
+            continue
+        return True
+    return False
+
+
+def _fill_inverse_cost(
+    candidates: list[dict[str, Any]],
+    budget: int,
+    land_rem: int,
+    sea_rem: int,
+    rng: random.Random,
+) -> dict[str, int]:
+    """Add one unit at a time until nothing else fits. P(unit) is proportional to 1/cost."""
+    bundle: dict[str, int] = {}
+    spent = 0
+    land_used = 0
+    sea_used = 0
+    while True:
+        legal: list[dict[str, Any]] = []
+        weights: list[float] = []
+        for candidate in candidates:
+            have = bundle.get(candidate["unit_id"], 0)
+            if have >= candidate["max_affordable"] or candidate["cost"] > budget - spent:
+                continue
+            if candidate["is_naval"] and sea_used >= sea_rem:
+                continue
+            if not candidate["is_naval"] and land_used >= land_rem:
+                continue
+            legal.append(candidate)
+            weights.append(1.0 / candidate["cost"])
+        if not legal:
+            return bundle
+        picked = rng.choices(legal, weights=weights, k=1)[0]
+        bundle[picked["unit_id"]] = bundle.get(picked["unit_id"], 0) + 1
+        spent += picked["cost"]
+        if picked["is_naval"]:
+            sea_used += 1
+        else:
+            land_used += 1
 
 
 def decide_purchase_mcts(ctx: AIContext) -> Action | None:

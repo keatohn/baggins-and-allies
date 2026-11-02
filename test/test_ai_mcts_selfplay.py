@@ -264,9 +264,14 @@ def run_phase_actions(
             # Anti-stuck: same fallback shape as the API loop.
             action = end_phase(faction_id)
         _fill_combat_dice(state, action, ud, td, fd, rng)
-        v = validate_action(state, action, ud, td, fd, cd, port_d)
-        assert v.valid, f"invalid action {action.type} {action.payload}: {v.error}"
-        state, _events = apply_action(state, action, ud, td, fd, cd, port_d)
+        if action.type == "move_units" and (action.payload or {}).get("bundle_rest"):
+            from backend.ai.mcts.combat_move import apply_bundled_moves
+
+            state, _events = apply_bundled_moves(state, action, ud, td, fd, cd, port_d)
+        else:
+            v = validate_action(state, action, ud, td, fd, cd, port_d)
+            assert v.valid, f"invalid action {action.type} {action.payload}: {v.error}"
+            state, _events = apply_action(state, action, ud, td, fd, cd, port_d)
         action_types.append(action.type)
     else:
         raise AssertionError(
@@ -352,12 +357,12 @@ def _difficulty_env(difficulty: str | None):
 # Short names accepted by run_matchup/selfplay_winrate -> AI_MCTS_W_* env vars
 # (the knobs added in MCTS 3.6a; see backend/ai/mcts/eval_weights.py).
 WEIGHT_ENV_KEYS = {
-    "material": "AI_MCTS_W_MATERIAL",
-    "territory": "AI_MCTS_W_TERRITORY",
+    "units": "AI_MCTS_W_UNITS",
+    "capital": "AI_MCTS_W_CAPITAL",
     "stronghold": "AI_MCTS_W_STRONGHOLD",
     "power_prod": "AI_MCTS_W_POWER_PROD",
     "board_scale": "AI_MCTS_W_BOARD_SCALE",
-    "purchase_defense": "AI_MCTS_W_PURCHASE_DEFENSE",
+    "purchase_attack": "AI_MCTS_W_PURCHASE_ATTACK",
 }
 
 
@@ -433,7 +438,7 @@ def run_matchup(
     the map use `default_algorithm`. `difficulties` maps faction id -> an MCTS
     level id and is applied the same way, one faction turn at a time.
     `env_overrides` (3.6b) maps faction id ->
-    weight overrides in short form ({"material": "2.0"}) or raw AI_MCTS_W_*
+    weight overrides in short form ({"units": "2.0"}) or raw AI_MCTS_W_*
     names; the given vars are applied via os.environ around each of that
     faction's decide calls and restored afterwards (weights are re-read per
     decide, so a per-turn swap is exact).
@@ -909,13 +914,13 @@ def test_matchup_baseline_winrate_printout(monkeypatch):
 
 def test_resolve_weight_env_maps_short_and_raw_names():
     """Short names map to AI_MCTS_W_* vars; raw names pass through; typos raise."""
-    resolved = resolve_weight_env({"material": 2.0, "purchase_defense": "0.8"})
+    resolved = resolve_weight_env({"units": 2.0, "purchase_attack": "0.8"})
     assert resolved == {
-        "AI_MCTS_W_MATERIAL": "2.0",
-        "AI_MCTS_W_PURCHASE_DEFENSE": "0.8",
+        "AI_MCTS_W_UNITS": "2.0",
+        "AI_MCTS_W_PURCHASE_ATTACK": "0.8",
     }
-    assert resolve_weight_env({"AI_MCTS_W_TERRITORY": "1.5"}) == {
-        "AI_MCTS_W_TERRITORY": "1.5"
+    assert resolve_weight_env({"AI_MCTS_W_CAPITAL": "1.5"}) == {
+        "AI_MCTS_W_CAPITAL": "1.5"
     }
     assert resolve_weight_env(None) == {}
     with pytest.raises(ValueError, match="unknown weight override"):
@@ -925,11 +930,11 @@ def test_resolve_weight_env_maps_short_and_raw_names():
 def test_format_weight_label():
     """Report label shows per-faction short names; empty overrides stay quiet."""
     label = format_weight_label({
-        "frodo": {"AI_MCTS_W_MATERIAL": "2.0"},
+        "frodo": {"AI_MCTS_W_UNITS": "2.0"},
         "sam": {},
-        "gollum": {"AI_MCTS_W_TERRITORY": "0.5", "AI_MCTS_W_MATERIAL": "3"},
+        "gollum": {"AI_MCTS_W_CAPITAL": "0.5", "AI_MCTS_W_UNITS": "3"},
     })
-    assert label == "frodo material=2.0 | gollum material=3,territory=0.5"
+    assert label == "frodo units=2.0 | gollum capital=0.5,units=3"
     assert format_weight_label(None) == ""
     assert format_weight_label({"frodo": {}}) == ""
 
@@ -949,22 +954,22 @@ def test_run_matchup_rejects_unknown_weight_keys():
 def test_run_matchup_env_overrides_applied_and_restored(monkeypatch):
     """Weight overrides are live during the owning faction's decides only.
 
-    The decide spy records the ambient AI_MCTS_W_MATERIAL at call time and
+    The decide spy records the ambient AI_MCTS_W_UNITS at call time and
     cross-checks that get_eval_weights() (the 3.6a reader, uncached) resolves
     the overridden value while it is set. After the matchup the ambient env
     must be exactly what it was before.
     """
     monkeypatch.setenv("AI_MCTS_DIFFICULTY", "easy")
-    monkeypatch.delenv("AI_MCTS_W_MATERIAL", raising=False)
+    monkeypatch.delenv("AI_MCTS_W_UNITS", raising=False)
     this_module = sys.modules[__name__]
     real_decide = this_module.decide
     seen: list[tuple[str, str | None, float | None]] = []
 
     def spy(ctx):
         fid = ctx.state.current_faction or ""
-        raw = os.environ.get("AI_MCTS_W_MATERIAL")
+        raw = os.environ.get("AI_MCTS_W_UNITS")
         # The full 3.6a chain: while the override is applied, the reader sees it.
-        weight = get_eval_weights().material_weight if raw is not None else None
+        weight = get_eval_weights().units_weight if raw is not None else None
         seen.append((fid, raw, weight))
         return real_decide(ctx)
 
@@ -976,7 +981,7 @@ def test_run_matchup_env_overrides_applied_and_restored(monkeypatch):
     result = run_matchup(
         state, ud, td, fd, cd, port_d,
         {first: "mcts", second: "heuristic"},
-        env_overrides={first: {"material": "2.0"}},
+        env_overrides={first: {"units": "2.0"}},
         max_faction_turns=2,
         seed=11,
     )
@@ -989,16 +994,16 @@ def test_run_matchup_env_overrides_applied_and_restored(monkeypatch):
     assert {weight for _raw, weight in first_seen} == {2.0}
     assert second_seen, f"no decide calls recorded for {second}"
     assert set(second_seen) == {None}, "override leaked into the other faction's turn"
-    assert os.environ.get("AI_MCTS_W_MATERIAL") is None, "ambient env not restored"
+    assert os.environ.get("AI_MCTS_W_UNITS") is None, "ambient env not restored"
 
-    assert result["env_overrides"] == {first: {"AI_MCTS_W_MATERIAL": "2.0"}}
+    assert result["env_overrides"] == {first: {"AI_MCTS_W_UNITS": "2.0"}}
     assert result["turn_records"][0]["faction"] == first
-    assert result["turn_records"][0]["env_overrides"] == {"AI_MCTS_W_MATERIAL": "2.0"}
+    assert result["turn_records"][0]["env_overrides"] == {"AI_MCTS_W_UNITS": "2.0"}
     assert result["turn_records"][1]["faction"] == second
     assert result["turn_records"][1]["env_overrides"] == {}
     report = format_matchup_report(result)
-    assert f"weight overrides: {first} material=2.0" in report
-    assert "material=2.0" in summarize_winrate([result])
+    assert f"weight overrides: {first} units=2.0" in report
+    assert "units=2.0" in summarize_winrate([result])
 
 
 def test_run_matchup_sets_difficulty_per_faction(monkeypatch):
@@ -1066,28 +1071,28 @@ def test_selfplay_winrate_weight_flag_resolution():
 
     parser = selfplay_winrate.build_parser()
     args = parser.parse_args([
-        "--good-w-material", "2.0",
-        "--evil-w-purchase-defense", "0.8",
-        "--w-territory", "1.5",
+        "--good-w-units", "2.0",
+        "--evil-w-purchase-attack", "0.8",
+        "--w-capital", "1.5",
     ])
     good = selfplay_winrate._side_weight_env(args, "good")
     evil = selfplay_winrate._side_weight_env(args, "evil")
     assert good == {
-        "AI_MCTS_W_MATERIAL": "2.0",
-        "AI_MCTS_W_TERRITORY": "1.5",
+        "AI_MCTS_W_UNITS": "2.0",
+        "AI_MCTS_W_CAPITAL": "1.5",
     }
     assert evil == {
-        "AI_MCTS_W_PURCHASE_DEFENSE": "0.8",
-        "AI_MCTS_W_TERRITORY": "1.5",
+        "AI_MCTS_W_PURCHASE_ATTACK": "0.8",
+        "AI_MCTS_W_CAPITAL": "1.5",
     }
 
     # Per-side beats the global flag.
-    args2 = parser.parse_args(["--w-material", "1.0", "--evil-w-material", "3.0"])
+    args2 = parser.parse_args(["--w-units", "1.0", "--evil-w-units", "3.0"])
     assert selfplay_winrate._side_weight_env(args2, "good") == {
-        "AI_MCTS_W_MATERIAL": "1.0"
+        "AI_MCTS_W_UNITS": "1.0"
     }
     assert selfplay_winrate._side_weight_env(args2, "evil") == {
-        "AI_MCTS_W_MATERIAL": "3.0"
+        "AI_MCTS_W_UNITS": "3.0"
     }
 
     # Alliance -> per-faction mapping matches each faction's alliance.
@@ -1096,8 +1101,8 @@ def test_selfplay_winrate_weight_flag_resolution():
     for fid in state.turn_order:
         alliance = getattr(fd.get(fid), "alliance", "")
         if alliance == "good":
-            assert overrides[fid] == {"AI_MCTS_W_MATERIAL": "1.0"}
+            assert overrides[fid] == {"AI_MCTS_W_UNITS": "1.0"}
         elif alliance == "evil":
-            assert overrides[fid] == {"AI_MCTS_W_MATERIAL": "3.0"}
+            assert overrides[fid] == {"AI_MCTS_W_UNITS": "3.0"}
         else:
             assert fid not in overrides

@@ -2208,6 +2208,13 @@ class AiLevelBody(BaseModel):
     name: str = ""
     iterations: int = 500
     seconds: float = 0.5
+    randomness: float | None = None
+    aggression: float | None = None
+    purchase_variety: float | None = None
+    purchase_options: int | None = None
+    combat_move_options: int | None = None
+    non_combat_options: int | None = None
+    mobilization_options: int | None = None
 
 
 class AdminAiSettingsBody(BaseModel):
@@ -6433,11 +6440,16 @@ def do_ai_step(
         available_actions=available_actions,
     )
     from backend.ai.mcts.budget import budget_catalog_scope
-    from backend.ai.settings import faction_search_env, load_ai_defaults, style_env
+    from backend.ai.settings import faction_search_env, load_ai_defaults, style_env, style_for_difficulty
 
     faction_setting = _faction_search_setting(row, state.current_faction)
     ai_defaults = load_ai_defaults(db)
-    with style_env(ai_defaults), budget_catalog_scope(ai_defaults["levels"]):
+    level_id = (
+        (faction_setting or {}).get("difficulty")
+        or getattr(state, "ai_difficulty", None)
+        or ai_defaults["difficulty"]
+    )
+    with style_env(style_for_difficulty(ai_defaults["levels"], level_id)), budget_catalog_scope(ai_defaults["levels"]):
         if faction_setting is None:
             action = decide(ctx)
         else:
@@ -6484,6 +6496,20 @@ def do_ai_step(
                     action.payload["terror_final_defender_hits"] = terror_rr_ai["terror_final_defender_hits"]
                 if terror_rr_ai.get("terror_reroll_count") is not None:
                     action.payload["terror_reroll_count"] = terror_rr_ai["terror_reroll_count"]
+
+    if action.type == "move_units" and action.payload.get("bundle_rest"):
+        from backend.ai.mcts.combat_move import apply_bundled_moves
+
+        try:
+            new_state, events = apply_bundled_moves(state, action, ud, td, fd, cd, port_d)
+        except (TypeError, ValueError, KeyError, AttributeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc) or "AI action invalid") from exc
+        save_game(game_id, new_state, db, events)
+        return {
+            "state": state_for_viewer(new_state, game_id, db, player),
+            "events": events_for_viewer(events, new_state, game_id, db, player),
+            "action_type": action.type,
+        }
 
     validation = validate_action(state, action, ud, td, fd, cd, port_d)
     if not validation.valid:

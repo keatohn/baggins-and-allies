@@ -39,15 +39,41 @@ def default_levels() -> list[dict[str, Any]]:
     from backend.ai.mcts.budget import BUDGETS
 
     labels = (("easy", "Easy"), ("normal", "Normal"), ("hard", "Hard"))
+    style = default_style()
+    options = _branch_options({}, "")
     return [
         {
             "id": key,
             "name": label,
             "iterations": BUDGETS[key].max_iterations,
             "seconds": BUDGETS[key].max_time_seconds,
+            **style,
+            **options,
         }
         for key, label in labels
     ]
+
+
+def _branch_options(item: dict[str, Any], name: str) -> dict[str, int]:
+    """Per-phase option caps. Missing keys keep the built-in default. Values are clamped to the ceiling."""
+    from backend.ai.mcts.budget import BRANCH_FIELDS, BRANCH_LIMITS
+
+    out: dict[str, int] = {}
+    for phase, field in BRANCH_FIELDS.items():
+        default, ceiling = BRANCH_LIMITS[phase]
+        raw = item.get(field) if isinstance(item, dict) else None
+        if raw is None:
+            out[field] = default
+            continue
+        try:
+            count = int(raw)
+        except (TypeError, ValueError):
+            raise AiSettingsError(f"{name}: {field.replace('_', ' ')} must be a whole number") from None
+        if count < 1 or count > ceiling:
+            label = field.replace("_", " ")
+            raise AiSettingsError(f"{name}: {label} must be between 1 and {ceiling}")
+        out[field] = count
+    return out
 
 
 def stored_difficulty(raw: Any, default: str = "normal") -> str:
@@ -79,8 +105,12 @@ def _unique_level_id(name: str, used: set[str]) -> str:
     return candidate
 
 
-def normalize_levels(raw: Any) -> list[dict[str, Any]]:
-    """Validate the ordered level list. Index 0 is the easiest. Ids stay put across renames."""
+def normalize_levels(raw: Any, style_fallback: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Validate the ordered level list. Index 0 is the easiest. Ids stay put across renames.
+
+    Randomness, aggression, and purchase variety live on each level. A level
+    that omits them keeps `style_fallback` (older saves stored one shared set).
+    """
     if not isinstance(raw, list) or not raw:
         raise AiSettingsError("Add at least one difficulty level")
     if len(raw) > MAX_LEVELS:
@@ -116,13 +146,30 @@ def normalize_levels(raw: Any) -> list[dict[str, Any]]:
             raise AiSettingsError(f"{name}: step count must be between 1 and 20000")
         if seconds < 0.05 or seconds > 30 or seconds != seconds:
             raise AiSettingsError(f"{name}: time cap must be between 0.05 and 30 seconds")
+        style_body = {
+            name_key: item[name_key]
+            for name_key, _default in STYLE_FIELDS
+            if item.get(name_key) is not None
+        }
+        style = normalize_style({**normalize_style(style_fallback), **style_body})
         out.append({
             "id": level_id,
             "name": name,
             "iterations": iterations,
             "seconds": round(seconds, 3),
+            **style,
+            **_branch_options(item, name),
         })
     return out
+
+
+def style_for_difficulty(levels: list[dict[str, Any]] | None, difficulty: str) -> dict[str, float]:
+    """Style knobs for one difficulty level. Unknown ids use the built-in defaults."""
+    wanted = stored_difficulty(difficulty)
+    for level in levels or []:
+        if isinstance(level, dict) and str(level.get("id") or "") == wanted:
+            return normalize_style(level)
+    return default_style()
 
 
 def normalize_algorithm(raw: Any) -> str:
@@ -173,7 +220,7 @@ def default_ai_settings() -> dict[str, Any]:
         "difficulty": "normal",
         "algorithm": "heuristic",
         "levels": levels,
-        **default_style(),
+        **style_for_difficulty(levels, "normal"),
     }
 
 
@@ -192,18 +239,20 @@ def load_ai_defaults(db) -> dict[str, Any]:
         return default_ai_settings()
     if not isinstance(data, dict):
         return default_ai_settings()
+    shared = normalize_style(data)
     if isinstance(data.get("levels"), list):
         try:
-            levels = normalize_levels(data.get("levels"))
+            levels = normalize_levels(data.get("levels"), shared)
         except AiSettingsError:
             levels = default_levels()
     else:
         levels = default_levels()
+    difficulty = normalize_difficulty(data.get("difficulty"), levels)
     return {
-        "difficulty": normalize_difficulty(data.get("difficulty"), levels),
+        "difficulty": difficulty,
         "algorithm": normalize_algorithm(data.get("algorithm")),
         "levels": levels,
-        **normalize_style(data),
+        **style_for_difficulty(levels, difficulty),
     }
 
 
@@ -212,15 +261,17 @@ def save_ai_defaults(db, raw: Any) -> dict[str, Any]:
 
     body = raw if isinstance(raw, dict) else {}
     current = load_ai_defaults(db)
+    shared = normalize_style(body if any(name in body for name, _default in STYLE_FIELDS) else current)
     if isinstance(body.get("levels"), list):
-        levels = normalize_levels(body.get("levels"))
+        levels = normalize_levels(body.get("levels"), shared)
     else:
         levels = current["levels"]
+    difficulty = normalize_difficulty(body.get("difficulty"), levels)
     settings = {
-        "difficulty": normalize_difficulty(body.get("difficulty"), levels),
+        "difficulty": difficulty,
         "algorithm": normalize_algorithm(body.get("algorithm")),
         "levels": levels,
-        **normalize_style(body if any(name in body for name, _default in STYLE_FIELDS) else current),
+        **style_for_difficulty(levels, difficulty),
     }
     payload = json.dumps(settings)
     row = db.query(AppSetting).filter(AppSetting.key == AI_DEFAULTS_KEY).first()
@@ -271,21 +322,21 @@ def stamp_ai_on_state(state, difficulty: str, algorithm: str, levels: list[dict[
 # Short name, default, minimum, maximum (None = no maximum).
 # These are the MCTS board-score knobs. The heuristic player does not read them.
 WEIGHT_FIELDS: tuple[tuple[str, float, float, float | None], ...] = (
-    ("material", 1.0, 0.0, None),
-    ("territory", 1.0, 0.0, None),
+    ("units", 1.0, 0.0, None),
     ("stronghold", 3.0, 0.0, None),
+    ("capital", 3.0, 0.0, None),
     ("power_prod", 0.5, 0.0, None),
     ("board_scale", 1.0, 0.0, None),
-    ("purchase_defense", 0.5, 0.0, 1.0),
+    ("purchase_attack", 0.5, 0.0, 1.0),
 )
 
 WEIGHT_ENV: dict[str, str] = {
-    "material": "AI_MCTS_W_MATERIAL",
-    "territory": "AI_MCTS_W_TERRITORY",
+    "units": "AI_MCTS_W_UNITS",
+    "capital": "AI_MCTS_W_CAPITAL",
     "stronghold": "AI_MCTS_W_STRONGHOLD",
     "power_prod": "AI_MCTS_W_POWER_PROD",
     "board_scale": "AI_MCTS_W_BOARD_SCALE",
-    "purchase_defense": "AI_MCTS_W_PURCHASE_DEFENSE",
+    "purchase_attack": "AI_MCTS_W_PURCHASE_ATTACK",
 }
 
 
@@ -314,14 +365,21 @@ def normalize_faction_ai(
     fallback_algorithm: str = "mcts",
     style_fallback: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """One faction's algorithm, MCTS weights, and the shared style knobs.
+    """One faction's algorithm, MCTS weights, and the style of its difficulty.
 
     Board-score weights are read only by MCTS. Randomness, aggression, and
-    purchase variety are read by both algorithms. Missing style fields fall
-    back to `style_fallback` (the Difficulty tab), then to the built-in defaults.
+    purchase variety are read by both algorithms, from that faction's difficulty
+    level. With no level catalog, missing style fields fall back to
+    `style_fallback`, then to the built-in defaults. A faction body can override
+    those only when no catalog is passed.
     """
     body = raw if isinstance(raw, dict) else {}
     incoming = body.get("weights") if isinstance(body.get("weights"), dict) else {}
+    if incoming.get("units") is None and incoming.get("material") is not None:
+        incoming = {**incoming, "units": incoming.get("material")}
+    if incoming.get("purchase_attack") is None and incoming.get("purchase_defense") is not None:
+        old = _clamp_weight(incoming.get("purchase_defense"), 0.5, 0.0, 1.0)
+        incoming = {**incoming, "purchase_attack": 1.0 - old}
     weights = {
         name: _clamp_weight(incoming.get(name), default, lo, hi)
         for name, default, lo, hi in WEIGHT_FIELDS
@@ -337,13 +395,16 @@ def normalize_faction_ai(
         if levels is not None
         else stored_difficulty(raw_difficulty)
     )
-    base_style = normalize_style(style_fallback)
-    style_body = {
-        name: body[name]
-        for name, _default in STYLE_FIELDS
-        if body.get(name) is not None
-    }
-    style = normalize_style({**base_style, **style_body})
+    if levels is not None:
+        style = style_for_difficulty(levels, difficulty)
+    else:
+        base_style = normalize_style(style_fallback)
+        style_body = {
+            name: body[name]
+            for name, _default in STYLE_FIELDS
+            if body.get(name) is not None
+        }
+        style = normalize_style({**base_style, **style_body})
     return {
         "difficulty": difficulty,
         "algorithm": algorithm,

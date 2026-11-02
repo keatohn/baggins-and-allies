@@ -13,9 +13,9 @@ good and evil each get one algorithm. Caps are "whichever comes first";
 
 Eval-weight knobs (MCTS 3.6b): --w-<name> sets an AI_MCTS_W_* var for both
 sides; --good-w-<name> / --evil-w-<name> set it for one alliance only (the
-per-side value wins). Names: material, territory, stronghold, power_prod,
-board_scale, purchase_defense. Weight sweeps compare e.g.
-`--good-w-material 2.0` (variant good vs default evil) against the same
+per-side value wins). Names: units, stronghold, capital, power_prod,
+board_scale, purchase_attack. Purchase attack is 0 for defense and 1 for attack. Weight sweeps compare e.g.
+`--good-w-units 2.0` (variant good vs default evil) against the same
 weight on evil, across seeds.
 
 Run from the repo root:
@@ -23,7 +23,7 @@ Run from the repo root:
         --matchup mcts-vs-mcts --games 4 --max-cycles 20 --difficulty easy
     PYTHONPATH=. .venv/bin/python test/selfplay_winrate.py \
         --matchup mcts-vs-mcts --games 8 --max-cycles 20 \
-        --good-w-material 2.0 --seed 1
+        --good-w-units 2.0 --seed 1
 """
 
 import argparse

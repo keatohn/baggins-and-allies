@@ -6,7 +6,7 @@ continue vs retreat using battle_net_value and combat sim when in active combat.
 import random
 from collections import Counter
 
-from backend.engine.actions import initiate_combat, continue_combat, retreat
+from backend.engine.actions import continue_combat, end_phase, initiate_combat, retreat
 from backend.engine.combat_sim import SimOptions, SimResult, run_simulation
 from backend.engine.movement import _is_water_zone
 from backend.engine.queries import get_retreat_options, participates_in_sea_hex_naval_combat
@@ -29,7 +29,8 @@ from backend.ai.geography import (
     count_enemies_that_can_reach_territory_combat_move,
     is_frontline,
 )
-from backend.ai.randomness import pick_from_score_band
+from backend.ai.randomness import pick_from_score_band, softmax_pick
+from backend.ai.style import randomness, scale_combat_gain
 
 
 def _split_trials_for_casualty_compare() -> tuple[int, int]:
@@ -401,3 +402,193 @@ def decide_combat(ctx: AIContext):
     best = pick_from_score_band(scored)
     dest = best if best is not None else retreat_destinations[0]
     return retreat(state.current_faction, dest)
+
+
+def decide_mcts_combat_policy(ctx: AIContext, rng: random.Random | None = None):
+    """
+    Combat for the MCTS player, without searching battle order.
+
+    Declared battles start in territory-id order. They do not depend on each other.
+    After each round the combat sim is run on whoever is still alive, and continue
+    versus retreat is scored from that win chance, the territory and unit rewards,
+    and aggression. Randomness picks between those scores. Ending the phase is
+    automatic once no battle is left.
+    """
+    state = ctx.state
+    if not state or not ctx.faction_id or state.winner:
+        return None
+    if (state.phase or "") != "combat":
+        return None
+
+    combat = state.active_combat
+    if combat is not None:
+        return _mcts_continue_or_retreat(ctx, rng)
+
+    entries = _declared_battles(ctx)
+    if not entries:
+        return end_phase(ctx.faction_id)
+    entry = sorted(entries, key=_battle_order_key)[0]
+    territory_id = entry.get("territory_id")
+    if not territory_id:
+        return end_phase(ctx.faction_id)
+    return initiate_combat(
+        ctx.faction_id,
+        territory_id,
+        {"attacker": [], "defender": []},
+        sea_zone_id=entry.get("sea_zone_id"),
+    )
+
+
+def _battle_order_key(entry: dict) -> tuple[str, str]:
+    return (str(entry.get("territory_id") or ""), str(entry.get("sea_zone_id") or ""))
+
+
+def _declared_battles(ctx: AIContext) -> list[dict]:
+    listed = (ctx.available_actions or {}).get("combat_territories")
+    if isinstance(listed, list) and listed:
+        return [entry for entry in listed if isinstance(entry, dict)]
+    from backend.engine.queries import get_contested_territories
+
+    return get_contested_territories(
+        ctx.state,
+        ctx.faction_id,
+        ctx.faction_defs,
+        ctx.unit_defs,
+        ctx.territory_defs,
+    )
+
+
+def _mcts_continue_or_retreat(ctx: AIContext, rng: random.Random | None):
+    """Resim the units still in the battle, then choose continue or a retreat destination."""
+    state = ctx.state
+    combat = state.active_combat
+    faction = ctx.faction_id
+    empty_dice = {"attacker": [], "defender": []}
+    if combat is None:
+        return None
+    if state.current_faction != getattr(combat, "attacker_faction", ""):
+        return continue_combat(faction, dice_rolls=empty_dice)
+
+    attackers, defenders, is_stronghold, hp, sea_raid = _live_battle_stacks(ctx, combat)
+    if not attackers or not defenders:
+        return continue_combat(faction, dice_rolls=empty_dice)
+
+    opts = SimOptions(
+        must_conquer=is_stronghold,
+        casualty_order_attacker="best_attack" if is_stronghold else "best_unit",
+        is_sea_raid=sea_raid,
+        stronghold_initial_hp=hp,
+    )
+    try:
+        sim = run_simulation(
+            attackers,
+            defenders,
+            combat.territory_id,
+            ctx.unit_defs,
+            ctx.territory_defs,
+            n_trials=COMBAT_SIM_TRIALS,
+            options=opts,
+        )
+    except (TypeError, ValueError, KeyError, AttributeError):
+        return continue_combat(
+            faction,
+            dice_rolls=empty_dice,
+            casualty_order="best_attack" if is_stronghold else None,
+            must_conquer=True if is_stronghold else None,
+        )
+
+    continue_score = _scaled_continue_value(sim, combat.territory_id, state, ctx)
+    destinations = get_retreat_options(state, ctx.territory_defs, ctx.faction_defs, ctx.unit_defs)
+    fight = continue_combat(
+        faction,
+        dice_rolls=empty_dice,
+        casualty_order="best_attack" if is_stronghold else None,
+        must_conquer=True if is_stronghold else None,
+    )
+    if not destinations:
+        return fight
+
+    choice = softmax_pick(
+        [("continue", continue_score), ("retreat", 0.0)],
+        randomness(),
+        rng=rng,
+    )
+    if choice != "retreat":
+        return fight
+    scored = [
+        (
+            dest,
+            _score_retreat_destination(
+                dest, state, faction, ctx.faction_defs, ctx.territory_defs, ctx.unit_defs
+            ),
+        )
+        for dest in destinations
+    ]
+    picked = softmax_pick(scored, randomness(), rng=rng)
+    return retreat(faction, picked if picked is not None else destinations[0])
+
+
+def _scaled_continue_value(sim: SimResult, territory_id: str, state, ctx: AIContext) -> float:
+    """Aggression-scaled expected gain of fighting on, from the units still alive."""
+    territory = state.territories.get(territory_id)
+    def_cas = sim.defender_casualty_cost_mean
+    if territory and getattr(territory, "owner", None) is None:
+        def_cas = 0.0
+    att_cas = sim.attacker_casualty_cost_mean
+    raw = expected_net_gain(
+        sim.p_attacker_win,
+        territory_id,
+        ctx.territory_defs,
+        ctx.faction_defs,
+        def_cas,
+        att_cas,
+        ctx.camp_defs,
+        ctx.port_defs,
+        ctx.unit_defs,
+    )
+    prize = raw - def_cas + att_cas
+    return scale_combat_gain(prize, def_cas, att_cas)
+
+
+def _live_battle_stacks(ctx: AIContext, combat) -> tuple[list[dict], list[dict], bool, int | None, bool]:
+    """Stacks still in the active battle, plus stronghold and sea-raid flags for the sim."""
+    state = ctx.state
+    territory = state.territories.get(combat.territory_id)
+    attacker_ids = set(getattr(combat, "attacker_instance_ids", []) or [])
+    sea_zone_id = getattr(combat, "sea_zone_id", None)
+    if sea_zone_id:
+        sea_zone = state.territories.get(sea_zone_id)
+        in_sea = [
+            u
+            for u in (sea_zone.units if sea_zone else [])
+            if getattr(u, "instance_id", "") in attacker_ids
+        ]
+        attacker_territory = sea_zone if in_sea else territory
+    else:
+        attacker_territory = territory
+    attackers = [
+        u
+        for u in (getattr(attacker_territory, "units", []) or [])
+        if getattr(u, "instance_id", "") in attacker_ids
+    ]
+    defenders = [
+        u
+        for u in (getattr(territory, "units", []) or [])
+        if getattr(u, "instance_id", "") not in attacker_ids
+    ]
+    tdef = ctx.territory_defs.get(combat.territory_id)
+    if tdef and _is_water_zone(tdef):
+        attackers = [
+            u for u in attackers if participates_in_sea_hex_naval_combat(u, ctx.unit_defs.get(u.unit_id))
+        ]
+        defenders = [
+            u for u in defenders if participates_in_sea_hex_naval_combat(u, ctx.unit_defs.get(u.unit_id))
+        ]
+    is_stronghold = bool(tdef and getattr(tdef, "is_stronghold", False))
+    hp = None
+    if is_stronghold and tdef is not None:
+        base = int(getattr(tdef, "stronghold_base_health", 0) or 0)
+        if base > 0:
+            cur = getattr(territory, "stronghold_current_health", None) if territory is not None else None
+            hp = int(cur) if cur is not None else base
+    return _units_to_stacks(attackers), _units_to_stacks(defenders), is_stronghold, hp, bool(sea_zone_id)

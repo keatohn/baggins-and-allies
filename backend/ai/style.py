@@ -1,11 +1,11 @@
 """
 Live AI style knobs, read from the environment on each decision.
 
-The admin Difficulty tab stores these and the API sets the env vars around
-decide(). A sim can set them per faction for that faction's turn. Defaults:
+Each difficulty level stores its own values. The API sets the env vars around
+decide() from the level that faction is using. Defaults:
 
     AI_RANDOMNESS        0    take the best decision
-    AI_AGGRESSION        0.5  combat-move prize and casualties weigh as before
+    AI_AGGRESSION        0.5  combat-move prize, kills, and our losses weigh evenly
     AI_PURCHASE_VARIETY  0    purchase keeps the small per-copy batch penalty
 
 All three are continuous on [0, 1]. Nothing here is a pass/fail cutoff.
@@ -38,8 +38,20 @@ def randomness() -> float:
 
 
 def aggression() -> float:
-    """0 weighs our combat-move losses heavily. 1 weighs the territory. 0.5 is even."""
+    """0 favors fewer attacks and our own survivors. 1 favors more attacks and enemy dead. 0.5 is even."""
     return _unit("AI_AGGRESSION", 0.5)
+
+
+def _aggression_tilt() -> float:
+    """-1 at aggression 0, 0 at 0.5, +1 at 1."""
+    return (aggression() - 0.5) / 0.5
+
+
+# How far prize, enemy kills, and our losses move from the midpoint. 0.5 means
+# ±50%, so the slider never zeroes a term or doubles it.
+_AGGRESSION_SWING = 0.5
+# Power-points added (or removed) per battle already opened, at the extreme.
+_ATTACK_SPREAD_STEP = 1.0
 
 
 def purchase_variety() -> float:
@@ -50,15 +62,36 @@ def purchase_variety() -> float:
 def scale_combat_gain(prize: float, defender_casualty: float, attacker_casualty: float) -> float:
     """Blend a battle's territory prize against casualties.
 
-    At 0.5 this is prize + defender losses - attacker losses, the usual expected
-    gain. Lower aggression shrinks the prize and charges more for our dead.
-    Higher aggression does the opposite. A fight we will probably lose stays in
-    the ranking when the trade is still worth it.
+    At 0.5 this is prize + enemy dead - our dead. Higher aggression raises the
+    prize and the value of killing their units, and lowers the cost of ours.
+    Each of those moves by at most half, so a reckless setting still counts our
+    losses and a cautious one still counts the territory.
     """
-    knob = aggression()
-    prize_scale = knob / 0.5
-    loss_scale = (1.0 - knob) / 0.5
-    return prize_scale * prize + defender_casualty - loss_scale * attacker_casualty
+    tilt = _aggression_tilt()
+    prize_scale = 1.0 + _AGGRESSION_SWING * tilt
+    kill_scale = 1.0 + _AGGRESSION_SWING * tilt
+    loss_scale = 1.0 - _AGGRESSION_SWING * tilt
+    return prize_scale * prize + kill_scale * defender_casualty - loss_scale * attacker_casualty
+
+
+def attack_spread_adjustment(state, destination: str) -> float:
+    """Score for opening another battle. 0 at aggression 0.5.
+
+    Reinforcing a destination already in the combat-move queue is unchanged.
+    A new destination gains a point per battle already open at full aggression,
+    and loses that much at zero. The first new battle is one point at the extreme.
+    """
+    dest = str(destination or "")
+    opened: set[str] = set()
+    for pending in getattr(state, "pending_moves", None) or []:
+        if getattr(pending, "phase", None) != "combat_move":
+            continue
+        to_tid = str(getattr(pending, "to_territory", "") or "")
+        if to_tid:
+            opened.add(to_tid)
+    if dest and dest in opened:
+        return 0.0
+    return _aggression_tilt() * _ATTACK_SPREAD_STEP * (len(opened) + 1)
 
 
 def purchase_repeat_penalty(score: float, already: int) -> float:

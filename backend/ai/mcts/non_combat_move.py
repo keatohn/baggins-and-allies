@@ -36,11 +36,12 @@ from backend.ai.non_combat_move import (
 )
 from backend.ai.garrison import prune_move_unit_ids_for_garrison_floor
 from backend.ai.mcts.action_key import HashableAction
+from backend.ai.mcts.budget import BRANCH_LIMITS, branch_limit, resolve_game_difficulty
 from backend.ai.mcts.eval_weights import board_score, get_eval_weights
 from backend.ai.mcts.search import Problem
 
 # Cap on branching factor per node (top-K proposals + optional end_phase).
-MAX_NON_COMBAT_MOVE_BRANCHES = 12
+MAX_NON_COMBAT_MOVE_BRANCHES = BRANCH_LIMITS["non_combat_move"][0]
 
 # Extra prior weight for moves that rescue a stuck aerial (phase cannot end otherwise).
 _AERIAL_RESCUE_PRIOR_BONUS = 2.5
@@ -113,7 +114,8 @@ class NonCombatMoveProblem(Problem):
             if v.valid:
                 actions.append(HashableAction(end_action))
 
-        return actions[: MAX_NON_COMBAT_MOVE_BRANCHES + 1]
+        cap = branch_limit("non_combat_move", resolve_game_difficulty(state))
+        return actions[: cap + 1]
 
     def apply(self, state: Any, action: HashableAction) -> Any:
         """Apply via the reducer. apply_action deep-copies, so `state` is never mutated."""
@@ -138,7 +140,7 @@ class NonCombatMoveProblem(Problem):
         return (state.phase or "non_combat_move") != "non_combat_move"
 
     def evaluate(self, state: Any) -> float:
-        """Non-terminal leaf: soft material + territory value from our perspective, in [-1, 1]."""
+        """Non-terminal leaf: units, strongholds, capitals, and power from our perspective."""
         return self._score_board(state)
 
     def terminal_value(self, state: Any) -> float:
@@ -278,7 +280,8 @@ class NonCombatMoveProblem(Problem):
             candidates.append((score, (from_tid, to_tid, pruned)))
 
         candidates.sort(key=lambda x: x[0], reverse=True)
-        top = [cand for _score, cand in candidates[:MAX_NON_COMBAT_MOVE_BRANCHES]]
+        cap = branch_limit("non_combat_move", resolve_game_difficulty(state))
+        top = [cand for _score, cand in candidates[:cap]]
         return top, threat_map
 
     def _destination_allowed(self, state: Any, to_tid: str, unit_def: Any) -> bool:
@@ -384,7 +387,7 @@ class NonCombatMoveProblem(Problem):
         return 1.0 if state.winner == our_alliance else -1.0
 
     def _score_board(self, state: Any) -> float:
-        """Soft material + territory value from our perspective, in [-1, 1]."""
+        """Units, strongholds, capitals, and power from our perspective."""
         return board_score(state, self.faction_id, self.td, self.fd, self.ud, self._eval_weights)
 
 

@@ -34,6 +34,40 @@ function StyleSlider({
   );
 }
 
+function OptionCount({
+  label,
+  note,
+  value,
+  max,
+  onChange,
+}: {
+  label: string;
+  note: string;
+  value: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="admin-page__field">
+      <span className="admin-page__field-label">
+        {label} <span className="admin-ai-options__range">{note}</span>
+      </span>
+      <input
+        className="admin-form__input"
+        type="number"
+        min={1}
+        max={max}
+        step={1}
+        value={value}
+        onChange={(e) => {
+          const next = Number(e.target.value);
+          if (Number.isFinite(next)) onChange(Math.max(1, Math.min(max, Math.round(next))));
+        }}
+      />
+    </label>
+  );
+}
+
 function uniqueLevelId(name: string, used: string[]): string {
   const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24) || 'level';
   let id = base;
@@ -51,9 +85,6 @@ export function AiPanel({ onSaved, onError }: Props) {
   const [difficulty, setDifficulty] = useState('normal');
   const [algorithm, setAlgorithm] = useState('heuristic');
   const [levels, setLevels] = useState<AdminAiLevel[]>([]);
-  const [randomness, setRandomness] = useState(0);
-  const [aggression, setAggression] = useState(0.5);
-  const [purchaseVariety, setPurchaseVariety] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -66,9 +97,6 @@ export function AiPanel({ onSaved, onError }: Props) {
         setDifficulty(res.difficulty);
         setAlgorithm(res.algorithm);
         setLevels(res.levels ?? []);
-        setRandomness(res.randomness ?? 0);
-        setAggression(res.aggression ?? 0.5);
-        setPurchaseVariety(res.purchase_variety ?? 0);
       })
       .catch((e) => {
         if (!cancelled) onError(e instanceof Error ? e.message : 'Could not load AI settings');
@@ -123,6 +151,13 @@ export function AiPanel({ onSaved, onError }: Props) {
           name,
           iterations: last?.iterations ?? 500,
           seconds: last?.seconds ?? 0.5,
+          randomness: last?.randomness ?? 0,
+          aggression: last?.aggression ?? 0.5,
+          purchase_variety: last?.purchase_variety ?? 0,
+          purchase_options: last?.purchase_options ?? 48,
+          combat_move_options: last?.combat_move_options ?? 24,
+          non_combat_options: last?.non_combat_options ?? 24,
+          mobilization_options: last?.mobilization_options ?? 24,
         },
       ];
     });
@@ -135,9 +170,9 @@ export function AiPanel({ onSaved, onError }: Props) {
   return (
     <div className="admin-page__ai">
       <p className="admin-page__hint">
-        These levels only apply to MCTS. Each one is a search budget: the search stops at the step
-        count or the time cap, whichever comes first. The heuristic player has no difficulty. It
-        ignores the level and plays the same way every time.
+        Steps and seconds are the MCTS search budget: the search stops at the step count or the
+        time cap, whichever comes first. The heuristic player ignores both. Randomness, aggression,
+        and purchase variety belong to the level, and both players read the level they are set to.
       </p>
       <p className="admin-page__hint">
         Levels are listed from easiest to hardest. New games copy the algorithm below and the level
@@ -156,23 +191,17 @@ export function AiPanel({ onSaved, onError }: Props) {
         </select>
       </label>
       <p className="admin-page__hint">
-        A computer faction shows these level names only when its algorithm is MCTS. Heuristic factions
-        do not use a level.
+        A computer faction uses one of these levels. Steps and seconds apply only when its algorithm
+        is MCTS. Randomness, aggression, and purchase variety apply for either algorithm. Changing
+        them changes every faction on that level, including games already started. At randomness 0
+        the best option is taken. As it rises, every lower-ranked option gets a larger share, down
+        the whole list, until 1 picks among them about equally. Aggression changes combat move and
+        the retreat choice after each combat round. Higher aggression values the territory and
+        killing enemy units a bit more, values our own losses a bit less, and adds a growing bonus
+        for each extra attack. Purchase variety evens the counts across every unit that can be
+        bought: higher variety is a tighter spread. Combat itself is not searched. The board weights
+        in Sims are MCTS only.
       </p>
-      <p className="admin-page__hint">
-        These three apply to both players, including games already in progress, and randomness
-        applies to purchases as well as moves. At 0 the best option is taken. As it rises, every
-        lower-ranked option gets a larger share, down the whole list, until 1 picks among them
-        about equally. Aggression only changes combat move, sliding weight from our losses toward
-        the territory. Purchase variety evens the counts across every unit that can be bought:
-        higher variety is a tighter spread, not a nudge toward one different unit. The board
-        weights in Sims are MCTS only. The heuristic player does not read them.
-      </p>
-      <div className="admin-ai-style">
-        <StyleSlider label="Randomness" value={randomness} onChange={setRandomness} />
-        <StyleSlider label="Aggression" value={aggression} onChange={setAggression} />
-        <StyleSlider label="Purchase variety" value={purchaseVariety} onChange={setPurchaseVariety} />
-      </div>
       <div className="admin-ai-levels" role="list">
         {levels.map((level, index) => (
           <div key={level.id} className="admin-ai-levels__row" role="listitem">
@@ -252,6 +281,56 @@ export function AiPanel({ onSaved, onError }: Props) {
                 Remove
               </button>
             </div>
+            <div className="admin-ai-options admin-ai-levels__style">
+              <OptionCount
+                label="Purchase options"
+                note="48–200"
+                value={level.purchase_options ?? 48}
+                max={2000}
+                onChange={(value) => updateLevel(index, { purchase_options: value })}
+              />
+              <OptionCount
+                label="Combat move options"
+                note="12–32"
+                value={level.combat_move_options ?? 24}
+                max={2000}
+                onChange={(value) => updateLevel(index, { combat_move_options: value })}
+              />
+              <OptionCount
+                label="Non-combat options"
+                note="12–32"
+                value={level.non_combat_options ?? 24}
+                max={2000}
+                onChange={(value) => updateLevel(index, { non_combat_options: value })}
+              />
+              <OptionCount
+                label="Mobilization options"
+                note="24–200"
+                value={level.mobilization_options ?? 24}
+                max={2000}
+                onChange={(value) => updateLevel(index, { mobilization_options: value })}
+              />
+              <p className="admin-ai-options__note">
+                Purchase and mobilization add about 2 ms per option. Combat move and non-combat hit the time cap; extras past a few dozen are not visited.
+              </p>
+            </div>
+            <div className="admin-ai-style admin-ai-levels__style">
+              <StyleSlider
+                label="Randomness"
+                value={level.randomness ?? 0}
+                onChange={(value) => updateLevel(index, { randomness: value })}
+              />
+              <StyleSlider
+                label="Aggression"
+                value={level.aggression ?? 0.5}
+                onChange={(value) => updateLevel(index, { aggression: value })}
+              />
+              <StyleSlider
+                label="Purchase variety"
+                value={level.purchase_variety ?? 0}
+                onChange={(value) => updateLevel(index, { purchase_variety: value })}
+              />
+            </div>
           </div>
         ))}
       </div>
@@ -265,21 +344,11 @@ export function AiPanel({ onSaved, onError }: Props) {
           disabled={saving || levels.length === 0}
           onClick={() => {
             setSaving(true);
-            api.adminPutAi({
-              difficulty,
-              algorithm,
-              levels,
-              randomness,
-              aggression,
-              purchase_variety: purchaseVariety,
-            })
+            api.adminPutAi({ difficulty, algorithm, levels })
               .then((res) => {
                 setDifficulty(res.difficulty);
                 setAlgorithm(res.algorithm);
                 setLevels(res.levels ?? []);
-                setRandomness(res.randomness ?? 0);
-                setAggression(res.aggression ?? 0.5);
-                setPurchaseVariety(res.purchase_variety ?? 0);
                 onSaved();
               })
               .catch((e) => onError(e instanceof Error ? e.message : 'Save failed'))

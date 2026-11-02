@@ -752,6 +752,13 @@ export interface AdminAiLevel {
   name: string;
   iterations: number;
   seconds: number;
+  randomness: number;
+  aggression: number;
+  purchase_variety: number;
+  purchase_options: number;
+  combat_move_options: number;
+  non_combat_options: number;
+  mobilization_options: number;
 }
 
 export interface AdminAiSettings {
@@ -776,12 +783,12 @@ export interface AiFactionSetting {
   aggression: number;
   purchase_variety: number;
   weights: {
-    material: number;
-    territory: number;
+    units: number;
     stronghold: number;
+    capital: number;
     power_prod: number;
     board_scale: number;
-    purchase_defense: number;
+    purchase_attack: number;
   };
 }
 
@@ -1429,9 +1436,6 @@ export const api = {
     difficulty: string;
     algorithm: string;
     levels: AdminAiLevel[];
-    randomness: number;
-    aggression: number;
-    purchase_variety: number;
   }) =>
     fetchJson<AdminAiSettings & { ok: boolean }>('/admin/ai', {
       method: 'PUT',

@@ -12,12 +12,12 @@ const LOBBY_POLL_MS = 3000;
 const LOBBY_COMPUTER_ID = '__computer__';
 
 const WEIGHT_FIELDS: { key: keyof AiFactionSetting['weights']; label: string; max?: number }[] = [
-  { key: 'material', label: 'Material' },
-  { key: 'territory', label: 'Territory' },
+  { key: 'units', label: 'Units' },
   { key: 'stronghold', label: 'Stronghold' },
+  { key: 'capital', label: 'Capital' },
   { key: 'power_prod', label: 'Power' },
   { key: 'board_scale', label: 'Scale' },
-  { key: 'purchase_defense', label: 'Purchase defense', max: 1 },
+  { key: 'purchase_attack', label: 'Purchase attack', max: 1 },
 ];
 
 const FALLBACK_LEVELS: AiLevelChoice[] = [
@@ -44,25 +44,24 @@ function FactionSearchSettings({
   if (!setting) return <span className="lobby-view__waiting">Loading…</span>;
   const choices = levels.length > 0 ? levels : FALLBACK_LEVELS;
   const known = choices.some((level) => level.id === setting.difficulty);
+  const usesMcts = (setting.algorithm || 'mcts') === 'mcts';
   return (
     <div className="lobby-ai">
-      {(setting.algorithm || 'mcts') === 'mcts' && (
-        <label className="lobby-ai__field">
-          Difficulty
-          <select
-            value={setting.difficulty}
-            disabled={disabled}
-            onChange={(e) => onDifficulty(e.target.value)}
-          >
-            {!known && <option value={setting.difficulty}>{setting.difficulty}</option>}
-            {choices.map((level) => (
-              <option key={level.id} value={level.id}>
-                {level.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
+      <label className="lobby-ai__field">
+        Difficulty
+        <select
+          value={setting.difficulty}
+          disabled={disabled}
+          onChange={(e) => onDifficulty(e.target.value)}
+        >
+          {!known && <option value={setting.difficulty}>{setting.difficulty}</option>}
+          {choices.map((level) => (
+            <option key={level.id} value={level.id}>
+              {level.name}
+            </option>
+          ))}
+        </select>
+      </label>
       <label className="lobby-ai__field">
         Algorithm
         <select
@@ -74,7 +73,7 @@ function FactionSearchSettings({
           <option value="heuristic">Heuristic</option>
         </select>
       </label>
-      {WEIGHT_FIELDS.map((field) => (
+      {usesMcts ? WEIGHT_FIELDS.map((field) => (
         <label key={field.key} className="lobby-ai__field">
           {field.label}
           <input
@@ -90,7 +89,7 @@ function FactionSearchSettings({
             }}
           />
         </label>
-      ))}
+      )) : null}
     </div>
   );
 }

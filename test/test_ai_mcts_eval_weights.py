@@ -71,12 +71,17 @@ def _ctx(
 
 
 def _legacy_score_board(state, faction_id, td, fd, ud) -> float:
-    """Verbatim pre-3.6 private `_score_board` (the four copies were identical)."""
+    """Board formula at the default weights, including 3 per capital held."""
     our_power = 0.0
     enemy_power = 0.0
     our_terr = 0.0
     enemy_terr = 0.0
     our_alliance = ""
+    capitals = {
+        cap
+        for fdef in (fd or {}).values()
+        if isinstance((cap := getattr(fdef, "capital", None)), str) and cap
+    }
     fd_row = fd.get(faction_id)
     if fd_row:
         our_alliance = getattr(fd_row, "alliance", "") or ""
@@ -85,6 +90,8 @@ def _legacy_score_board(state, faction_id, td, fd, ud) -> float:
         owner = getattr(terr, "owner", None)
         value = 0.0
         tdef = td.get(tid)
+        if tid in capitals:
+            value += 3.0
         if tdef:
             if getattr(tdef, "is_stronghold", False):
                 value += 3.0
@@ -127,11 +134,14 @@ def _legacy_score_board(state, faction_id, td, fd, ud) -> float:
 def _clear_weight_env(monkeypatch) -> None:
     for name in (
         "AI_MCTS_W_MATERIAL",
+        "AI_MCTS_W_UNITS",
         "AI_MCTS_W_TERRITORY",
+        "AI_MCTS_W_CAPITAL",
         "AI_MCTS_W_STRONGHOLD",
         "AI_MCTS_W_POWER_PROD",
         "AI_MCTS_W_BOARD_SCALE",
         "AI_MCTS_W_PURCHASE_DEFENSE",
+        "AI_MCTS_W_PURCHASE_ATTACK",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -145,49 +155,49 @@ def test_get_eval_weights_defaults_match_legacy_constants(monkeypatch):
     _clear_weight_env(monkeypatch)
     w = get_eval_weights()
     assert w == EvalWeights(
-        material_weight=1.0,
-        territory_weight=1.0,
+        units_weight=1.0,
+        capital_value=3.0,
         stronghold_value=3.0,
         power_produce_scale=0.5,
         board_scale=1.0,
-        purchase_defense_weight=PURCHASE_DEFENSE_WEIGHT_DEFAULT,
+        purchase_attack_weight=PURCHASE_DEFENSE_WEIGHT_DEFAULT,
     )
 
 
 def test_env_knobs_override_each_field(monkeypatch):
     _clear_weight_env(monkeypatch)
-    monkeypatch.setenv("AI_MCTS_W_MATERIAL", "2.5")
-    monkeypatch.setenv("AI_MCTS_W_TERRITORY", "0.25")
+    monkeypatch.setenv("AI_MCTS_W_UNITS", "2.5")
+    monkeypatch.setenv("AI_MCTS_W_CAPITAL", "9")
     monkeypatch.setenv("AI_MCTS_W_STRONGHOLD", "7")
     monkeypatch.setenv("AI_MCTS_W_POWER_PROD", "1.5")
     monkeypatch.setenv("AI_MCTS_W_BOARD_SCALE", "0.5")
-    monkeypatch.setenv("AI_MCTS_W_PURCHASE_DEFENSE", "0.9")
+    monkeypatch.setenv("AI_MCTS_W_PURCHASE_ATTACK", "0.9")
     w = get_eval_weights()
-    assert w.material_weight == 2.5
-    assert w.territory_weight == 0.25
+    assert w.units_weight == 2.5
+    assert w.capital_value == 9.0
     assert w.stronghold_value == 7.0
     assert w.power_produce_scale == 1.5
     assert w.board_scale == 0.5
-    assert w.purchase_defense_weight == pytest.approx(0.9)
+    assert w.purchase_attack_weight == pytest.approx(0.9)
 
 
 @pytest.mark.parametrize(
     ("name", "value", "field", "expected"),
     [
-        ("AI_MCTS_W_MATERIAL", "abc", "material_weight", 1.0),
-        ("AI_MCTS_W_MATERIAL", "", "material_weight", 1.0),
-        ("AI_MCTS_W_MATERIAL", "   ", "material_weight", 1.0),
-        ("AI_MCTS_W_MATERIAL", "-1", "material_weight", 1.0),
-        ("AI_MCTS_W_MATERIAL", "nan", "material_weight", 1.0),
-        ("AI_MCTS_W_MATERIAL", "inf", "material_weight", 1.0),
-        ("AI_MCTS_W_MATERIAL", "1e999", "material_weight", 1.0),
-        ("AI_MCTS_W_TERRITORY", "-0.5", "territory_weight", 1.0),
+        ("AI_MCTS_W_UNITS", "abc", "units_weight", 1.0),
+        ("AI_MCTS_W_UNITS", "", "units_weight", 1.0),
+        ("AI_MCTS_W_UNITS", "   ", "units_weight", 1.0),
+        ("AI_MCTS_W_UNITS", "-1", "units_weight", 1.0),
+        ("AI_MCTS_W_UNITS", "nan", "units_weight", 1.0),
+        ("AI_MCTS_W_UNITS", "inf", "units_weight", 1.0),
+        ("AI_MCTS_W_UNITS", "1e999", "units_weight", 1.0),
+        ("AI_MCTS_W_CAPITAL", "-0.5", "capital_value", 3.0),
         ("AI_MCTS_W_STRONGHOLD", "not-a-number", "stronghold_value", 3.0),
         ("AI_MCTS_W_POWER_PROD", "nan", "power_produce_scale", 0.5),
         ("AI_MCTS_W_BOARD_SCALE", "-2", "board_scale", 1.0),
-        ("AI_MCTS_W_PURCHASE_DEFENSE", "1.5", "purchase_defense_weight", 0.5),
-        ("AI_MCTS_W_PURCHASE_DEFENSE", "-0.2", "purchase_defense_weight", 0.5),
-        ("AI_MCTS_W_PURCHASE_DEFENSE", "abc", "purchase_defense_weight", 0.5),
+        ("AI_MCTS_W_PURCHASE_ATTACK", "1.5", "purchase_attack_weight", 0.5),
+        ("AI_MCTS_W_PURCHASE_ATTACK", "-0.2", "purchase_attack_weight", 0.5),
+        ("AI_MCTS_W_PURCHASE_ATTACK", "abc", "purchase_attack_weight", 0.5),
     ],
 )
 def test_invalid_env_values_fall_back_to_default(monkeypatch, name, value, field, expected):
@@ -243,19 +253,21 @@ def test_board_scale_env_doubles_score_exactly(monkeypatch):
     assert board_score(state, "gondor", td, fd, ud, get_eval_weights()) == 2.0 * base
 
 
-def test_zero_material_and_territory_weights_give_zero_score(monkeypatch):
+def test_zero_units_stronghold_power_and_capital_give_zero_score(monkeypatch):
     _clear_weight_env(monkeypatch)
     state, ud, td, fd, cd, port_d = _load_wotr_setup()
-    monkeypatch.setenv("AI_MCTS_W_MATERIAL", "0")
-    monkeypatch.setenv("AI_MCTS_W_TERRITORY", "0")
+    monkeypatch.setenv("AI_MCTS_W_UNITS", "0")
+    monkeypatch.setenv("AI_MCTS_W_STRONGHOLD", "0")
+    monkeypatch.setenv("AI_MCTS_W_POWER_PROD", "0")
+    monkeypatch.setenv("AI_MCTS_W_CAPITAL", "0")
     assert board_score(state, "gondor", td, fd, ud, get_eval_weights()) == 0.0
 
 
-def test_zero_territory_weight_changes_score(monkeypatch):
+def test_zero_capital_weight_changes_score(monkeypatch):
     _clear_weight_env(monkeypatch)
     state, ud, td, fd, cd, port_d = _load_wotr_setup()
     base = board_score(state, "gondor", td, fd, ud, get_eval_weights())
-    monkeypatch.setenv("AI_MCTS_W_TERRITORY", "0")
+    monkeypatch.setenv("AI_MCTS_W_CAPITAL", "0")
     changed = board_score(state, "gondor", td, fd, ud, get_eval_weights())
     assert changed != base
 
@@ -333,13 +345,13 @@ def test_purchase_default_bundle_parity(monkeypatch):
     assert problem._bundle_prior_score(state, bundle) == expected
 
 
-def test_purchase_defense_weight_env_pure_defense_and_pure_attack(monkeypatch):
-    """AI_MCTS_W_PURCHASE_DEFENSE=1.0 -> all defense; =0.0 -> all attack."""
+def test_purchase_attack_weight_env_pure_defense_and_pure_attack(monkeypatch):
+    """AI_MCTS_W_PURCHASE_ATTACK=0 is all defense; =1 is all attack."""
     _clear_weight_env(monkeypatch)
     bundle = {"gondor_archer": 2}
     udef_archer = None
 
-    monkeypatch.setenv("AI_MCTS_W_PURCHASE_DEFENSE", "1.0")
+    monkeypatch.setenv("AI_MCTS_W_PURCHASE_ATTACK", "0.0")
     problem_def, state, ud, td, fd, cd, port_d = _purchase_problem(monkeypatch)
     udef_archer = ud["gondor_archer"]
     cost = get_unit_power_cost(udef_archer)
@@ -348,7 +360,7 @@ def test_purchase_defense_weight_env_pure_defense_and_pure_attack(monkeypatch):
     )
     assert problem_def._bundle_prior_score(state, bundle) == expected_def
 
-    monkeypatch.setenv("AI_MCTS_W_PURCHASE_DEFENSE", "0.0")
+    monkeypatch.setenv("AI_MCTS_W_PURCHASE_ATTACK", "1.0")
     problem_off, state2, *_ = _purchase_problem(monkeypatch)
     expected_att = max(0.05, 2 * attack_value_per_power(udef_archer, cost, 0))
     assert problem_off._bundle_prior_score(state2, bundle) == expected_att
@@ -364,13 +376,13 @@ def test_purchase_score_purchased_uses_env_weight(monkeypatch):
     _clear_weight_env(monkeypatch)
     purchased = [("gondor_archer", 2)]
 
-    monkeypatch.setenv("AI_MCTS_W_PURCHASE_DEFENSE", "1.0")
+    monkeypatch.setenv("AI_MCTS_W_PURCHASE_ATTACK", "0.0")
     p_def, state, ud, td, fd, cd, port_d = _purchase_problem(monkeypatch, purchased=purchased)
     cost = get_unit_power_cost(ud["gondor_archer"])
     raw_def = 2 * defense_value_per_power(ud["gondor_archer"], cost, 0)
     assert p_def._score_purchased(state) == raw_def / (1.0 + abs(raw_def))
 
-    monkeypatch.setenv("AI_MCTS_W_PURCHASE_DEFENSE", "0.0")
+    monkeypatch.setenv("AI_MCTS_W_PURCHASE_ATTACK", "1.0")
     p_off, state2, ud2, *_rest = _purchase_problem(monkeypatch, purchased=purchased)
     raw_att = 2 * attack_value_per_power(ud2["gondor_archer"], cost, 0)
     assert p_off._score_purchased(state2) == raw_att / (1.0 + abs(raw_att))
@@ -390,24 +402,54 @@ def test_purchase_score_purchased_default_parity(monkeypatch):
 
 def test_purchase_captures_weight_at_construction(monkeypatch):
     _clear_weight_env(monkeypatch)
-    monkeypatch.setenv("AI_MCTS_W_PURCHASE_DEFENSE", "1.0")
+    monkeypatch.setenv("AI_MCTS_W_PURCHASE_ATTACK", "0.0")
     problem, state, ud, td, fd, cd, port_d = _purchase_problem(monkeypatch, purchased=[("gondor_archer", 2)])
-    monkeypatch.delenv("AI_MCTS_W_PURCHASE_DEFENSE")
+    monkeypatch.delenv("AI_MCTS_W_PURCHASE_ATTACK")
     cost = get_unit_power_cost(ud["gondor_archer"])
     raw_def = 2 * defense_value_per_power(ud["gondor_archer"], cost, 0)
     # Still the construction-time (defense-only) blend despite env cleared.
-    assert problem._eval_weights.purchase_defense_weight == 1.0
+    assert problem._eval_weights.purchase_attack_weight == 0.0
     assert problem._score_purchased(state) == raw_def / (1.0 + abs(raw_def))
 
 
 def test_heuristic_default_constant_unaffected_by_mcts_knob(monkeypatch):
     """The MCTS knob is MCTS-only; the heuristic AI's constant stays put."""
     _clear_weight_env(monkeypatch)
-    monkeypatch.setenv("AI_MCTS_W_PURCHASE_DEFENSE", "1.0")
+    monkeypatch.setenv("AI_MCTS_W_PURCHASE_ATTACK", "1.0")
     from backend.ai.habits import PURCHASE_DEFENSE_WEIGHT_DEFAULT as heuristic_default
 
     assert heuristic_default == 0.5
-    assert get_eval_weights().purchase_defense_weight == 1.0
+    assert get_eval_weights().purchase_attack_weight == 1.0
+
+
+def test_saved_material_weight_renames_to_units():
+    from backend.ai.settings import normalize_faction_ai
+
+    faction = normalize_faction_ai({"weights": {"material": 2.0, "territory": 4.0}})
+    assert faction["weights"]["units"] == 2.0
+    assert faction["weights"]["capital"] == 3.0
+    assert "material" not in faction["weights"]
+    assert "territory" not in faction["weights"]
+    kept = normalize_faction_ai({"weights": {"material": 2.0, "units": 0.5}})
+    assert kept["weights"]["units"] == 0.5
+
+
+def test_saved_purchase_defense_weight_inverts_to_attack():
+    from backend.ai.settings import normalize_faction_ai
+
+    faction = normalize_faction_ai({"weights": {"purchase_defense": 1.0}})
+    assert faction["weights"]["purchase_attack"] == 0.0
+    assert "purchase_defense" not in faction["weights"]
+    kept = normalize_faction_ai({"weights": {"purchase_defense": 1.0, "purchase_attack": 0.7}})
+    assert kept["weights"]["purchase_attack"] == pytest.approx(0.7)
+
+
+def test_old_purchase_defense_env_inverts_onto_attack(monkeypatch):
+    _clear_weight_env(monkeypatch)
+    monkeypatch.setenv("AI_MCTS_W_PURCHASE_DEFENSE", "1.0")
+    assert get_eval_weights().purchase_attack_weight == 0.0
+    monkeypatch.setenv("AI_MCTS_W_PURCHASE_ATTACK", "0.7")
+    assert get_eval_weights().purchase_attack_weight == pytest.approx(0.7)
 
 
 # ---------------------------------------------------------------------------
@@ -421,7 +463,7 @@ def test_decide_combat_mcts_deterministic_under_weight_env(monkeypatch):
     from backend.engine.state import Unit
 
     monkeypatch.setenv("AI_MCTS_DIFFICULTY", "easy")
-    monkeypatch.setenv("AI_MCTS_W_TERRITORY", "0")
+    monkeypatch.setenv("AI_MCTS_W_CAPITAL", "0")
 
     from backend.ai.mcts.combat import decide_combat_mcts
 

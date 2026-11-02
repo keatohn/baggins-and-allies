@@ -1,12 +1,9 @@
 """
 Combat-move MCTS Problem: top-K heuristic proposal enumerator + leaf evaluator.
 
-The action space for combat_move is enormous (unit x destination x grouping).
-This Problem reuses the existing greedy policy as an *action generator*: enumerate
-(from, to) pairs from movable units, apply garrison pruning, rank each defended
-battle with the combat sim (the same trials the heuristic uses), and keep the
-top-K candidates that are actually worth fighting, plus end_phase when legal.
-MCTS then composes multi-front sequences of move_units before ending the phase.
+One option is one attack on one territory. Every origin that can reach it is
+part of that attack. Mixes add unit types from weakest to strongest, so the
+strongest type is never the first mix.
 
 Heuristics remain evaluators/priors, not sole deciders.
 """
@@ -38,7 +35,7 @@ from backend.ai.formulas import (
     get_unit_power_cost,
 )
 from backend.ai.habits import COMBAT_SIM_TRIALS
-from backend.ai.style import scale_combat_gain
+from backend.ai.style import attack_spread_adjustment, scale_combat_gain
 from backend.ai.combat_move import (
     _committed_attacker_stacks,
     _defender_stacks,
@@ -54,11 +51,131 @@ from backend.ai.garrison import (
     prune_move_unit_ids_for_garrison_floor,
 )
 from backend.ai.mcts.action_key import HashableAction
+from backend.ai.mcts.budget import BRANCH_LIMITS, branch_limit, resolve_game_difficulty
 from backend.ai.mcts.eval_weights import board_score, get_eval_weights
 from backend.ai.mcts.search import Problem
 
-# Cap on branching factor per node (top-K proposals + optional end_phase).
-MAX_COMBAT_MOVE_BRANCHES = 12
+# Default cap when no difficulty level is loaded. A level can raise this up to the admin ceiling.
+MAX_COMBAT_MOVE_BRANCHES = BRANCH_LIMITS["combat_move"][0]
+
+
+def attack_stack_variants(groups: list[tuple[str, list[str], float]]) -> list[list[str]]:
+    """Mixes that add unit types from weakest attack to strongest.
+
+    `groups` is (unit type, instance ids, attack stat). The first mix is the
+    weakest type. The strongest type is only added once every weaker type is
+    already in the mix, and it is never offered on its own when a weaker type
+    can come along.
+    """
+    ordered = sorted(groups, key=lambda group: (group[2], group[0]))
+    seen: set[tuple[str, ...]] = set()
+    mixes: list[list[str]] = []
+    running: list[str] = []
+    for _unit_id, ids, _attack in ordered:
+        running = [*running, *ids]
+        key = tuple(sorted(running))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        mixes.append(list(running))
+    return mixes
+
+
+def _bundle_move_action(
+    faction_id: str, legs: list[tuple[str, str, list[str], list[str]]]
+) -> Action:
+    """One engine action for the whole attack. Later origins ride along in bundle_rest."""
+    from_tid, to_tid, unit_ids, charge = legs[0]
+    action = move_units(
+        faction_id,
+        from_tid,
+        to_tid,
+        list(unit_ids),
+        charge_through=list(charge) if charge else None,
+    )
+    rest = []
+    for origin, dest, ids, leg_charge in legs[1:]:
+        leg = {
+            "from": origin,
+            "to": dest,
+            "unit_instance_ids": list(ids),
+        }
+        if leg_charge:
+            leg["charge_through"] = list(leg_charge)
+        rest.append(leg)
+    if rest:
+        action.payload["bundle_rest"] = rest
+    return action
+
+
+def apply_bundled_moves(state, action: Action, ud, td, fd, cd, port_d):
+    """Apply the first move and every origin stored on bundle_rest. The caller's action is not mutated."""
+    rest = list(action.payload.get("bundle_rest") or [])
+    primary = Action(
+        type=action.type,
+        faction=action.faction,
+        payload={key: value for key, value in action.payload.items() if key != "bundle_rest"},
+    )
+    new_state, events = apply_action(state, primary, ud, td, fd, cd, port_d)
+    for leg in rest:
+        follow = move_units(
+            action.faction,
+            leg["from"],
+            leg["to"],
+            list(leg.get("unit_instance_ids") or []),
+            charge_through=leg.get("charge_through") or None,
+        )
+        new_state, more = apply_action(new_state, follow, ud, td, fd, cd, port_d)
+        events.extend(more)
+    return new_state, events
+
+
+def _bundle_applies(state, action: Action, ud, td, fd, cd, port_d) -> bool:
+    """True when every origin in the bundle queues and the combat-move queue replays."""
+    from backend.engine.reducer import get_state_after_pending_moves
+
+    try:
+        new_state, _events = apply_bundled_moves(state, action, ud, td, fd, cd, port_d)
+        if any(getattr(pm, "phase", None) == "combat_move" for pm in (new_state.pending_moves or [])):
+            get_state_after_pending_moves(new_state, "combat_move", ud, td, fd)
+    except (TypeError, ValueError, KeyError, AttributeError):
+        return False
+    return True
+
+
+def omission_rank_score(
+    full_score: float, sim_score: float, randomness_knob: float, unit_count: int
+) -> float:
+    """Rank a leave-one-out attack under the full stack.
+
+    Randomness 0 keeps the score at 0, so the unit stays in the attack. As the
+    knob rises the omission can be chosen, and it stays a fraction of the full
+    attack: one unit's share, times the knob.
+    """
+    if randomness_knob <= 0 or unit_count <= 0 or sim_score <= 0 or full_score <= 0:
+        return 0.0
+    return min(sim_score, full_score) * randomness_knob / unit_count
+
+
+def _moves_without_instance(
+    moves: list[tuple[str, str, list[str], list[str]]], drop: str
+) -> list[tuple[str, str, list[str], list[str]]]:
+    reduced: list[tuple[str, str, list[str], list[str]]] = []
+    for origin, dest, ids, charge in moves:
+        kept = [iid for iid in ids if iid != drop]
+        if kept:
+            reduced.append((origin, dest, kept, charge))
+    return reduced
+
+
+def _merge_stacks(base: list[dict], extra: list[dict]) -> list[dict]:
+    combined: dict[str, int] = {}
+    for stack in base + extra:
+        uid = stack.get("unit_id")
+        if not uid:
+            continue
+        combined[uid] = combined.get(uid, 0) + int(stack.get("count") or 0)
+    return [{"unit_id": uid, "count": count} for uid, count in combined.items()]
 
 
 class CombatMoveProblem(Problem):
@@ -121,16 +238,9 @@ class CombatMoveProblem(Problem):
             return rescue
 
         actions: list[HashableAction] = []
-        for from_tid, to_tid, unit_ids, charge_through in self._enumerate_top_k_cached(state):
-            action = move_units(
-                self.faction_id,
-                from_tid,
-                to_tid,
-                list(unit_ids),
-                charge_through=charge_through or None,
-            )
-            v = validate_action(state, action, self.ud, self.td, self.fd, self.cd, self.port_d)
-            if v.valid:
+        for _score, legs in self._enumerate_top_k_cached(state):
+            action = _bundle_move_action(self.faction_id, legs)
+            if _bundle_applies(state, action, self.ud, self.td, self.fd, self.cd, self.port_d):
                 actions.append(HashableAction(action))
 
         if self._can_end_phase(state):
@@ -139,13 +249,19 @@ class CombatMoveProblem(Problem):
             if v.valid:
                 actions.append(HashableAction(end_action))
 
-        return actions[: MAX_COMBAT_MOVE_BRANCHES + 1]
+        cap = branch_limit("combat_move", resolve_game_difficulty(state))
+        return actions[: cap + 1]
 
     def apply(self, state: Any, action: HashableAction) -> Any:
         """Apply via the reducer. apply_action deep-copies, so `state` is never mutated."""
         from backend.engine.reducer import apply_action
 
         raw = action.unwrap() if isinstance(action, HashableAction) else action
+        if raw.type == "move_units" and raw.payload.get("bundle_rest"):
+            new_state, _events = apply_bundled_moves(
+                state, raw, self.ud, self.td, self.fd, self.cd, self.port_d
+            )
+            return new_state
         new_state, _events = apply_action(
             state,
             raw,
@@ -164,14 +280,14 @@ class CombatMoveProblem(Problem):
         return (state.phase or "combat_move") != "combat_move"
 
     def evaluate(self, state: Any) -> float:
-        """Non-terminal leaf: soft material + territory value from our perspective, in [-1, 1]."""
-        return self._score_board(state)
+        """Board score plus the combat sim of every attack already queued."""
+        return self._score_board(state) + self._pending_attack_value(state)
 
     def terminal_value(self, state: Any) -> float:
-        """Terminal leaf: winner short-circuits to ±1; otherwise board score."""
+        """Terminal leaf: winner short-circuits to ±1; otherwise board plus queued attacks."""
         if state.winner is not None:
             return self._winner_value(state)
-        return self._score_board(state)
+        return self._score_board(state) + self._pending_attack_value(state)
 
     def enumerator_size(self, state: Any) -> int:
         """Branching factor the enumerator yields for this state (3.1 hook)."""
@@ -193,18 +309,10 @@ class CombatMoveProblem(Problem):
             }
 
         scored: list[tuple[HashableAction, float]] = []
-        for from_tid, to_tid, unit_ids, charge_through in self._enumerate_top_k_cached(state):
-            action = move_units(
-                self.faction_id,
-                from_tid,
-                to_tid,
-                list(unit_ids),
-                charge_through=charge_through or None,
-            )
-            v = validate_action(state, action, self.ud, self.td, self.fd, self.cd, self.port_d)
-            if not v.valid:
+        for score, legs in self._enumerate_top_k_cached(state):
+            action = _bundle_move_action(self.faction_id, legs)
+            if not _bundle_applies(state, action, self.ud, self.td, self.fd, self.cd, self.port_d):
                 continue
-            score = self._cheap_move_score(state, from_tid, to_tid, unit_ids, charge_through)
             scored.append((HashableAction(action), max(0.05, score)))
 
         priors: dict[HashableAction, float] = {}
@@ -274,7 +382,7 @@ class CombatMoveProblem(Problem):
             origin_ids, state, faction_id, fd, td, ud
         )
 
-        candidates: list[tuple] = []
+        reachable: dict[tuple[str, bool], list[tuple[str, list[str]]]] = {}
         for (from_tid, to_tid), unit_ids in from_to_units.items():
             if not unit_ids:
                 continue
@@ -317,40 +425,203 @@ class CombatMoveProblem(Problem):
                 ]
                 if not pruned:
                     continue
-            charge_options = self._charge_path_options(
-                state, (from_tid, to_tid), pruned, charge_routes_per_unit
-            )
-            if sea_raid:
-                pruned = _with_raid_boats(state, from_tid, pruned, ud)
-            if unit_ids_are_unaccompanied_ladders(state, ud, pruned, to_tid):
+            reachable.setdefault((to_tid, sea_raid), []).append((from_tid, list(pruned)))
+
+        bundles: list[tuple[float, list[tuple[str, str, list[str], list[str]]]]] = []
+        for (to_tid, sea_raid), legs in reachable.items():
+            for score, moves in self._attack_bundles(
+                state, state_after, to_tid, sea_raid, legs, charge_routes_per_unit
+            ):
+                if score <= 0:
+                    continue
+                action = _bundle_move_action(self.faction_id, moves)
+                if not _bundle_applies(state, action, ud, td, fd, self.cd, self.port_d):
+                    continue
+                bundles.append((score, moves))
+
+        for score, moves in self._one_unit_omissions(state, state_after, bundles):
+            action = _bundle_move_action(self.faction_id, moves)
+            if _bundle_applies(state, action, ud, td, fd, self.cd, self.port_d):
+                bundles.append((score, moves))
+
+        bundles.sort(key=lambda item: item[0], reverse=True)
+        cap = branch_limit("combat_move", resolve_game_difficulty(state))
+        return bundles[:cap]
+
+    def _attack_bundles(
+        self,
+        state: Any,
+        board: Any,
+        to_tid: str,
+        sea_raid: bool,
+        legs: list[tuple[str, list[str]]],
+        charge_routes_per_unit: dict,
+    ) -> list[tuple[float, list[tuple[str, str, list[str], list[str]]]]]:
+        """One battle per mix. Every origin that can reach `to_tid` is in the mix."""
+        by_instance: dict[str, str] = {}
+        origin_of: dict[str, str] = {}
+        for from_tid, unit_ids in legs:
+            terr = state.territories.get(from_tid)
+            for unit in getattr(terr, "units", []) or []:
+                iid = getattr(unit, "instance_id", "")
+                if iid in unit_ids:
+                    by_instance[iid] = getattr(unit, "unit_id", "")
+                    origin_of[iid] = from_tid
+        groups: dict[str, list[str]] = {}
+        for iid, uid in by_instance.items():
+            if uid:
+                groups.setdefault(uid, []).append(iid)
+        typed: list[tuple[str, list[str], float]] = []
+        for uid, ids in groups.items():
+            udef = self.ud.get(uid)
+            attack = float(getattr(udef, "attack", 0) or 0)
+            typed.append((uid, ids, attack))
+        bundles: list[tuple[float, list[tuple[str, str, list[str], list[str]]]]] = []
+        for mix in attack_stack_variants(typed):
+            by_origin: dict[str, list[str]] = {}
+            for iid in mix:
+                by_origin.setdefault(origin_of[iid], []).append(iid)
+            moves: list[tuple[str, str, list[str], list[str]]] = []
+            stacks: list[dict] = []
+            non_ladder = False
+            ladder_moves: list[tuple[str, str, list[str], list[str]]] = []
+            for from_tid, ids in sorted(by_origin.items()):
+                moving = _with_raid_boats(state, from_tid, ids, self.ud) if sea_raid else list(ids)
+                leg_stacks = _stacks_for_unit_ids(state, from_tid, moving, self.ud)
+                if not leg_stacks:
+                    continue
+                charge = self._charge_path_options(
+                    state, (from_tid, to_tid), moving, charge_routes_per_unit
+                )[0]
+                leg = (from_tid, to_tid, moving, charge)
+                if unit_ids_are_unaccompanied_ladders(state, self.ud, moving, to_tid):
+                    ladder_moves.append(leg)
+                else:
+                    non_ladder = True
+                    moves.append(leg)
+                    stacks = _merge_stacks(stacks, leg_stacks)
+            if non_ladder:
+                for leg in ladder_moves:
+                    moves.append(leg)
+                    stacks = _merge_stacks(
+                        stacks, _stacks_for_unit_ids(state, leg[0], leg[2], self.ud)
+                    )
+            elif not moves:
                 continue
-            # Rank by the preferred charge; a later option is substituted only
-            # when that path does not survive a full pending replay.
-            score = self._cheap_move_score(
-                state, from_tid, to_tid, pruned, charge_options[0], state_after=state_after
-            )
+            net = self._joined_battle_net(board, stacks, to_tid, sea_raid)
+            bundles.append((net + attack_spread_adjustment(state, to_tid), moves))
+        return bundles
+
+    def _one_unit_omissions(
+        self,
+        state: Any,
+        board: Any,
+        bundles: list,
+    ) -> list[tuple[float, list]]:
+        """Leave-one-out mixes for the biggest attack. Ranked under the full stack."""
+        from backend.ai.style import randomness
+
+        knob = randomness()
+        if knob <= 0 or not bundles:
+            return []
+        full_score, moves = max(
+            bundles, key=lambda item: sum(len(leg[2]) for leg in item[1])
+        )
+        unit_ids = [iid for _origin, _dest, ids, _charge in moves for iid in ids]
+        if len(unit_ids) < 2:
+            return []
+        by_type: dict[str, list[str]] = {}
+        for origin, _dest, ids, _charge in moves:
+            terr = state.territories.get(origin)
+            for unit in getattr(terr, "units", []) or []:
+                iid = getattr(unit, "instance_id", "")
+                if iid in ids:
+                    by_type.setdefault(getattr(unit, "unit_id", "") or iid, []).append(iid)
+        to_tid = moves[0][1]
+        from_tid = moves[0][0]
+        sea_raid = bool(
+            _is_water_zone(self.td.get(from_tid)) and not _is_water_zone(self.td.get(to_tid))
+        )
+        already = {
+            tuple(sorted(iid for _o, _d, ids, _c in item[1] for iid in ids))
+            for item in bundles
+        }
+        omissions: list[tuple[float, list]] = []
+        for ids in by_type.values():
+            drop = ids[0]
+            reduced = _moves_without_instance(moves, drop)
+            key = tuple(sorted(iid for _o, _d, kept, _c in reduced for iid in kept))
+            if not key or key in already:
+                continue
+            stacks: list[dict] = []
+            for origin, _dest, kept, _charge in reduced:
+                stacks = _merge_stacks(stacks, _stacks_for_unit_ids(state, origin, kept, self.ud))
+            sim_score = self._joined_battle_net(board, stacks, to_tid, sea_raid)
+            sim_score += attack_spread_adjustment(state, to_tid)
+            score = omission_rank_score(full_score, sim_score, knob, len(unit_ids))
             if score <= 0:
                 continue
-            candidates.append((score, from_tid, to_tid, pruned, charge_options))
+            omissions.append((score, reduced))
+            already.add(key)
+        return omissions
 
-        candidates.sort(key=lambda x: x[0], reverse=True)
-        # validate_action checks each move against the pre-pending board. Replaying
-        # the whole combat_move queue is stricter: a charge through a hex another
-        # pending move occupies, or a sail whose steps sum past remaining_movement
-        # (the "need 3, have 2" ship failure), raises inside _apply_pending_moves.
-        # Drop those candidates here so the search never queues them.
-        accepted: list[tuple[str, str, list[str], list[str]]] = []
-        for _score, from_tid, to_tid, unit_ids, charge_options in candidates:
-            for charge_through in charge_options:
-                if not self._must_replay_candidate(state, from_tid, to_tid, unit_ids, charge_through):
-                    accepted.append((from_tid, to_tid, unit_ids, charge_through))
-                    break
-                if self._pending_sequence_replays(state, from_tid, to_tid, unit_ids, charge_through):
-                    accepted.append((from_tid, to_tid, unit_ids, charge_through))
-                    break
-            if len(accepted) >= MAX_COMBAT_MOVE_BRANCHES:
-                break
-        return accepted
+    def _pending_attack_value(self, state: Any) -> float:
+        """Squashed sim value of attacks queued this phase, each with every origin that is going."""
+        memo = getattr(self, "_pending_value_memo", None)
+        if memo is not None and memo[0] is state:
+            return memo[1]
+        total = 0.0
+        try:
+            pending = [
+                pm
+                for pm in (state.pending_moves or [])
+                if getattr(pm, "phase", None) == "combat_move"
+            ]
+            board = (
+                get_state_after_pending_moves(state, "combat_move", self.ud, self.td, self.fd)
+                if pending
+                else state
+            )
+        except ValueError:
+            self._pending_value_memo = (state, 0.0)
+            return 0.0
+        seen: set[str] = set()
+        for move in pending:
+            dest = getattr(move, "to_territory", None)
+            if not dest or dest in seen:
+                continue
+            seen.add(dest)
+            origin = getattr(move, "from_territory", None)
+            sea_raid = bool(
+                _is_water_zone(self.td.get(origin)) and not _is_water_zone(self.td.get(dest))
+            )
+            committed = _committed_attacker_stacks(board, dest, self.faction_id, self.ud, self.fd)
+            if not committed:
+                continue
+            total += self._joined_battle_net(board, [], dest, sea_raid)
+        value = total / (1.0 + abs(total)) if total else 0.0
+        self._pending_value_memo = (state, value)
+        return value
+
+    def _joined_battle_net(
+        self,
+        board: Any,
+        move_stacks: list[dict],
+        to_tid: str,
+        sea_raid: bool,
+    ) -> float:
+        """Expected gain of these stacks plus attackers already committed to this destination."""
+        committed = _committed_attacker_stacks(board, to_tid, self.faction_id, self.ud, self.fd)
+        attackers = _merge_stacks(committed, move_stacks)
+        defenders = _defender_stacks(board, to_tid, self.faction_id, self.fd, self.ud)
+        if not defenders:
+            if not self._is_conquest(to_tid, board):
+                return 0.0
+            return expected_net_gain(
+                1.0, to_tid, self.td, self.fd, 0.0, 0.0, self.cd, self.port_d, self.ud
+            )
+        _win, net = self._sim_battle(board, attackers, defenders, to_tid, sea_raid=sea_raid)
+        return net
 
     def _is_boat(self, unit_id: str) -> bool:
         from backend.engine.queries import _is_water_boat
@@ -566,8 +837,9 @@ class CombatMoveProblem(Problem):
         """
         Rank a candidate by the combat sim's expected gain. A likely loss stays
         when the casualties and the territory still come out ahead. Aggression
-        slides the balance between those two. A negative total is dropped because
-        ending the phase is worth more.
+        raises the territory and enemy dead, lowers our dead, and adds a growing
+        bonus for each new battle. A negative total is dropped because ending
+        the phase is worth more.
         """
         move_stacks = _stacks_for_unit_ids(state, from_tid, unit_ids, self.ud)
         if not move_stacks:
@@ -614,12 +886,12 @@ class CombatMoveProblem(Problem):
                     total += expected_net_gain(
                         1.0, via, self.td, self.fd, 0.0, 0.0, self.cd, self.port_d, self.ud
                     )
-            return total + via_adjustment
+            return total + via_adjustment + attack_spread_adjustment(state, to_tid)
 
         committed = _committed_attacker_stacks(board, to_tid, self.faction_id, self.ud, self.fd)
         att_stacks = _merge(committed, move_stacks)
         _p_win, net = self._sim_battle(board, att_stacks, def_stacks, to_tid, sea_raid=sea_raid)
-        return net + via_adjustment
+        return net + via_adjustment + attack_spread_adjustment(state, to_tid)
 
     def _ladder_rescue_actions(self, state: Any) -> list[HashableAction] | None:
         """Partner moves or a cancel when a ladder is already attacking alone.
@@ -697,7 +969,7 @@ class CombatMoveProblem(Problem):
         return 1.0 if state.winner == our_alliance else -1.0
 
     def _score_board(self, state: Any) -> float:
-        """Soft material + territory value from our perspective, in [-1, 1]."""
+        """Units, strongholds, capitals, and power from our perspective."""
         return board_score(state, self.faction_id, self.td, self.fd, self.ud, self._eval_weights)
 
 

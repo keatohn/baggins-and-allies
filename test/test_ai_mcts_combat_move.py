@@ -19,7 +19,10 @@ from backend.ai.mcts.budget import SearchBudget
 from backend.ai.mcts.combat_move import (
     MAX_COMBAT_MOVE_BRANCHES,
     CombatMoveProblem,
+    apply_bundled_moves,
+    attack_stack_variants,
     decide_combat_move_mcts,
+    omission_rank_score,
 )
 from backend.ai.mcts.search import run_mcts
 
@@ -103,6 +106,26 @@ def _plant_attackers_near_enemy(
             )
         )
     terr.owner = "gondor"
+
+
+def test_omission_stays_under_the_full_attack():
+    assert omission_rank_score(8.0, 8.0, 0.0, 8) == 0.0
+    held_back = omission_rank_score(8.0, 9.0, 1.0, 8)
+    assert 0 < held_back < 8.0
+    assert held_back == 8.0 / 8
+
+
+def test_attack_stack_variants_add_weakest_types_before_the_strongest():
+    mixes = attack_stack_variants([
+        ("infantry", ["i1", "i2"], 2.0),
+        ("cavalry", ["c1"], 5.0),
+        ("archers", ["a1"], 1.0),
+    ])
+    assert [sorted(mix) for mix in mixes] == [
+        ["a1"],
+        ["a1", "i1", "i2"],
+        ["a1", "c1", "i1", "i2"],
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -307,10 +330,12 @@ def test_decide_combat_move_mcts_returns_valid_action():
     action = decide_combat_move_mcts(ctx, rng=random.Random(3))
     assert action is not None
     assert action.type in ("move_units", "end_phase")
-    v = validate_action(state, action, ud, td, fd, cd, port_d)
-    assert v.valid, v.error
-    # Must apply cleanly (end_phase may raise if boats must attack — none here).
-    apply_action(state, action, ud, td, fd, cd, port_d)
+    if action.type == "move_units" and action.payload.get("bundle_rest"):
+        apply_bundled_moves(state, action, ud, td, fd, cd, port_d)
+    else:
+        v = validate_action(state, action, ud, td, fd, cd, port_d)
+        assert v.valid, v.error
+        apply_action(state, action, ud, td, fd, cd, port_d)
 
 
 # ---------------------------------------------------------------------------

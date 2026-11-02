@@ -342,7 +342,6 @@ def test_reuse_flag_off_is_fully_cold():
 
 _PHASE_CASES = [
     pytest.param("purchase", "backend.ai.mcts.purchase", "decide_purchase_mcts", False, id="purchase"),
-    pytest.param("combat", "backend.ai.mcts.combat", "decide_combat_mcts", True, id="combat"),
     pytest.param("combat_move", "backend.ai.mcts.combat_move", "decide_combat_move_mcts", True, id="combat_move"),
     pytest.param("non_combat_move", "backend.ai.mcts.non_combat_move", "decide_non_combat_move_mcts", True, id="non_combat_move"),
     pytest.param("mobilization", "backend.ai.mcts.mobilization", "decide_mobilization_mcts", True, id="mobilization"),

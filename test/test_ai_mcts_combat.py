@@ -425,6 +425,37 @@ def test_decide_combat_mcts_applies_cleanly():
     assert new_state is not None
 
 
+def test_decide_combat_mcts_starts_battles_in_territory_order(monkeypatch):
+    """Battle order is fixed. The search is not asked which fight to open."""
+    import backend.ai.mcts.search as search_mod
+
+    def fail_search(*_args, **_kwargs):
+        raise AssertionError("combat must not search battle order")
+
+    monkeypatch.setattr(search_mod, "run_mcts_reuse", fail_search)
+    state, ud, td, fd, cd, port_d = _load_wotr_setup()
+    ctx = _combat_ctx(
+        state,
+        ud,
+        td,
+        fd,
+        cd,
+        port_d,
+        available_actions={
+            "phase": "combat",
+            "faction": "gondor",
+            "combat_territories": [
+                {"territory_id": "osgiliath"},
+                {"territory_id": "minas_morgul"},
+            ],
+        },
+    )
+    action = decide_combat_mcts(ctx, rng=random.Random(0))
+    assert action is not None
+    assert action.type == "initiate_combat"
+    assert action.payload["territory_id"] == "minas_morgul"
+
+
 def test_decide_combat_mcts_end_phase_when_no_battles():
     state, ud, td, fd, cd, port_d = _load_wotr_setup()
     ctx = _combat_ctx(state, ud, td, fd, cd, port_d)

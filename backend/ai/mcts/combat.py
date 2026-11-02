@@ -216,35 +216,23 @@ class CombatProblem(Problem):
     # ----- Scoring -----
 
     def _score_board(self, state: Any) -> float:
-        """Soft material + territory value from our perspective, in [-1, 1]."""
+        """Units, strongholds, capitals, and power from our perspective."""
         return board_score(state, self.faction_id, self.td, self.fd, self.ud, self._eval_weights)
 
 
 def decide_combat_mcts(ctx: AIContext, rng: random.Random | None = None) -> Action | None:
     """
-    Entry point: run combat-phase MCTS and return the chosen root action.
-    Dice are left empty for initiate/continue so the API can fill real rolls.
-    Falls back to end_phase if search yields nothing (safety net).
+    Start declared battles in territory-id order and choose retreat after each round.
+
+    Battle order is not searched: once a battle is declared it does not depend on
+    the others. Ending the phase is automatic when none remain. Dice stay empty so
+    the API fills real rolls.
     """
-    from backend.ai.mcts.budget import get_phase_budget, resolve_game_difficulty
-    from backend.ai.mcts.search import run_mcts_reuse
+    from backend.ai.combat import decide_mcts_combat_policy
 
-    if not ctx.state or not ctx.faction_id:
-        return None
-    if ctx.state.winner:
-        return None
-    if (ctx.state.phase or "combat") != "combat":
-        return None
-
-    problem = CombatProblem(ctx, rng=rng)
-    budget = get_phase_budget("combat", resolve_game_difficulty(ctx.state))
-    # 3.4: reuse often misses here — decide() strips dice and the API fills real
-    # rolls before apply, so the next state differs from the searched child.
-    action = run_mcts_reuse(problem, ctx.state, budget)
+    action = decide_mcts_combat_policy(ctx, rng=rng)
     if action is None:
-        return end_phase(ctx.faction_id)
-    if isinstance(action, HashableAction):
-        return _strip_search_dice(action.unwrap())
+        return None
     return _strip_search_dice(action)
 
 

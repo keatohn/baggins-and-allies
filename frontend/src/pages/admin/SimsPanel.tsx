@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../services/api';
-import type { AdminSetupListItem, AdminSimRun, AiFactionSetting, AiLevelChoice } from '../../services/api';
+import type { AdminAiLevel, AdminSetupListItem, AdminSimRun, AiFactionSetting } from '../../services/api';
 
 type Props = {
   setups: AdminSetupListItem[];
@@ -8,21 +8,21 @@ type Props = {
 };
 
 const WEIGHT_FIELDS: { key: keyof AiFactionSetting['weights']; label: string; max?: number }[] = [
-  { key: 'material', label: 'Material' },
-  { key: 'territory', label: 'Territory' },
+  { key: 'units', label: 'Units' },
   { key: 'stronghold', label: 'Stronghold' },
+  { key: 'capital', label: 'Capital' },
   { key: 'power_prod', label: 'Power' },
   { key: 'board_scale', label: 'Scale' },
-  { key: 'purchase_defense', label: 'Purchase defense', max: 1 },
+  { key: 'purchase_attack', label: 'Purchase attack', max: 1 },
 ];
 
 const DEFAULT_WEIGHTS: AiFactionSetting['weights'] = {
-  material: 1,
-  territory: 1,
+  units: 1,
   stronghold: 3,
+  capital: 3,
   power_prod: 0.5,
   board_scale: 1,
-  purchase_defense: 0.5,
+  purchase_attack: 0.5,
 };
 
 const STYLE_FIELDS: { key: 'randomness' | 'aggression' | 'purchase_variety'; label: string }[] = [
@@ -31,19 +31,6 @@ const STYLE_FIELDS: { key: 'randomness' | 'aggression' | 'purchase_variety'; lab
   { key: 'purchase_variety', label: 'Purchase variety' },
 ];
 
-type StyleDefaults = {
-  randomness: number;
-  aggression: number;
-  purchase_variety: number;
-};
-
-const DEFAULT_STYLE: StyleDefaults = {
-  randomness: 0,
-  aggression: 0.5,
-  purchase_variety: 0,
-};
-
-const ALLIANCE_ORDER = ['good', 'evil'];
 const MAX_TURNS = 10;
 
 type SimFaction = {
@@ -52,8 +39,15 @@ type SimFaction = {
   alliance: string;
 };
 
-function blankSetting(difficulty: string, algorithm: string, style: StyleDefaults = DEFAULT_STYLE): AiFactionSetting {
-  return { difficulty, algorithm, weights: { ...DEFAULT_WEIGHTS }, ...style };
+function blankSetting(difficulty: string, algorithm: string): AiFactionSetting {
+  return {
+    difficulty,
+    algorithm,
+    weights: { ...DEFAULT_WEIGHTS },
+    randomness: 0,
+    aggression: 0.5,
+    purchase_variety: 0,
+  };
 }
 
 function allianceLabel(alliance: string): string {
@@ -63,7 +57,16 @@ function allianceLabel(alliance: string): string {
   return alliance.charAt(0).toUpperCase() + alliance.slice(1);
 }
 
-function factionsFromBundle(factions: Record<string, unknown> | undefined): SimFaction[] {
+function turnOrderIds(starting: Record<string, unknown> | undefined): string[] {
+  const raw = starting?.turn_order;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((id): id is string => typeof id === 'string' && id.length > 0);
+}
+
+function factionsFromBundle(
+  factions: Record<string, unknown> | undefined,
+  turnOrder: string[],
+): SimFaction[] {
   const rows: SimFaction[] = [];
   for (const [id, raw] of Object.entries(factions ?? {})) {
     const row = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
@@ -76,11 +79,11 @@ function factionsFromBundle(factions: Record<string, unknown> | undefined): SimF
     if (!alliance || alliance === 'neutral') continue;
     rows.push({ id, name, alliance });
   }
+  const rank = new Map(turnOrder.map((id, index) => [id, index]));
   return rows.sort((a, b) => {
-    const ai = ALLIANCE_ORDER.indexOf(a.alliance);
-    const bi = ALLIANCE_ORDER.indexOf(b.alliance);
-    const order = (ai === -1 ? ALLIANCE_ORDER.length : ai) - (bi === -1 ? ALLIANCE_ORDER.length : bi);
-    if (order !== 0) return order;
+    const ai = rank.has(a.id) ? rank.get(a.id)! : turnOrder.length;
+    const bi = rank.has(b.id) ? rank.get(b.id)! : turnOrder.length;
+    if (ai !== bi) return ai - bi;
     return a.name.localeCompare(b.name);
   });
 }
@@ -109,14 +112,9 @@ export function SimsPanel({ setups, onError }: Props) {
     onErrorRef.current = onError;
   }, [onError]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [levels, setLevels] = useState<AiLevelChoice[]>([
-    { id: 'easy', name: 'Easy' },
-    { id: 'normal', name: 'Normal' },
-    { id: 'hard', name: 'Hard' },
-  ]);
+  const [levels, setLevels] = useState<AdminAiLevel[]>([]);
   const [defaultDifficulty, setDefaultDifficulty] = useState('normal');
   const [defaultAlgorithm, setDefaultAlgorithm] = useState('heuristic');
-  const [defaultStyle, setDefaultStyle] = useState<StyleDefaults>(DEFAULT_STYLE);
 
   const scenarioId = setupId || setups[0]?.id || '';
   const loadingSetup = Boolean(scenarioId) && loadedSetupId !== scenarioId;
@@ -136,21 +134,16 @@ export function SimsPanel({ setups, onError }: Props) {
         if (cancelled) return;
         const difficulty = ai.difficulty || 'normal';
         const algorithm = ai.algorithm || 'heuristic';
-        const style = {
-          randomness: ai.randomness ?? 0,
-          aggression: ai.aggression ?? 0.5,
-          purchase_variety: ai.purchase_variety ?? 0,
-        };
         setDefaultDifficulty(difficulty);
         setDefaultAlgorithm(algorithm);
-        setDefaultStyle(style);
-        if (ai.levels?.length) {
-          setLevels(ai.levels.map((level) => ({ id: level.id, name: level.name })));
-        }
-        const nextFactions = factionsFromBundle(bundle.factions);
+        setLevels(ai.levels ?? []);
+        const nextFactions = factionsFromBundle(
+          bundle.factions,
+          turnOrderIds(bundle.starting_setup),
+        );
         setFactions(nextFactions);
         setSettings(Object.fromEntries(
-          nextFactions.map((faction) => [faction.id, blankSetting(difficulty, algorithm, style)]),
+          nextFactions.map((faction) => [faction.id, blankSetting(difficulty, algorithm)]),
         ));
         setLoadedSetupId(requestedId);
       })
@@ -170,11 +163,10 @@ export function SimsPanel({ setups, onError }: Props) {
       difficulty?: string;
       algorithm?: string;
       weight?: { key: keyof AiFactionSetting['weights']; value: number };
-      style?: { key: keyof StyleDefaults; value: number };
     },
   ) => {
     setSettings((current) => {
-      const row = current[factionId] ?? blankSetting(defaultDifficulty, defaultAlgorithm, defaultStyle);
+      const row = current[factionId] ?? blankSetting(defaultDifficulty, defaultAlgorithm);
       return {
         ...current,
         [factionId]: {
@@ -182,21 +174,32 @@ export function SimsPanel({ setups, onError }: Props) {
           ...(patch.difficulty != null ? { difficulty: patch.difficulty } : {}),
           ...(patch.algorithm != null ? { algorithm: patch.algorithm } : {}),
           ...(patch.weight ? { weights: { ...row.weights, [patch.weight.key]: patch.weight.value } } : {}),
-          ...(patch.style ? { [patch.style.key]: patch.style.value } : {}),
         },
       };
     });
   };
 
   const selected = runs.find((run) => run.id === selectedId) ?? runs[0] ?? null;
-  const choices = levels.length > 0 ? levels : [{ id: 'normal', name: 'Normal' }];
+  const choices: AdminAiLevel[] = levels.length > 0 ? levels : [{
+    id: 'normal',
+    name: 'Normal',
+    iterations: 500,
+    seconds: 0.5,
+    randomness: 0,
+    aggression: 0.5,
+    purchase_variety: 0,
+    purchase_options: 48,
+    combat_move_options: 24,
+    non_combat_options: 24,
+    mobilization_options: 24,
+  }];
 
   return (
     <div className="admin-page__ai">
       <p className="admin-page__hint">
-        Runs one computer-vs-computer game and keeps the report here. Each faction has its own
-        algorithm. Randomness, aggression, and purchase variety apply to both. Difficulty and the
-        board weights apply only when that faction uses MCTS. The heuristic player does not read them.
+        Runs one computer-vs-computer game and keeps the report here. Factions are listed in turn
+        order. Each one picks a difficulty. Randomness, aggression, and purchase variety come from
+        that level. Steps, seconds, and the board weights apply only when the faction uses MCTS.
       </p>
       <div className="admin-page__toolbar admin-page__toolbar--wrap">
         <label className="admin-page__field">
@@ -249,9 +252,10 @@ export function SimsPanel({ setups, onError }: Props) {
       {!loadingSetup && factions.length > 0 ? (
         <div className="admin-sim-factions">
           {factions.map((faction) => {
-            const setting = settings[faction.id] ?? blankSetting(defaultDifficulty, defaultAlgorithm, defaultStyle);
+            const setting = settings[faction.id] ?? blankSetting(defaultDifficulty, defaultAlgorithm);
             const known = choices.some((level) => level.id === setting.difficulty);
             const usesMcts = (setting.algorithm || 'mcts') === 'mcts';
+            const levelStyle = choices.find((level) => level.id === setting.difficulty);
             return (
               <section key={faction.id} className="admin-sim-faction">
                 <h3 className="admin-sim-faction__name">
@@ -271,49 +275,35 @@ export function SimsPanel({ setups, onError }: Props) {
                     </select>
                     {usesMcts ? null : (
                       <span className="admin-sim-faction__heuristic">
-                        Heuristic has no difficulty or board weights.
+                        Heuristic ignores steps, seconds, and board weights.
                       </span>
                     )}
                   </label>
+                  <label className="admin-page__field">
+                    <span className="admin-page__field-label">Difficulty</span>
+                    <select
+                      className="admin-page__select"
+                      value={setting.difficulty}
+                      onChange={(e) => patchFaction(faction.id, { difficulty: e.target.value })}
+                    >
+                      {!known && <option value={setting.difficulty}>{setting.difficulty}</option>}
+                      {choices.map((level) => (
+                        <option key={level.id} value={level.id}>
+                          {level.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   {STYLE_FIELDS.map((field) => (
-                    <label key={field.key} className="admin-page__field">
+                    <p key={field.key} className="admin-page__field">
                       <span className="admin-page__field-label">
                         {field.label}{' '}
-                        <span className="admin-ai-style__value">{Number(setting[field.key] ?? 0).toFixed(2)}</span>
+                        <span className="admin-ai-style__value">
+                          {Number(levelStyle?.[field.key] ?? 0).toFixed(2)}
+                        </span>
                       </span>
-                      <input
-                        className="admin-ai-style__slider"
-                        type="range"
-                        min={0}
-                        max={1}
-                        step={0.05}
-                        value={setting[field.key] ?? 0}
-                        onChange={(e) => {
-                          const value = Number(e.target.value);
-                          if (Number.isFinite(value)) {
-                            patchFaction(faction.id, { style: { key: field.key, value } });
-                          }
-                        }}
-                      />
-                    </label>
+                    </p>
                   ))}
-                  {usesMcts ? (
-                    <label className="admin-page__field">
-                      <span className="admin-page__field-label">Difficulty</span>
-                      <select
-                        className="admin-page__select"
-                        value={setting.difficulty}
-                        onChange={(e) => patchFaction(faction.id, { difficulty: e.target.value })}
-                      >
-                        {!known && <option value={setting.difficulty}>{setting.difficulty}</option>}
-                        {choices.map((level) => (
-                          <option key={level.id} value={level.id}>
-                            {level.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
                   {usesMcts ? WEIGHT_FIELDS.map((field) => (
                     <label key={field.key} className="admin-page__field">
                       <span className="admin-page__field-label">{field.label}</span>

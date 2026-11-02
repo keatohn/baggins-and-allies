@@ -76,7 +76,7 @@ from backend.ai.habits import (
     PUSH_TOWARD_STRONGHOLD_PER_STEP_BONUS,
 )
 from backend.ai.randomness import pick_from_score_band
-from backend.ai.style import scale_combat_gain
+from backend.ai.style import attack_spread_adjustment, scale_combat_gain
 from backend.ai.formulas import (
     battle_gain_if_win,
     expected_net_gain,
@@ -1354,7 +1354,10 @@ def decide_combat_move(ctx: AIContext):
                     from_tid, 0.0
                 )
                 score += strategic.combat_move_bonus_to.get(to_tid, 0.0)
-            candidates.append(((from_tid, to_tid, pruned_ids), score))
+            candidates.append((
+                (from_tid, to_tid, pruned_ids),
+                score + attack_spread_adjustment(state, to_tid),
+            ))
             continue
         committed_att = _committed_attacker_stacks(
             state_after, to_tid, faction_id, ud, fd)
@@ -1530,7 +1533,10 @@ def decide_combat_move(ctx: AIContext):
                 score *= strategic.combat_attack_mult_by_blob.get(bi_d, 1.0)
             score -= strategic.combat_strip_penalty_from.get(from_tid, 0.0)
             score += strategic.combat_move_bonus_to.get(to_tid, 0.0)
-        candidates.append(((from_tid, to_tid, unit_ids), score))
+        candidates.append((
+            (from_tid, to_tid, unit_ids),
+            score + attack_spread_adjustment(state, to_tid),
+        ))
 
     # A negative score is worse than ending the phase. A loss whose trade is still
     # positive stays in the list; randomness can then pick it over a better attack.

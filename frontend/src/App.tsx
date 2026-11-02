@@ -214,8 +214,11 @@ function getPlayerIdFromJwt(): string | null {
 /** Poll game state this often (ms) so other players' actions appear without refresh. */
 const GAME_POLL_INTERVAL_MS = 2000;
 
-/** Delay between each AI action so the human can follow what the computer is doing (ms). */
+/** Pause after a heuristic AI action so the human can follow it (ms). */
 const AI_STEP_DELAY_MS = 2500;
+
+/** MCTS steps already spend their search time. Pad only until the step has lasted this long (ms). */
+const MCTS_AI_STEP_TOTAL_MS = 2000;
 
 const MOVE_DEST_META_KEYS = new Set(['max_reach', 'by_distance', 'instance_ids', 'is_enemy', 'cost', 'max_units']);
 
@@ -1883,7 +1886,9 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     return () => clearInterval(t);
   }, [GAME_ID, refreshState, pollIntervalMs, isMultiplayer]);
 
-  // AI turn: run one ai-step, then wait AI_STEP_DELAY_MS so the human can follow, then refresh and repeat until human turn or game over
+  // AI turn: one ai-step, then pause before the next. Heuristic always waits
+  // AI_STEP_DELAY_MS. MCTS counts the search toward MCTS_AI_STEP_TOTAL_MS and
+  // waits only the remainder, so a long search is not padded.
   const isAITurn = Boolean(
     GAME_ID &&
     backendState &&
@@ -1894,6 +1899,11 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   useEffect(() => {
     if (!isAITurn || aiStepInProgressRef.current) return;
     aiStepInProgressRef.current = true;
+    const factionId = backendState?.current_faction ?? '';
+    const perFaction = gameMeta?.ai_faction_settings?.[factionId]?.algorithm;
+    const algorithm = (perFaction || gameMeta?.ai_algorithm || 'heuristic').toLowerCase();
+    const usesMcts = algorithm === 'mcts';
+    const started = performance.now();
     (async () => {
       try {
         const result = await api.aiStep(GAME_ID);
@@ -1906,11 +1916,13 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         addLogEntry(err instanceof Error ? err.message : 'AI step failed', 'error');
         await refreshState();
       } finally {
+        const elapsed = performance.now() - started;
+        const delay = usesMcts ? Math.max(0, MCTS_AI_STEP_TOTAL_MS - elapsed) : AI_STEP_DELAY_MS;
         aiStepTimeoutRef.current = setTimeout(() => {
           aiStepInProgressRef.current = false;
           aiStepTimeoutRef.current = null;
           refreshState();
-        }, AI_STEP_DELAY_MS);
+        }, delay);
       }
     })();
   }, [isAITurn, GAME_ID, addBackendEvents, addLogEntry, refreshState, backendState]);

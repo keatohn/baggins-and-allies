@@ -106,19 +106,19 @@ def test_admin_computer_only_sets_weights_and_starts_with_no_human(make_client, 
     assert settings[faction_id]["difficulty"] == "normal"
     assert settings[faction_id]["algorithm"] == "heuristic"
     assert [level["name"] for level in body["ai_levels"]] == ["Easy", "Normal", "Hard"]
-    assert settings[faction_id]["weights"]["material"] == 1.0
+    assert settings[faction_id]["weights"]["units"] == 1.0
 
     settings[faction_id]["difficulty"] = "hard"
     settings[faction_id]["algorithm"] = "mcts"
-    settings[faction_id]["weights"]["material"] = 2
-    settings[faction_id]["weights"]["purchase_defense"] = 5
+    settings[faction_id]["weights"]["units"] = 2
+    settings[faction_id]["weights"]["purchase_attack"] = 5
     saved = client.put(f"/games/{game_id}/ai-faction-settings", json={"factions": settings})
     assert saved.status_code == 200, saved.text
     saved_row = saved.json()["ai_faction_settings"][faction_id]
     assert saved_row["difficulty"] == "hard"
     assert saved_row["algorithm"] == "mcts"
-    assert saved_row["weights"]["material"] == 2
-    assert saved_row["weights"]["purchase_defense"] == 1.0
+    assert saved_row["weights"]["units"] == 2
+    assert saved_row["weights"]["purchase_attack"] == 1.0
 
     started = client.post(f"/games/{game_id}/start")
     assert started.status_code == 200, started.text
@@ -126,7 +126,7 @@ def test_admin_computer_only_sets_weights_and_starts_with_no_human(make_client, 
     assert faction_id in after["ai_factions"]
     assert after["players"][0]["player_id"] == admin.id
     assert after["players"][0]["faction_id"] is None
-    assert after["ai_faction_settings"][faction_id]["weights"]["material"] == 2
+    assert after["ai_faction_settings"][faction_id]["weights"]["units"] == 2
 
 
 def test_admin_levels_drive_new_games_and_the_lobby_choice(make_client, players):
@@ -192,7 +192,7 @@ def test_admin_sim_uses_faction_settings_and_turn_cap(make_client, players, monk
         "setup_id": "wotr_exp_1.0",
         "max_cycles": 99,
         "factions": {
-            "gondor": {"difficulty": "hard", "algorithm": "mcts", "weights": {"material": 2}},
+            "gondor": {"difficulty": "hard", "algorithm": "mcts", "weights": {"units": 2}},
             "mordor": {"difficulty": "easy", "algorithm": "heuristic", "weights": {"stronghold": 4}},
         },
     })
@@ -201,7 +201,7 @@ def test_admin_sim_uses_faction_settings_and_turn_cap(make_client, players, monk
     assert captured["kwargs"]["max_cycles"] == 10
     assert factions["gondor"]["algorithm"] == "mcts"
     assert factions["gondor"]["difficulty"] == "hard"
-    assert factions["gondor"]["weights"]["material"] == 2
+    assert factions["gondor"]["weights"]["units"] == 2
     assert factions["mordor"]["algorithm"] == "heuristic"
     assert factions["mordor"]["difficulty"] == "easy"
     assert factions["rohan"]["algorithm"] == "heuristic"

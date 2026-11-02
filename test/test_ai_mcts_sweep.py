@@ -26,9 +26,9 @@ def _fake_fd(alliances: dict[str, str]):
 def test_default_grid_names_and_axes():
     names = [v.name for v in DEFAULT_SWEEP_GRID]
     assert names[0] == "baseline"
-    assert "material_0.5" in names and "material_2.0" in names
-    assert "territory_0.5" in names and "territory_2.0" in names
-    assert "pdefense_0.0" in names and "pdefense_1.0" in names
+    assert "units_0.5" in names and "units_2.0" in names
+    assert "capital_0.0" in names and "capital_6.0" in names
+    assert "pattack_0.0" in names and "pattack_1.0" in names
     baseline = DEFAULT_SWEEP_GRID[0]
     assert baseline.weights == {}
 
@@ -37,12 +37,12 @@ def test_variant_rejects_unknown_weight_keys():
     with pytest.raises(ValueError, match="unknown weight override"):
         SweepVariant("bad", {"nope": "1.0"})
     with pytest.raises(ValueError, match="unknown weight override"):
-        SweepVariant("bad", {"wibble": "AI_MCTS_W_MATERIAL"})
+        SweepVariant("bad", {"wibble": "AI_MCTS_W_UNITS"})
 
 
 def test_variant_by_name_known_and_unknown():
-    v = variant_by_name("material_2.0")
-    assert v.weights == {"material": "2.0"}
+    v = variant_by_name("units_2.0")
+    assert v.weights == {"units": "2.0"}
     with pytest.raises(KeyError, match="unknown variant"):
         variant_by_name("does_not_exist")
 
@@ -54,10 +54,10 @@ def test_side_overrides_targets_only_requested_alliance():
         "mordor": "evil",
         "isengard": "evil",
     })
-    variant = SweepVariant("material_2.0", {"material": "2.0"})
+    variant = SweepVariant("units_2.0", {"units": "2.0"})
     good = side_overrides(variant, fd, list(fd), "good")
     assert set(good) == {"gondor", "rohan"}
-    assert good["gondor"] == {"AI_MCTS_W_MATERIAL": "2.0"}
+    assert good["gondor"] == {"AI_MCTS_W_UNITS": "2.0"}
     evil = side_overrides(variant, fd, list(fd), "evil")
     assert set(evil) == {"mordor", "isengard"}
 
@@ -104,11 +104,11 @@ def test_aggregate_sweep_empty_input():
 def test_format_sweep_table_lists_variants():
     rows = aggregate_sweep([
         {"variant": "baseline", "alignment": "good", "winner": None, "leader": "good", "wall_time": 3},
-        {"variant": "material_2.0", "alignment": "good", "winner": "good", "leader": None, "wall_time": 4},
+        {"variant": "units_2.0", "alignment": "good", "winner": "good", "leader": None, "wall_time": 4},
     ])
     table = format_sweep_table(rows)
     assert "baseline" in table
-    assert "material_2.0" in table
+    assert "units_2.0" in table
     assert "rate" in table.splitlines()[0]
 
 
@@ -161,7 +161,7 @@ def test_run_sweep_dispatches_variants_alignments_and_seeds(monkeypatch):
         lambda setup_id: (_FakeState(), {}, {}, fd, {}, {}),
     )
 
-    variant = SweepVariant("material_2.0", {"material": "2.0"})
+    variant = SweepVariant("units_2.0", {"units": "2.0"})
     records = run_sweep(
         [variant],
         matchup="mcts-vs-mcts",
@@ -173,17 +173,17 @@ def test_run_sweep_dispatches_variants_alignments_and_seeds(monkeypatch):
     assert len(records) == 2
     assert {r["alignment"] for r in records} == {"good", "evil"}
     assert all(r["seed"] == 7 for r in records)
-    assert all(r["variant"] == "material_2.0" for r in records)
+    assert all(r["variant"] == "units_2.0" for r in records)
     # env_overrides present on the variant's side only
     good_rec = next(r for r in records if r["alignment"] == "good")
     evil_rec = next(r for r in records if r["alignment"] == "evil")
     assert good_rec["env_overrides"] == {
-        "gondor": {"AI_MCTS_W_MATERIAL": "2.0"},
-        "rohan": {"AI_MCTS_W_MATERIAL": "2.0"},
+        "gondor": {"AI_MCTS_W_UNITS": "2.0"},
+        "rohan": {"AI_MCTS_W_UNITS": "2.0"},
     }
     assert evil_rec["env_overrides"] == {
-        "mordor": {"AI_MCTS_W_MATERIAL": "2.0"},
-        "isengard": {"AI_MCTS_W_MATERIAL": "2.0"},
+        "mordor": {"AI_MCTS_W_UNITS": "2.0"},
+        "isengard": {"AI_MCTS_W_UNITS": "2.0"},
     }
     assert len(calls) == 2
 

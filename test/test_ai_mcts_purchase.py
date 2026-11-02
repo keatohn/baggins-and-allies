@@ -17,6 +17,8 @@ from backend.ai.mcts.action_key import HashableAction
 from backend.ai.mcts.purchase import (
     MAX_BUNDLE_ACTIONS,
     PurchaseProblem,
+    _fill_inverse_cost,
+    _something_still_fits,
     decide_purchase_mcts,
 )
 from backend.ai.mcts.budget import SearchBudget
@@ -114,6 +116,62 @@ def test_legal_actions_only_end_phase_when_capital_lost():
     problem = PurchaseProblem(ctx)
     actions = problem.legal_actions(state)
     assert all(a.type == "end_phase" for a in actions)
+
+
+def test_purchase_bundles_do_not_exceed_power_on_hand():
+    """Every offered bundle costs no more than the power still unspent this turn."""
+    from backend.ai.formulas import get_unit_power_cost
+
+    state, ud, td, fd, cd, port_d = _load_wotr_setup()
+    state.faction_resources.setdefault("mordor", {})["power"] = 8
+    ctx = _purchase_ctx(state, ud, td, fd, cd, port_d, "mordor")
+    problem = PurchaseProblem(ctx)
+    for action in problem.legal_actions(state):
+        raw = _unwrap(action)
+        if raw.type != "purchase_units":
+            continue
+        spent = 0
+        for unit_id, count in (raw.payload.get("purchases") or {}).items():
+            spent += (get_unit_power_cost(ud.get(unit_id)) or 0) * int(count)
+        assert 0 < spent <= 8
+
+
+def test_purchase_bundles_spend_until_nothing_else_fits():
+    """No offered bundle leaves enough power and slots to buy another unit."""
+    state, ud, td, fd, cd, port_d = _load_wotr_setup()
+    state.faction_resources.setdefault("mordor", {})["power"] = 40
+    ctx = _purchase_ctx(state, ud, td, fd, cd, port_d, "mordor")
+    problem = PurchaseProblem(ctx)
+    budget = problem._remaining_budget(state)
+    land_rem, sea_rem = problem._remaining_slots(state)
+    candidates = problem._affordable_candidates(budget, land_rem, sea_rem)
+    purchases = [
+        _unwrap(action).payload["purchases"]
+        for action in problem.legal_actions(state)
+        if action.type == "purchase_units"
+    ]
+    assert purchases
+    for bundle in purchases:
+        assert not _something_still_fits(candidates, bundle, budget, land_rem, sea_rem)
+
+
+def test_inverse_cost_draw_favors_cheaper_units():
+    """Picking with weight 1/cost yields more copies of the cheaper unit."""
+    import random
+
+    candidates = [
+        {"unit_id": "cheap", "cost": 3, "max_affordable": 40, "is_naval": False},
+        {"unit_id": "pricey", "cost": 12, "max_affordable": 40, "is_naval": False},
+    ]
+    rng = random.Random(1)
+    cheap = 0
+    pricey = 0
+    for _ in range(300):
+        bundle = _fill_inverse_cost(candidates, 60, 40, 0, rng)
+        cheap += bundle.get("cheap", 0)
+        pricey += bundle.get("pricey", 0)
+        assert not _something_still_fits(candidates, bundle, 60, 40, 0)
+    assert cheap > pricey * 2
 
 
 def test_legal_actions_capped():

@@ -22,7 +22,6 @@ from backend.ai.mcts.budget import (
     get_budget,
     get_phase_budget,
 )
-from backend.ai.mcts.combat import decide_combat_mcts
 from backend.ai.mcts.combat_move import decide_combat_move_mcts
 from backend.ai.mcts.mobilization import decide_mobilization_mcts
 from backend.ai.mcts.non_combat_move import decide_non_combat_move_mcts
@@ -147,7 +146,6 @@ def _ctx_for_phase(phase: str) -> AIContext:
 
 _ENTRY_POINTS = [
     ("purchase", decide_purchase_mcts),
-    ("combat", decide_combat_mcts),
     ("combat_move", decide_combat_move_mcts),
     ("non_combat_move", decide_non_combat_move_mcts),
     ("mobilization", decide_mobilization_mcts),

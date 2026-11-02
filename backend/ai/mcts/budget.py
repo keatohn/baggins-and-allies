@@ -34,6 +34,22 @@ BUDGETS: dict[str, SearchBudget] = {
 
 DEFAULT_DIFFICULTY = "normal"
 
+# How many actions a phase may put in front of the search, per difficulty level.
+# Combat is not here: battles are started in order and retreat is chosen after each round.
+# (default, admin maximum). The default is what a level uses until it stores its own number.
+BRANCH_LIMITS: dict[str, tuple[int, int]] = {
+    "purchase": (48, 2000),
+    "combat_move": (24, 2000),
+    "non_combat_move": (24, 2000),
+    "mobilization": (24, 2000),
+}
+BRANCH_FIELDS: dict[str, str] = {
+    "purchase": "purchase_options",
+    "combat_move": "combat_move_options",
+    "non_combat_move": "non_combat_options",
+    "mobilization": "mobilization_options",
+}
+
 # The five decision phases that route through MCTS (see backend/ai/decide.py).
 PHASES: tuple[str, ...] = (
     "purchase",
@@ -111,6 +127,25 @@ def get_budget(difficulty: str | None = None) -> SearchBudget:
     if custom is not None:
         return custom
     return BUDGETS.get(key, BUDGETS[DEFAULT_DIFFICULTY])
+
+
+def branch_limit(phase: str, difficulty: str | None = None) -> int:
+    """How many options this phase may offer. Reads the active difficulty level when one is set."""
+    default, ceiling = BRANCH_LIMITS.get(phase, (12, 64))
+    levels = _catalog_ctx.get()
+    if not levels:
+        return default
+    key = _resolve_difficulty(difficulty)
+    by_id = {str(row.get("id")): row for row in levels if isinstance(row, dict)}
+    row = by_id.get(key) or by_id.get(DEFAULT_DIFFICULTY) or levels[0]
+    raw = row.get(BRANCH_FIELDS.get(phase, ""))
+    if raw is None:
+        return default
+    try:
+        count = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(ceiling, count))
 
 
 def get_phase_budget(phase: str, difficulty: str | None = None) -> SearchBudget:

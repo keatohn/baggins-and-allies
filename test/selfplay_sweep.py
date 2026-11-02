@@ -7,16 +7,16 @@ on evil) across the same seeds so side-order luck cancels out; the aggregate
 score rate (decisive wins + leader-at-cutoff points) decides whether a
 variant beats baseline.
 
-Variants are short-name weight overrides ({"material": "2.0"}) resolved to
+Variants are short-name weight overrides ({"units": "2.0"}) resolved to
 AI_MCTS_W_* env vars per faction turn via run_matchup's env_overrides. The
-default grid covers the material/territory axis (0.5, 2.0) and the
-purchase-defense axis (0.0, 1.0); pass --variant to run a subset.
+default grid covers the units axis (0.5, 2.0), the capital axis (0, 6), and the
+purchase-attack axis (0.0 defense, 1.0 attack); pass --variant to run a subset.
 
 Run from the repo root:
     PYTHONPATH=. .venv/bin/python test/selfplay_sweep.py \
         --games-per-side 1 --seeds 1 --max-cycles 5 --difficulty easy
     PYTHONPATH=. .venv/bin/python test/selfplay_sweep.py \
-        --variant baseline --variant material_2.0 \
+        --variant baseline --variant units_2.0 \
         --games-per-side 2 --seeds 1 2 --max-cycles 10
 """
 
@@ -55,17 +55,17 @@ class SweepVariant:
         resolve_weight_env(self.weights)
 
 
-# Default grid (MCTS 3.6c): baseline control plus the material/territory
-# axis and the purchase-defense axis. Values are strings so they pass through
+# Default grid: baseline control plus the units axis, the capital axis,
+# and the purchase-attack axis. Values are strings so they pass through
 # os.environ unmodified (eval_weights validates ranges itself).
 DEFAULT_SWEEP_GRID: list[SweepVariant] = [
     SweepVariant("baseline", {}),
-    SweepVariant("material_0.5", {"material": "0.5"}),
-    SweepVariant("material_2.0", {"material": "2.0"}),
-    SweepVariant("territory_0.5", {"territory": "0.5"}),
-    SweepVariant("territory_2.0", {"territory": "2.0"}),
-    SweepVariant("pdefense_0.0", {"purchase_defense": "0.0"}),
-    SweepVariant("pdefense_1.0", {"purchase_defense": "1.0"}),
+    SweepVariant("units_0.5", {"units": "0.5"}),
+    SweepVariant("units_2.0", {"units": "2.0"}),
+    SweepVariant("capital_0.0", {"capital": "0.0"}),
+    SweepVariant("capital_6.0", {"capital": "6.0"}),
+    SweepVariant("pattack_0.0", {"purchase_attack": "0.0"}),
+    SweepVariant("pattack_1.0", {"purchase_attack": "1.0"}),
 ]
 
 
