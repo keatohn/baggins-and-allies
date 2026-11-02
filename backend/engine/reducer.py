@@ -3393,7 +3393,6 @@ def _handle_initiate_combat(
             ts = territory
             current = getattr(ts, "stronghold_current_health", None)
             defender_stronghold_hp = current if current is not None else base_hp
-    defender_territory_is_stronghold = bool(territory_def and getattr(territory_def, "is_stronghold", False))
     round_result, defender_stronghold_hp_after = resolve_combat_round(
         attacker_units, defender_units, unit_defs, dice_rolls,
         stat_modifiers_attacker=attacker_mods or None,
@@ -3408,7 +3407,6 @@ def _handle_initiate_combat(
         is_naval_combat_attacker=is_naval_combat_attacker,
         is_naval_combat_defender=is_naval_combat_defender,
         defender_stronghold_hp=defender_stronghold_hp,
-        defender_territory_is_stronghold=defender_territory_is_stronghold,
         exclude_archetypes_from_rolling=["siegework"],
         attacker_ladder_instance_ids=set(_initiate_ladder_infantry_ids),
         defender_effective_dice_override=ring_def_dice,
@@ -4112,7 +4110,6 @@ def _handle_continue_combat(
         return state, events
 
     # Normal round 1 or later: all units roll except siegework (excluded); ladder bypass applies
-    defender_territory_is_stronghold = bool(territory_def and getattr(territory_def, "is_stronghold", False))
     round_result, defender_stronghold_hp_after = resolve_combat_round(
         attacker_units, defender_units, unit_defs, dice_rolls,
         stat_modifiers_attacker=attacker_mods or None,
@@ -4127,7 +4124,6 @@ def _handle_continue_combat(
         is_naval_combat_attacker=is_naval_combat_attacker,
         is_naval_combat_defender=is_naval_combat_defender,
         defender_stronghold_hp=defender_stronghold_hp_cur,
-        defender_territory_is_stronghold=defender_territory_is_stronghold,
         exclude_archetypes_from_rolling=["siegework"],
         attacker_ladder_instance_ids=ladder_ids_combat,
         defender_effective_dice_override=ring_def_dice,

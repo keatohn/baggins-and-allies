@@ -587,7 +587,6 @@ def resolve_combat_round(
     is_naval_combat_attacker: bool = False,
     is_naval_combat_defender: bool = False,
     defender_stronghold_hp: int | None = None,
-    defender_territory_is_stronghold: bool = False,
     exclude_archetypes_from_rolling: list[str] | None = None,
     attacker_ladder_instance_ids: set[str] | None = None,
     defender_effective_dice_override: dict[str, int] | None = None,
@@ -671,30 +670,16 @@ def resolve_combat_round(
         is_naval_combat=is_naval_combat_attacker,
         hp_shield=hp_shield,
     )
-    # Defender: when ladder hits exist, apply ladder hits first (non-stronghold first), then remaining (stronghold first)
-
-    def _defender_apply(n: int, from_ladder: bool):
-        return _apply_hits(
-            defender_units, n, unit_defs, is_attacker=False,
-            stat_modifiers=stat_modifiers_defender,
-            casualty_order=casualty_order_defender,
-            must_conquer=False,
-            is_naval_combat=is_naval_combat_defender,
-            territory_is_stronghold=defender_territory_is_stronghold,
-            hits_from_ladder=from_ladder,
-            hp_shield=hp_shield,
-        )
-    if ladder_hits > 0 and hits_to_defender_units > 0:
-        ladder_cas, ladder_wound = _defender_apply(
-            ladder_hits, from_ladder=True)
-        rest_hits = hits_to_defender_units - ladder_hits
-        rest_cas, rest_wound = _defender_apply(
-            rest_hits, from_ladder=False) if rest_hits > 0 else ([], [])
-        defender_casualties = ladder_cas + rest_cas
-        defender_wounded = list(set(ladder_wound) | set(rest_wound))
-    else:
-        defender_casualties, defender_wounded = _defender_apply(
-            hits_to_defender_units, from_ladder=False)
+    # Defender: single pass. Ladder vs non-ladder only matters for the wall-HP soak above;
+    # once hits reach defender units, both kinds share the same unit-level casualty order.
+    defender_casualties, defender_wounded = _apply_hits(
+        defender_units, hits_to_defender_units, unit_defs, is_attacker=False,
+        stat_modifiers=stat_modifiers_defender,
+        casualty_order=casualty_order_defender,
+        must_conquer=False,
+        is_naval_combat=is_naval_combat_defender,
+        hp_shield=hp_shield,
+    )
 
     # Bombikazi: paired bombikazi + bomb self-destruct (add to casualties, remove from list)
     if bombikazi_self_destruct_ids:
@@ -849,8 +834,6 @@ def _apply_hits(
     casualty_order: str = "best_unit",
     must_conquer: bool = False,
     is_naval_combat: bool = False,
-    territory_is_stronghold: bool = False,
-    hits_from_ladder: bool = False,
     hp_shield: dict[str, int] | None = None,
 ) -> tuple[list[str], list[str]]:
     """
@@ -861,16 +844,15 @@ def _apply_hits(
     instead (so a ground unit can conquer).
     is_naval_combat: only naval and aerial units can take hits (passengers are not targets). Naval uses cargo_value (asc)
     after best_unit/best_attack in the sort order.
-    territory_is_stronghold: defender only; when True, defender units are in a stronghold territory (strongholds take first hits).
-    hits_from_ladder: defender only; when True, these hits came from ladder attackers and assign to non-stronghold first
-    (is_stronghold asc). When False and territory_is_stronghold, stronghold takes first (is_stronghold desc).
+
+    Note: stronghold wall HP is soaked *before* hits reach this function (see resolve_combat_round);
+    there is no per-unit stronghold sort key — ladder hits only bypass the wall, not this ordering.
 
     Priority order for taking hits (re-evaluated after each hit):
-    1. is_stronghold: desc for normal hits (stronghold first), asc for hits_from_ladder (non-stronghold first). Attacker: not used.
-    2. remaining_health desc (healthiest soaks first)
-    3. best_unit / best_attack (cost vs effective stat × unit dice per battle config)
-    4. (Naval only) cargo_value asc
-    5. num_specials asc, remaining_movement asc, instance_id
+    1. remaining_health desc (healthiest soaks first)
+    2. best_unit / best_attack (cost vs effective stat × unit dice per battle config)
+    3. (Naval only) cargo_value asc
+    4. num_specials asc, remaining_movement asc, instance_id
 
     Note: Modifies units list in place (removes dead units).
     """
@@ -880,10 +862,6 @@ def _apply_hits(
     wounded_ids = set()
     remaining_hits = hits
     use_stat_before_cost = casualty_order in ("best_attack", "best_defense")
-    # Defender in stronghold: normal hits → stronghold first (-1); ladder hits → non-stronghold first (1 so stronghold last)
-    stronghold_sort = 0
-    if not is_attacker and territory_is_stronghold:
-        stronghold_sort = 1 if hits_from_ladder else -1
 
     def _cargo_sort_key(boat_unit: Unit, all_units: list[Unit]) -> tuple[int, int, tuple[int, ...]]:
         """Naval: (cargo_value_sum, num_passengers, tuple(sorted passenger costs)). Asc = sink low-value first."""
@@ -902,10 +880,10 @@ def _apply_hits(
         return (sum(costs), len(costs), tuple(costs))
 
     def sort_key(unit: Unit):
-        """Order: stronghold key, remaining_health desc, cost/stat per config, cargo (naval), num_specials, mov, instance_id."""
+        """Order: remaining_health desc, cost/stat per config, cargo (naval), num_specials, mov, instance_id."""
         unit_def = unit_defs.get(unit.unit_id)
         if not unit_def:
-            return (0, -1, 0, 0, (0, 0, ()), 0, unit.remaining_movement, unit.instance_id or '')
+            return (-1, 0, 0, (0, 0, ()), 0, unit.remaining_movement, unit.instance_id or '')
         cost_dict = getattr(unit_def, 'cost', None) or {}
         total_cost = sum(cost_dict.values()) if isinstance(
             cost_dict, dict) else 0
@@ -926,7 +904,7 @@ def _apply_hits(
         else:
             cost_stat = (-unit.remaining_health, total_cost, stat_for_casualty_order, cargo_key,
                          num_specials, unit.remaining_movement, unit.instance_id or '')
-        return (stronghold_sort,) + cost_stat
+        return cost_stat
 
     # Naval combat: only naval and aerial units can take hits (passengers are not targets)
     if is_naval_combat:
@@ -1699,8 +1677,6 @@ def resolve_siegeworks_round(
         stat_modifiers=stat_modifiers_defender,
         casualty_order=casualty_order_defender,
         must_conquer=False,
-        territory_is_stronghold=defender_territory_is_stronghold,
-        hits_from_ladder=False,
         hp_shield=hp_shield,
     )
 
