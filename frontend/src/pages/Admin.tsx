@@ -70,6 +70,10 @@ function printedTerritoryPower(territories: AdminSetupBundle['territories'] | un
   return out;
 }
 
+function cloneSetupBundle(bundle: AdminSetupBundle): AdminSetupBundle {
+  return JSON.parse(JSON.stringify(bundle)) as AdminSetupBundle;
+}
+
 function factionAndSubfactionIds(factions: AdminSetupBundle['factions'] | undefined): string[] {
   const ids: string[] = [];
   const raw = factions && typeof factions === 'object' ? factions : {};
@@ -327,6 +331,8 @@ export default function Admin() {
   const [selectedId, setSelectedId] = useState<string>('');
   const [activeTab, setActiveTab] = useState<TabKey>('manifest');
   const [bundle, setBundle] = useState<AdminSetupBundle | null>(null);
+  const [savedBundle, setSavedBundle] = useState<AdminSetupBundle | null>(null);
+  const [discarded, setDiscarded] = useState(false);
   const [jsonTab, setJsonTab] = useState<Partial<Record<TabKey, boolean>>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -481,17 +487,22 @@ export default function Admin() {
     setLoadingBundle(true);
     setSaveError(null);
     setSaveOk(false);
+    setDiscarded(false);
+    setSavedBundle(null);
     setLoadError(null);
     api
       .adminGetSetup(id)
       .then((b) => {
-        setBundle({
+        const next = cloneSetupBundle({
           ...b,
           manifest: { ...b.manifest, id: b.id },
         } as AdminSetupBundle);
+        setBundle(next);
+        setSavedBundle(cloneSetupBundle(next));
       })
       .catch((e: Error) => {
         setBundle(null);
+        setSavedBundle(null);
         setLoadError(e.message);
       })
       .finally(() => setLoadingBundle(false));
@@ -501,6 +512,23 @@ export default function Admin() {
     if (!player?.is_admin || !selectedId) return;
     loadBundle(selectedId);
   }, [player?.is_admin, selectedId, loadBundle]);
+
+  const setupDirty = useMemo(() => {
+    if (globalOpen || !bundle || !savedBundle) return false;
+    return JSON.stringify(bundle) !== JSON.stringify(savedBundle);
+  }, [globalOpen, bundle, savedBundle]);
+
+  useEffect(() => {
+    if (discarded && setupDirty) setDiscarded(false);
+  }, [discarded, setupDirty]);
+
+  const discardSetupChanges = () => {
+    if (!savedBundle) return;
+    setBundle(cloneSetupBundle(savedBundle));
+    setSaveError(null);
+    setSaveOk(false);
+    setDiscarded(true);
+  };
 
   const handleSave = async () => {
     setSaveError(null);
@@ -1071,6 +1099,16 @@ export default function Admin() {
         >
           {saving ? 'Saving…' : 'Save'}
         </button>
+        {!globalOpen ? (
+          <button
+            type="button"
+            className="admin-page__btn"
+            disabled={!setupDirty || saving || loadingBundle}
+            onClick={discardSetupChanges}
+          >
+            Cancel
+          </button>
+        ) : null}
         <button
           type="button"
           className="admin-page__btn admin-page__btn--danger"
@@ -1104,6 +1142,9 @@ export default function Admin() {
                   ? 'Saved formulas.'
                 : 'Saved. New games will use this data.'}
         </p>
+      ) : null}
+      {!queryOpen && !globalOpen && discarded ? (
+        <p className="admin-page__success">Discarded unsaved changes. Nothing was saved.</p>
       ) : null}
 
       <CreateSetupDialog open={createOpen} onClose={() => setCreateOpen(false)} setups={setups} onCreated={onCreatedSetup} />
