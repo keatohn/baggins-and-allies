@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import api, { type GameMeta, type AuthPlayer, type Definitions } from '../services/api';
+import api, { type GameMeta, type AuthPlayer, type Definitions, type FriendUser } from '../services/api';
 import { useMenuScroll } from './MenuScrollContext';
 import './LobbyView.css';
 
@@ -48,6 +48,14 @@ export default function LobbyView({
   const [claimError, setClaimError] = useState<string | null>(null);
   const [startConfirmOpen, setStartConfirmOpen] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteFriends, setInviteFriends] = useState<FriendUser[] | null>(null);
+  const [invitedIds, setInvitedIds] = useState<string[]>([]);
+  const [inviteSelected, setInviteSelected] = useState<string[]>([]);
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteSending, setInviteSending] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteSent, setInviteSent] = useState(false);
 
   useEffect(() => {
     api.authMe().then(setPlayer).catch(() => setPlayer(null));
@@ -200,6 +208,48 @@ export default function LobbyView({
 
   const playerDisplayName = (player != null && meta.player_usernames?.[String(player.id)]) ?? 'You';
 
+  const memberIds = useMemo(
+    () => new Set((meta.players ?? []).map((p) => String(p.player_id))),
+    [meta.players],
+  );
+
+  const openInvites = () => {
+    setInviteOpen((open) => !open);
+    setInviteError(null);
+    setInviteSent(false);
+    setInviteSelected([]);
+    if (inviteFriends != null) return;
+    setInviteLoading(true);
+    Promise.all([api.listFriends(), api.listLobbyInvites(gameId)])
+      .then(([friendsRes, sentRes]) => {
+        setInviteFriends(friendsRes.friends ?? []);
+        setInvitedIds(sentRes.invitee_ids ?? []);
+      })
+      .catch((err) => setInviteError(err instanceof Error ? err.message : 'Could not load friends'))
+      .finally(() => setInviteLoading(false));
+  };
+
+  const toggleInvite = (id: string) => {
+    setInviteSent(false);
+    setInviteSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const sendInvites = async () => {
+    if (inviteSelected.length === 0) return;
+    setInviteSending(true);
+    setInviteError(null);
+    try {
+      await api.sendGameInvites(gameId, inviteSelected);
+      setInvitedIds((prev) => [...new Set([...prev, ...inviteSelected])]);
+      setInviteSelected([]);
+      setInviteSent(true);
+    } catch (err) {
+      setInviteError(err instanceof Error ? err.message : 'Could not send invites');
+    } finally {
+      setInviteSending(false);
+    }
+  };
+
   return (
     <div className="lobby-view-overlay">
       <div className={`lobby-view${isSinglePlayer ? ' lobby-view--single-player' : ''}`}>
@@ -208,9 +258,67 @@ export default function LobbyView({
             {isSinglePlayer ? 'Single player' : 'Lobby'}: {meta.name}
           </h1>
           {meta.game_code && (
-            <p className="lobby-view__code">
-              JOIN CODE: <strong className="lobby-view__code-value">{meta.game_code}</strong>
-            </p>
+            <div className="lobby-view__code-row">
+              <button
+                type="button"
+                className="lobby-view__invite-btn"
+                aria-expanded={inviteOpen}
+                onClick={openInvites}
+              >
+                Invite Friends
+              </button>
+              <p className="lobby-view__code">
+                JOIN CODE: <strong className="lobby-view__code-value">{meta.game_code}</strong>
+              </p>
+            </div>
+          )}
+          {meta.game_code && inviteOpen && (
+            <div className="lobby-view__invite">
+              {inviteLoading && <p className="lobby-view__invite-note">Loading friends…</p>}
+              {inviteError && (
+                <p className="lobby-view__error" role="alert">
+                  {inviteError}
+                </p>
+              )}
+              {inviteFriends && inviteFriends.length === 0 && (
+                <p className="lobby-view__invite-note">You have no friends to invite yet.</p>
+              )}
+              {inviteFriends && inviteFriends.length > 0 && (
+                <ul className="lobby-view__invite-list" aria-label="Friends to invite">
+                  {inviteFriends.map((friend) => {
+                    const inLobby = memberIds.has(friend.id);
+                    const already = invitedIds.includes(friend.id);
+                    const selected = inviteSelected.includes(friend.id);
+                    return (
+                      <li key={friend.id}>
+                        <button
+                          type="button"
+                          className={`lobby-view__invite-friend${selected ? ' lobby-view__invite-friend--selected' : ''}`}
+                          aria-pressed={selected}
+                          disabled={inLobby || already || inviteSending}
+                          onClick={() => toggleInvite(friend.id)}
+                        >
+                          <span>{friend.username}</span>
+                          {inLobby ? <span className="lobby-view__invite-tag">In lobby</span> : null}
+                          {!inLobby && already ? <span className="lobby-view__invite-tag">Invited</span> : null}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {inviteFriends && inviteFriends.length > 0 && (
+                <button
+                  type="button"
+                  className="lobby-view__invite-send primary"
+                  disabled={inviteSelected.length === 0 || inviteSending}
+                  onClick={() => void sendInvites()}
+                >
+                  {inviteSending ? 'Sending…' : 'Send'}
+                </button>
+              )}
+              {inviteSent && <p className="lobby-view__invite-note">Invites sent.</p>}
+            </div>
           )}
         </header>
 

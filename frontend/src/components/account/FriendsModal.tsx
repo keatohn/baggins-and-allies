@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../services/api';
-import type { AuthPlayer, FriendRequestItem, FriendUser, PlayerAvatarSettings, PlayerProfileCard } from '../../services/api';
+import type { AuthPlayer, FriendRequestItem, FriendUser, GameInvitation, PlayerAvatarSettings, PlayerProfileCard } from '../../services/api';
+import { useMenuScroll } from '../MenuScrollContext';
 import ModalShell from './ModalShell';
 import ProfileModal from './ProfileModal';
 
@@ -59,6 +60,7 @@ interface FriendsModalProps {
 }
 
 export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModalProps) {
+  const { navigateWithScroll } = useMenuScroll();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<FriendUser[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -77,13 +79,19 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
   const [playedError, setPlayedError] = useState<string | null>(null);
   const [viewing, setViewing] = useState<AuthPlayer | null>(null);
   const [viewError, setViewError] = useState<string | null>(null);
+  const [invitations, setInvitations] = useState<GameInvitation[]>([]);
 
   const loadLists = useCallback(async () => {
     try {
-      const [reqs, friendRows] = await Promise.all([api.listFriendRequests(), api.listFriends()]);
+      const [reqs, friendRows, inviteRows] = await Promise.all([
+        api.listFriendRequests(),
+        api.listFriends(),
+        api.listGameInvites(),
+      ]);
       setIncoming(reqs.incoming ?? []);
       setOutgoing(reqs.outgoing ?? []);
       setFriends(friendRows.friends ?? []);
+      setInvitations(inviteRows.invitations ?? []);
       setListError(null);
     } catch (err) {
       setListError(err instanceof Error ? err.message : 'Could not load friends');
@@ -178,6 +186,25 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
       .catch((err) => setViewError(err instanceof Error ? err.message : 'Could not open profile'));
   };
 
+  const acceptInvite = (invite: GameInvitation) => {
+    setActionError(null);
+    setBusyId(invite.id);
+    void api
+      .acceptGameInvite(invite.id)
+      .then((res) => {
+        onRequestsChanged();
+        onClose();
+        navigateWithScroll(`/game/${res.game_id}`, undefined, { force: true });
+      })
+      .catch((err) => setActionError(err instanceof Error ? err.message : 'Could not accept invitation'))
+      .finally(() => setBusyId(null));
+  };
+
+  const declineInvite = (invite: GameInvitation) => {
+    setBusyId(invite.id);
+    void runAction(() => api.declineGameInvite(invite.id)).finally(() => setBusyId(null));
+  };
+
   return (
     <>
     <ModalShell
@@ -186,6 +213,40 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
       className="account-modal--friends"
       closeOnEscape={viewing == null}
     >
+      {invitations.length > 0 && (
+        <section className="account-section" aria-label="Invitations">
+          <h3 className="account-section__title">Invitations</h3>
+          {actionError && <p className="account-msg account-msg--error">{actionError}</p>}
+          <ul className="friends-list" aria-label="Game invitations">
+            {invitations.map((invite) => (
+              <li key={invite.id} className="friends-list__row friends-list__row--invite">
+                <span className="friends-list__invite-copy">
+                  <span className="friends-list__name">{invite.inviter_username}</span>
+                  <span className="friends-list__tag">invited you to {invite.game_name}</span>
+                </span>
+                <span className="friends-list__actions">
+                  <button
+                    type="button"
+                    className="account-btn account-btn--small"
+                    onClick={() => acceptInvite(invite)}
+                    disabled={busyId === invite.id}
+                  >
+                    Accept
+                  </button>
+                  <button
+                    type="button"
+                    className="account-btn account-btn--small account-btn--ghost"
+                    onClick={() => declineInvite(invite)}
+                    disabled={busyId === invite.id}
+                  >
+                    Decline
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <section className="account-section" aria-label="Find friends">
         <h3 className="account-section__title">Find a friend</h3>
         <form className="friends-search" onSubmit={handleSearch}>

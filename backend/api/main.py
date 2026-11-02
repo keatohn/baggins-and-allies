@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from .admin_query import SelectOnlyError, list_db_schema, run_admin_select
 from .database import get_db, get_db_file_path, init_db, SessionLocal
-from .models import FriendRequest, Game as GameModel, GameResult, Player
+from .models import FriendRequest, Game as GameModel, GameInvite, GameResult, Player
 from .player_stats import compute_player_stats, player_headline_record
 from .achievements import (
     AchievementError,
@@ -442,6 +442,10 @@ class CreateGameRequest(BaseModel):
 
 class JoinGameRequest(BaseModel):
     game_code: str
+
+
+class GameInviteCreateBody(BaseModel):
+    player_ids: list[str]
 
 
 class ClaimFactionRequest(BaseModel):
@@ -1803,13 +1807,14 @@ def friends_pending_count(
     player: Player = Depends(get_current_player),
     db: Session = Depends(get_db),
 ):
-    """Badge count: pending requests awaiting this player's accept/decline."""
-    count = (
+    """Badge count: pending friend requests plus lobby invites still waiting on this player."""
+    request_count = (
         db.query(FriendRequest)
         .filter(FriendRequest.status == "pending", FriendRequest.addressee_id == player.id)
         .count()
     )
-    return {"count": count}
+    invite_count = _active_game_invites_query(db, player.id).count()
+    return {"count": request_count + invite_count}
 
 
 def _get_pending_request_for_player(
@@ -3054,6 +3059,59 @@ def get_recent_game(
     return {"game": mine[0] if mine else None}
 
 
+def _lobby_player_ids(row: GameModel) -> set[str]:
+    try:
+        players_list = json.loads(row.players or "[]")
+    except json.JSONDecodeError:
+        return set()
+    return {str(p.get("player_id")) for p in players_list if p.get("player_id")}
+
+
+def _add_player_to_lobby(row: GameModel, player_id: str) -> bool:
+    """Append a human to a lobby roster. Returns True when they were not already in it."""
+    try:
+        players_list = json.loads(row.players or "[]")
+    except json.JSONDecodeError:
+        players_list = []
+    if any(str(p.get("player_id")) == str(player_id) for p in players_list):
+        return False
+    players_list.append({"player_id": str(player_id), "faction_id": None})
+    row.players = json.dumps(players_list)
+    return True
+
+
+def _require_lobby_member(row: GameModel | None, player: Player) -> GameModel:
+    if row is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+    if str(player.id) not in _lobby_player_ids(row):
+        raise HTTPException(status_code=403, detail="You are not in this game")
+    return row
+
+
+def _active_game_invites_query(db: Session, player_id: str):
+    """Pending invites whose game is still in the lobby."""
+    return (
+        db.query(GameInvite)
+        .join(GameModel, GameInvite.game_id == GameModel.id)
+        .filter(
+            GameInvite.invitee_id == player_id,
+            GameInvite.status == "pending",
+            GameModel.status == "lobby",
+        )
+    )
+
+
+def _invite_payload(invite: GameInvite, game: GameModel, inviter: Player) -> dict[str, Any]:
+    return {
+        "id": invite.id,
+        "game_id": game.id,
+        "game_name": game.name,
+        "inviter_id": inviter.id,
+        "inviter_username": inviter.username,
+        "created_at": invite.created_at.isoformat() if invite.created_at else None,
+    }
+
+
 @app.post("/games/join")
 def join_game(
     request: JoinGameRequest,
@@ -3069,13 +3127,142 @@ def join_game(
         raise HTTPException(status_code=404, detail="Game not found")
     if row.status != "lobby":
         raise HTTPException(status_code=400, detail="Game already started")
-    players_list = json.loads(row.players)
-    if any(str(p.get("player_id")) == str(player.id) for p in players_list):
-        return {"game_id": row.id, "message": "Already in game"}
-    players_list.append({"player_id": str(player.id), "faction_id": None})
-    row.players = json.dumps(players_list)
+    added = _add_player_to_lobby(row, str(player.id))
+    if added:
+        db.commit()
+        return {"game_id": row.id, "name": row.name}
+    return {"game_id": row.id, "message": "Already in game"}
+
+
+@app.get("/games/invites")
+def list_game_invites(
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Active lobby invitations for the current player. Empty once the game starts or they answer."""
+    rows = (
+        db.query(GameInvite, GameModel, Player)
+        .join(GameModel, GameInvite.game_id == GameModel.id)
+        .join(Player, GameInvite.inviter_id == Player.id)
+        .filter(
+            GameInvite.invitee_id == player.id,
+            GameInvite.status == "pending",
+            GameModel.status == "lobby",
+        )
+        .order_by(GameInvite.created_at.desc())
+        .all()
+    )
+    return {"invitations": [_invite_payload(invite, game, inviter) for invite, game, inviter in rows]}
+
+
+def _get_pending_invite_for_player(db: Session, invite_id: str, player: Player) -> tuple[GameInvite, GameModel]:
+    invite = db.query(GameInvite).filter(GameInvite.id == invite_id).first()
+    if invite is None or invite.status != "pending" or invite.invitee_id != player.id:
+        raise HTTPException(status_code=404, detail="Invitation not found")
+    game = db.query(GameModel).filter(GameModel.id == invite.game_id).first()
+    if game is None or game.status != "lobby":
+        raise HTTPException(status_code=404, detail="Invitation not found")
+    return invite, game
+
+
+@app.post("/games/invites/{invite_id}/accept")
+def accept_game_invite(
+    invite_id: str,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Join the lobby from an invitation and clear it."""
+    invite, game = _get_pending_invite_for_player(db, invite_id, player)
+    _add_player_to_lobby(game, str(player.id))
+    invite.status = "accepted"
     db.commit()
-    return {"game_id": row.id, "name": row.name}
+    return {"game_id": game.id, "name": game.name}
+
+
+@app.post("/games/invites/{invite_id}/decline")
+def decline_game_invite(
+    invite_id: str,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    invite, _game = _get_pending_invite_for_player(db, invite_id, player)
+    invite.status = "declined"
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/games/{game_id}/invites")
+def list_game_invites_sent(
+    game_id: str,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Pending invitee ids for a lobby the caller is in."""
+    row = _require_lobby_member(db.query(GameModel).filter(GameModel.id == game_id).first(), player)
+    if row.status != "lobby":
+        return {"invitee_ids": []}
+    ids = [
+        invite.invitee_id
+        for invite in db.query(GameInvite)
+        .filter(GameInvite.game_id == row.id, GameInvite.status == "pending")
+        .all()
+    ]
+    return {"invitee_ids": ids}
+
+
+@app.post("/games/{game_id}/invites")
+def send_game_invites(
+    game_id: str,
+    body: GameInviteCreateBody,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Invite friends into a multiplayer lobby. Already-pending invites stay pending."""
+    row = _require_lobby_member(db.query(GameModel).filter(GameModel.id == game_id).first(), player)
+    if row.game_code is None or row.status != "lobby":
+        raise HTTPException(status_code=400, detail="Invites are only for games still in the lobby")
+    member_ids = _lobby_player_ids(row)
+    requested = []
+    for raw in body.player_ids:
+        pid = str(raw).strip()
+        if pid and pid not in requested:
+            requested.append(pid)
+    if not requested:
+        raise HTTPException(status_code=400, detail="Choose at least one friend")
+    friends = {
+        other_id
+        for other_id in requested
+        if _friendship_accepted(db, player.id, other_id)
+    }
+    if friends != set(requested):
+        raise HTTPException(status_code=400, detail="You can only invite friends")
+    sent = 0
+    for invitee_id in requested:
+        if invitee_id == str(player.id) or invitee_id in member_ids:
+            continue
+        existing = (
+            db.query(GameInvite)
+            .filter(GameInvite.game_id == row.id, GameInvite.invitee_id == invitee_id)
+            .first()
+        )
+        if existing is None:
+            db.add(
+                GameInvite(
+                    id=str(uuid.uuid4()),
+                    game_id=row.id,
+                    inviter_id=str(player.id),
+                    invitee_id=invitee_id,
+                    status="pending",
+                )
+            )
+            sent += 1
+        elif existing.status != "pending":
+            existing.status = "pending"
+            existing.inviter_id = str(player.id)
+            existing.created_at = datetime.utcnow()
+            sent += 1
+    db.commit()
+    return {"sent": sent}
 
 
 def _safe_asdict_map(defs_dict):

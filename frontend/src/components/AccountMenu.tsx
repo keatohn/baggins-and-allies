@@ -87,8 +87,12 @@ export default function AccountMenu({ variant = 'menu' }: AccountMenuProps) {
     };
     window.addEventListener(AUTH_CHANGED_EVENT, onAuthChanged);
     window.addEventListener('focus', onFocus);
+    const poll = window.setInterval(() => {
+      if (getAuthToken()) refreshPendingCount();
+    }, 10000);
     return () => {
       cancelled = true;
+      window.clearInterval(poll);
       window.removeEventListener(AUTH_CHANGED_EVENT, onAuthChanged);
       window.removeEventListener('focus', onFocus);
     };
@@ -111,7 +115,7 @@ export default function AccountMenu({ variant = 'menu' }: AccountMenuProps) {
   const profileTitle = player.tier?.name ? `Profile · ${player.tier.name}` : 'Profile';
   const friendsLabel =
     pendingCount > 0
-      ? `Open friends (${pendingCount} pending request${pendingCount === 1 ? '' : 's'})`
+      ? `Open friends (${pendingCount} waiting)`
       : 'Open friends';
 
   return (

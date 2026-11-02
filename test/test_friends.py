@@ -13,7 +13,7 @@ from sqlalchemy.pool import StaticPool
 from backend.api.auth import get_current_admin, get_current_player, hash_password
 from backend.api.database import Base, get_db
 from backend.api.main import app
-from backend.api.models import Game, GameResult, Player
+from backend.api.models import FriendRequest, Game, GameResult, Player
 
 
 @pytest.fixture()
@@ -271,3 +271,80 @@ def test_request_edge_cases(make_client, players):
     buddy_client = make_client(buddy)
     r = buddy_client.post("/friends/requests/does-not-exist/accept")
     assert r.status_code == 404
+
+
+def _accept_friendship(db_session, a: Player, b: Player) -> None:
+    db_session.add(
+        FriendRequest(
+            id=str(uuid.uuid4()),
+            requester_id=a.id,
+            addressee_id=b.id,
+            status="accepted",
+        )
+    )
+    db_session.commit()
+
+
+def _lobby(db_session, host: Player, name: str = "Invite Lobby", code: str = "AB12") -> Game:
+    game = Game(
+        id=str(uuid.uuid4()),
+        name=name,
+        game_code=code,
+        status="lobby",
+        game_state="{}",
+        created_by=host.id,
+        players=json.dumps([{"player_id": host.id, "faction_id": None}]),
+    )
+    db_session.add(game)
+    db_session.commit()
+    return game
+
+
+def test_lobby_invite_badge_accept_and_decline(make_client, players, db_session):
+    _admin, user, buddy = players
+    _accept_friendship(db_session, user, buddy)
+    game = _lobby(db_session, user)
+    host = make_client(user)
+
+    r = host.post(f"/games/{game.id}/invites", json={"player_ids": [buddy.id]})
+    assert r.status_code == 200
+    assert r.json()["sent"] == 1
+
+    guest = make_client(buddy)
+    r = guest.get("/friends/requests/pending-count")
+    assert r.json()["count"] == 1
+    r = guest.get("/games/invites")
+    invites = r.json()["invitations"]
+    assert len(invites) == 1
+    assert invites[0]["game_name"] == "Invite Lobby"
+    assert invites[0]["inviter_username"] == "normaluser"
+
+    r = guest.post(f"/games/invites/{invites[0]['id']}/accept")
+    assert r.status_code == 200
+    assert r.json()["game_id"] == game.id
+    db_session.refresh(game)
+    assert buddy.id in json.loads(game.players)[1]["player_id"]
+    assert guest.get("/games/invites").json()["invitations"] == []
+    assert guest.get("/friends/requests/pending-count").json()["count"] == 0
+
+    other = _lobby(db_session, user, name="Second Lobby", code="CD34")
+    host = make_client(user)
+    r = host.post(f"/games/{other.id}/invites", json={"player_ids": [buddy.id]})
+    assert r.status_code == 200
+    guest = make_client(buddy)
+    invite_id = guest.get("/games/invites").json()["invitations"][0]["id"]
+    r = guest.post(f"/games/invites/{invite_id}/decline")
+    assert r.status_code == 200
+    assert guest.get("/games/invites").json()["invitations"] == []
+
+    # A started game no longer counts, and a non-friend cannot be invited.
+    other.status = "active"
+    db_session.commit()
+    host = make_client(user)
+    r = host.post(f"/games/{other.id}/invites", json={"player_ids": [buddy.id]})
+    assert r.status_code == 400
+    stranger = make_client(_admin)
+    assert stranger.get("/games/invites").json()["invitations"] == []
+    host = make_client(user)
+    r = host.post(f"/games/{game.id}/invites", json={"player_ids": [_admin.id]})
+    assert r.status_code == 400

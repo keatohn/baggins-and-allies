@@ -235,6 +235,7 @@ def init_db():
         AppSetting,
         FriendRequest,
         Game,
+        GameInvite,
         GameResult,
         MapOverride,
         Player,

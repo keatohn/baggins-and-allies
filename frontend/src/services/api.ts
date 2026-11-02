@@ -690,6 +690,15 @@ export interface AuthPlayer {
 }
 
 /** Search result / friend-list row with the viewer's relation to that user. */
+export interface GameInvitation {
+  id: string;
+  game_id: string;
+  game_name: string;
+  inviter_id: string;
+  inviter_username: string;
+  created_at?: string | null;
+}
+
 export interface FriendUser {
   id: string;
   username: string;
@@ -1209,7 +1218,7 @@ export const api = {
   /** Pending requests: incoming (act on these) + outgoing (awaiting reply). */
   listFriendRequests: () =>
     fetchJson<{ incoming: FriendRequestItem[]; outgoing: FriendRequestItem[] }>('/friends/requests'),
-  /** Badge count of pending requests awaiting this player. */
+  /** Badge count: pending friend requests plus active lobby invitations. */
   getPendingFriendCount: () => fetchJson<{ count: number }>('/friends/requests/pending-count'),
   acceptFriendRequest: (requestId: string) =>
     fetchJson<{ ok: boolean }>(`/friends/requests/${encodeURIComponent(requestId)}/accept`, {
@@ -1221,6 +1230,25 @@ export const api = {
     }),
   /** Accepted friends list. */
   listFriends: () => fetchJson<{ friends: FriendUser[] }>('/friends'),
+  /** Lobby invitations still waiting on this player. */
+  listGameInvites: () =>
+    fetchJson<{ invitations: GameInvitation[] }>('/games/invites'),
+  acceptGameInvite: (inviteId: string) =>
+    fetchJson<{ game_id: string; name: string }>(`/games/invites/${encodeURIComponent(inviteId)}/accept`, {
+      method: 'POST',
+    }),
+  declineGameInvite: (inviteId: string) =>
+    fetchJson<{ ok: boolean }>(`/games/invites/${encodeURIComponent(inviteId)}/decline`, {
+      method: 'POST',
+    }),
+  /** Pending invitee ids for a lobby the caller is in. */
+  listLobbyInvites: (gameId: string) =>
+    fetchJson<{ invitee_ids: string[] }>(`/games/${encodeURIComponent(gameId)}/invites`),
+  sendGameInvites: (gameId: string, playerIds: string[]) =>
+    fetchJson<{ sent: number }>(`/games/${encodeURIComponent(gameId)}/invites`, {
+      method: 'POST',
+      body: JSON.stringify({ player_ids: playerIds }),
+    }),
 
   /** Admin: default avatar color applied to users who never picked one. */
   adminGetProfileDefaults: () =>

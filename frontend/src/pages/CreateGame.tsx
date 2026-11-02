@@ -123,6 +123,11 @@ export default function CreateGame() {
 
   const selectedScenario = scenariosWithContext.find((s) => s.id === selectedSetupId) ?? null;
 
+  const confirmScenario = (id: string) => {
+    setSelectedSetupId(id);
+    withScrollTransition(() => setStep('settings'));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -172,25 +177,13 @@ export default function CreateGame() {
                 scenarios={scenariosWithContext}
                 selectedId={selectedSetupId}
                 onSelect={setSelectedSetupId}
+                onConfirm={confirmScenario}
               />
             )}
           </div>
-          {scenariosWithContext.length > 0 && (
-            <button
-              type="button"
-              className="create-game-form__submit primary create-game-form__continue"
-              disabled={loadingSetups || selectedSetupId == null}
-              onClick={() => withScrollTransition(() => setStep('settings'))}
-            >
-              Continue
-            </button>
-          )}
         </div>
       ) : (
         <form className="create-game-form create-game-form--settings" onSubmit={handleSubmit}>
-          <button type="button" className="page-menu-btn" onClick={() => withScrollTransition(() => setStep('scenario'))}>
-            Back
-          </button>
           {selectedScenario && (
             <p className="create-game-form__chosen">
               {selectedScenario.display_name}
@@ -298,9 +291,14 @@ export default function CreateGame() {
               </button>
             </div>
           </div>
-          <button type="submit" className="create-game-form__submit primary" disabled={loading || loadingSetups || selectedSetupId == null}>
-            {loading ? 'Creating…' : 'Create game'}
-          </button>
+          <div className="create-game-form__actions">
+            <button type="button" className="page-menu-btn" onClick={() => withScrollTransition(() => setStep('scenario'))}>
+              Back
+            </button>
+            <button type="submit" className="create-game-form__submit primary" disabled={loading || loadingSetups || selectedSetupId == null}>
+              {loading ? 'Creating…' : 'Create game'}
+            </button>
+          </div>
         </form>
       )}
       <MenuLink to="/" className="page-menu-btn create-game-page__menu-anchor">Menu</MenuLink>

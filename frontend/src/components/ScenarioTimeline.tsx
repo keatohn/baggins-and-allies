@@ -56,10 +56,13 @@ export default function ScenarioTimeline({
   scenarios,
   selectedId,
   onSelect,
+  onConfirm,
 }: {
   scenarios: SetupInfo[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** Choosing a scenario (not just a multi-scenario moment) advances the create flow. */
+  onConfirm: (id: string) => void;
 }) {
   const { events, undated } = useMemo(() => buildTimeline(scenarios), [scenarios]);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -90,6 +93,11 @@ export default function ScenarioTimeline({
   const selectedEvent = events.find((event) => event.scenarios.some((scenario) => scenario.id === selectedId)) ?? null;
 
   const chooseMoment = (event: TimelineEvent) => {
+    const only = event.scenarios.length === 1 ? event.scenarios[0] : null;
+    if (only) {
+      onConfirm(only.id);
+      return;
+    }
     if (!event.scenarios.some((scenario) => scenario.id === selectedId) && event.scenarios[0]) {
       onSelect(event.scenarios[0].id);
     }
@@ -173,7 +181,7 @@ export default function ScenarioTimeline({
         </div>
       </div>
       {selectedEvent && (
-        <MomentChoices event={selectedEvent} selectedId={selectedId} onSelect={onSelect} />
+        <MomentChoices event={selectedEvent} selectedId={selectedId} onSelect={onSelect} onConfirm={onConfirm} />
       )}
       {undated.length > 0 && (
         <div className="chronicle__undated">
@@ -186,6 +194,7 @@ export default function ScenarioTimeline({
                 selected={scenario.id === selectedId}
                 showYear
                 onSelect={onSelect}
+                onConfirm={onConfirm}
               />
             ))}
           </div>
@@ -199,10 +208,12 @@ function MomentChoices({
   event,
   selectedId,
   onSelect,
+  onConfirm,
 }: {
   event: TimelineEvent;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onConfirm: (id: string) => void;
 }) {
   const years = new Set(event.scenarios.map((scenario) => scenario.context?.year?.trim()).filter(Boolean));
   const mixedYears = years.size > 1;
@@ -218,6 +229,7 @@ function MomentChoices({
             selected={scenario.id === selectedId}
             showYear={mixedYears}
             onSelect={onSelect}
+            onConfirm={onConfirm}
           />
         ))}
       </div>
@@ -230,11 +242,13 @@ function ScenarioChoice({
   selected,
   showYear,
   onSelect,
+  onConfirm,
 }: {
   scenario: SetupInfo;
   selected: boolean;
   showYear: boolean;
   onSelect: (id: string) => void;
+  onConfirm: (id: string) => void;
 }) {
   const factions = scenario.context?.factions;
   return (
@@ -243,7 +257,10 @@ function ScenarioChoice({
       role="radio"
       aria-checked={selected}
       className={`chronicle__option${selected ? ' chronicle__option--active' : ''}${scenario.admin_only ? ' chronicle__option--admin' : ''}`}
-      onClick={() => onSelect(scenario.id)}
+      onClick={() => {
+        onSelect(scenario.id);
+        onConfirm(scenario.id);
+      }}
     >
       {scenario.admin_only && <span className="chronicle__admin-tag">Admin</span>}
       <span className="chronicle__option-name">{scenario.display_name}</span>

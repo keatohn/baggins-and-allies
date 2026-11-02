@@ -859,6 +859,17 @@
   border-radius: 6px;
 }
 
+.friends-list__row--invite {
+  align-items: flex-start;
+}
+
+.friends-list__invite-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
 .friends-list__person,
 .friends-list__person:hover:not(:disabled) {
   display: flex;

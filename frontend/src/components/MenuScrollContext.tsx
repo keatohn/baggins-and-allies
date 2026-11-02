@@ -53,7 +53,7 @@ type ScrollTransitionPhase =
 interface MenuScrollContextValue {
   phase: ScrollTransitionPhase
   /** Animate the scroll ends around an in-app navigation. No-op while animating. */
-  navigateWithScroll: (to: string, opts?: NavigateOptions) => void
+  navigateWithScroll: (to: string, opts?: NavigateOptions, scroll?: { force?: boolean }) => void
   /**
    * Close the scroll ends, run `action` while covered (e.g. an in-page step
    * swap), then reopen. No-ops the animation if already animating or reduced
@@ -164,14 +164,14 @@ export function MenuScrollProvider({ children }: { children: ReactNode }) {
   }, [proceedToReveal])
 
   const navigateWithScroll = useCallback(
-    (to: string, opts?: NavigateOptions) => {
+    (to: string, opts?: NavigateOptions, scroll?: { force?: boolean }) => {
       if (phaseRef.current !== 'idle') return
 
       const toPath = to.split('?')[0].split('#')[0]
       const fromMenu = isMenuScrollRoute(location.pathname)
       const toMenu = isMenuScrollRoute(toPath)
 
-      if (prefersReducedMotion() || (!fromMenu && !toMenu)) {
+      if (prefersReducedMotion() || (!scroll?.force && !fromMenu && !toMenu)) {
         navigate(to, opts)
         return
       }

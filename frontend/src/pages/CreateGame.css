@@ -42,9 +42,18 @@
   margin-inline: auto;
 }
 
-.create-game-form__continue {
-  align-self: center;
-  min-width: 12rem;
+.create-game-form__actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.create-game-form__actions button.page-menu-btn,
+.create-game-form__actions .create-game-form__submit {
+  margin: 0;
 }
 
 .create-game-form__chosen {

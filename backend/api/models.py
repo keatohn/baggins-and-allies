@@ -43,6 +43,20 @@ class FriendRequest(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class GameInvite(Base):
+    """Lobby invite from one player to a friend. Active while pending and the game is still in the lobby."""
+
+    __tablename__ = "game_invites"
+    __table_args__ = (UniqueConstraint("game_id", "invitee_id", name="uq_game_invites_game_invitee"),)
+
+    id = Column(String(36), primary_key=True)
+    game_id = Column(String(36), ForeignKey("games.id"), nullable=False, index=True)
+    inviter_id = Column(String(36), ForeignKey("players.id"), nullable=False, index=True)
+    invitee_id = Column(String(36), ForeignKey("players.id"), nullable=False, index=True)
+    status = Column(String(16), nullable=False, default="pending")  # pending | accepted | declined
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Game(Base):
     __tablename__ = "games"
 
