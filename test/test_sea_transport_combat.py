@@ -223,6 +223,68 @@ def test_sea_raid_empty_land_conquer(state_with_sea_units):
     assert len(combat_ended) == 1 and combat_ended[0].payload.get("outcome") == "conquer"
 
 
+def test_sea_raid_onto_own_or_allied_land_blocked(state_with_sea_units):
+    """
+    Regression (naval audit High #1): a sea raid may not target the attacker's own or allied
+    land. Same-alliance units on the hex are bystanders (not defenders), so the old
+    empty-defender path conquered an ally's hex and set pending_captures (destroying their camp
+    before the liberation rule restored ownership).
+    Assert BOTH that own/allied raids now fail validate + apply AND that enemy/neutral targets
+    remain valid raid targets (no over-blocking).
+    """
+    state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs = state_with_sea_units
+    harondor = state.territories["harondor"]
+    harondor.units.clear()
+    sea_before = [u.instance_id for u in state.territories["sea_zone_11"].units]
+
+    def raid():
+        return initiate_combat(
+            "harad", "harondor",
+            dice_rolls={"attacker": [1], "defender": []},
+            sea_zone_id="sea_zone_11",
+        )
+
+    def check():
+        return validate_action(
+            state, raid(), unit_defs, territory_defs, faction_defs, camp_defs, port_defs
+        )
+
+    # Control: enemy-owned and unowned targets are still valid raid targets (no over-blocking).
+    harondor.owner = "gondor"
+    result = check()
+    assert result.valid, result.error
+    harondor.owner = None
+    result = check()
+    assert result.valid, result.error
+
+    # Own land: rejected by validation now (previously only the reducer raised).
+    harondor.owner = "harad"
+    result = check()
+    assert not result.valid and "own territory" in result.error
+    with pytest.raises(ValueError, match="own territory"):
+        apply_action(
+            state, raid(), unit_defs, territory_defs, faction_defs, camp_defs, port_defs
+        )
+
+    # Allied land (harad and mordor are both evil): rejected by validation and apply.
+    harondor.owner = "mordor"
+    harondor.units.append(_make_unit(state, "mordor", "morgul_orc", unit_defs))
+    result = check()
+    assert not result.valid and "allied" in result.error
+    with pytest.raises(ValueError, match="allied"):
+        apply_action(
+            state, raid(), unit_defs, territory_defs, faction_defs, camp_defs, port_defs
+        )
+
+    # The failed raids must not conquer: no pending capture, no passengers landed.
+    assert "harondor" not in state.pending_captures
+    assert [u.instance_id for u in state.territories["sea_zone_11"].units] == sea_before
+    assert all(
+        get_unit_faction(u, unit_defs) != "harad"
+        for u in state.territories["harondor"].units
+    ), "harad passengers must not land on allied/own hex"
+
+
 def test_sea_raid_combat_attacker_win_moves_to_territory(state_with_sea_units):
     """Sea raid with combat: attacker wins -> land survivors move to territory, ships stay in sea."""
     state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs = state_with_sea_units
