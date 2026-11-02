@@ -189,6 +189,10 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
   const xpToNext = ceiling != null ? Math.max(0, ceiling - xp) : null;
 
   const ring = tierRingProps(player.tier);
+  const tierFill =
+    player.tier?.color && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(player.tier.color)
+      ? player.tier.color
+      : undefined;
   const scenarios = stats?.by_scenario ?? [];
 
   return (
@@ -292,7 +296,7 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
             aria-valuenow={xp}
             aria-label="XP toward the next tier"
           >
-            <span className="account-xp__fill" style={{ width: `${xpPct}%` }} />
+            <span className="account-xp__fill" style={{ width: `${xpPct}%`, background: tierFill }} />
           </div>
           <p className="account-subtle">
             {player.next_tier && xpToNext != null

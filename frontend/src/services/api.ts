@@ -771,7 +771,7 @@ export interface ProgressionRules {
   vs_ai_multiplier: number;
   min_rounds_to_count: number;
   stats_cap_per_game: number;
-  forfeit_xp: number;
+  forfeit_multiplier: number;
   daily_cap: number;
 }
 

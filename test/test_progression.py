@@ -20,6 +20,7 @@ from backend.progression import (
     ProgressionError,
     fold_events,
     normalize_progression,
+    save_progression,
     score_player,
     default_progression,
 )
@@ -96,6 +97,16 @@ def _rules(**overrides):
     rules = dict(default_progression()["rules"])
     rules.update(overrides)
     return rules
+
+
+def test_legacy_flat_forfeit_xp_becomes_zero_multiplier():
+    cfg = default_progression()
+    rules = dict(cfg["rules"])
+    del rules["forfeit_multiplier"]
+    rules["forfeit_xp"] = 40
+    saved = normalize_progression({**cfg, "rules": rules})
+    assert saved["rules"]["forfeit_multiplier"] == 0
+    assert "forfeit_xp" not in saved["rules"]
 
 
 def test_defaults_and_threshold_order():
@@ -206,12 +217,26 @@ def test_score_applies_multiplier_cap_rounds_and_forfeit():
         winner="evil",
         forfeited=True,
         vs_ai=False,
+        turn_number=4,
+        by_faction=by,
+        rules=_rules(forfeit_multiplier=0.5),
+    )
+    # (50 + 15 + 2 + 2 + 3) * 1.0 * 0.5
+    assert forfeited == 36
+    assert fmeta["forfeited"] is True
+    assert fmeta["forfeit_multiplier"] == 0.5
+    early, emeta = score_player(
+        faction_ids=["gondor"],
+        alliances={"gondor": "good"},
+        winner="evil",
+        forfeited=True,
+        vs_ai=False,
         turn_number=1,
         by_faction=by,
-        rules=rules,
+        rules=_rules(forfeit_multiplier=1),
     )
-    assert forfeited == 0
-    assert fmeta["forfeited"] is True
+    assert early == 0
+    assert emeta["below_min_rounds"] is True
     capped, cmeta = score_player(
         faction_ids=["gondor"],
         alliances={"gondor": "good"},
@@ -312,7 +337,7 @@ def test_save_game_awards_once_and_keeps_stats_across_saves(db_session, players)
     assert db_session.query(XpLedger).count() == 1
 
 
-def test_forfeit_gets_flat_xp_and_opponent_gets_the_win(db_session, players):
+def test_forfeit_multiplier_scales_xp_and_opponent_gets_the_win(db_session, players):
     admin, user = players
     other = Player(
         id=str(uuid.uuid4()),
@@ -323,6 +348,9 @@ def test_forfeit_gets_flat_xp_and_opponent_gets_the_win(db_session, players):
     )
     db_session.add(other)
     db_session.commit()
+    cfg = default_progression()
+    cfg["rules"] = _rules(forfeit_multiplier=0.5)
+    save_progression(db_session, cfg)
     config = _definitions()
     config["forfeited_player_ids"] = [user.id]
     config["ai_factions"] = []
@@ -337,7 +365,7 @@ def test_forfeit_gets_flat_xp_and_opponent_gets_the_win(db_session, players):
     _finish(db_session, row, [], winner="evil")
     db_session.refresh(user)
     db_session.refresh(other)
-    assert user.xp == 0
+    assert user.xp == 25
     assert other.xp == 150
 
 

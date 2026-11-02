@@ -19,7 +19,6 @@ const INT_RULES: { key: keyof ProgressionRules; label: string }[] = [
   { key: 'battle_won', label: 'Each battle won' },
   { key: 'stats_cap_per_game', label: 'Cap on stat XP per game' },
   { key: 'min_rounds_to_count', label: 'Minimum rounds for a game to count' },
-  { key: 'forfeit_xp', label: 'XP for a player who forfeited' },
   { key: 'daily_cap', label: 'Daily XP cap (0 = no cap)' },
 ];
 
@@ -467,8 +466,9 @@ export function TierXpPanel({
         <p className="admin-form__micro">
           XP is awarded once, when a game finishes. Stat XP is added up, cut off at the per-game cap, then
           multiplied. A game counts as against the computer when only one human is playing. Rounds use the
-          game’s round counter: it starts at 1 and goes up after every faction has taken a turn. Forfeiting
-          players get only the forfeit amount. The daily cap uses the day the game finished, and 0 turns it off.
+          game’s round counter: it starts at 1 and goes up after every faction has taken a turn. A player
+          who forfeited gets the same award times the forfeit multiplier, on top of the people or computer
+          multiplier. 0 gives them nothing. The daily cap uses the day the game finished, and 0 turns it off.
         </p>
         <div className="admin-tier-rules">
           {INT_RULES.map((rule) => (
@@ -488,6 +488,14 @@ export function TierXpPanel({
               ariaLabel="Multiplier against other people"
               value={config.rules.multiplayer_multiplier}
               onChange={(n) => setRule('multiplayer_multiplier', n)}
+            />
+          </label>
+          <label className="admin-form__label">
+            Multiplier for a player who forfeited
+            <DecimalField
+              ariaLabel="Multiplier for a player who forfeited"
+              value={config.rules.forfeit_multiplier}
+              onChange={(n) => setRule('forfeit_multiplier', n)}
             />
           </label>
           <label className="admin-form__label">

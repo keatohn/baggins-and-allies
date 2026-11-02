@@ -57,12 +57,12 @@ INT_RULES: dict[str, tuple[int, int]] = {
     "battle_won": (0, 100_000),
     "min_rounds_to_count": (0, 10_000),
     "stats_cap_per_game": (0, 1_000_000),
-    "forfeit_xp": (0, 100_000),
     "daily_cap": (0, 1_000_000),
 }
 FLOAT_RULES: dict[str, tuple[float, float]] = {
     "multiplayer_multiplier": (0.0, 10.0),
     "vs_ai_multiplier": (0.0, 10.0),
+    "forfeit_multiplier": (0.0, 10.0),
 }
 GLOWS = ("none", "soft", "pulse")
 
@@ -83,7 +83,7 @@ DEFAULT_RULES: dict[str, int | float] = {
     "vs_ai_multiplier": 0.5,
     "min_rounds_to_count": 3,
     "stats_cap_per_game": 300,
-    "forfeit_xp": 0,
+    "forfeit_multiplier": 0.0,
     "daily_cap": 0,
 }
 
@@ -210,6 +210,11 @@ def _slug(label: str, used: set[str], prefix: str) -> str:
 def _parse_rules(raw: Any) -> dict[str, int | float]:
     if not isinstance(raw, dict):
         raise ProgressionError("XP rules must be a set of numbers.")
+    raw = dict(raw)
+    # Older configs stored a flat forfeit grant. 0 meant no XP, which this multiplier keeps.
+    # A positive flat grant has no equivalent multiplier, so it becomes 0 until an admin sets one.
+    if "forfeit_multiplier" not in raw:
+        raw["forfeit_multiplier"] = 0
     out: dict[str, int | float] = {}
     for key, (lo, hi) in INT_RULES.items():
         val = _clean_int(raw.get(key), lo, hi)
@@ -717,9 +722,6 @@ def score_player(
         "turn_number": turn_number,
         "won": False,
     }
-    if forfeited:
-        meta["forfeit_xp"] = int(rules["forfeit_xp"])
-        return int(rules["forfeit_xp"]), meta
     if turn_number < int(rules["min_rounds_to_count"]):
         meta["below_min_rounds"] = True
         return 0, meta
@@ -734,6 +736,9 @@ def score_player(
     stats_xp = min(stats_xp, int(rules["stats_cap_per_game"]))
     base = int(rules["game_completed"]) + (int(rules["game_won"]) if won else 0)
     multiplier = float(rules["vs_ai_multiplier"] if vs_ai else rules["multiplayer_multiplier"])
+    if forfeited:
+        meta["forfeit_multiplier"] = float(rules["forfeit_multiplier"])
+        multiplier *= float(rules["forfeit_multiplier"])
     amount = int(round((base + stats_xp) * multiplier))
     meta.update({
         "won": won,

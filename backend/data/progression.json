@@ -106,7 +106,7 @@
     "vs_ai_multiplier": 0.5,
     "min_rounds_to_count": 3,
     "stats_cap_per_game": 300,
-    "forfeit_xp": 0,
+    "forfeit_multiplier": 0.0,
     "daily_cap": 0
   }
 }
