@@ -572,6 +572,67 @@
   flex-direction: column;
 }
 
+.admin-modal--units {
+  width: min(100%, 76rem);
+  height: min(92vh, 54rem);
+  max-height: min(92vh, 54rem);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-modal--units .unit-stats-modal {
+  max-width: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.units-across__table .units-across__icon,
+.units-across__table .units-across__scenario,
+.units-across__table .units-across__id {
+  text-align: left;
+  vertical-align: middle;
+}
+
+.units-across__table .units-across__icon {
+  text-align: center;
+  width: 3.2rem;
+}
+
+.units-across__col-icon {
+  width: 3.2rem;
+}
+
+.units-across__col-scenario {
+  width: 11rem;
+}
+
+.units-across__col-id {
+  width: 12rem;
+}
+
+.units-across__table td.units-across__id {
+  font-size: 0.82rem;
+  word-break: break-word;
+}
+
+.units-across__table td.units-across__icon,
+.units-across__table td.units-across__scenario {
+  background: var(--parchment-light, #f7f1e4);
+  border-bottom: 1px solid rgba(139, 115, 85, 0.35);
+}
+
+.units-across .header-stats-table.header-stats-table--units thead th:nth-child(7),
+.units-across .header-stats-table.header-stats-table--units tbody td:nth-child(7) {
+  padding-right: 0.35rem;
+}
+
+.units-across .header-stats-table.header-stats-table--units thead th:nth-child(9),
+.units-across .header-stats-table.header-stats-table--units tbody td:nth-child(9) {
+  padding-right: 0.9rem;
+}
+
 .games-report__header {
   display: flex;
   justify-content: space-between;

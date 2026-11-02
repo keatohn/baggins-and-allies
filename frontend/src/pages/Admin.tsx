@@ -23,6 +23,7 @@ import type { SignalPreset } from '../territorySignals';
 import { isValidSetupId } from './admin/setupId';
 import { BalanceModal } from './admin/BalanceModal';
 import { GamesReportModal } from './admin/GamesReportModal';
+import { UnitsReportModal } from './admin/UnitsReportModal';
 import { AiPanel } from './admin/AiPanel';
 import { SimsPanel } from './admin/SimsPanel';
 import { QueryPanel } from './admin/QueryPanel';
@@ -369,6 +370,7 @@ export default function Admin() {
   const [gameStatsOpen, setGameStatsOpen] = useState(false);
   const [balanceOpen, setBalanceOpen] = useState(false);
   const [gamesOpen, setGamesOpen] = useState(false);
+  const [unitsOpen, setUnitsOpen] = useState(false);
   const [usersOpen, setUsersOpen] = useState(false);
   const [queryOpen, setQueryOpen] = useState(false);
   const audioJson = useMemo(() => ({ gains: audioGains, menu_music: menuMusic }), [audioGains, menuMusic]);
@@ -926,10 +928,11 @@ export default function Admin() {
     { label: 'Query', active: queryOpen, onClick: () => openSection('query') },
     {
       label: 'Setups',
-      active: !globalOpen && !queryOpen && !gamesOpen && !usersOpen,
+      active: !globalOpen && !queryOpen && !gamesOpen && !unitsOpen && !usersOpen,
       onClick: () => openSection('setups'),
     },
     { label: 'Signals', active: signalsOpen, onClick: () => openSection('signals') },
+    { label: 'Units', active: unitsOpen, onClick: () => setUnitsOpen(true) },
     { label: 'Users', active: usersOpen, onClick: () => setUsersOpen(true) },
   ].sort((a, b) => a.label.localeCompare(b.label));
 
@@ -1142,7 +1145,7 @@ export default function Admin() {
         <button
           type="button"
           className="admin-page__btn admin-page__btn--primary"
-          disabled={aiOpen || gamesOpen || (globalOpen ? false : !bundle) || saving}
+          disabled={aiOpen || gamesOpen || unitsOpen || (globalOpen ? false : !bundle) || saving}
           onClick={handleSave}
         >
           {saving ? 'Saving…' : 'Save'}
@@ -1319,6 +1322,13 @@ export default function Admin() {
         />
       )}
       {gamesOpen && <GamesReportModal onClose={() => setGamesOpen(false)} />}
+      {unitsOpen && (
+        <UnitsReportModal
+          setups={setups}
+          specials={catalog.specials}
+          onClose={() => setUnitsOpen(false)}
+        />
+      )}
       {usersOpen && <UsersReportModal onClose={() => setUsersOpen(false)} />}
     </div>
   );
