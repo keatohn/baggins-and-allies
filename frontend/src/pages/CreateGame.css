@@ -54,6 +54,13 @@
 .create-game-form__actions button.page-menu-btn,
 .create-game-form__actions .create-game-form__submit {
   margin: 0;
+  flex: 1 1 0;
+  box-sizing: border-box;
+  min-height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 0.75rem;
 }
 
 .create-game-form__chosen {

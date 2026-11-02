@@ -93,11 +93,6 @@ export default function ScenarioTimeline({
   const selectedEvent = events.find((event) => event.scenarios.some((scenario) => scenario.id === selectedId)) ?? null;
 
   const chooseMoment = (event: TimelineEvent) => {
-    const only = event.scenarios.length === 1 ? event.scenarios[0] : null;
-    if (only) {
-      onConfirm(only.id);
-      return;
-    }
     if (!event.scenarios.some((scenario) => scenario.id === selectedId) && event.scenarios[0]) {
       onSelect(event.scenarios[0].id);
     }
