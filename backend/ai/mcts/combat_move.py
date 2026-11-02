@@ -39,6 +39,7 @@ from backend.ai.combat_move import (
     _is_attackable_territory,
     _is_cavalry_combat,
     _stacks_for_unit_ids,
+    _with_raid_boats,
 )
 from backend.ai.garrison import (
     move_attacks_enemy_stack_that_threatens_origin,
@@ -281,7 +282,10 @@ class CombatMoveProblem(Problem):
             # Sea -> land: only land units may move (naval cannot go on land).
             from_def = td.get(from_tid)
             to_def = td.get(to_tid)
-            if from_def and to_def and _is_water_zone(from_def) and not _is_water_zone(to_def):
+            sea_raid = bool(
+                from_def and to_def and _is_water_zone(from_def) and not _is_water_zone(to_def)
+            )
+            if sea_raid:
                 terr = state.territories.get(from_tid)
                 ids_set = set(pruned)
                 pruned = [
@@ -294,6 +298,8 @@ class CombatMoveProblem(Problem):
             charge_options = self._charge_path_options(
                 state, (from_tid, to_tid), pruned, charge_routes_per_unit
             )
+            if sea_raid:
+                pruned = _with_raid_boats(state, from_tid, pruned, ud)
             # Rank by the preferred charge; a later option is substituted only
             # when that path does not survive a full pending replay.
             score = self._cheap_move_score(

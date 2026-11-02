@@ -160,7 +160,7 @@
   transition: background 0.15s ease, color 0.15s ease;
 }
 
-.create-game-form__picker-option:first-of-type {
+.create-game-form__picker-option:not(:last-child) {
   border-right: 1px solid var(--ink-faded);
 }
 

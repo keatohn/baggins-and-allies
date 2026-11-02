@@ -540,6 +540,78 @@ def test_offload_after_pending_load_same_turn_no_loaded_onto_yet(wotr_defs):
     assert ship.instance_id in [u.instance_id for u in state.territories["sea_zone_11"].units]
 
 
+def test_ai_sea_raid_names_the_boat_so_must_attack_clears(wotr_defs):
+    """A combat load sets must-attack. A passenger-only raid never clears it; the boat id has to be on the move."""
+    from backend.ai.combat_move import _last_resort_must_attack_move, _with_raid_boats
+    from backend.engine.queries import get_movable_units
+
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    ship_def = unit_defs.get("black_ship")
+    if ship_def is not None:
+        setattr(ship_def, "transport_capacity", 2)
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    sea_11 = state.territories.get("sea_zone_11")
+    harondor = state.territories.get("harondor")
+    assert sea_11 is not None and harondor is not None
+    sea_11.units.clear()
+    ship = _make_unit(state, "harad", "black_ship", unit_defs)
+    land = _make_unit(state, "harad", "corsair_of_umbar", unit_defs)
+    harondor.units.append(land)
+    sea_11.units.append(ship)
+    if harondor.owner == "harad":
+        harondor.owner = "gondor"
+    state.current_faction = "harad"
+    state.phase = "combat_move"
+
+    load_a = move_units(
+        "harad", "harondor", "sea_zone_11", [land.instance_id],
+        move_type="load", load_onto_boat_instance_id=ship.instance_id,
+    )
+    assert validate_action(state, load_a, unit_defs, territory_defs, faction_defs, camp_defs, port_defs).valid
+    state, _ = apply_action(state, load_a, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+
+    passenger_only = move_units("harad", "sea_zone_11", "harondor", [land.instance_id], move_type="offload")
+    stuck = deepcopy(state)
+    if validate_action(stuck, passenger_only, unit_defs, territory_defs, faction_defs, camp_defs, port_defs).valid:
+        stuck, _ = apply_action(stuck, passenger_only, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+        with pytest.raises(ValueError, match="must attack"):
+            apply_action(stuck, end_phase("harad"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+
+    movable = get_movable_units(state, "harad", unit_defs, faction_defs)
+    action = _last_resort_must_attack_move(
+        state,
+        "harad",
+        faction_defs,
+        unit_defs,
+        territory_defs,
+        camp_defs,
+        port_defs,
+        {ship.instance_id},
+        movable,
+        {land.instance_id},
+    )
+    assert action is not None
+    assert ship.instance_id in (action.payload.get("unit_instance_ids") or [])
+    state, _ = apply_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    state, _ = apply_action(state, end_phase("harad"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert not state.loaded_naval_must_attack_instance_ids
+    assert land.instance_id in [u.instance_id for u in state.territories["harondor"].units]
+    assert ship.instance_id in [u.instance_id for u in state.territories["sea_zone_11"].units]
+
+    aboard = _make_unit(state, "harad", "corsair_of_umbar", unit_defs)
+    aboard.loaded_onto = ship.instance_id
+    state.territories["sea_zone_11"].units.append(aboard)
+    assert _with_raid_boats(state, "sea_zone_11", [aboard.instance_id], unit_defs) == [
+        aboard.instance_id,
+        ship.instance_id,
+    ]
+
+
 def test_expand_offload_includes_pending_when_request_lists_embarked_passengers(wotr_defs):
     """Regression: do not skip pending-load splice when IDs already include embarked land units in the sea hex."""
     unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs

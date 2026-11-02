@@ -10,6 +10,39 @@
   box-sizing: border-box;
 }
 
+.lobby-view--computer {
+  max-width: 40rem;
+}
+
+.lobby-ai {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem 0.6rem;
+  width: 100%;
+}
+
+.lobby-ai__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.75rem;
+  color: var(--ink-faded, #5c5346);
+}
+
+.lobby-ai__field--wide {
+  grid-column: 1 / -1;
+}
+
+.lobby-ai__field select,
+.lobby-ai__field input {
+  font: inherit;
+  color: var(--ink);
+  background: var(--parchment, #f4efe0);
+  border: 1px solid var(--ink-faded, rgba(0, 0, 0, 0.25));
+  border-radius: 4px;
+  padding: 0.2rem 0.35rem;
+}
+
 .lobby-view {
   display: flex;
   flex-direction: column;
@@ -29,7 +62,7 @@
 /* Single-player has more controls + faction | alliance text — a bit wider on desktop only */
 @media (min-width: 768px) {
   .lobby-view--single-player {
-    max-width: 500px;
+    max-width: 560px;
   }
 
   .lobby-view--single-player .lobby-view__faction-list {
@@ -226,6 +259,54 @@
 
 .lobby-view__faction-actions {
   flex-shrink: 0;
+}
+
+.lobby-view__single-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.35rem;
+}
+
+.lobby-view__difficulty-pills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.28rem;
+  max-width: 18rem;
+}
+
+.lobby-view__pill--difficulty {
+  border: 2px solid var(--gold-dark, #8b7355);
+  border-radius: 999px;
+  padding: 0.16rem 0.6rem;
+  font-size: 0.75rem;
+  background: transparent;
+  color: var(--ink-faded);
+}
+
+.lobby-view .lobby-view__difficulty-pills button.lobby-view__pill {
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.lobby-view__difficulty-pills .lobby-view__pill--selected {
+  background: var(--gold-dark, #8b7355);
+  color: #fff;
+  font-weight: 600;
+}
+
+.lobby-view--computer .lobby-view__faction-list {
+  max-width: none;
+}
+
+.lobby-view--computer .lobby-view__faction-row {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.lobby-view--computer .lobby-view__faction-actions {
+  flex: 1 1 100%;
 }
 
 .lobby-view__multiplayer-actions {
@@ -637,8 +718,15 @@
     justify-self: stretch;
   }
 
-  .lobby-view__faction-actions .lobby-view__binary-pills {
+  .lobby-view__faction-actions .lobby-view__binary-pills,
+  .lobby-view__single-choice,
+  .lobby-view__difficulty-pills {
     width: 100%;
+    max-width: none;
+  }
+
+  .lobby-view__single-choice {
+    align-items: stretch;
   }
 
   .lobby-view__faction-actions>.lobby-view__pill {

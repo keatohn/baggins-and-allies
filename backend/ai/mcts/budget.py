@@ -6,6 +6,8 @@ Budgets are hard caps: the search stops as soon as either limit is reached.
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 
@@ -74,9 +76,40 @@ PHASE_BUDGETS: dict[str, dict[str, SearchBudget]] = {
 }
 
 
+# Set around decide() from the admin level list. Unset in tests, which keep the tables above.
+_catalog_ctx: ContextVar[tuple[dict, ...] | None] = ContextVar("mcts_budget_catalog", default=None)
+
+
+@contextmanager
+def budget_catalog_scope(levels: list[dict] | None):
+    """Use the admin's step counts and time caps for every phase while this block runs."""
+    if not levels:
+        yield
+        return
+    token = _catalog_ctx.set(tuple(levels))
+    try:
+        yield
+    finally:
+        _catalog_ctx.reset(token)
+
+
+def _budget_from_catalog(key: str) -> SearchBudget | None:
+    levels = _catalog_ctx.get()
+    if not levels:
+        return None
+    by_id = {str(row.get("id")): row for row in levels if isinstance(row, dict)}
+    row = by_id.get(key) or by_id.get(DEFAULT_DIFFICULTY) or levels[0]
+    iterations = max(1, int(row["iterations"]))
+    seconds = max(0.05, float(row["seconds"]))
+    return SearchBudget(max_iterations=iterations, max_time_seconds=seconds)
+
+
 def get_budget(difficulty: str | None = None) -> SearchBudget:
     """Resolve a budget by difficulty name; falls back to DEFAULT_DIFFICULTY."""
     key = _resolve_difficulty(difficulty)
+    custom = _budget_from_catalog(key)
+    if custom is not None:
+        return custom
     return BUDGETS.get(key, BUDGETS[DEFAULT_DIFFICULTY])
 
 
@@ -90,6 +123,9 @@ def get_phase_budget(phase: str, difficulty: str | None = None) -> SearchBudget:
     a retuned entry.
     """
     key = _resolve_difficulty(difficulty)
+    custom = _budget_from_catalog(key)
+    if custom is not None:
+        return custom
     table = PHASE_BUDGETS.get(phase, BUDGETS)
     return table.get(key, table.get(DEFAULT_DIFFICULTY, BUDGETS[DEFAULT_DIFFICULTY]))
 

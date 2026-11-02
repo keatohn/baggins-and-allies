@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../services/api';
-import type { AdminSetupListItem, AdminSimRun } from '../../services/api';
+import type { AdminSetupListItem, AdminSimRun, AiLevelChoice } from '../../services/api';
 
 type Props = {
   setups: AdminSetupListItem[];
@@ -22,6 +22,11 @@ export function SimsPanel({ setups, onError }: Props) {
   const [cycles, setCycles] = useState(1);
   const [running, setRunning] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [levels, setLevels] = useState<AiLevelChoice[]>([
+    { id: 'easy', name: 'Easy' },
+    { id: 'normal', name: 'Normal' },
+    { id: 'hard', name: 'Hard' },
+  ]);
 
   useEffect(() => {
     if (!setupId && setups[0]) setSetupId(setups[0].id);
@@ -31,6 +36,16 @@ export function SimsPanel({ setups, onError }: Props) {
     api.adminListSims()
       .then((res) => setRuns(res.runs ?? []))
       .catch((e) => onError(e instanceof Error ? e.message : 'Could not load sims'));
+    api.adminGetAi()
+      .then((res) => {
+        if (res.levels?.length) {
+          setLevels(res.levels.map((level) => ({ id: level.id, name: level.name })));
+          setDifficulty((current) => (
+            res.levels.some((level) => level.id === current) ? current : res.levels[0].id
+          ));
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const selected = runs.find((run) => run.id === selectedId) ?? runs[0] ?? null;
@@ -55,9 +70,11 @@ export function SimsPanel({ setups, onError }: Props) {
         <label className="admin-page__field">
           <span className="admin-page__field-label">Difficulty</span>
           <select className="admin-page__select" value={difficulty} onChange={(e) => setDifficulty(e.target.value)}>
-            <option value="easy">easy</option>
-            <option value="normal">normal</option>
-            <option value="hard">hard</option>
+            {levels.map((level) => (
+              <option key={level.id} value={level.id}>
+                {level.name}
+              </option>
+            ))}
           </select>
         </label>
         <label className="admin-page__field">

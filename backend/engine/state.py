@@ -53,6 +53,14 @@ def _stored_ai_choice(value: Any, allowed: tuple[str, ...], default: str) -> str
     return text if text in allowed else default
 
 
+def _stored_difficulty_id(value: Any) -> str:
+    """Level ids are admin-defined, so a save may name one that is not easy/normal/hard."""
+    text = str(value or "").strip().lower()
+    if 1 <= len(text) <= 32 and all(("a" <= char <= "z") or ("0" <= char <= "9") or char == "_" for char in text):
+        return text
+    return "normal"
+
+
 def _ensure_territory_signals(value: Any) -> dict[str, dict[str, dict[str, str]]]:
     """alliance -> territory_id -> {preset_id, label, icon, color, faction_id}."""
     if not isinstance(value, dict):
@@ -983,7 +991,7 @@ class GameState:
             if isinstance(data.get("starting_territory_owners"), dict)
             else {},
             territory_signals=_ensure_territory_signals(data.get("territory_signals")),
-            ai_difficulty=_stored_ai_choice(data.get("ai_difficulty"), ("easy", "normal", "hard"), "normal"),
+            ai_difficulty=_stored_difficulty_id(data.get("ai_difficulty")),
             ai_algorithm=_stored_ai_choice(data.get("ai_algorithm"), ("heuristic", "mcts"), "heuristic"),
         )
 

@@ -44,6 +44,19 @@ def test_stored_algorithm_is_used_when_env_is_unset(monkeypatch):
     assert _mcts_enabled(state) is False
 
 
+def test_catalog_caps_replace_the_move_phase_override():
+    from backend.ai.mcts.budget import SearchBudget, budget_catalog_scope, get_phase_budget
+
+    levels = [
+        {"id": "easy", "name": "Casual", "iterations": 40, "seconds": 0.1},
+        {"id": "nightmare", "name": "Nightmare", "iterations": 3000, "seconds": 3},
+    ]
+    with budget_catalog_scope(levels):
+        assert get_phase_budget("combat_move", "nightmare") == SearchBudget(3000, 3.0)
+        assert get_phase_budget("purchase", "missing") == SearchBudget(40, 0.1)
+    assert get_phase_budget("combat_move", "normal").max_iterations == 200
+
+
 def test_normalize_ai_knobs_rejects_unknown_names():
     assert normalize_difficulty("hard") == "hard"
     assert normalize_difficulty("nightmare") == "normal"

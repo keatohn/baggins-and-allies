@@ -23,6 +23,7 @@ from backend.engine.movement import (
     _is_water_zone,
     get_charge_max_gain_over_moves,
     resolve_territory_key_in_state,
+    sea_land_adjacent_for_offload,
 )
 from backend.engine.queries import (
     get_movable_units,
@@ -491,6 +492,39 @@ def _stacks_for_unit_ids(state, from_territory_id: str, unit_instance_ids: list,
     return _units_to_stacks(units, ud)
 
 
+def _carrier_boat_ids(state, from_tid: str, land_ids: list[str], ud) -> list[str]:
+    """Boats in this sea that these passengers are loaded on.
+
+    A combat sea raid leaves the boat in the water. Must-attack and idle-sail clear
+    only when that boat's instance id is in the move, which is how the map sends a raid.
+    """
+    terr = state.territories.get(from_tid)
+    if not terr or not land_ids:
+        return []
+    by_id = {getattr(u, "instance_id", ""): u for u in (getattr(terr, "units", []) or [])}
+    land_set = set(land_ids)
+    boats: list[str] = []
+    seen: set[str] = set()
+    for iid in land_ids:
+        passenger = by_id.get(iid)
+        if passenger is None:
+            continue
+        boat_id = getattr(passenger, "loaded_onto", None) or ""
+        if not boat_id or boat_id in seen or boat_id in land_set:
+            continue
+        boat = by_id.get(boat_id)
+        if boat is None or not _is_water_boat(ud.get(getattr(boat, "unit_id", ""))):
+            continue
+        seen.add(boat_id)
+        boats.append(boat_id)
+    return boats
+
+
+def _with_raid_boats(state, from_tid: str, unit_ids: list[str], ud) -> list[str]:
+    """Land passengers plus the boats that must be named on the sea-raid move."""
+    return list(dict.fromkeys([*unit_ids, *_carrier_boat_ids(state, from_tid, unit_ids, ud)]))
+
+
 def _pick_must_attack_move(
     state,
     faction_id: str,
@@ -549,7 +583,10 @@ def _pick_must_attack_move(
         )
         if not ids_to_use:
             continue
-        charge_through = best_charge_path_fn((from_tid, to_tid), ids_to_use)
+        charge_ids = list(ids_to_use)
+        if to_land:
+            ids_to_use = _with_raid_boats(state, from_tid, ids_to_use, ud)
+        charge_through = best_charge_path_fn((from_tid, to_tid), charge_ids)
         return move_units_fn(
             faction_id, from_tid, to_tid, ids_to_use, charge_through=charge_through
         )
@@ -654,8 +691,11 @@ def _last_resort_must_attack_move(
                 )
                 if not ids_use:
                     continue
+                charge_ids = list(ids_use)
+                if to_land:
+                    ids_use = _with_raid_boats(state, from_tid, ids_use, ud)
                 ct = _intersect_charge_through(
-                    to_tid, ids_use, {iid: charge_routes}
+                    to_tid, charge_ids, {iid: charge_routes}
                 )
                 action = move_units(
                     faction_id,
@@ -724,8 +764,9 @@ def _last_resort_must_attack_move(
                 continue
             cr_map = {iid: cr_by_iid.get(iid) or {} for iid in reachable}
             ct = _intersect_charge_through(to_tid, reachable, cr_map)
+            raid_ids = _with_raid_boats(state, from_tid, reachable, ud)
             action = move_units(
-                faction_id, from_tid, to_tid, reachable, charge_through=ct
+                faction_id, from_tid, to_tid, raid_ids, charge_through=ct
             )
             vr = validate_action(state, action, ud, td, fd, cd, pd)
             if vr.valid:
@@ -735,11 +776,44 @@ def _last_resort_must_attack_move(
                     faction_id,
                     from_tid,
                     to_tid,
-                    reachable,
+                    raid_ids,
                     charge_through=None,
                 )
                 if validate_action(state, action2, ud, td, fd, cd, pd).valid:
                     return action2
+
+    # Passengers from a load declared this phase are still on land. A boat-only
+    # raid is what the map sends: expand_sea_offload pulls those passengers in,
+    # and the boat id is what clears loaded_naval_must_attack.
+    for from_tid in sorted(sea_from):
+        from_def = td.get(from_tid)
+        if not from_def or not _is_water_zone(from_def):
+            continue
+        from_territory = state.territories.get(from_tid)
+        if not from_territory:
+            continue
+        boat_ids = [
+            getattr(u, "instance_id", "")
+            for u in (getattr(from_territory, "units", []) or [])
+            if getattr(u, "instance_id", "") in must_attack_boat_ids
+            and getattr(u, "instance_id", "") not in pending_unit_ids
+            and _is_water_boat(ud.get(getattr(u, "unit_id", "")))
+        ]
+        if not boat_ids:
+            continue
+        neighbor_ids = set(getattr(from_def, "adjacent", []) or [])
+        for tid, tdef in td.items():
+            if from_tid in (getattr(tdef, "adjacent", []) or []):
+                neighbor_ids.add(tid)
+        for to_tid in sorted(neighbor_ids):
+            if not to_tid or to_tid == from_tid:
+                continue
+            if not sea_land_adjacent_for_offload(from_tid, to_tid, td):
+                continue
+            for boat_id in boat_ids:
+                action = move_units(faction_id, from_tid, to_tid, [boat_id])
+                if validate_action(state, action, ud, td, fd, cd, pd).valid:
+                    return action
 
     return None
 
@@ -1370,10 +1444,12 @@ def decide_combat_move(ctx: AIContext):
         if fallback is not None:
             return fallback
         return _must_attack_last_resort()
-    # Sea -> land (offload/sea raid): only land units may move; naval units cannot go on land (backend rule)
+    # Sea -> land: passengers go ashore. Keep each passenger's boat id on the move so a
+    # combat load counts as an attack. The reducer does not move the boat onto land.
     from_def = td.get(from_tid)
     to_def = td.get(to_tid)
-    if from_def and to_def and _is_water_zone(from_def) and not _is_water_zone(to_def):
+    sea_raid = bool(from_def and to_def and _is_water_zone(from_def) and not _is_water_zone(to_def))
+    if sea_raid:
         terr = state.territories.get(from_tid)
         ids_set = set(unit_ids)
         unit_ids = [
@@ -1391,4 +1467,6 @@ def decide_combat_move(ctx: AIContext):
                 return fallback
             return _must_attack_last_resort()
     charge_through = _best_charge_path((from_tid, to_tid), unit_ids)
+    if sea_raid:
+        unit_ids = _with_raid_boats(state, from_tid, unit_ids, ud)
     return move_units(faction_id, from_tid, to_tid, unit_ids, charge_through=charge_through)

@@ -267,6 +267,61 @@
   gap: 0.75rem;
 }
 
+.admin-ai-levels {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.admin-ai-levels__row {
+  display: grid;
+  grid-template-columns: auto minmax(8rem, 1.4fr) minmax(5.5rem, 0.7fr) minmax(5.5rem, 0.7fr) auto;
+  gap: 0.55rem 0.75rem;
+  align-items: end;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid rgba(139, 115, 85, 0.35);
+  border-radius: 8px;
+  background: rgba(255, 254, 248, 0.45);
+}
+
+.admin-ai-levels__default {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding-bottom: 0.45rem;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.admin-ai-levels__default input {
+  accent-color: var(--gold-dark);
+}
+
+.admin-ai-levels__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding-bottom: 0.05rem;
+}
+
+.admin-ai-levels__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+@media (max-width: 800px) {
+  .admin-ai-levels__row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .admin-ai-levels__default,
+  .admin-ai-levels__actions {
+    grid-column: 1 / -1;
+  }
+}
+
 .admin-page__hint {
   margin: 0;
   line-height: 1.45;
