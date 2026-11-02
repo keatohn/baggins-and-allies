@@ -1705,11 +1705,14 @@ def resolve_stealth_prefire(
     prefire_penalty_delta: int = -1,
     hp_shield: dict[str, int] | None = None,
     attacker_effective_dice_override: dict[str, int] | None = None,
+    casualty_order_defender: str = "best_unit",
 ) -> RoundResult:
     """
     Resolve attacker stealth prefire: only attackers roll at attack-1, hits applied to defenders only.
     Call when EVERY attacker has the stealth special. Modifies defender_units in place.
     prefire_penalty_delta: -1 when setup manifest enables prefire penalty; 0 when disabled.
+    casualty_order_defender: defender hit assignment order ("best_unit" | "best_defense");
+    pass the territory's configured order so prefire matches every other round.
     """
     stat_modifiers = prefire_stat_modifiers(
         attacker_units, unit_defs, True, prefire_penalty_delta, stat_modifiers_attacker_extra,
@@ -1723,7 +1726,7 @@ def resolve_stealth_prefire(
 
     defender_casualties, defender_wounded = _apply_hits(
         defender_units, attacker_hits, unit_defs, is_attacker=False,
-        casualty_order="best_unit",
+        casualty_order=casualty_order_defender,
         must_conquer=False,
         hp_shield=hp_shield,
     )
