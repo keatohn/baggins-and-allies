@@ -641,7 +641,6 @@ def run_one_battle(
         )
         defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
 
-        defender_territory_is_stronghold = bool(territory_def and getattr(territory_def, "is_stronghold", False))
         round_result, stronghold_hp = resolve_combat_round(
             attacker_units,
             defender_units,
@@ -658,7 +657,6 @@ def run_one_battle(
             is_naval_combat_attacker=is_naval_attacker,
             is_naval_combat_defender=is_naval_defender,
             defender_stronghold_hp=stronghold_hp,
-            defender_territory_is_stronghold=defender_territory_is_stronghold,
             exclude_archetypes_from_rolling=["siegework"],
             attacker_ladder_instance_ids=set(ladder_infantry_instance_ids),
         )
