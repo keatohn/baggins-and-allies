@@ -425,10 +425,10 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
               <>
                 <h4 className="account-stats__subhead">Head to head</h4>
                 <div className="account-stats__table-wrap">
-                  <table className="account-stats__table">
-                    <thead>
-                      <tr>
-                        <th>Player</th>
+                <table className="account-stats__table account-stats__table--h2h">
+                  <thead>
+                    <tr>
+                      <th>Player</th>
                         <th>Vs/With</th>
                         <th>Games</th>
                         <th>W–L</th>
@@ -436,17 +436,29 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
                       </tr>
                     </thead>
                     <tbody>
-                      {stats.head_to_head.map((row) => (
-                        <tr key={`${row.kind}-${row.player_id}`}>
-                          <td>{row.username ?? 'Unknown'}</td>
-                          <td>{row.kind === 'with' ? 'with' : 'vs'}</td>
-                          <td>{row.games}</td>
-                          <td>
-                            {row.wins}–{row.losses}
-                          </td>
-                          <td>{formatPct(row.win_pct)}</td>
-                        </tr>
-                      ))}
+                      {stats.head_to_head.map((row, index, all) => {
+                        const prev = index > 0 ? all[index - 1] : null;
+                        const startsGroup = !prev || prev.player_id !== row.player_id;
+                        let span = 1;
+                        if (startsGroup) {
+                          while (index + span < all.length && all[index + span].player_id === row.player_id) span += 1;
+                        }
+                        return (
+                          <tr key={`${row.kind}-${row.player_id}`}>
+                            {startsGroup ? (
+                              <td className="account-stats__player" rowSpan={span}>
+                                {row.username ?? 'Unknown'}
+                              </td>
+                            ) : null}
+                            <td>{row.kind === 'with' ? 'with' : 'vs'}</td>
+                            <td>{row.games}</td>
+                            <td>
+                              {row.wins}–{row.losses}
+                            </td>
+                            <td>{formatPct(row.win_pct)}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

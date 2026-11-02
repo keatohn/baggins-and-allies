@@ -240,6 +240,12 @@ def test_stats_head_to_head_and_peer_filters(db_session, players, make_client):
     assert h2h[(carol.id, "with")]["wins"] == 1
     assert h2h[(carol.id, "against")]["games"] == 1
     assert h2h[(carol.id, "against")]["wins"] == 0
+    # Same player stays together, vs line then with line.
+    assert [(e["username"], e["kind"]) for e in data["head_to_head"]] == [
+        ("bob", "against"),
+        ("carol", "against"),
+        ("carol", "with"),
+    ]
 
     # opponent=bob: both games
     r_opp = client.get(f"/players/{alice.id}/stats", params={"opponent": bob.id})

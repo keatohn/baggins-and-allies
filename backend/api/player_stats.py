@@ -305,20 +305,29 @@ def compute_player_stats(
                 bucket["wins"] += 1
 
     usernames = _usernames_for(db, [pid for pid, _kind in h2h.keys()])
+    rows = [
+        {
+            "player_id": b["player_id"],
+            "username": usernames.get(b["player_id"]),
+            "kind": b["kind"],
+            "games": b["games"],
+            "wins": b["wins"],
+            "losses": b["games"] - b["wins"],
+            "win_pct": _win_pct(b["wins"], b["games"]),
+        }
+        for b in h2h.values()
+    ]
+    games_by_player: dict[str, int] = defaultdict(int)
+    for row in rows:
+        games_by_player[row["player_id"]] += row["games"]
+    # Players stay together. Vs is the first line of a pair; with follows it.
     head_to_head = sorted(
-        (
-            {
-                "player_id": b["player_id"],
-                "username": usernames.get(b["player_id"]),
-                "kind": b["kind"],
-                "games": b["games"],
-                "wins": b["wins"],
-                "losses": b["games"] - b["wins"],
-                "win_pct": _win_pct(b["wins"], b["games"]),
-            }
-            for b in h2h.values()
+        rows,
+        key=lambda e: (
+            -games_by_player[e["player_id"]],
+            (e["username"] or e["player_id"]).lower(),
+            0 if e["kind"] == "against" else 1,
         ),
-        key=lambda e: (-e["games"], (e["username"] or e["player_id"]).lower(), e["kind"]),
     )
 
     faction_counts: dict[str, int] = defaultdict(int)

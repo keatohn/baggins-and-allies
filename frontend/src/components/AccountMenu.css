@@ -772,6 +772,14 @@
   text-align: right;
 }
 
+.account-stats__player {
+  vertical-align: middle;
+}
+
+.account-stats__table--h2h td:not(.account-stats__player) {
+  text-align: right;
+}
+
 .account-stats__extras {
   display: flex;
   flex-wrap: wrap;
