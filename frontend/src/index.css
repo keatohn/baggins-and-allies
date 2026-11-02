@@ -223,3 +223,27 @@ button.page-menu-btn:hover:not(:disabled) {
     max-height: min(55dvh, 420px) !important;
   }
 }
+
+/* Circular faction logo with a colored ring, matching the turn-order ticker. */
+.faction-seal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid var(--ink-faded);
+  padding: 2px;
+  background: transparent;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  line-height: 0;
+}
+
+.faction-seal > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  display: block;
+}

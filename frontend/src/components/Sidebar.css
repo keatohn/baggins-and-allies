@@ -594,7 +594,8 @@
 .territory-panel h2 .faction-icon {
   width: 24px;
   height: 24px;
-  object-fit: contain;
+  object-fit: cover;
+  border-radius: 50%;
 }
 
 /* Faction background colors are now applied dynamically via inline styles using faction.color */
@@ -776,7 +777,8 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
 .territory-original-owner-logo {
   width: 18px;
   height: 18px;
-  object-fit: contain;
+  object-fit: cover;
+  border-radius: 50%;
   margin-top: 0.15rem;
 }
 

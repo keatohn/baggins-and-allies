@@ -205,9 +205,8 @@
 }
 
 .main-menu__recent-faction-icon {
-  width: 0.95em;
-  height: 0.95em;
-  object-fit: contain;
+  width: 1.45em;
+  height: 1.45em;
   flex: 0 0 auto;
 }
 

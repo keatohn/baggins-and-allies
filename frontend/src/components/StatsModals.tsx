@@ -141,7 +141,14 @@ export function GameStatsModal({
                 ▸
               </button>
             )}
-            {fd?.icon && <img className="stats-faction-icon" src={fd.icon} alt="" aria-hidden />}
+            {fd?.icon && (
+              <span
+                className="faction-seal stats-faction-icon"
+                style={fd.color ? { borderColor: fd.color } : undefined}
+              >
+                <img src={fd.icon} alt="" aria-hidden />
+              </span>
+            )}
             <span>{fd?.name ?? fid}</span>
             {rings.length > 0 && (
               <span className="stats-faction-rings">
@@ -446,7 +453,12 @@ export function UnitStatsModal({
                       <td colSpan={8 + extraColumns.length} className="stats-col-unit">
                         <div className="unit-stats-name-cell">
                           {fd?.icon && (fd?.alliance === 'good' || fd?.alliance === 'evil') && (
-                            <img className="unit-stats-faction-icon" src={fd.icon} alt="" aria-hidden />
+                            <span
+                              className="faction-seal unit-stats-faction-icon"
+                              style={fd.color ? { borderColor: fd.color } : undefined}
+                            >
+                              <img src={fd.icon} alt="" aria-hidden />
+                            </span>
                           )}
                           <span>{fd?.name ?? fid}</span>
                         </div>

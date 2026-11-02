@@ -1001,19 +1001,13 @@
 }
 
 .stats-modal .stats-faction-icon {
-  width: 18px;
-  height: 18px;
-  object-fit: contain;
-  flex-shrink: 0;
-  background: transparent;
+  width: 26px;
+  height: 26px;
 }
 
 .unit-stats-modal .unit-stats-faction-icon {
-  width: 22px;
-  height: 22px;
-  object-fit: contain;
-  flex-shrink: 0;
-  background: transparent;
+  width: 30px;
+  height: 30px;
 }
 
 .unit-stats-modal .unit-stats-unit-row td {
@@ -1944,7 +1938,7 @@
   /* Parent cell is tighter on phones (smaller caret/icon/gap) — recompute so the sub
      faction logo still lands under the parent's name, not left of it. */
   .stats-modal .stats-faction-row.stats-subfaction-row .stats-col-faction {
-    padding-left: calc(0.95rem + 0.85em + 15px);
+    padding-left: calc(0.95rem + 0.85em + 22px);
   }
 
   .stats-modal .stats-faction-row .stats-col-faction .stats-faction-cell-inner {
@@ -1952,8 +1946,8 @@
   }
 
   .stats-modal .stats-faction-icon {
-    width: 15px;
-    height: 15px;
+    width: 22px;
+    height: 22px;
   }
 
   .stats-modal .stats-placeholder,
@@ -1967,8 +1961,8 @@
   }
 
   .unit-stats-modal .unit-stats-faction-icon {
-    width: 18px;
-    height: 18px;
+    width: 24px;
+    height: 24px;
   }
 
   .unit-stats-modal .unit-stats-unit-row td {

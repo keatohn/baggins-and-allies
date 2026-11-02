@@ -197,7 +197,14 @@ export function BalanceModal({
                             <tr key={row.id}>
                               <th scope="row">
                                 <span className="balance-faction">
-                                  {fd?.icon ? <img src={fd.icon} alt="" /> : null}
+                                  {fd?.icon ? (
+                                    <span
+                                      className="faction-seal balance-faction-seal"
+                                      style={fd.color ? { borderColor: fd.color } : undefined}
+                                    >
+                                      <img src={fd.icon} alt="" />
+                                    </span>
+                                  ) : null}
                                   <span>{row.display_name}</span>
                                 </span>
                               </th>

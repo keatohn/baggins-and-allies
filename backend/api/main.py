@@ -3189,6 +3189,7 @@ def _build_games_list(
         current_player_username = None
         current_faction_display_name = None
         current_faction_icon = None
+        current_faction_color = None
         faction_stats = None
         fd = faction_defs  # fallback to default setup if get_game_definitions not run or fails
 
@@ -3224,6 +3225,8 @@ def _build_games_list(
             current_faction_display_name = getattr(current_fd, "display_name", None) or current_faction
             icon = getattr(current_fd, "icon", None) or f"{current_faction}.png"
             current_faction_icon = f"/assets/factions/{icon}"
+            color = getattr(current_fd, "color", None)
+            current_faction_color = color if isinstance(color, str) and color else None
         if current_faction and current_faction in ai_faction_ids:
             current_player_username = "Computer"
         elif current_faction and fd and fd.get(current_faction):
@@ -3309,6 +3312,7 @@ def _build_games_list(
             "current_faction": current_faction,
             "current_faction_display_name": current_faction_display_name,
             "current_faction_icon": current_faction_icon,
+            "current_faction_color": current_faction_color,
             "current_player_username": current_player_username,
             "faction_stats": faction_stats,
             "lobby_players": lobby_players,

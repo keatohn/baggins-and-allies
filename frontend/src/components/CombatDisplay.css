@@ -310,10 +310,9 @@
   flex-shrink: 0;
 }
 
-.side-header .faction-icon {
-  width: 32px;
-  height: 32px;
-  object-fit: contain;
+.side-header .side-header-faction {
+  width: 40px;
+  height: 40px;
 }
 
 .side-title {
@@ -1275,9 +1274,9 @@ button.danger:hover {
     font-size: clamp(0.68rem, 2.8vw, 0.8rem);
   }
 
-  .side-header .faction-icon {
-    width: 26px;
-    height: 26px;
+  .side-header .side-header-faction {
+    width: 32px;
+    height: 32px;
   }
 
   .side-role-badge {

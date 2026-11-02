@@ -948,14 +948,17 @@ const CAPITAL_LOGO_PX = 60;
 const PORTRAIT_LOGO_RATIO = 1.02;
 const logoAspectBySrc = new Map<string, number>();
 
-function strongholdMarkerSrc(faction: { icon: string; banner?: string } | undefined): string {
-  return faction?.banner || faction?.icon || '';
+function strongholdMarkerArt(faction: { icon: string; banner?: string } | undefined): { src: string; banner: boolean } {
+  const banner = faction?.banner?.trim() || '';
+  if (banner) return { src: banner, banner: true };
+  return { src: faction?.icon || '', banner: false };
 }
 
-function FactionStrongholdLogo({ src, capital }: { src: string; capital: boolean }) {
+function FactionStrongholdLogo({ src, capital, banner }: { src: string; capital: boolean; banner: boolean }) {
   const [aspect, setAspect] = useState(() => logoAspectBySrc.get(src) ?? 1);
   const base = capital ? CAPITAL_LOGO_PX : STRONGHOLD_LOGO_PX;
-  const portrait = aspect >= PORTRAIT_LOGO_RATIO;
+  // Banners keep their shape. The icon fallback is always a circle.
+  const portrait = banner && aspect >= PORTRAIT_LOGO_RATIO;
   const height = portrait ? Math.round(base * Math.min(aspect, 2.25)) : base;
   return (
     <img
@@ -4642,7 +4645,7 @@ function GameMap({
                                           data-tip={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
                                         >
                                           <FactionStrongholdLogo
-                                            src={strongholdMarkerSrc(factionData[territory.owner!])}
+                                            {...strongholdMarkerArt(factionData[territory.owner!])}
                                             capital={isCapital}
                                           />
                                         </div>
@@ -4739,7 +4742,7 @@ function GameMap({
                                           data-tip={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
                                         >
                                           <FactionStrongholdLogo
-                                            src={strongholdMarkerSrc(factionData[territory.owner!])}
+                                            {...strongholdMarkerArt(factionData[territory.owner!])}
                                             capital={isCapital}
                                           />
                                         </div>
@@ -4822,7 +4825,7 @@ function GameMap({
                                             data-tip={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
                                           >
                                             <FactionStrongholdLogo
-                                              src={strongholdMarkerSrc(factionData[territory.owner!])}
+                                              {...strongholdMarkerArt(factionData[territory.owner!])}
                                               capital={isCapital}
                                             />
                                           </div>
@@ -4938,7 +4941,7 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                                           data-tip={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
                                     >
                                       <FactionStrongholdLogo
-                                        src={strongholdMarkerSrc(factionData[territory.owner!])}
+                                        {...strongholdMarkerArt(factionData[territory.owner!])}
                                         capital={isCapital}
                                       />
                                     </div>
@@ -5072,7 +5075,7 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                                             data-tip={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
                                           >
                                             <FactionStrongholdLogo
-                                              src={strongholdMarkerSrc(factionData[territory.owner!])}
+                                              {...strongholdMarkerArt(factionData[territory.owner!])}
                                               capital={isCapital}
                                             />
                                           </div>
@@ -5157,7 +5160,7 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                                             data-tip={territory.name + (isCapital ? ' (Capital)' : ' (Stronghold)')}
                                           >
                                             <FactionStrongholdLogo
-                                              src={strongholdMarkerSrc(factionData[territory.owner!])}
+                                              {...strongholdMarkerArt(factionData[territory.owner!])}
                                               capital={isCapital}
                                             />
                                           </div>

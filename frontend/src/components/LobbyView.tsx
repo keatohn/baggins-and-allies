@@ -550,7 +550,10 @@ export default function LobbyView({
                         aria-hidden
                       />
                     )}
-                    <div className="lobby-view__faction-logo">
+                    <div
+                      className="lobby-view__faction-logo faction-seal"
+                      style={factionColor ? { borderColor: factionColor } : undefined}
+                    >
                       <img src={`/assets/factions/${icon}`} alt="" />
                     </div>
                   </div>

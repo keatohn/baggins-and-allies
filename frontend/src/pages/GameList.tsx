@@ -355,11 +355,12 @@ export default function GameList() {
                       {(g.current_faction_icon != null || g.current_faction_display_name != null || (g.current_player_username != null && g.current_player_username !== '')) && (
                         <span className="game-list__faction-row">
                           {g.current_faction_icon && (
-                            <img
-                              src={g.current_faction_icon}
-                              alt=""
-                              className="game-list__faction-icon"
-                            />
+                            <span
+                              className="faction-seal game-list__faction-icon"
+                              style={g.current_faction_color ? { borderColor: g.current_faction_color } : undefined}
+                            >
+                              <img src={g.current_faction_icon} alt="" />
+                            </span>
                           )}
                           <span className="game-list__faction-name">{g.current_faction_display_name ?? g.current_faction ?? '—'}</span>
                           {g.current_player_username != null && g.current_player_username !== '' && (

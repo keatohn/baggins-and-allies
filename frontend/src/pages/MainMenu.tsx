@@ -149,7 +149,12 @@ function RecentGameBody({ game }: { game: GameListItem }) {
       ) : showFactionRow ? (
         <span className="main-menu__recent-faction">
           {game.current_faction_icon ? (
-            <img src={game.current_faction_icon} alt="" className="main-menu__recent-faction-icon" />
+            <span
+              className="faction-seal main-menu__recent-faction-icon"
+              style={game.current_faction_color ? { borderColor: game.current_faction_color } : undefined}
+            >
+              <img src={game.current_faction_icon} alt="" />
+            </span>
           ) : null}
           <span className="main-menu__recent-faction-name">{faction}</span>
           {game.current_player_username ? (

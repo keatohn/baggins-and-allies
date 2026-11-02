@@ -197,9 +197,8 @@
 }
 
 .game-list__faction-icon {
-  width: 28px;
-  height: 28px;
-  object-fit: contain;
+  width: 36px;
+  height: 36px;
 }
 
 .game-list__faction-name {

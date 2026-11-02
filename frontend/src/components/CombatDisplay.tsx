@@ -1355,7 +1355,12 @@ function CombatSide({
     >
       <div className="side-header">
         {factionIcon ? (
-          <img src={factionIcon} alt={title} className="faction-icon" />
+          <span
+            className="faction-seal side-header-faction"
+            style={factionColor ? { borderColor: factionColor } : undefined}
+          >
+            <img src={factionIcon} alt="" />
+          </span>
         ) : null}
         <span className="side-title">{title}</span>
         <div className="side-header-trailing">

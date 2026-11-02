@@ -1149,6 +1149,7 @@ export interface GameListItem {
   current_faction?: string | null;
   current_faction_display_name?: string | null;
   current_faction_icon?: string | null;
+  current_faction_color?: string | null;
   current_player_username?: string | null;
   /** Same as in-game header: alliances + neutral_strongholds for the list stronghold bar. */
   faction_stats?: ApiFactionStats | null;

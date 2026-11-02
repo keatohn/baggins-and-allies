@@ -1094,10 +1094,9 @@
   font-weight: 500;
 }
 
-.balance-faction img {
-  width: 1.15rem;
-  height: 1.15rem;
-  object-fit: contain;
+.balance-faction-seal {
+  width: 1.45rem;
+  height: 1.45rem;
 }
 
 .balance-subtitle {

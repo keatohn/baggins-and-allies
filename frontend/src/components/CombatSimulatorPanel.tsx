@@ -1721,7 +1721,12 @@ export default function CombatSimulatorPanel({
         <div className="combat-sim-logos-row">
           <div className="combat-sim-logos-col">
             {attackerFaction && factionData[attackerFaction]?.icon && (
-              <img src={factionData[attackerFaction].icon} alt="" className="combat-sim-faction-logo" />
+              <span
+                className="faction-seal combat-sim-faction-logo"
+                style={factionData[attackerFaction].color ? { borderColor: factionData[attackerFaction].color } : undefined}
+              >
+                <img src={factionData[attackerFaction].icon} alt="" />
+              </span>
             )}
           </div>
           <div className="combat-sim-logos-vs">
@@ -1729,7 +1734,12 @@ export default function CombatSimulatorPanel({
           </div>
           <div className="combat-sim-logos-col">
             {defenderLogoFaction && defenderLogoFaction !== 'neutral' && factionData[defenderLogoFaction]?.icon && (
-              <img src={factionData[defenderLogoFaction].icon} alt="" className="combat-sim-faction-logo" />
+              <span
+                className="faction-seal combat-sim-faction-logo"
+                style={factionData[defenderLogoFaction].color ? { borderColor: factionData[defenderLogoFaction].color } : undefined}
+              >
+                <img src={factionData[defenderLogoFaction].icon} alt="" />
+              </span>
             )}
           </div>
         </div>
