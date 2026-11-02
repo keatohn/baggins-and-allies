@@ -20,7 +20,7 @@
     url('/middle-earth.webp');
   background-position: center, center;
   background-size: auto, contain;
-  opacity: 0.72;
+  opacity: 0.62;
 }
 
 @media (max-width: 767px) and (orientation: portrait) {
@@ -35,6 +35,6 @@
   }
 
   .menu-map-backdrop--home {
-    opacity: 0.62;
+    opacity: 0.52;
   }
 }
