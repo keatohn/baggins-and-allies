@@ -1974,24 +1974,13 @@
 
 .admin-color-picker__swatch {
   width: 2.4rem;
-  height: 2.4rem;
+  height: 2.15rem;
   padding: 0;
   box-sizing: border-box;
-  border: 2px solid var(--ink-faded);
+  border: 1px solid var(--ink-faded);
   border-radius: 6px;
-  background: none;
+  background: #fffef8;
   cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-}
-
-.admin-color-picker__swatch::-webkit-color-swatch-wrapper {
-  padding: 0;
-}
-
-.admin-color-picker__swatch::-webkit-color-swatch {
-  border: none;
-  border-radius: 4px;
 }
 
 .admin-color-picker__hex {

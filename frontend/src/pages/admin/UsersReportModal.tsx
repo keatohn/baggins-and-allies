@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useState } from 'react';
 import { api } from '../../services/api';
 import type { AdminUserItem, ProgressionConfig } from '../../services/api';
+import AvatarColorPicker from '../../components/account/AvatarColorPicker';
 import { NumberField } from './NumberField';
 import { TierXpPanel } from './TierXpPanel';
-import { ColorField } from './ColorField';
 
 /** Last login is stored as naive UTC. Show it in US Eastern (EST or EDT). */
 function formatDateTime(iso: string | null | undefined): string {
@@ -252,11 +252,11 @@ export function UsersReportModal({ onClose }: { onClose: () => void }) {
                 Default avatar color for players who have not picked one. A chosen color stays put.
               </p>
               <div className="users-report__defaults-row">
-                <ColorField
-                  value={defaultColor}
-                  ariaLabel="Default avatar color"
+                <AvatarColorPicker
+                  color={defaultColor}
+                  label="Background color"
                   disabled={defaultsLoading || defaultsSaving}
-                  onApply={(color) => {
+                  onChange={(color) => {
                     setDefaultColor(color);
                     setDefaultColorDirty(true);
                     setDefaultsSaved(false);

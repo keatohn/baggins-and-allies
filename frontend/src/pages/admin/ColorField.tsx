@@ -5,7 +5,7 @@ function parseHexColor(value: unknown): string | null {
   return null;
 }
 
-/** Faction color control: system color swatch plus hex field. The Users default uses this too. */
+/** Swatch plus hex field used for faction colors in the setup editor. */
 export function ColorField({
   value,
   onApply,

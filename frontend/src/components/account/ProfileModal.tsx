@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, setAuthToken } from '../../services/api';
 import type { AuthPlayer, AvatarIconChoice, PlayerStats } from '../../services/api';
+import AvatarColorPicker from './AvatarColorPicker';
 import ModalShell from './ModalShell';
 import { tierRingProps } from './tierRing';
 
@@ -12,21 +13,6 @@ interface ProfileModalProps {
   /** Another player's card: same layout, without avatar, username, or logout controls. */
   readOnly?: boolean;
 }
-
-/**
- * Background colors, row by row.
- * Columns left to right: red, orange, brown, yellow, green, blue, indigo, violet, gray.
- * Rows top to bottom: light to dark.
- */
-const COLOR_ROWS = [
-  ['#f9d3d2', '#fce3cf', '#e3d6c9', '#f7f1d4', '#d6f5da', '#d3e3f8', '#e2d6f5', '#f2d4f7', '#f0f0f0'],
-  ['#f29592', '#f8bb8c', '#d0b295', '#f4e390', '#9ce8a6', '#96bcee', '#ba9ce8', '#e098eb', '#c7c7c7'],
-  ['#ea5853', '#f39349', '#c08f5d', '#eed34f', '#62da72', '#5895e4', '#9262da', '#ce5ce0', '#9e9e9e'],
-  ['#da211b', '#e66c0f', '#9f6b38', '#dfbd16', '#2fc643', '#226fd3', '#6b2fc6', '#b727ce', '#757575'],
-  ['#9a1813', '#a34d0a', '#6d4c2c', '#9e8610', '#218c2f', '#184e95', '#4c218c', '#821c92', '#4c4c4c'],
-  ['#5b0e0b', '#602d06', '#3e2e1d', '#5d4f09', '#13531c', '#0e2e58', '#2d1353', '#4c1056', '#242424'],
-];
-const COLOR_PALETTE = COLOR_ROWS.flat();
 
 function formatPct(pct: number | null | undefined): string {
   if (pct == null) return '—';
@@ -73,7 +59,6 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
   const [avatarImage, setAvatarImage] = useState(player.avatar?.image ?? 'hobbit.png');
   const [avatarColor, setAvatarColor] = useState(player.avatar?.color ?? '#2d5a27');
   const [editingAvatar, setEditingAvatar] = useState(false);
-  const [colorOpen, setColorOpen] = useState(false);
   const [savingAvatar, setSavingAvatar] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const [avatarSuccess, setAvatarSuccess] = useState(false);
@@ -135,7 +120,6 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
 
   const closeAvatarEdit = () => {
     setEditingAvatar(false);
-    setColorOpen(false);
     setAvatarImage(player.avatar?.image ?? 'hobbit.png');
     setAvatarColor(player.avatar?.color ?? '#2d5a27');
     setAvatarError(null);
@@ -150,7 +134,6 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
       onPlayerChange?.(updated);
       setAvatarSuccess(true);
       setEditingAvatar(false);
-      setColorOpen(false);
     } catch (e) {
       setAvatarError(e instanceof Error ? e.message : 'Could not save avatar');
     } finally {
@@ -271,42 +254,13 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
                 );
               })}
             </div>
-            <div className="profile-color">
-              <button
-                type="button"
-                className="profile-color-trigger"
-                style={{ ['--swatch' as string]: avatarColor }}
-                aria-expanded={colorOpen}
-                aria-label="Choose background color"
-                onClick={() => setColorOpen((open) => !open)}
-              >
-                <span className="profile-color-trigger__chip" aria-hidden />
-                Background color
-              </button>
-              {colorOpen && (
-                <div className="profile-color-grid" role="listbox" aria-label="Background colors">
-                  {COLOR_PALETTE.map((color) => {
-                    const selected = color.toLowerCase() === avatarColor.toLowerCase();
-                    return (
-                      <button
-                        key={color}
-                        type="button"
-                        role="option"
-                        aria-selected={selected}
-                        aria-label={color}
-                        className={`profile-color-swatch${selected ? ' profile-color-swatch--selected' : ''}`}
-                        style={{ ['--swatch' as string]: color }}
-                        onClick={() => {
-                          setAvatarColor(color);
-                          setAvatarSuccess(false);
-                          setColorOpen(false);
-                        }}
-                      />
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            <AvatarColorPicker
+              color={avatarColor}
+              onChange={(color) => {
+                setAvatarColor(color);
+                setAvatarSuccess(false);
+              }}
+            />
             {avatarDirty && (
               <div className="profile-username-actions">
                 <button type="button" className="account-btn" onClick={() => void saveAvatar()} disabled={savingAvatar}>
