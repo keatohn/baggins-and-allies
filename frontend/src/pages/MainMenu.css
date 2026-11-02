@@ -176,7 +176,7 @@
 
 .main-menu__recent-name {
   width: 100%;
-  font-size: clamp(0.8rem, 6.2cqi, 1.25rem);
+  font-size: clamp(0.68rem, 5.2cqi, 1.05rem);
   font-weight: 700;
   line-height: 1.05;
   color: var(--ink);
@@ -195,7 +195,7 @@
   max-width: 100%;
   min-width: 0;
   font-weight: 700;
-  font-size: clamp(0.72rem, 5.2cqi, 1.05rem);
+  font-size: clamp(0.6rem, 4.4cqi, 0.88rem);
   line-height: 1.05;
   color: var(--ink);
   white-space: nowrap;
@@ -221,7 +221,7 @@
 .main-menu__recent-created {
   width: 100%;
   font-weight: 600;
-  font-size: clamp(0.52rem, 3.1cqi, 0.68rem);
+  font-size: clamp(0.46rem, 2.6cqi, 0.58rem);
   line-height: 1.05;
   color: var(--ink-faded);
   text-align: center;
