@@ -429,13 +429,23 @@ def delete_setup(db: Session, setup_id: str) -> None:
     db.commit()
 
 
+# Shipped profile/unit art. Not every file is referenced by a setup.
+_UNITS_ICON_DIR = Path(__file__).resolve().parents[1] / "frontend" / "public" / "assets" / "units"
+
+
+def _unit_icon_files() -> set[str]:
+    if not _UNITS_ICON_DIR.is_dir():
+        return set()
+    return {p.name for p in _UNITS_ICON_DIR.iterdir() if p.is_file() and p.suffix.lower() == ".png"}
+
+
 def list_all_unit_icons(db: Session | None) -> list[str]:
-    """Distinct unit icon filenames across every setup (db rows when present, else files).
+    """Every unit PNG in the units folder, plus any icon a setup names that is not a file yet.
 
     Falls back to ``{unit_id}.png`` when a unit entry has no icon. Used by the
     profile avatar picker, which is not tied to any one setup.
     """
-    icons: set[str] = set()
+    icons: set[str] = set(_unit_icon_files())
 
     def _add_units(units: Any) -> None:
         if not isinstance(units, dict):

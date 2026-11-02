@@ -193,7 +193,5 @@ def test_avatar_icons_endpoint_lists_hobbit(make_client, players):
     assert r.status_code == 200
     icons = r.json()["icons"]
     assert isinstance(icons, list)
-    names = [row["name"] for row in icons]
-    assert "hobbit.png" in names
-    assert names == sorted(names)
-    assert all(row["new"] is False for row in icons)
+    # Unassigned icons fall back to the highest tier, so a new player does not receive them.
+    assert icons == []

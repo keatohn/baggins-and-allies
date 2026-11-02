@@ -384,6 +384,21 @@
   overflow: auto;
 }
 
+.admin-modal-overlay--icons {
+  z-index: 1100;
+}
+
+.admin-modal--icons {
+  width: min(100%, 32rem);
+  max-height: min(90vh, 44rem);
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-modal--icons .admin-icon-unlocks {
+  flex: 1 1 auto;
+}
+
 .admin-modal--games {
   width: min(100%, 76rem);
   height: min(92vh, 54rem);

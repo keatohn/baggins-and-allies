@@ -1,4 +1,5 @@
-import { useState, type ChangeEvent, type FocusEvent } from 'react';
+import { useMemo, useState, type ChangeEvent, type FocusEvent } from 'react';
+import UNIT_ICON_PNG from 'virtual:unit-icon-png';
 import type { ProgressionConfig, ProgressionFrame, ProgressionRules, ProgressionTier, TierGlow } from '../../services/api';
 import { NumberField } from './NumberField';
 
@@ -98,11 +99,9 @@ function DecimalField({
 export function TierXpPanel({
   config,
   onChange,
-  unitIcons,
 }: {
   config: ProgressionConfig;
   onChange: (next: ProgressionConfig) => void;
-  unitIcons: string[] | null;
 }) {
   const setTier = (id: string, patch: Partial<ProgressionTier>) => {
     onChange({
@@ -127,15 +126,20 @@ export function TierXpPanel({
   };
   const ranked = rankedTiers(config.tiers);
   const rankById = new Map(ranked.map((row) => [row.tier.id, row.rank]));
-  const lowestId = ranked[0]?.tier.id ?? '';
+  const highestId = ranked[ranked.length - 1]?.tier.id ?? '';
   const unlocks = config.icon_min_tier ?? {};
+  const [iconsOpen, setIconsOpen] = useState(false);
   const [iconQuery, setIconQuery] = useState('');
   const iconQueryNorm = iconQuery.trim().toLowerCase();
-  const visibleIcons = (unitIcons ?? []).filter((name) => name.toLowerCase().includes(iconQueryNorm));
+  const unitIcons = useMemo(
+    () => [...UNIT_ICON_PNG].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
+    [],
+  );
+  const visibleIcons = unitIcons.filter((name) => name.toLowerCase().includes(iconQueryNorm));
 
   const setIconTier = (name: string, tierId: string) => {
     const next = { ...unlocks };
-    if (!tierId || tierId === lowestId) delete next[name];
+    if (!tierId || tierId === highestId) delete next[name];
     else next[name] = tierId;
     onChange({ ...config, icon_min_tier: next });
   };
@@ -339,81 +343,108 @@ export function TierXpPanel({
       <section>
         <h3 className="admin-form__subtitle">Profile icons</h3>
         <p className="admin-form__micro">
-          Icons are grouped by the lowest tier that can use them. Tier 1 is at the top, and each step down
-          is a higher tier. The arrows move an icon into the group above or below. Players only see icons
-          at or below their own tier. Icons that unlock at the player’s current tier, other than tier 1,
-          get a mark in the picker.
+          Every image in the units folder can be a profile icon. One with no tier set yet starts at the
+          highest tier. Players only see icons at or below their own tier. Icons that unlock at the
+          player’s current tier, other than tier 1, get a mark in the picker.
         </p>
-        <label className="admin-form__label">
-          Find an icon
-          <input
-            className="admin-form__input"
-            value={iconQuery}
-            placeholder="archer, hobbit…"
-            onChange={(e) => setIconQuery(e.target.value)}
-          />
-        </label>
-        {unitIcons == null ? <p className="admin-form__micro">Loading icons…</p> : null}
-        {unitIcons != null && unitIcons.length === 0 ? <p className="admin-form__micro">No unit icons found.</p> : null}
-        {unitIcons != null && unitIcons.length > 0 && visibleIcons.length === 0 ? (
-          <p className="admin-form__micro">No icons match.</p>
-        ) : null}
-        {unitIcons != null && unitIcons.length > 0 ? <div className="admin-icon-unlocks">
-          {ranked.map(({ tier, rank }, tierIndex) => {
-            const icons = visibleIcons
-              .filter((name) => {
-                const assigned = unlocks[name] && rankById.has(unlocks[name]) ? unlocks[name] : lowestId;
-                return assigned === tier.id;
-              })
-              .sort((a, b) => a.localeCompare(b));
-            if (iconQueryNorm && icons.length === 0) return null;
-            return (
-              <section key={tier.id} className="admin-icon-group" aria-label={`Tier ${rank}`}>
-                <h4 className="admin-icon-group__title">
-                  Tier {rank}
-                  {tier.name ? ` · ${tier.name}` : ''}
-                </h4>
-                {icons.length === 0 ? <p className="admin-form__micro">No icons</p> : null}
-                {icons.map((name) => {
-                  const label = name.replace(/\.png$/i, '').replace(/_/g, ' ');
+        <button type="button" className="admin-page__btn" onClick={() => setIconsOpen(true)}>
+          Unit icons
+        </button>
+      </section>
+      {iconsOpen ? (
+        <div className="admin-modal-overlay admin-modal-overlay--icons" role="presentation" onClick={() => setIconsOpen(false)}>
+          <div
+            className="admin-modal admin-modal--icons"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-unit-icons-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="games-report__header">
+              <h2 id="admin-unit-icons-title" className="admin-modal__title">
+                Unit icons
+              </h2>
+              <button type="button" className="admin-page__btn" onClick={() => setIconsOpen(false)}>
+                Close
+              </button>
+            </div>
+            <p className="admin-form__micro">
+              Grouped by the lowest tier that can use them. Tier 1 is at the top, and each step down is a higher
+              tier. The arrows move an icon into the group above or below.
+            </p>
+            <label className="admin-form__label">
+              Find an icon
+              <input
+                className="admin-form__input"
+                value={iconQuery}
+                placeholder="archer, hobbit…"
+                onChange={(e) => setIconQuery(e.target.value)}
+              />
+            </label>
+            {unitIcons.length === 0 ? <p className="admin-form__micro">No unit icons found.</p> : null}
+            {unitIcons.length > 0 && visibleIcons.length === 0 ? (
+              <p className="admin-form__micro">No icons match.</p>
+            ) : null}
+            {unitIcons.length > 0 ? (
+              <div className="admin-icon-unlocks">
+                {ranked.map(({ tier, rank }, tierIndex) => {
+                  const icons = visibleIcons
+                    .filter((name) => {
+                      const assigned = unlocks[name] && rankById.has(unlocks[name]) ? unlocks[name] : highestId;
+                      return assigned === tier.id;
+                    })
+                    .sort((a, b) => a.localeCompare(b));
+                  if (iconQueryNorm && icons.length === 0) return null;
                   return (
-                    <div key={name} className="admin-icon-unlock">
-                      <img src={`/assets/units/${name}`} alt="" />
-                      <span>{label}</span>
-                      <span className="admin-icon-unlock__arrows">
-                        <button
-                          type="button"
-                          className="admin-icon-unlock__arrow"
-                          aria-label={`Move ${label} up`}
-                          disabled={tierIndex === 0}
-                          onClick={() => {
-                            const above = ranked[tierIndex - 1];
-                            if (above) setIconTier(name, above.tier.id);
-                          }}
-                        >
-                          ↑
-                        </button>
-                        <button
-                          type="button"
-                          className="admin-icon-unlock__arrow"
-                          aria-label={`Move ${label} down`}
-                          disabled={tierIndex === ranked.length - 1}
-                          onClick={() => {
-                            const below = ranked[tierIndex + 1];
-                            if (below) setIconTier(name, below.tier.id);
-                          }}
-                        >
-                          ↓
-                        </button>
-                      </span>
-                    </div>
+                    <section key={tier.id} className="admin-icon-group" aria-label={`Tier ${rank}`}>
+                      <h4 className="admin-icon-group__title">
+                        Tier {rank}
+                        {tier.name ? ` · ${tier.name}` : ''}
+                      </h4>
+                      {icons.length === 0 ? <p className="admin-form__micro">No icons</p> : null}
+                      {icons.map((name) => {
+                        const label = name.replace(/\.png$/i, '').replace(/_/g, ' ');
+                        return (
+                          <div key={name} className="admin-icon-unlock">
+                            <img src={`/assets/units/${name}`} alt="" />
+                            <span>{label}</span>
+                            <span className="admin-icon-unlock__arrows">
+                              <button
+                                type="button"
+                                className="admin-icon-unlock__arrow"
+                                aria-label={`Move ${label} up`}
+                                disabled={tierIndex === 0}
+                                onClick={() => {
+                                  const above = ranked[tierIndex - 1];
+                                  if (above) setIconTier(name, above.tier.id);
+                                }}
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                className="admin-icon-unlock__arrow"
+                                aria-label={`Move ${label} down`}
+                                disabled={tierIndex === ranked.length - 1}
+                                onClick={() => {
+                                  const below = ranked[tierIndex + 1];
+                                  if (below) setIconTier(name, below.tier.id);
+                                }}
+                              >
+                                ↓
+                              </button>
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </section>
                   );
                 })}
-              </section>
-            );
-          })}
-        </div> : null}
-      </section>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       <section>
         <h3 className="admin-form__subtitle">XP rules</h3>

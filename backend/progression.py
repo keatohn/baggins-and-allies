@@ -323,8 +323,8 @@ def _parse_tiers(raw: Any, frame_ids: set[str]) -> list[dict[str, Any]]:
     return out
 
 
-def _parse_icon_min_tier(raw: Any, tier_ids: set[str], lowest_id: str) -> dict[str, str]:
-    """Filename -> tier id. Missing icons use the lowest tier, so those are not stored."""
+def _parse_icon_min_tier(raw: Any, tier_ids: set[str], highest_id: str) -> dict[str, str]:
+    """Filename -> tier id. Missing icons use the highest tier, so that tier is not stored."""
     from backend.avatar import IMAGE_RE
 
     if raw is None:
@@ -341,7 +341,7 @@ def _parse_icon_min_tier(raw: Any, tier_ids: set[str], lowest_id: str) -> dict[s
         if not isinstance(value, str) or value.strip() not in tier_ids:
             raise ProgressionError(f"Profile icon '{name}' uses an unknown tier.")
         tier_id = value.strip()
-        if tier_id == lowest_id:
+        if tier_id == highest_id:
             continue
         out[name] = tier_id
     return out
@@ -360,7 +360,7 @@ def normalize_progression(raw: Any) -> dict[str, Any]:
     icon_min_tier = _parse_icon_min_tier(
         raw.get("icon_min_tier"),
         {t["id"] for t in tiers},
-        tiers[0]["id"],
+        tiers[-1]["id"],
     )
     return {
         "version": PROGRESSION_VERSION,
@@ -501,7 +501,8 @@ def next_tier_for_xp(xp: int, tiers: list[dict[str, Any]]) -> dict[str, Any] | N
 def profile_avatar_choices(player: Any, db: Session | None) -> list[dict[str, Any]]:
     """Unit icons this player may use, with a flag for ones that unlock at their current tier.
 
-    The flag stays off for the lowest tier, since those icons are available from the start.
+    An icon with no saved tier uses the highest tier. The flag stays off for the lowest tier,
+    since those icons are available from the start.
     """
     from backend.setup_data import list_all_unit_icons
 
@@ -510,15 +511,16 @@ def profile_avatar_choices(player: Any, db: Session | None) -> list[dict[str, An
     if not tiers:
         return []
     ranks = {str(t["id"]): int(t["rank"]) for t in tiers}
-    lowest_id = str(tiers[0]["id"])
     lowest_rank = int(tiers[0]["rank"])
+    highest_id = str(tiers[-1]["id"])
+    highest_rank = int(tiers[-1]["rank"])
     current = tier_for_xp(int(getattr(player, "xp", 0) or 0), tiers)
     player_rank = int(current["rank"]) if current else 0
     unlocks = cfg.get("icon_min_tier") or {}
     choices: list[dict[str, Any]] = []
     for name in list_all_unit_icons(db):
-        min_id = str(unlocks.get(name) or lowest_id)
-        min_rank = ranks.get(min_id, lowest_rank)
+        min_id = str(unlocks.get(name) or highest_id)
+        min_rank = ranks.get(min_id, highest_rank)
         if min_rank > player_rank:
             continue
         choices.append({

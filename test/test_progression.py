@@ -451,42 +451,44 @@ def test_avatar_icons_follow_tier(db_session, players, make_client):
     client = make_client(user)
     listed = client.get("/profile/avatar-icons")
     assert listed.status_code == 200
-    names = [row["name"] for row in listed.json()["icons"]]
-    assert "hobbit.png" in names
-    assert all(row["new"] is False for row in listed.json()["icons"])
-    locked = next(name for name in names if name != "hobbit.png")
+    # No saved tier means the highest tier, so a new player sees none of them.
+    assert listed.json()["icons"] == []
 
     cfg = default_progression()
-    cfg["icon_min_tier"] = {"hobbit.png": "hobbit", locked: "ranger"}
+    cfg["icon_min_tier"] = {"hobbit.png": "hobbit", "gondor_soldier.png": "ranger"}
     saved = make_client(admin).put("/admin/progression", json=cfg)
     assert saved.status_code == 200, saved.text
     stored = saved.json()["progression"]["icon_min_tier"]
-    assert stored[locked] == "ranger"
-    assert "hobbit.png" not in stored
+    assert stored["hobbit.png"] == "hobbit"
+    assert stored["gondor_soldier.png"] == "ranger"
+    assert "eagle.png" not in stored
     assert saved.json()["progression"]["tiers"][2]["rank"] == 3
 
     client = make_client(user)
     hidden = client.get("/profile/avatar-icons")
-    assert locked not in [row["name"] for row in hidden.json()["icons"]]
-    denied = client.patch("/auth/me", json={"avatar": {"image": locked}})
+    hidden_names = [row["name"] for row in hidden.json()["icons"]]
+    assert "hobbit.png" in hidden_names
+    assert "gondor_soldier.png" not in hidden_names
+    assert "eagle.png" not in hidden_names
+    denied = client.patch("/auth/me", json={"avatar": {"image": "gondor_soldier.png"}})
     assert denied.status_code == 400
 
     user.xp = 750
     db_session.commit()
     unlocked = client.get("/profile/avatar-icons")
-    row = next(item for item in unlocked.json()["icons"] if item["name"] == locked)
+    row = next(item for item in unlocked.json()["icons"] if item["name"] == "gondor_soldier.png")
     assert row["new"] is True
-    assert client.patch("/auth/me", json={"avatar": {"image": locked}}).status_code == 200
+    assert client.patch("/auth/me", json={"avatar": {"image": "gondor_soldier.png"}}).status_code == 200
 
     user.xp = 1500
     db_session.commit()
     later = client.get("/profile/avatar-icons")
-    row = next(item for item in later.json()["icons"] if item["name"] == locked)
+    row = next(item for item in later.json()["icons"] if item["name"] == "gondor_soldier.png")
     assert row["new"] is False
 
     user.xp = 0
     db_session.commit()
-    kept = client.patch("/auth/me", json={"avatar": {"image": locked, "color": "#445566"}})
+    kept = client.patch("/auth/me", json={"avatar": {"image": "gondor_soldier.png", "color": "#445566"}})
     assert kept.status_code == 200, kept.text
 
     bad = default_progression()

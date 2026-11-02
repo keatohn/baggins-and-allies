@@ -43,9 +43,6 @@ export function UsersReportModal({ onClose }: { onClose: () => void }) {
   const [backfillArmed, setBackfillArmed] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
   const [backfillNote, setBackfillNote] = useState<string | null>(null);
-  const [unitIcons, setUnitIcons] = useState<string[] | null>(null);
-  const [unitIconsError, setUnitIconsError] = useState<string | null>(null);
-
   const [defaultColor, setDefaultColor] = useState<string>('#2d5a27');
   const [defaultColorDirty, setDefaultColorDirty] = useState(false);
   const [defaultsLoading, setDefaultsLoading] = useState(true);
@@ -99,24 +96,6 @@ export function UsersReportModal({ onClose }: { onClose: () => void }) {
       cancelled = true;
     };
   }, [tab, progression]);
-
-  useEffect(() => {
-    if (tab !== 'tiers') return;
-    let cancelled = false;
-    api
-      .adminListUnitIcons()
-      .then((r) => {
-        if (!cancelled) setUnitIcons(r.icons ?? []);
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return;
-        setUnitIcons([]);
-        setUnitIconsError(e instanceof Error ? e.message : 'Could not load unit icons');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [tab]);
 
   const dirty = progression != null && JSON.stringify(progression) !== savedProgression;
 
@@ -405,11 +384,10 @@ export function UsersReportModal({ onClose }: { onClose: () => void }) {
               </button>
             </div>
             {progressionError ? <p className="admin-page__error games-report__error">{progressionError}</p> : null}
-            {unitIconsError ? <p className="admin-page__error games-report__error">{unitIconsError}</p> : null}
             {backfillNote ? <p className="admin-form__micro">{backfillNote}</p> : null}
             <div className="games-report__table-scroll">
               {progression ? (
-                <TierXpPanel config={progression} onChange={setProgression} unitIcons={unitIcons} />
+                <TierXpPanel config={progression} onChange={setProgression} />
               ) : !progressionError ? (
                 <p className="admin-form__micro">Loading…</p>
               ) : null}
