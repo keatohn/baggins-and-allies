@@ -1975,11 +1975,11 @@
 .admin-color-picker__swatch {
   width: 2.4rem;
   height: 2.15rem;
-  padding: 0;
+  padding: 0.12rem;
   box-sizing: border-box;
   border: 1px solid var(--ink-faded);
   border-radius: 6px;
-  background: #fffef8;
+  background: transparent;
   cursor: pointer;
 }
 

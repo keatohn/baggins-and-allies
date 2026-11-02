@@ -5,11 +5,11 @@ function parseHexColor(value: unknown): string | null {
   return null;
 }
 
-/** Swatch plus hex field used for faction colors in the setup editor. */
+/** Faction color. The swatch opens the system color panel: wheel, then a lightness slider. */
 export function ColorField({
   value,
   onApply,
-  ariaLabel = 'Faction color palette',
+  ariaLabel = 'Faction color',
   disabled = false,
 }: {
   value: unknown;
