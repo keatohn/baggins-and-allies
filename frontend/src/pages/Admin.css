@@ -2844,6 +2844,10 @@
   min-width: 0;
 }
 
+.admin-tier-card__color {
+  flex: 1 1 100%;
+}
+
 .admin-tier-card__rank {
   margin: 0 0 0.35rem;
   font-family: 'Cinzel', serif;

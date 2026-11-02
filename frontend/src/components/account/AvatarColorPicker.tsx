@@ -21,7 +21,7 @@ export default function AvatarColorPicker({
         className="profile-color-trigger"
         style={{ ['--swatch' as string]: color }}
         aria-expanded={open}
-        aria-label="Choose background color"
+        aria-label={`Choose ${label.toLowerCase()}`}
         disabled={disabled}
         onClick={() => setOpen((isOpen) => !isOpen)}
       >
@@ -29,7 +29,7 @@ export default function AvatarColorPicker({
         {label}
       </button>
       {open && (
-        <div className="profile-color-grid" role="listbox" aria-label="Background colors">
+        <div className="profile-color-grid" role="listbox" aria-label={label}>
           {COLOR_PALETTE.map((swatch) => {
             const selected = swatch.toLowerCase() === color.toLowerCase();
             return (

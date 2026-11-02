@@ -1,6 +1,7 @@
 import { useMemo, useState, type ChangeEvent, type FocusEvent } from 'react';
 import UNIT_ICON_PNG from 'virtual:unit-icon-png';
 import type { ProgressionConfig, ProgressionFrame, ProgressionRules, ProgressionTier, TierGlow } from '../../services/api';
+import AvatarColorPicker from '../../components/account/AvatarColorPicker';
 import { NumberField } from './NumberField';
 
 const GLOWS: { id: TierGlow; label: string }[] = [
@@ -194,16 +195,13 @@ export function TierXpPanel({
                   onChange={(e) => setTier(tier.id, { min_xp: Number(e.target.value) || 0 })}
                 />
               </label>
-              <label className="admin-form__label">
-                Badge
-                <input
-                  type="color"
-                  className="admin-signal-color"
-                  aria-label={`Badge color for ${tier.name || 'tier'}`}
-                  value={hexOr(tier.color, '#8c6a3f')}
-                  onChange={(e) => setTier(tier.id, { color: e.target.value })}
+              <div className="admin-tier-card__color">
+                <AvatarColorPicker
+                  label="Badge"
+                  color={hexOr(tier.color, '#8c6a3f')}
+                  onChange={(color) => setTier(tier.id, { color })}
                 />
-              </label>
+              </div>
             </div>
             <div className="admin-tier-card__line">
               <label className="admin-form__label">
@@ -222,16 +220,6 @@ export function TierXpPanel({
                 </select>
               </label>
               <label className="admin-form__label">
-                Ring
-                <input
-                  type="color"
-                  className="admin-signal-color"
-                  aria-label={`Ring color for ${tier.name || 'tier'}`}
-                  value={hexOr(tier.visual.ring_color, '#8c6a3f')}
-                  onChange={(e) => setVisual(tier.id, { ring_color: e.target.value })}
-                />
-              </label>
-              <label className="admin-form__label">
                 Glow
                 <select
                   className="admin-form__input"
@@ -245,6 +233,13 @@ export function TierXpPanel({
                   ))}
                 </select>
               </label>
+              <div className="admin-tier-card__color">
+                <AvatarColorPicker
+                  label="Ring"
+                  color={hexOr(tier.visual.ring_color, '#8c6a3f')}
+                  onChange={(color) => setVisual(tier.id, { ring_color: color })}
+                />
+              </div>
             </div>
             <label className="admin-form__label">
               Description
