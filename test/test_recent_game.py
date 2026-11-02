@@ -183,3 +183,50 @@ def test_recent_ignores_games_the_player_cannot_load(client, db_session, players
     mine.status = "finished"
     db_session.commit()
     assert client.get("/games/recent").json()["game"] is None
+
+
+def test_recent_skips_a_deleted_game_for_the_newest_that_remains(client, db_session, players):
+    user, _other = players
+    older = _add_game(
+        db_session,
+        name="Older",
+        status="active",
+        players_list=[{"player_id": user.id, "faction_id": "gondor"}],
+        created_by=user.id,
+    )
+    newer = _add_game(
+        db_session,
+        name="Newer",
+        status="active",
+        players_list=[{"player_id": user.id, "faction_id": "rohan"}],
+        created_by=user.id,
+    )
+    assert client.get(f"/games/{newer.id}").status_code == 200
+    db_session.refresh(user)
+    assert user.last_opened_game_id == newer.id
+
+    deleted = client.delete(f"/games/{newer.id}")
+    assert deleted.status_code == 200
+    body = client.get("/games/recent").json()["game"]
+    assert body["id"] == older.id
+    assert body["name"] == "Older"
+
+
+def test_recent_keeps_last_opened_when_a_newer_game_exists(client, db_session, players):
+    user, _other = players
+    opened = _add_game(
+        db_session,
+        name="Opened",
+        status="active",
+        players_list=[{"player_id": user.id, "faction_id": "gondor"}],
+        created_by=user.id,
+    )
+    _add_game(
+        db_session,
+        name="Newer Untouched",
+        status="active",
+        players_list=[{"player_id": user.id, "faction_id": "rohan"}],
+        created_by=user.id,
+    )
+    assert client.get(f"/games/{opened.id}").status_code == 200
+    assert client.get("/games/recent").json()["game"]["name"] == "Opened"

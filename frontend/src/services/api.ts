@@ -705,6 +705,7 @@ export interface FriendUser {
   /** none | friend | pending_out (viewer sent) | pending_in (viewer must act). */
   relation?: 'none' | 'friend' | 'pending_out' | 'pending_in';
   avatar?: PlayerAvatarSettings;
+  tier?: ProgressionTier | null;
 }
 
 /** A pending friend request row (incoming = act on it; outgoing = awaiting reply). */
@@ -712,6 +713,7 @@ export interface FriendRequestItem {
   id: string;
   username: string;
   avatar?: PlayerAvatarSettings;
+  tier?: ProgressionTier | null;
   created_at?: string | null;
 }
 
@@ -1499,7 +1501,7 @@ export const api = {
     if (status) qs.set('status', status);
     return fetchJson<{ games: GameListItem[] }>(`/games?${qs.toString()}`, { cache: 'no-store' });
   },
-  /** Most recently opened game still on this player's load list, or null. */
+  /** Last opened game if it still exists; otherwise the newest game still on the load list. */
   recentGame: () =>
     fetchJson<{ game: GameListItem | null }>(`/games/recent?_=${Date.now()}`, { cache: 'no-store' }),
   /** Public (any logged-in user): career stats for a player. */

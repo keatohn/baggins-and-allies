@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../services/api';
-import type { AuthPlayer, FriendRequestItem, FriendUser, GameInvitation, PlayerAvatarSettings, PlayerProfileCard } from '../../services/api';
+import type { AuthPlayer, FriendRequestItem, FriendUser, GameInvitation, PlayerAvatarSettings, PlayerProfileCard, ProgressionTier } from '../../services/api';
 import { useMenuScroll } from '../MenuScrollContext';
 import ModalShell from './ModalShell';
 import ProfileModal from './ProfileModal';
+import { tierRingProps } from './tierRing';
 
 const FALLBACK_AVATAR: PlayerAvatarSettings = { image: 'hobbit.png', color: '#2d5a27' };
 
@@ -24,15 +25,22 @@ function profileToPlayer(card: PlayerProfileCard): AuthPlayer {
 function PersonIdentity({
   username,
   avatar,
+  tier,
   onOpen,
 }: {
   username: string;
   avatar?: PlayerAvatarSettings;
+  tier?: ProgressionTier | null;
   onOpen?: () => void;
 }) {
   const face = avatar ?? FALLBACK_AVATAR;
+  const ring = tierRingProps(tier);
   const picture = (
-    <span className="friends-list__avatar" style={{ backgroundColor: face.color }} aria-hidden>
+    <span
+      className={`friends-list__avatar${ring.className}`}
+      style={{ backgroundColor: face.color, ...ring.style }}
+      aria-hidden
+    >
       <img src={`/assets/units/${face.image}`} alt="" />
     </span>
   );
@@ -289,7 +297,7 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
                 ) : (
                   othersPlayedWith.map((u) => (
                     <li key={u.id} className="friends-list__row">
-                      <PersonIdentity username={u.username} avatar={u.avatar} />
+                      <PersonIdentity username={u.username} avatar={u.avatar} tier={u.tier} />
                       <button
                         type="button"
                         className="account-btn account-btn--small"
@@ -315,6 +323,7 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
                   <PersonIdentity
                     username={u.username}
                     avatar={u.avatar}
+                    tier={u.tier}
                     onOpen={u.relation === 'friend' ? () => openFriend(u) : undefined}
                   />
                   {u.relation === 'friend' ? (
@@ -350,7 +359,7 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
           <ul className="friends-list" aria-label="Friends list">
             {friends.map((f) => (
               <li key={f.id} className="friends-list__row">
-                <PersonIdentity username={f.username} avatar={f.avatar} onOpen={() => openFriend(f)} />
+                <PersonIdentity username={f.username} avatar={f.avatar} tier={f.tier} onOpen={() => openFriend(f)} />
                 <span className="friends-list__tag">Friend</span>
               </li>
             ))}
@@ -369,7 +378,7 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
           <ul className="friends-list" aria-label="Incoming requests">
             {incoming.map((r) => (
               <li key={r.id} className="friends-list__row">
-                <PersonIdentity username={r.username} avatar={r.avatar} />
+                <PersonIdentity username={r.username} avatar={r.avatar} tier={r.tier} />
                 <span className="friends-list__actions">
                   <button
                     type="button"
@@ -396,7 +405,7 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
           <ul className="friends-list" aria-label="Outgoing requests">
             {outgoing.map((r) => (
               <li key={r.id} className="friends-list__row">
-                <PersonIdentity username={r.username} avatar={r.avatar} />
+                <PersonIdentity username={r.username} avatar={r.avatar} tier={r.tier} />
                 <span className="friends-list__tag">Pending</span>
               </li>
             ))}

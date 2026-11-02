@@ -103,6 +103,7 @@ def test_search_prefix_and_self_excluded(make_client, players):
     assert [u["username"] for u in users] == ["buddyone"]
     assert users[0]["avatar"]["image"] == "hobbit.png"
     assert users[0]["avatar"]["color"].startswith("#")
+    assert users[0]["tier"]["visual"]["ring_color"] == "#8c6a3f"
     assert users[0]["id"] == buddy.id
     assert users[0]["relation"] == "none"
 
@@ -193,6 +194,7 @@ def test_request_lifecycle_accept(make_client, players):
 
     r = buddy_client.get("/friends/requests")
     assert [x["username"] for x in r.json()["incoming"]] == ["normaluser"]
+    assert r.json()["incoming"][0]["tier"]["visual"]["ring_color"] == "#8c6a3f"
     assert r.json()["outgoing"] == []
 
     # Search shows relation for both sides (make_client switches the shared current player)

@@ -81,18 +81,21 @@
 
 /* Tier ring. Color comes from --tier-ring, set by the player's current tier. */
 .account-menu__btn--avatar.tier-ring,
-.profile-avatar-preview.tier-ring {
+.profile-avatar-preview.tier-ring,
+.friends-list__avatar.tier-ring {
   border-color: var(--tier-ring);
   border-width: 3px;
 }
 
 .account-menu__btn--avatar.tier-ring--soft,
-.profile-avatar-preview.tier-ring--soft {
+.profile-avatar-preview.tier-ring--soft,
+.friends-list__avatar.tier-ring--soft {
   box-shadow: 0 0 8px var(--tier-ring);
 }
 
 .account-menu__btn--avatar.tier-ring--pulse,
-.profile-avatar-preview.tier-ring--pulse {
+.profile-avatar-preview.tier-ring--pulse,
+.friends-list__avatar.tier-ring--pulse {
   animation: tier-ring-pulse 2s ease-in-out infinite;
 }
 
@@ -116,7 +119,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .account-menu__btn--avatar.tier-ring--pulse,
-  .profile-avatar-preview.tier-ring--pulse {
+  .profile-avatar-preview.tier-ring--pulse,
+  .friends-list__avatar.tier-ring--pulse {
     animation: none;
     box-shadow: 0 0 8px var(--tier-ring);
   }

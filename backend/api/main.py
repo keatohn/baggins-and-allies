@@ -1655,6 +1655,7 @@ def _friend_user_payload(db: Session, viewer_id: str, other: Player) -> dict[str
         "username": other.username,
         "relation": _friend_relation(db, viewer_id, other),
         "avatar": _player_avatar_response(other, db),
+        "tier": player_progression_view(other, db)["tier"],
     }
 
 
@@ -1790,6 +1791,7 @@ def friends_list_requests(
                         "id": row.id,
                         "username": other.username,
                         "avatar": _player_avatar_response(other, db),
+                        "tier": player_progression_view(other, db)["tier"],
                         "created_at": row.created_at.isoformat() if row.created_at else None,
                     }
                 )
@@ -1801,6 +1803,7 @@ def friends_list_requests(
                         "id": row.id,
                         "username": other.username,
                         "avatar": _player_avatar_response(other, db),
+                        "tier": player_progression_view(other, db)["tier"],
                         "created_at": row.created_at.isoformat() if row.created_at else None,
                     }
                 )
@@ -3263,12 +3266,21 @@ def get_recent_game(
     player: Player = Depends(get_current_player),
     db: Session = Depends(get_db),
 ):
-    """The game this player opened most recently, if they can still load it."""
+    """The game this player opened most recently, if that game still exists.
+
+    A deleted (or otherwise unloadable) last-opened game is skipped. The button
+    then shows the newest game this player can still load.
+    """
     gid = getattr(player, "last_opened_game_id", None)
-    if not gid:
+    if gid:
+        opened = _build_games_list(player, db, only_game_id=str(gid))
+        if opened:
+            return {"game": opened[0]}
+    mine = _build_games_list(player, db)
+    if not mine:
         return {"game": None}
-    mine = _build_games_list(player, db, only_game_id=str(gid))
-    return {"game": mine[0] if mine else None}
+    newest = max(mine, key=lambda item: item.get("created_at") or "")
+    return {"game": newest}
 
 
 def _lobby_player_ids(row: GameModel) -> set[str]:
