@@ -387,7 +387,14 @@ export function UsersReportModal({ onClose }: { onClose: () => void }) {
             {backfillNote ? <p className="admin-form__micro">{backfillNote}</p> : null}
             <div className="games-report__table-scroll">
               {progression ? (
-                <TierXpPanel config={progression} onChange={setProgression} />
+                <TierXpPanel
+                  config={progression}
+                  onChange={setProgression}
+                  onSave={() => void saveProgression()}
+                  saving={saving}
+                  dirty={dirty}
+                  saveError={progressionError}
+                />
               ) : !progressionError ? (
                 <p className="admin-form__micro">Loading…</p>
               ) : null}

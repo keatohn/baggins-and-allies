@@ -99,9 +99,17 @@ function DecimalField({
 export function TierXpPanel({
   config,
   onChange,
+  onSave,
+  saving,
+  dirty,
+  saveError,
 }: {
   config: ProgressionConfig;
   onChange: (next: ProgressionConfig) => void;
+  onSave: () => void;
+  saving: boolean;
+  dirty: boolean;
+  saveError: string | null;
 }) {
   const setTier = (id: string, patch: Partial<ProgressionTier>) => {
     onChange({
@@ -364,13 +372,24 @@ export function TierXpPanel({
               <h2 id="admin-unit-icons-title" className="admin-modal__title">
                 Unit icons
               </h2>
-              <button type="button" className="admin-page__btn" onClick={() => setIconsOpen(false)}>
-                Close
-              </button>
+              <div className="admin-modal__actions">
+                <button
+                  type="button"
+                  className="admin-page__btn"
+                  disabled={!dirty || saving}
+                  onClick={() => void onSave()}
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+                <button type="button" className="admin-page__btn" onClick={() => setIconsOpen(false)}>
+                  Close
+                </button>
+              </div>
             </div>
+            {saveError ? <p className="admin-page__error games-report__error">{saveError}</p> : null}
             <p className="admin-form__micro">
               Grouped by the lowest tier that can use them. Tier 1 is at the top, and each step down is a higher
-              tier. The arrows move an icon into the group above or below.
+              tier. The arrows move an icon into the group above or below. Save writes those moves.
             </p>
             <label className="admin-form__label">
               Find an icon

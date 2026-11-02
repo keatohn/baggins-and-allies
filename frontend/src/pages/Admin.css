@@ -389,7 +389,7 @@
 }
 
 .admin-modal--icons {
-  width: min(100%, 32rem);
+  width: min(100%, 68rem);
   max-height: min(90vh, 44rem);
   display: flex;
   flex-direction: column;
@@ -397,6 +397,24 @@
 
 .admin-modal--icons .admin-icon-unlocks {
   flex: 1 1 auto;
+}
+
+.admin-modal--icons .admin-icon-group {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 1.25rem;
+  row-gap: 0.2rem;
+}
+
+.admin-modal--icons .admin-icon-group__title,
+.admin-modal--icons .admin-icon-group .admin-form__micro {
+  grid-column: 1 / -1;
+}
+
+.admin-modal--icons .admin-icon-unlock > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .admin-modal--games {
@@ -2759,6 +2777,10 @@
     padding-right: max(1rem, env(safe-area-inset-right, 0px));
     padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
     box-sizing: border-box;
+  }
+
+  .admin-modal--icons .admin-icon-group {
+    grid-template-columns: 1fr;
   }
 
   .admin-modal__actions {
