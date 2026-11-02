@@ -323,6 +323,27 @@ def _algorithm_env(algorithm: str):
             os.environ["AI_ALGORITHM"] = previous
 
 
+@contextlib.contextmanager
+def _difficulty_env(difficulty: str | None):
+    """Temporarily set AI_MCTS_DIFFICULTY for one faction's turn.
+
+    Heuristic play ignores this. MCTS reads it at the start of each search.
+    A missing difficulty leaves the ambient value alone.
+    """
+    if not difficulty:
+        yield
+        return
+    previous = os.environ.get("AI_MCTS_DIFFICULTY")
+    os.environ["AI_MCTS_DIFFICULTY"] = difficulty
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("AI_MCTS_DIFFICULTY", None)
+        else:
+            os.environ["AI_MCTS_DIFFICULTY"] = previous
+
+
 # ---------------------------------------------------------------------------
 # 3.6b: per-faction eval-weight env overrides for matchups/sweeps
 # ---------------------------------------------------------------------------
@@ -396,6 +417,7 @@ def run_matchup(
     *,
     default_algorithm: str = "heuristic",
     env_overrides: dict[str, dict[str, str]] | None = None,
+    difficulties: dict[str, str] | None = None,
     max_faction_turns: int | None = None,
     max_cycles: int | None = 1,
     setup_id: str = SETUP_ID,
@@ -406,7 +428,9 @@ def run_matchup(
     """Drive a game where each faction decides via its own algorithm.
 
     `algorithms` maps faction id -> "mcts" | "heuristic"; factions missing from
-    the map use `default_algorithm`. `env_overrides` (3.6b) maps faction id ->
+    the map use `default_algorithm`. `difficulties` maps faction id -> an MCTS
+    level id and is applied the same way, one faction turn at a time.
+    `env_overrides` (3.6b) maps faction id ->
     weight overrides in short form ({"material": "2.0"}) or raw AI_MCTS_W_*
     names; the given vars are applied via os.environ around each of that
     faction's decide calls and restored afterwards (weights are re-read per
@@ -457,9 +481,10 @@ def run_matchup(
             last_turned_faction = fid
         turn_number_before = state.turn_number
         algorithm = assigned.get(fid, default_algorithm)
+        difficulty = (difficulties or {}).get(fid) or None
         decide_times: list[float] = []
         t0 = time.perf_counter()
-        with _algorithm_env(algorithm), _weight_env(resolved_overrides.get(fid, {})):
+        with _algorithm_env(algorithm), _difficulty_env(difficulty), _weight_env(resolved_overrides.get(fid, {})):
             action_types, state = run_faction_turn(
                 state, ud, td, fd, cd, port_d, fid,
                 per_action_cap_s=per_action_cap_s, rng=rng, decide_times=decide_times,
@@ -477,6 +502,7 @@ def run_matchup(
         turn_records.append({
             "faction": fid,
             "algorithm": algorithm,
+            "difficulty": difficulty,
             "actions": len(action_types),
             "action_types": action_types,
             "decide_times": decide_times,
@@ -506,6 +532,7 @@ def run_matchup(
     return {
         "setup_id": setup_id,
         "algorithms": assigned,
+        "difficulties": {fid: (difficulties or {}).get(fid) for fid in assigned if (difficulties or {}).get(fid)},
         "env_overrides": resolved_overrides,
         "winner": state.winner,
         "turns_driven": len(turn_records),
@@ -524,6 +551,11 @@ def run_matchup(
 
 def format_matchup_report(record: dict) -> str:
     """Human-readable matchup summary: result, per-turn timing, standings."""
+    show_difficulty = any(turn.get("difficulty") for turn in record["turn_records"])
+    header = "turn | faction | algorithm"
+    if show_difficulty:
+        header += " | difficulty"
+    header += " | actions | decide avg/max | turn wall"
     lines = [
         f"=== matchup {record['setup_id']} ===",
         (
@@ -532,16 +564,17 @@ def format_matchup_report(record: dict) -> str:
             f"cycles: {record['cycles_completed']} | "
             f"wall: {record['wall_time']:.1f}s"
         ),
-        "turn | faction | algorithm | actions | decide avg/max | turn wall",
+        header,
     ]
     for i, turn in enumerate(record["turn_records"], 1):
         times = turn["decide_times"]
         avg = sum(times) / len(times) if times else 0.0
         worst = max(times) if times else 0.0
-        lines.append(
-            f"{i} | {turn['faction']} | {turn['algorithm']} | {turn['actions']} | "
-            f"{avg:.2f}/{worst:.2f} | {turn['wall_time']:.1f}"
-        )
+        row = f"{i} | {turn['faction']} | {turn['algorithm']}"
+        if show_difficulty:
+            row += f" | {turn.get('difficulty') or '-'}"
+        row += f" | {turn['actions']} | {avg:.2f}/{worst:.2f} | {turn['wall_time']:.1f}"
+        lines.append(row)
     weight_label = format_weight_label(record.get("env_overrides"))
     if weight_label:
         lines.append(f"weight overrides: {weight_label}")
@@ -958,6 +991,37 @@ def test_run_matchup_env_overrides_applied_and_restored(monkeypatch):
     report = format_matchup_report(result)
     assert f"weight overrides: {first} material=2.0" in report
     assert "material=2.0" in summarize_winrate([result])
+
+
+def test_run_matchup_sets_difficulty_per_faction(monkeypatch):
+    """Each faction turn sees its own MCTS level, then the ambient value is restored."""
+    seen: list[tuple[str, str | None]] = []
+    real_decide = decide
+
+    def spy(ctx):
+        seen.append((ctx.state.current_faction or "", os.environ.get("AI_MCTS_DIFFICULTY")))
+        return real_decide(ctx)
+
+    monkeypatch.setattr("test.test_ai_mcts_selfplay.decide", spy)
+    monkeypatch.delenv("AI_MCTS_DIFFICULTY", raising=False)
+    state, ud, td, fd, cd, port_d = _load_setup()
+    first = state.current_faction or ""
+    second = next(fid for fid in state.turn_order if fid != first)
+    result = run_matchup(
+        state, ud, td, fd, cd, port_d,
+        {fid: "heuristic" for fid in state.turn_order},
+        difficulties={first: "hard", second: "easy"},
+        max_faction_turns=2,
+        seed=11,
+    )
+    first_seen = [raw for fid, raw in seen if fid == first]
+    second_seen = [raw for fid, raw in seen if fid == second]
+    assert first_seen and set(first_seen) == {"hard"}
+    assert second_seen and set(second_seen) == {"easy"}
+    assert os.environ.get("AI_MCTS_DIFFICULTY") is None
+    report = format_matchup_report(result)
+    assert f"| {first} | heuristic | hard |" in report
+    assert f"| {second} | heuristic | easy |" in report
 
 
 def test_run_matchup_clears_tree_cache_per_faction_turn(monkeypatch):

@@ -102,11 +102,15 @@ export function AiPanel({ onSaved, onError }: Props) {
   return (
     <div className="admin-page__ai">
       <p className="admin-page__hint">
-        Levels are listed from easiest to hardest. Search stops at the step count or the time cap,
-        whichever comes first, and that same cap is used for every decision. New games copy the
-        algorithm and the level marked for new games. Changing a level&apos;s steps or time changes
-        every game that uses that level, including games already started. Renaming only changes the
-        name players see.
+        These levels only apply to MCTS. Each one is a search budget: the search stops at the step
+        count or the time cap, whichever comes first. The heuristic player has no difficulty. It
+        ignores the level and plays the same way every time.
+      </p>
+      <p className="admin-page__hint">
+        Levels are listed from easiest to hardest. New games copy the algorithm below and the level
+        marked for new games. That level is used only when a faction is set to MCTS. Changing a
+        level&apos;s steps or time changes every MCTS search that uses that level, including games
+        already started. Renaming only changes the name players see.
       </p>
       <label className="admin-page__field">
         <span className="admin-page__field-label">Algorithm for new games</span>
@@ -119,8 +123,8 @@ export function AiPanel({ onSaved, onError }: Props) {
         </select>
       </label>
       <p className="admin-page__hint">
-        Single-player lobbies show these level names under a faction when that faction is the computer
-        and new games are set to MCTS.
+        A computer faction shows these level names only when its algorithm is MCTS. Heuristic factions
+        do not use a level.
       </p>
       <div className="admin-ai-levels" role="list">
         {levels.map((level, index) => (

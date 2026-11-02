@@ -763,8 +763,10 @@ export interface AdminSimRun {
   id?: string;
   created_at?: string;
   setup_id?: string;
-  difficulty?: string;
+  max_cycles?: number;
+  /** Older reports stored a two-sided matchup name. New reports store per-faction settings. */
   matchup?: string;
+  factions?: Record<string, AiFactionSetting>;
   winner?: string | null;
   leader?: string | null;
   error?: string;
@@ -1396,7 +1398,11 @@ export const api = {
       body: JSON.stringify(body),
     }),
   adminListSims: () => fetchJson<{ runs: AdminSimRun[] }>('/admin/sims'),
-  adminRunSim: (body: { setup_id: string; difficulty: string; matchup: string; max_cycles: number }) =>
+  adminRunSim: (body: {
+    setup_id: string;
+    max_cycles: number;
+    factions: Record<string, AiFactionSetting>;
+  }) =>
     fetchJson<{ ok: boolean; run: AdminSimRun; runs: AdminSimRun[] }>('/admin/sims', {
       method: 'POST',
       body: JSON.stringify(body),
@@ -1596,6 +1602,35 @@ export const api = {
         include_outcomes: params.include_outcomes ?? false,
         options: params.options ?? undefined,
       }),
+    }),
+
+  /** Starting faction's opening attacks into territories that already have defenders. */
+  openingAttacks: (body: {
+    manifest?: Record<string, unknown>;
+    units: Record<string, unknown>;
+    territories: Record<string, unknown>;
+    factions: Record<string, unknown>;
+    camps?: Record<string, unknown>;
+    ports?: Record<string, unknown>;
+    starting_setup: Record<string, unknown>;
+    n_trials?: number;
+  }) =>
+    fetchJson<{
+      faction_id: string;
+      faction_name: string;
+      n_trials: number;
+      attacks: {
+        from_territory: string;
+        to_territory: string;
+        attacker_stacks: { unit_id: string; count: number }[];
+        defender_stacks: { unit_id: string; count: number }[];
+        p_attacker_win: number;
+        p_conquer: number;
+        is_sea_raid: boolean;
+      }[];
+    }>('/admin/opening-attacks', {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
 
   // Create a new game (legacy in-memory, no auth)

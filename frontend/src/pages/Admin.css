@@ -269,6 +269,54 @@
   gap: 0.75rem;
 }
 
+.admin-page__subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.admin-sim-factions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.admin-sim-faction {
+  padding: 0.7rem 0.75rem;
+  border: 1px solid rgba(139, 115, 85, 0.35);
+  border-radius: 8px;
+  background: rgba(255, 254, 248, 0.45);
+}
+
+.admin-sim-faction__name {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.admin-sim-faction__alliance {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--ink-light);
+}
+
+.admin-sim-faction__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: 0.45rem 0.6rem;
+  align-items: end;
+}
+
+.admin-sim-faction__heuristic {
+  margin: 0;
+  padding-bottom: 0.45rem;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: var(--ink-light);
+}
+
 .admin-ai-levels {
   display: flex;
   flex-direction: column;
@@ -343,6 +391,12 @@
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+}
+
+.admin-page__sim-list .page-menu-btn {
+  white-space: normal;
+  text-align: left;
+  height: auto;
 }
 
 .admin-page__sim-report {

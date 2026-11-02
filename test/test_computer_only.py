@@ -171,6 +171,46 @@ def test_admin_levels_drive_new_games_and_the_lobby_choice(make_client, players)
     assert empty.status_code == 400
 
 
+def test_admin_sim_uses_faction_settings_and_turn_cap(make_client, players, monkeypatch):
+    captured = {}
+
+    def fake(*_args, **kwargs):
+        captured["kwargs"] = kwargs
+        return {
+            "setup_id": kwargs.get("setup_id"),
+            "winner": None,
+            "leader": "good",
+            "report": "ok",
+            "factions": kwargs.get("factions"),
+            "max_cycles": kwargs.get("max_cycles"),
+        }
+
+    monkeypatch.setattr("backend.api.main._run_admin_sim", fake)
+    admin, _user = players
+    client = make_client(admin)
+    response = client.post("/admin/sims", json={
+        "setup_id": "wotr_exp_1.0",
+        "max_cycles": 99,
+        "factions": {
+            "gondor": {"difficulty": "hard", "algorithm": "mcts", "weights": {"material": 2}},
+            "mordor": {"difficulty": "easy", "algorithm": "heuristic", "weights": {"stronghold": 4}},
+        },
+    })
+    assert response.status_code == 200, response.text
+    factions = captured["kwargs"]["factions"]
+    assert captured["kwargs"]["max_cycles"] == 10
+    assert factions["gondor"]["algorithm"] == "mcts"
+    assert factions["gondor"]["difficulty"] == "hard"
+    assert factions["gondor"]["weights"]["material"] == 2
+    assert factions["mordor"]["algorithm"] == "heuristic"
+    assert factions["mordor"]["difficulty"] == "easy"
+    assert factions["rohan"]["algorithm"] == "heuristic"
+    assert "matchup" not in captured["kwargs"]
+    body = response.json()["run"]
+    assert body["max_cycles"] == 10
+    assert body["factions"]["gondor"]["algorithm"] == "mcts"
+
+
 def test_single_player_still_requires_a_human(make_client, players):
     admin, _user = players
     client = make_client(admin)

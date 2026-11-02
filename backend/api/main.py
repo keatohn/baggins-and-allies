@@ -2140,6 +2140,67 @@ def admin_put_formulas(
     return {"ok": True, "formulas": save_unit_formulas(db, body)}
 
 
+class OpeningAttacksRequest(BaseModel):
+    """Current admin setup, including unsaved map edits."""
+    manifest: dict[str, Any] = {}
+    units: dict[str, Any]
+    territories: dict[str, Any]
+    factions: dict[str, Any]
+    camps: dict[str, Any] = {}
+    ports: dict[str, Any] = {}
+    starting_setup: dict[str, Any]
+    n_trials: int = 1000
+
+
+def _rows_with_ids(table: dict[str, Any] | None) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    if not isinstance(table, dict):
+        return out
+    for key, raw in table.items():
+        if not isinstance(raw, dict):
+            continue
+        row = dict(raw)
+        row.setdefault("id", key)
+        out[str(key)] = row
+    return out
+
+
+@app.post("/admin/opening-attacks")
+def admin_opening_attacks(
+    body: OpeningAttacksRequest,
+    _admin: Player = Depends(get_current_admin),
+):
+    """Win chances for the starting faction's opening attacks into defended territories."""
+    from backend.engine.openings import compute_opening_attacks
+
+    snapshot = {
+        "units": _rows_with_ids(body.units),
+        "territories": _rows_with_ids(body.territories),
+        "factions": _rows_with_ids(body.factions),
+        "camps": _rows_with_ids(body.camps),
+        "ports": _rows_with_ids(body.ports),
+    }
+    if not snapshot["units"] or not snapshot["territories"] or not snapshot["factions"]:
+        raise HTTPException(status_code=400, detail="Setup is missing units, territories, or factions")
+    if not isinstance(body.starting_setup, dict):
+        raise HTTPException(status_code=400, detail="starting_setup is required")
+    try:
+        unit_defs, territory_defs, faction_defs, camp_defs, _ports = definitions_from_snapshot(snapshot)
+        return compute_opening_attacks(
+            unit_defs,
+            territory_defs,
+            faction_defs,
+            camp_defs,
+            body.starting_setup,
+            manifest=body.manifest or {},
+            n_trials=body.n_trials,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not simulate openings: {e}") from e
+
+
 class AiLevelBody(BaseModel):
     id: str = ""
     name: str = ""
@@ -2190,12 +2251,17 @@ def admin_put_ai(
     return {"ok": True, **_admin_ai_payload(settings)}
 
 
+class AdminSimFactionBody(BaseModel):
+    difficulty: str = "normal"
+    algorithm: str = "mcts"
+    weights: dict[str, float] = Field(default_factory=dict)
+
+
 class AdminSimBody(BaseModel):
     setup_id: str
-    difficulty: str = "easy"
-    matchup: str = "mcts-vs-mcts"
-    max_cycles: int = 1
+    max_cycles: int = 3
     seed: int = 1
+    factions: dict[str, AdminSimFactionBody] = Field(default_factory=dict)
 
 
 @app.get("/admin/sims")
@@ -2214,8 +2280,8 @@ def admin_run_sim(
     _admin: Player = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    """Run one short AI-vs-AI game for a scenario and keep the report."""
-    from backend.ai.settings import load_ai_defaults, normalize_difficulty, normalize_matchup, save_sim_run
+    """Run one computer-vs-computer game for a scenario and keep the report."""
+    from backend.ai.settings import load_ai_defaults, normalize_faction_ai, save_sim_run
 
     setup_id = (body.setup_id or "").strip()
     if not setup_id:
@@ -2227,21 +2293,34 @@ def admin_run_sim(
         ud, td, fd, cd, port_d = try_load_static_definitions(setup_id, db)
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    cycles = max(1, min(int(body.max_cycles or 1), 2))
+    cycles = max(1, min(int(body.max_cycles or 3), 10))
     ai_defaults = load_ai_defaults(db)
-    difficulty = normalize_difficulty(body.difficulty, ai_defaults["levels"])
-    matchup = normalize_matchup(body.matchup)
+    raw_factions = {
+        fid: setting.model_dump()
+        for fid, setting in (body.factions or {}).items()
+        if fid
+    }
+    factions = {
+        fid: normalize_faction_ai(
+            raw_factions.get(fid),
+            ai_defaults["difficulty"],
+            ai_defaults["levels"],
+            ai_defaults["algorithm"],
+        )
+        for fid in fd
+        if fid
+    }
     try:
         record = _run_admin_sim(
             setup, setup_id, ud, td, fd, cd, port_d,
-            difficulty=difficulty, matchup=matchup, max_cycles=cycles, seed=int(body.seed or 1),
+            factions=factions, max_cycles=cycles, seed=int(body.seed or 1),
             levels=ai_defaults["levels"],
         )
     except Exception as e:
         record = {
             "setup_id": setup_id,
-            "difficulty": difficulty,
-            "matchup": matchup,
+            "max_cycles": cycles,
+            "factions": factions,
             "error": str(e),
             "report": str(e),
         }
@@ -2251,19 +2330,12 @@ def admin_run_sim(
     return {"ok": "error" not in record, "run": record, "runs": runs}
 
 
-def _run_admin_sim(setup, setup_id, ud, td, fd, cd, port_d, *, difficulty, matchup, max_cycles, seed, levels=None):
+def _run_admin_sim(setup, setup_id, ud, td, fd, cd, port_d, *, factions, max_cycles, seed, levels=None):
     from test.test_ai_mcts_selfplay import (
         format_matchup_report,
         run_matchup,
-        _alliance_algorithms,
     )
 
-    by_alliance = {
-        "mcts-vs-mcts": {"good": "mcts", "evil": "mcts"},
-        "mcts-vs-heuristic": {"good": "mcts", "evil": "heuristic"},
-        "heuristic-vs-mcts": {"good": "heuristic", "evil": "mcts"},
-        "heuristic-vs-heuristic": {"good": "heuristic", "evil": "heuristic"},
-    }[matchup]
     state = initialize_game_state(
         faction_defs=fd,
         territory_defs=td,
@@ -2281,29 +2353,36 @@ def _run_admin_sim(setup, setup_id, ud, td, fd, cd, port_d, *, difficulty, match
     from backend.ai.mcts.budget import budget_catalog_scope
     from backend.ai.settings import stamp_ai_on_state
 
-    stamp_ai_on_state(state, difficulty, "mcts" if "mcts" in matchup else "heuristic", levels)
-    faction_ids = list(state.turn_order or [])
-    algorithms = _alliance_algorithms(fd, faction_ids, by_alliance)
-    previous_difficulty = os.environ.get("AI_MCTS_DIFFICULTY")
-    os.environ["AI_MCTS_DIFFICULTY"] = difficulty
-    try:
-        with budget_catalog_scope(levels):
-            result = run_matchup(
-                state, ud, td, fd, cd, port_d,
-                algorithms,
-                max_cycles=max_cycles,
-                seed=seed,
-                setup_id=setup_id,
-            )
-    finally:
-        if previous_difficulty is None:
-            os.environ.pop("AI_MCTS_DIFFICULTY", None)
-        else:
-            os.environ["AI_MCTS_DIFFICULTY"] = previous_difficulty
+    ordered = [fid for fid in (state.turn_order or []) if fid in factions]
+    for fid in factions:
+        if fid not in ordered:
+            ordered.append(fid)
+    any_mcts = any(factions[fid]["algorithm"] == "mcts" for fid in ordered)
+    first_level = next(
+        (factions[fid]["difficulty"] for fid in ordered if factions[fid]["algorithm"] == "mcts"),
+        next((factions[fid]["difficulty"] for fid in ordered), "normal"),
+    )
+    stamp_ai_on_state(state, first_level, "mcts" if any_mcts else "heuristic", levels)
+    algorithms = {fid: factions[fid]["algorithm"] for fid in ordered}
+    difficulties = {fid: factions[fid]["difficulty"] for fid in ordered}
+    env_overrides = {
+        fid: {name: str(value) for name, value in factions[fid]["weights"].items()}
+        for fid in ordered
+    }
+    with budget_catalog_scope(levels):
+        result = run_matchup(
+            state, ud, td, fd, cd, port_d,
+            algorithms,
+            difficulties=difficulties,
+            env_overrides=env_overrides,
+            max_cycles=max_cycles,
+            seed=seed,
+            setup_id=setup_id,
+        )
     return {
         "setup_id": setup_id,
-        "difficulty": difficulty,
-        "matchup": matchup,
+        "max_cycles": max_cycles,
+        "factions": {fid: factions[fid] for fid in ordered},
         "winner": result.get("winner"),
         "leader": result.get("leader"),
         "turns_driven": result.get("turns_driven"),

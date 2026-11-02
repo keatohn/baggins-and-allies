@@ -363,8 +363,8 @@ export default function Admin() {
   const [formulasJsonMode, setFormulasJsonMode] = useState(false);
   const [formulas, setFormulas] = useState<UnitFormulas>(EMPTY_FORMULAS);
   const [aiOpen, setAiOpen] = useState(false);
-  const [simsOpen, setSimsOpen] = useState(false);
-  const globalOpen = audioOpen || signalsOpen || catalogOpen || formulasOpen || aiOpen || simsOpen;
+  const [aiTab, setAiTab] = useState<'difficulty' | 'sims'>('difficulty');
+  const globalOpen = audioOpen || signalsOpen || catalogOpen || formulasOpen || aiOpen;
   const [unitStatsOpen, setUnitStatsOpen] = useState(false);
   const [gameStatsOpen, setGameStatsOpen] = useState(false);
   const [balanceOpen, setBalanceOpen] = useState(false);
@@ -577,7 +577,7 @@ export default function Admin() {
       }
       return;
     }
-    if (aiOpen || simsOpen) return;
+    if (aiOpen) return;
     if (formulasOpen) {
       setSaving(true);
       try {
@@ -701,28 +701,44 @@ export default function Admin() {
 
   const renderTabBody = () => {
     if (aiOpen) {
+      const aiError = (message: string) => {
+        setSaveOk(false);
+        setSaveError(message);
+      };
       return (
-        <AiPanel
-          onSaved={() => {
-            setSaveError(null);
-            setSaveOk(true);
-          }}
-          onError={(message) => {
-            setSaveOk(false);
-            setSaveError(message);
-          }}
-        />
-      );
-    }
-    if (simsOpen) {
-      return (
-        <SimsPanel
-          setups={setups}
-          onError={(message) => {
-            setSaveOk(false);
-            setSaveError(message);
-          }}
-        />
+        <div className="admin-page__ai">
+          <div className="admin-page__subtabs" role="tablist" aria-label="AI">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={aiTab === 'difficulty'}
+              className={`admin-page__tab${aiTab === 'difficulty' ? ' admin-page__tab--active' : ''}`}
+              onClick={() => setAiTab('difficulty')}
+            >
+              Difficulty
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={aiTab === 'sims'}
+              className={`admin-page__tab${aiTab === 'sims' ? ' admin-page__tab--active' : ''}`}
+              onClick={() => setAiTab('sims')}
+            >
+              Sims
+            </button>
+          </div>
+          {aiTab === 'difficulty' ? (
+            <AiPanel
+              onSaved={() => {
+                setSaveError(null);
+                setSaveOk(true);
+              }}
+              onError={aiError}
+            />
+          ) : (
+            <SimsPanel setups={setups} onError={aiError} />
+          )}
+        </div>
       );
     }
     if (formulasOpen) {
@@ -889,13 +905,12 @@ export default function Admin() {
     }
   };
 
-  const openSection = (section: 'setups' | 'catalog' | 'formulas' | 'audio' | 'signals' | 'ai' | 'sims' | 'query') => {
+  const openSection = (section: 'setups' | 'catalog' | 'formulas' | 'audio' | 'signals' | 'ai' | 'query') => {
     setCatalogOpen(section === 'catalog');
     setFormulasOpen(section === 'formulas');
     setAudioOpen(section === 'audio');
     setSignalsOpen(section === 'signals');
     setAiOpen(section === 'ai');
-    setSimsOpen(section === 'sims');
     setQueryOpen(section === 'query');
     setSaveOk(false);
     setSaveError(null);
@@ -903,7 +918,6 @@ export default function Admin() {
 
   const navItems = [
     { label: 'AI', active: aiOpen, onClick: () => openSection('ai') },
-    { label: 'Sims', active: simsOpen, onClick: () => openSection('sims') },
     { label: 'Audio', active: audioOpen, onClick: () => openSection('audio') },
     { label: 'Catalog', active: catalogOpen, onClick: () => openSection('catalog') },
     { label: 'Formulas', active: formulasOpen, onClick: () => openSection('formulas') },
@@ -1128,7 +1142,7 @@ export default function Admin() {
         <button
           type="button"
           className="admin-page__btn admin-page__btn--primary"
-          disabled={simsOpen || gamesOpen || (globalOpen ? false : !bundle) || saving}
+          disabled={aiOpen || gamesOpen || (globalOpen ? false : !bundle) || saving}
           onClick={handleSave}
         >
           {saving ? 'Saving…' : 'Save'}
