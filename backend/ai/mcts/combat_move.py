@@ -26,7 +26,7 @@ from backend.engine.queries import (
     filter_unit_instances_that_can_reach,
     validate_action,
 )
-from backend.engine.reducer import get_state_after_pending_moves
+from backend.engine.reducer import apply_action, get_state_after_pending_moves
 from backend.engine.definitions import faction_acts_as
 
 from backend.ai.context import AIContext
@@ -210,10 +210,16 @@ class CombatMoveProblem(Problem):
         faction_id = self.faction_id
         ud, td, fd = self.ud, self.td, self.fd
 
-        if any(getattr(pm, "phase", None) == "combat_move" for pm in (state.pending_moves or [])):
-            state_after = get_state_after_pending_moves(state, "combat_move", ud, td, fd)
-        else:
-            state_after = state  # no same-phase pendings: post-pending board is this state
+        # Post-pending snapshot is only for reachability (embark slots, occupancy).
+        # A queue that already cannot replay is not a board we can plan on; bail out
+        # instead of raising out of the search.
+        try:
+            if any(getattr(pm, "phase", None) == "combat_move" for pm in (state.pending_moves or [])):
+                state_after = get_state_after_pending_moves(state, "combat_move", ud, td, fd)
+            else:
+                state_after = state  # no same-phase pendings: post-pending board is this state
+        except ValueError:
+            return []
         movable = get_movable_units(state, faction_id, ud, fd)
         pending_unit_ids: set[str] = set()
         for pm in (state.pending_moves or []):
@@ -248,7 +254,7 @@ class CombatMoveProblem(Problem):
             origin_ids, state, faction_id, fd, td, ud
         )
 
-        candidates: list[tuple[float, tuple[str, str, list[str], list[str]]]] = []
+        candidates: list[tuple] = []
         for (from_tid, to_tid), unit_ids in from_to_units.items():
             if not unit_ids:
                 continue
@@ -288,40 +294,63 @@ class CombatMoveProblem(Problem):
                 ]
                 if not pruned:
                     continue
-            charge_through = self._best_charge_path(
+            charge_options = self._charge_path_options(
                 state, (from_tid, to_tid), pruned, charge_routes_per_unit
             )
+            # Rank by the preferred charge; a later option is substituted only
+            # when that path does not survive a full pending replay.
             score = self._cheap_move_score(
-                state, from_tid, to_tid, pruned, charge_through, state_after=state_after
+                state, from_tid, to_tid, pruned, charge_options[0], state_after=state_after
             )
-            candidates.append((score, (from_tid, to_tid, pruned, charge_through)))
+            candidates.append((score, from_tid, to_tid, pruned, charge_options))
 
         candidates.sort(key=lambda x: x[0], reverse=True)
-        return [cand for _score, cand in candidates[:MAX_COMBAT_MOVE_BRANCHES]]
+        # validate_action checks each move against the pre-pending board. Replaying
+        # the whole combat_move queue is stricter: a charge through a hex another
+        # pending move occupies, or a sail whose steps sum past remaining_movement
+        # (the "need 3, have 2" ship failure), raises inside _apply_pending_moves.
+        # Drop those candidates here so the search never queues them.
+        accepted: list[tuple[str, str, list[str], list[str]]] = []
+        for _score, from_tid, to_tid, unit_ids, charge_options in candidates:
+            for charge_through in charge_options:
+                if not self._must_replay_candidate(state, from_tid, to_tid, unit_ids, charge_through):
+                    accepted.append((from_tid, to_tid, unit_ids, charge_through))
+                    break
+                if self._pending_sequence_replays(state, from_tid, to_tid, unit_ids, charge_through):
+                    accepted.append((from_tid, to_tid, unit_ids, charge_through))
+                    break
+            if len(accepted) >= MAX_COMBAT_MOVE_BRANCHES:
+                break
+        return accepted
 
     def _is_boat(self, unit_id: str) -> bool:
         from backend.engine.queries import _is_water_boat
 
         return _is_water_boat(self.ud.get(unit_id))
 
-    def _best_charge_path(
+    def _charge_path_options(
         self,
         state: Any,
         key: tuple[str, str],
         unit_ids_for_move: list[str],
         charge_routes_per_unit: dict[tuple[str, str], dict[str, list[list[str]]]],
-    ) -> list[str]:
-        """Intersection of charge paths valid for ALL units in the move; pick by conquered value."""
+    ) -> list[list[str]]:
+        """
+        Charge paths shared by every unit in the move, best conquest first.
+
+        The empty path is always last so a direct move can replace a charge that
+        would pass through a hex another pending move fills.
+        """
         per_unit = charge_routes_per_unit.get(key, {})
         if not unit_ids_for_move or not per_unit:
-            return []
+            return [[]]
         valid_paths: set[tuple[str, ...]] | None = None
         for uid in unit_ids_for_move:
             paths = per_unit.get(uid, [])
             path_tuples = {tuple(p) for p in paths} if paths else {()}
             valid_paths = path_tuples if valid_paths is None else (valid_paths & path_tuples)
         if not valid_paths:
-            return []
+            return [[]]
         _, to_tid = key
 
         def path_sort_key(path: tuple[str, ...]) -> tuple[int, int]:
@@ -335,8 +364,63 @@ class CombatMoveProblem(Problem):
             )
             return (-conquered, len(path) + 1)
 
-        best = min(valid_paths, key=path_sort_key)
-        return list(best)
+        ranked = [list(path) for path in sorted(valid_paths, key=path_sort_key) if path]
+        ranked.append([])
+        return ranked
+
+    def _must_replay_candidate(
+        self,
+        state: Any,
+        from_tid: str,
+        to_tid: str,
+        unit_ids: list[str],
+        charge_through: list[str],
+    ) -> bool:
+        """
+        True when this candidate can disagree with validate_action.
+
+        A lone non-charging land move uses the same shortest path validate_action
+        already checked. Charges, sea moves, and anything queued beside existing
+        pending moves can fail only when the whole queue is replayed.
+        """
+        if charge_through:
+            return True
+        if any(getattr(pm, "phase", None) == "combat_move" for pm in (state.pending_moves or [])):
+            return True
+        if _is_water_zone(self.td.get(from_tid)) or _is_water_zone(self.td.get(to_tid)):
+            return True
+        return False
+
+    def _pending_sequence_replays(
+        self,
+        state: Any,
+        from_tid: str,
+        to_tid: str,
+        unit_ids: list[str],
+        charge_through: list[str],
+    ) -> bool:
+        """True when existing combat_move pending moves plus this one apply cleanly."""
+        action = move_units(
+            self.faction_id,
+            from_tid,
+            to_tid,
+            list(unit_ids),
+            charge_through=list(charge_through) if charge_through else None,
+        )
+        try:
+            new_state, _events = apply_action(
+                state,
+                action,
+                self.ud,
+                self.td,
+                self.fd,
+                self.cd,
+                self.port_d,
+            )
+            get_state_after_pending_moves(new_state, "combat_move", self.ud, self.td, self.fd)
+        except ValueError:
+            return False
+        return True
 
     def _territory_power(self, tid: str) -> int:
         tdef = self.td.get(tid)
@@ -437,10 +521,13 @@ class CombatMoveProblem(Problem):
         True when combat_move may end: no loaded boats that must attack and no
         unresolved idle sails (mirrors the API / reducer end-phase guards).
         """
-        if any(getattr(pm, "phase", None) == "combat_move" for pm in (state.pending_moves or [])):
-            sim = get_state_after_pending_moves(state, "combat_move", self.ud, self.td, self.fd)
-        else:
-            sim = state  # no same-phase pendings: post-pending board is this state
+        try:
+            if any(getattr(pm, "phase", None) == "combat_move" for pm in (state.pending_moves or [])):
+                sim = get_state_after_pending_moves(state, "combat_move", self.ud, self.td, self.fd)
+            else:
+                sim = state  # no same-phase pendings: post-pending board is this state
+        except ValueError:
+            return False
         if getattr(sim, "loaded_naval_must_attack_instance_ids", None):
             return False
         if getattr(sim, "combat_move_naval_idle_sail_instance_ids", None):

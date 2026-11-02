@@ -9,8 +9,8 @@ import pytest
 
 from backend.engine.actions import end_phase, move_units
 from backend.engine.queries import validate_action
-from backend.engine.reducer import apply_action
-from backend.engine.state import Unit
+from backend.engine.reducer import apply_action, get_state_after_pending_moves
+from backend.engine.state import PendingMove, Unit
 
 from backend.ai.context import AIContext
 from backend.ai.decide import decide
@@ -290,6 +290,134 @@ def test_decide_routes_combat_move_through_mcts_when_enabled(monkeypatch):
     assert action.type in ("move_units", "end_phase")
     v = validate_action(state, action, ud, td, fd, cd, port_d)
     assert v.valid, v.error
+
+
+def _load_motw_setup():
+    from backend.engine.definitions import load_static_definitions, load_starting_setup
+    from backend.engine.utils import initialize_game_state
+
+    ud, td, fd, cd, port_d = load_static_definitions(setup_id="motw_1.0")
+    setup = load_starting_setup(setup_id="motw_1.0")
+    state = initialize_game_state(
+        faction_defs=fd,
+        territory_defs=td,
+        unit_defs=ud,
+        starting_setup=setup,
+        camp_defs=cd,
+    )
+    return state, ud, td, fd, cd, port_d
+
+
+def _replay_combat_queue(state, ud, td, fd):
+    """Apply the combat_move queue the way phase-end does. Raises ValueError on a bad queue."""
+    get_state_after_pending_moves(state, "combat_move", ud, td, fd)
+
+
+def test_charge_sequences_survive_pending_replay():
+    """
+    Two charges that pass through each other's destinations are each legal on the
+    pre-pending board and then raise when the queue is replayed:
+
+        Charge path cannot pass through fords_of_isen: territory has units
+
+    legal_actions must not offer the second move.
+    """
+    state, ud, td, fd, cd, port_d = _load_motw_setup()
+    state.phase = "combat_move"
+    state.current_faction = "isengard"
+
+    def unit(iid, uid):
+        defn = ud[uid]
+        return Unit(iid, uid, defn.movement, defn.health, defn.movement, defn.health, None)
+
+    for terr in state.territories.values():
+        terr.units = [u for u in terr.units if ud[u.unit_id].faction != "isengard"]
+
+    def plant(tid, units):
+        terr = state.territories[tid]
+        terr.owner = "isengard"
+        terr.units = [u for u in terr.units if ud[u.unit_id].faction != "isengard"] + units
+
+    plant(
+        "south_dunland",
+        [unit("isengard_warg_a1", "isengard_warg_rider"), unit("isengard_warg_a2", "isengard_warg_rider")],
+    )
+    plant(
+        "west_march",
+        [unit("isengard_warg_b1", "isengard_warg_rider"), unit("isengard_warg_b2", "isengard_warg_rider")],
+    )
+    state.territories["fords_of_isen"].units = []
+    state.territories["fords_of_isen"].owner = "rohan"
+    state.territories["gap_of_rohan"].units = []
+    state.territories["gap_of_rohan"].owner = "rohan"
+
+    ctx = _combat_move_ctx(state, ud, td, fd, cd, port_d, faction_id="isengard")
+    problem = CombatMoveProblem(ctx)
+    first_moves = [a.unwrap() for a in problem.legal_actions(state) if a.unwrap().type != "end_phase"]
+    assert first_moves, "expected charge candidates from the planted wargs"
+
+    checked = 0
+    for first in first_moves:
+        after_first, _ = apply_action(state, first, ud, td, fd, cd, port_d)
+        _replay_combat_queue(after_first, ud, td, fd)
+        follow = CombatMoveProblem(
+            _combat_move_ctx(after_first, ud, td, fd, cd, port_d, faction_id="isengard")
+        )
+        for second in follow.legal_actions(after_first):
+            raw = second.unwrap()
+            if raw.type == "end_phase":
+                continue
+            after_second, _ = apply_action(after_first, raw, ud, td, fd, cd, port_d)
+            _replay_combat_queue(after_second, ud, td, fd)
+            checked += 1
+    assert checked > 0
+
+
+def test_ship_three_hex_sail_is_not_queued():
+    """
+    A gondor ship with movement 2 cannot sail three sea zones. Replaying that
+    pending move is the sweep failure:
+
+        unit gondor_gondor_ship_034 has remaining_movement=2, need 3
+
+    The enumerator must not offer that sail, and any sail it does offer has to
+    replay together with moves already queued.
+    """
+    state, ud, td, fd, cd, port_d = _load_motw_setup()
+    state.phase = "combat_move"
+    state.current_faction = "gondor"
+    ship_id = None
+    origin = None
+    for tid, terr in state.territories.items():
+        for unit in terr.units:
+            if unit.unit_id == "gondor_ship":
+                ship_id = unit.instance_id
+                origin = tid
+                break
+        if ship_id:
+            break
+    assert ship_id == "gondor_gondor_ship_034"
+    assert origin == "sea_zone_12"
+
+    doomed = state.copy()
+    doomed.pending_moves.append(
+        PendingMove(origin, "sea_zone_5", [ship_id], "combat_move", [], "sail")
+    )
+    with pytest.raises(ValueError, match=r"gondor_gondor_ship_034 has remaining_movement=2, need 3"):
+        _replay_combat_queue(doomed, ud, td, fd)
+
+    ctx = _combat_move_ctx(state, ud, td, fd, cd, port_d, faction_id="gondor")
+    problem = CombatMoveProblem(ctx)
+    assert problem._pending_sequence_replays(state, origin, "sea_zone_5", [ship_id], []) is False
+
+    for action in problem.legal_actions(state):
+        raw = action.unwrap()
+        if raw.type == "end_phase":
+            continue
+        ids = raw.payload.get("unit_instance_ids") or []
+        assert not (raw.payload.get("to") == "sea_zone_5" and ship_id in ids)
+        after, _ = apply_action(state, raw, ud, td, fd, cd, port_d)
+        _replay_combat_queue(after, ud, td, fd)
 
 
 def test_decide_keeps_heuristic_when_mcts_disabled(monkeypatch):
