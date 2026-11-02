@@ -646,9 +646,9 @@
 .account-stats__headline {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: baseline;
   justify-content: space-between;
-  gap: 0.5rem 1rem;
+  gap: 0.35rem 1rem;
   margin-bottom: 0.5rem;
 }
 
@@ -670,10 +670,17 @@
   margin-left: auto;
   text-align: right;
   display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 0.15rem 0.85rem;
   color: var(--ink-light);
   font-size: 0.95rem;
+}
+
+.account-stats__totals span {
+  white-space: nowrap;
 }
 
 .account-stats__alliances {
