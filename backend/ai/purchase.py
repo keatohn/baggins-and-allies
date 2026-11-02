@@ -42,7 +42,6 @@ from backend.ai.habits import (
     PURCHASE_DIVERSITY_OVER_PENALTY,
     PURCHASE_DIVERSITY_UNDER_RATIO,
     PURCHASE_DIVERSITY_UNDER_BONUS,
-    PURCHASE_BATCH_DIVERSITY_PENALTY,
     MAX_ACTIVE_SIEGEWORK,
     PURCHASE_CHEAPEST_INFANTRY_BONUS,
     PURCHASE_CHEAP_LINE_COST_BAND_PAD,
@@ -60,6 +59,8 @@ from backend.ai.formulas import (
     cost_range_bonus,
     territory_loss_cost,
 )
+from backend.ai.randomness import pick_from_score_band
+from backend.ai.style import blend_purchase_choice_scores, purchase_repeat_penalty, randomness
 from backend.ai.defense_sim import (
     marginal_hold_delta_add_land_unit,
     merge_combat_move_attacker_stacks,
@@ -731,6 +732,7 @@ def decide_purchase(ctx: AIContext):
         best_unit_id = None
         best_cost = 0
         best_effective = -1e9
+        ranked: list[tuple[tuple[str, int], float]] = []
         for unit_id, cost_per, score in options:
             if cost_per <= 0 or budget_left < cost_per:
                 continue
@@ -739,11 +741,25 @@ def decide_purchase(ctx: AIContext):
             if _unique_at_cap(state, ud, unit_id, batch_counts):
                 continue
             already = batch_counts.get(unit_id, 0)
-            effective = score - PURCHASE_BATCH_DIVERSITY_PENALTY * already
+            effective = score - purchase_repeat_penalty(score, already)
+            ranked.append(((unit_id, cost_per), effective))
             if best_unit_id is None or (effective, -cost_per) > (best_effective, -best_cost):
                 best_effective = effective
                 best_unit_id = unit_id
                 best_cost = cost_per
+        ranked = blend_purchase_choice_scores(
+            ranked,
+            lambda choice: choice[0],
+            batch_counts,
+            [unit_id for unit_id, _cost, _score in options],
+        )
+        if ranked:
+            if randomness() > 0:
+                picked = pick_from_score_band(ranked)
+            else:
+                picked = max(ranked, key=lambda item: (item[1], -item[0][1]))
+            if picked is not None:
+                return picked
         return (best_unit_id, best_cost)
 
     # Fill land slots: rescore each pick using phantom defenders stacked on highest-marginal tiles.
@@ -758,6 +774,7 @@ def decide_purchase(ctx: AIContext):
         best_unit_id = None
         best_cost = 0
         best_effective = -1e9
+        ranked: list[tuple[tuple[str, int], float]] = []
         for unit_id, cost_per, p in land_entries:
             if cost_per <= 0 or budget_left < cost_per:
                 continue
@@ -779,11 +796,25 @@ def decide_purchase(ctx: AIContext):
                 home_rem=home_rem,
             )
             already = purchases.get(unit_id, 0)
-            effective = score - PURCHASE_BATCH_DIVERSITY_PENALTY * already
+            effective = score - purchase_repeat_penalty(score, already)
+            ranked.append(((unit_id, cost_per), effective))
             if best_unit_id is None or (effective, -cost_per) > (best_effective, -best_cost):
                 best_effective = effective
                 best_unit_id = unit_id
                 best_cost = cost_per
+        ranked = blend_purchase_choice_scores(
+            ranked,
+            lambda choice: choice[0],
+            purchases,
+            [unit_id for unit_id, _cost, _row in land_entries],
+        )
+        if ranked:
+            if randomness() > 0:
+                picked = pick_from_score_band(ranked)
+            else:
+                picked = max(ranked, key=lambda item: (item[1], -item[0][1]))
+            if picked is not None:
+                best_unit_id, best_cost = picked
         if not best_unit_id or best_cost <= 0:
             break
         purchases[best_unit_id] = purchases.get(best_unit_id, 0) + 1

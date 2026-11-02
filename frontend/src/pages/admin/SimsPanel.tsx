@@ -25,6 +25,24 @@ const DEFAULT_WEIGHTS: AiFactionSetting['weights'] = {
   purchase_defense: 0.5,
 };
 
+const STYLE_FIELDS: { key: 'randomness' | 'aggression' | 'purchase_variety'; label: string }[] = [
+  { key: 'randomness', label: 'Randomness' },
+  { key: 'aggression', label: 'Aggression' },
+  { key: 'purchase_variety', label: 'Purchase variety' },
+];
+
+type StyleDefaults = {
+  randomness: number;
+  aggression: number;
+  purchase_variety: number;
+};
+
+const DEFAULT_STYLE: StyleDefaults = {
+  randomness: 0,
+  aggression: 0.5,
+  purchase_variety: 0,
+};
+
 const ALLIANCE_ORDER = ['good', 'evil'];
 const MAX_TURNS = 10;
 
@@ -34,8 +52,8 @@ type SimFaction = {
   alliance: string;
 };
 
-function blankSetting(difficulty: string, algorithm: string): AiFactionSetting {
-  return { difficulty, algorithm, weights: { ...DEFAULT_WEIGHTS } };
+function blankSetting(difficulty: string, algorithm: string, style: StyleDefaults = DEFAULT_STYLE): AiFactionSetting {
+  return { difficulty, algorithm, weights: { ...DEFAULT_WEIGHTS }, ...style };
 }
 
 function allianceLabel(alliance: string): string {
@@ -98,6 +116,7 @@ export function SimsPanel({ setups, onError }: Props) {
   ]);
   const [defaultDifficulty, setDefaultDifficulty] = useState('normal');
   const [defaultAlgorithm, setDefaultAlgorithm] = useState('heuristic');
+  const [defaultStyle, setDefaultStyle] = useState<StyleDefaults>(DEFAULT_STYLE);
 
   const scenarioId = setupId || setups[0]?.id || '';
   const loadingSetup = Boolean(scenarioId) && loadedSetupId !== scenarioId;
@@ -117,15 +136,21 @@ export function SimsPanel({ setups, onError }: Props) {
         if (cancelled) return;
         const difficulty = ai.difficulty || 'normal';
         const algorithm = ai.algorithm || 'heuristic';
+        const style = {
+          randomness: ai.randomness ?? 0,
+          aggression: ai.aggression ?? 0.5,
+          purchase_variety: ai.purchase_variety ?? 0,
+        };
         setDefaultDifficulty(difficulty);
         setDefaultAlgorithm(algorithm);
+        setDefaultStyle(style);
         if (ai.levels?.length) {
           setLevels(ai.levels.map((level) => ({ id: level.id, name: level.name })));
         }
         const nextFactions = factionsFromBundle(bundle.factions);
         setFactions(nextFactions);
         setSettings(Object.fromEntries(
-          nextFactions.map((faction) => [faction.id, blankSetting(difficulty, algorithm)]),
+          nextFactions.map((faction) => [faction.id, blankSetting(difficulty, algorithm, style)]),
         ));
         setLoadedSetupId(requestedId);
       })
@@ -141,10 +166,15 @@ export function SimsPanel({ setups, onError }: Props) {
 
   const patchFaction = (
     factionId: string,
-    patch: { difficulty?: string; algorithm?: string; weight?: { key: keyof AiFactionSetting['weights']; value: number } },
+    patch: {
+      difficulty?: string;
+      algorithm?: string;
+      weight?: { key: keyof AiFactionSetting['weights']; value: number };
+      style?: { key: keyof StyleDefaults; value: number };
+    },
   ) => {
     setSettings((current) => {
-      const row = current[factionId] ?? blankSetting(defaultDifficulty, defaultAlgorithm);
+      const row = current[factionId] ?? blankSetting(defaultDifficulty, defaultAlgorithm, defaultStyle);
       return {
         ...current,
         [factionId]: {
@@ -152,6 +182,7 @@ export function SimsPanel({ setups, onError }: Props) {
           ...(patch.difficulty != null ? { difficulty: patch.difficulty } : {}),
           ...(patch.algorithm != null ? { algorithm: patch.algorithm } : {}),
           ...(patch.weight ? { weights: { ...row.weights, [patch.weight.key]: patch.weight.value } } : {}),
+          ...(patch.style ? { [patch.style.key]: patch.style.value } : {}),
         },
       };
     });
@@ -164,8 +195,8 @@ export function SimsPanel({ setups, onError }: Props) {
     <div className="admin-page__ai">
       <p className="admin-page__hint">
         Runs one computer-vs-computer game and keeps the report here. Each faction has its own
-        algorithm, the same way a computer-only lobby does. Difficulty and weights apply only when
-        that faction uses MCTS. Heuristic has no difficulty.
+        algorithm. Randomness, aggression, and purchase variety apply to both. Difficulty and the
+        board weights apply only when that faction uses MCTS. The heuristic player does not read them.
       </p>
       <div className="admin-page__toolbar admin-page__toolbar--wrap">
         <label className="admin-page__field">
@@ -218,7 +249,7 @@ export function SimsPanel({ setups, onError }: Props) {
       {!loadingSetup && factions.length > 0 ? (
         <div className="admin-sim-factions">
           {factions.map((faction) => {
-            const setting = settings[faction.id] ?? blankSetting(defaultDifficulty, defaultAlgorithm);
+            const setting = settings[faction.id] ?? blankSetting(defaultDifficulty, defaultAlgorithm, defaultStyle);
             const known = choices.some((level) => level.id === setting.difficulty);
             const usesMcts = (setting.algorithm || 'mcts') === 'mcts';
             return (
@@ -239,9 +270,33 @@ export function SimsPanel({ setups, onError }: Props) {
                       <option value="heuristic">Heuristic</option>
                     </select>
                     {usesMcts ? null : (
-                      <span className="admin-sim-faction__heuristic">Heuristic has no difficulty.</span>
+                      <span className="admin-sim-faction__heuristic">
+                        Heuristic has no difficulty or board weights.
+                      </span>
                     )}
                   </label>
+                  {STYLE_FIELDS.map((field) => (
+                    <label key={field.key} className="admin-page__field">
+                      <span className="admin-page__field-label">
+                        {field.label}{' '}
+                        <span className="admin-ai-style__value">{Number(setting[field.key] ?? 0).toFixed(2)}</span>
+                      </span>
+                      <input
+                        className="admin-ai-style__slider"
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={setting[field.key] ?? 0}
+                        onChange={(e) => {
+                          const value = Number(e.target.value);
+                          if (Number.isFinite(value)) {
+                            patchFaction(faction.id, { style: { key: field.key, value } });
+                          }
+                        }}
+                      />
+                    </label>
+                  ))}
                   {usesMcts ? (
                     <label className="admin-page__field">
                       <span className="admin-page__field-label">Difficulty</span>
@@ -259,7 +314,7 @@ export function SimsPanel({ setups, onError }: Props) {
                       </select>
                     </label>
                   ) : null}
-                  {WEIGHT_FIELDS.map((field) => (
+                  {usesMcts ? WEIGHT_FIELDS.map((field) => (
                     <label key={field.key} className="admin-page__field">
                       <span className="admin-page__field-label">{field.label}</span>
                       <input
@@ -269,7 +324,6 @@ export function SimsPanel({ setups, onError }: Props) {
                         max={field.max}
                         step={0.1}
                         value={setting.weights[field.key]}
-                        disabled={!usesMcts}
                         onChange={(e) => {
                           const value = Number(e.target.value);
                           if (Number.isFinite(value)) {
@@ -278,7 +332,7 @@ export function SimsPanel({ setups, onError }: Props) {
                         }}
                       />
                     </label>
-                  ))}
+                  )) : null}
                 </div>
               </section>
             );

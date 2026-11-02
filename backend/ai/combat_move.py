@@ -51,7 +51,6 @@ from backend.ai.habits import (
     FRONTLINE_BONUS,
     COMBAT_SIM_TRIALS,
     COMBAT_MOVE_CONFIDENT_WIN_RATE,
-    COMBAT_MOVE_MIN_WIN_RATE,
     COMBAT_MOVE_EMPTY_TERRITORY_BONUS_ADDED,
     COMBAT_MOVE_EMPTY_TERRITORY_BONUS_MULTIPLIER,
     COMBAT_MOVE_FUTURE_CHARGE_WEIGHT,
@@ -77,6 +76,7 @@ from backend.ai.habits import (
     PUSH_TOWARD_STRONGHOLD_PER_STEP_BONUS,
 )
 from backend.ai.randomness import pick_from_score_band
+from backend.ai.style import scale_combat_gain
 from backend.ai.formulas import (
     battle_gain_if_win,
     expected_net_gain,
@@ -822,6 +822,40 @@ def _last_resort_must_attack_move(
     return None
 
 
+def is_ladder_instance(state, unit_defs, instance_id: str) -> bool:
+    """True when this unit instance is a siege ladder."""
+    for terr in (state.territories or {}).values():
+        for unit in getattr(terr, "units", None) or []:
+            if getattr(unit, "instance_id", None) != instance_id:
+                continue
+            return bool(has_unit_special(unit_defs.get(unit.unit_id), SIEGEWORK_SPECIAL_LADDER))
+    return False
+
+
+def unit_ids_are_unaccompanied_ladders(state, unit_defs, unit_ids, to_tid: str) -> bool:
+    """True when every unit in the move is a ladder and no other unit is already attacking there.
+
+    A ladder rolls no dice and cannot conquer alone, so the combat-move phase cannot end
+    until another unit type joins that attack or the ladder move is cancelled.
+    """
+    if not unit_ids:
+        return False
+    units_by_iid = {
+        u.instance_id: u
+        for terr in (state.territories or {}).values()
+        for u in (getattr(terr, "units", None) or [])
+    }
+
+    def _is_ladder(iid: str) -> bool:
+        unit = units_by_iid.get(iid)
+        return bool(unit and has_unit_special(unit_defs.get(unit.unit_id), SIEGEWORK_SPECIAL_LADDER))
+
+    if not all(_is_ladder(iid) for iid in unit_ids):
+        return False
+    _, accompanied = get_ladder_attack_accompaniment(state, unit_defs)
+    return to_tid not in accompanied
+
+
 def drop_unaccompanied_ladder_moves(
     state,
     unit_defs,
@@ -1150,6 +1184,16 @@ def decide_combat_move(ctx: AIContext):
         move_stacks = _stacks_for_unit_ids(state, from_tid, unit_ids, ud)
         if not move_stacks:
             continue
+        from_def = td.get(from_tid)
+        to_def = td.get(to_tid)
+        sea_raid_now = bool(
+            from_def and to_def and _is_water_zone(from_def) and not _is_water_zone(to_def)
+        )
+        ids_for_ladder_rule = (
+            _with_raid_boats(state, from_tid, unit_ids, ud) if sea_raid_now else unit_ids
+        )
+        if unit_ids_are_unaccompanied_ladders(state, ud, ids_for_ladder_rule, to_tid):
+            continue
         def_stacks = _defender_stacks(state_after, to_tid, faction_id, fd, ud)
         if not def_stacks:
             # `worth_empty_conquest_combat_move` throttles "wasting" combat_move on no-value empty
@@ -1327,33 +1371,23 @@ def decide_combat_move(ctx: AIContext):
                               casualty_order_attacker="best_attack")
         sim = run_simulation(att_stacks, def_stacks, to_tid,
                              ud, td, n_trials=COMBAT_SIM_TRIALS, options=opts)
-        net = expected_net_gain(
+        def_cas = _defender_cas_mean_for_net(to_tid, sim.defender_casualty_cost_mean)
+        att_cas = sim.attacker_casualty_cost_mean
+        raw_net = expected_net_gain(
             sim.p_attacker_win, to_tid, td, fd,
-            _defender_cas_mean_for_net(
-                to_tid, sim.defender_casualty_cost_mean),
-            sim.attacker_casualty_cost_mean,
+            def_cas,
+            att_cas,
             ctx.camp_defs,
             ctx.port_defs,
             ud,
         )
+        prize = raw_net - def_cas + att_cas
+        net = scale_combat_gain(prize, def_cas, att_cas)
         win_rate = sim.p_attacker_win
 
         def_total = _defender_stack_total(def_stacks)
         d_adj = min_distance_between_territories(from_tid, to_tid, td)
         is_adjacent_strike = d_adj <= 1
-        small_local_stack = def_total > 0 and def_total <= 4
-
-        # Skip terrible odds: prefer end_phase over very low win rate
-        if win_rate < COMBAT_MOVE_MIN_WIN_RATE:
-            continue
-        # Skip negative expected value unless confident — except adjacent cleanup of small stacks
-        if net < 0 and win_rate < COMBAT_MOVE_CONFIDENT_WIN_RATE:
-            if not (
-                is_adjacent_strike
-                and small_local_stack
-                and win_rate >= 0.4
-            ):
-                continue
 
         # Marginal gain: win rate and net gain added by *this* move (vs already-committed units to this target)
         marginal_win = win_rate - committed_win_rate.get(to_tid, 0.0)
@@ -1498,7 +1532,10 @@ def decide_combat_move(ctx: AIContext):
             score += strategic.combat_move_bonus_to.get(to_tid, 0.0)
         candidates.append(((from_tid, to_tid, unit_ids), score))
 
-    best_move = pick_from_score_band(candidates) if candidates else None
+    # A negative score is worse than ending the phase. A loss whose trade is still
+    # positive stays in the list; randomness can then pick it over a better attack.
+    viable = [item for item in candidates if item[1] > 0]
+    best_move = pick_from_score_band(viable) if viable else None
 
     if not best_move:
         if can_end_phase:

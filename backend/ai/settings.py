@@ -135,9 +135,46 @@ def normalize_matchup(raw: Any) -> str:
     return text if text in MATCHUPS else "mcts-vs-mcts"
 
 
+# name, default, used by the Difficulty tab. All three are 0–1.
+STYLE_FIELDS: tuple[tuple[str, float], ...] = (
+    ("randomness", 0.0),
+    ("aggression", 0.5),
+    ("purchase_variety", 0.0),
+)
+
+STYLE_ENV: dict[str, str] = {
+    "randomness": "AI_RANDOMNESS",
+    "aggression": "AI_AGGRESSION",
+    "purchase_variety": "AI_PURCHASE_VARIETY",
+}
+
+
+def default_style() -> dict[str, float]:
+    return {name: default for name, default in STYLE_FIELDS}
+
+
+def normalize_style(raw: Any) -> dict[str, float]:
+    body = raw if isinstance(raw, dict) else {}
+    out: dict[str, float] = {}
+    for name, default in STYLE_FIELDS:
+        try:
+            value = float(body.get(name, default))
+        except (TypeError, ValueError):
+            value = default
+        if value != value or value < 0.0 or value > 1.0:
+            value = default
+        out[name] = round(value, 3)
+    return out
+
+
 def default_ai_settings() -> dict[str, Any]:
     levels = default_levels()
-    return {"difficulty": "normal", "algorithm": "heuristic", "levels": levels}
+    return {
+        "difficulty": "normal",
+        "algorithm": "heuristic",
+        "levels": levels,
+        **default_style(),
+    }
 
 
 def load_ai_defaults(db) -> dict[str, Any]:
@@ -166,6 +203,7 @@ def load_ai_defaults(db) -> dict[str, Any]:
         "difficulty": normalize_difficulty(data.get("difficulty"), levels),
         "algorithm": normalize_algorithm(data.get("algorithm")),
         "levels": levels,
+        **normalize_style(data),
     }
 
 
@@ -182,6 +220,7 @@ def save_ai_defaults(db, raw: Any) -> dict[str, Any]:
         "difficulty": normalize_difficulty(body.get("difficulty"), levels),
         "algorithm": normalize_algorithm(body.get("algorithm")),
         "levels": levels,
+        **normalize_style(body if any(name in body for name, _default in STYLE_FIELDS) else current),
     }
     payload = json.dumps(settings)
     row = db.query(AppSetting).filter(AppSetting.key == AI_DEFAULTS_KEY).first()
@@ -273,8 +312,14 @@ def normalize_faction_ai(
     fallback_difficulty: str = "normal",
     levels: list[dict[str, Any]] | None = None,
     fallback_algorithm: str = "mcts",
+    style_fallback: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """One faction's search difficulty, algorithm, and board-score weights."""
+    """One faction's algorithm, MCTS weights, and the shared style knobs.
+
+    Board-score weights are read only by MCTS. Randomness, aggression, and
+    purchase variety are read by both algorithms. Missing style fields fall
+    back to `style_fallback` (the Difficulty tab), then to the built-in defaults.
+    """
     body = raw if isinstance(raw, dict) else {}
     incoming = body.get("weights") if isinstance(body.get("weights"), dict) else {}
     weights = {
@@ -292,10 +337,18 @@ def normalize_faction_ai(
         if levels is not None
         else stored_difficulty(raw_difficulty)
     )
+    base_style = normalize_style(style_fallback)
+    style_body = {
+        name: body[name]
+        for name, _default in STYLE_FIELDS
+        if body.get(name) is not None
+    }
+    style = normalize_style({**base_style, **style_body})
     return {
         "difficulty": difficulty,
         "algorithm": algorithm,
         "weights": weights,
+        **style,
     }
 
 
@@ -332,6 +385,23 @@ def normalize_faction_settings_map(
             continue
         out[fid] = normalize_faction_ai(incoming.get(fid), difficulty, levels)
     return out
+
+
+@contextmanager
+def style_env(settings: dict[str, Any] | None):
+    """Apply the admin randomness, aggression, and purchase-variety knobs for one decide()."""
+    style = normalize_style(settings)
+    saved = {env_name: os.environ.get(env_name) for env_name in STYLE_ENV.values()}
+    for name, env_name in STYLE_ENV.items():
+        os.environ[env_name] = str(style[name])
+    try:
+        yield
+    finally:
+        for env_name, previous in saved.items():
+            if previous is None:
+                os.environ.pop(env_name, None)
+            else:
+                os.environ[env_name] = previous
 
 
 @contextmanager

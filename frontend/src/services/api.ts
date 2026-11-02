@@ -759,6 +759,9 @@ export interface AdminAiSettings {
   algorithm: string;
   algorithms: string[];
   levels: AdminAiLevel[];
+  randomness: number;
+  aggression: number;
+  purchase_variety: number;
 }
 
 export interface AiLevelChoice {
@@ -769,6 +772,9 @@ export interface AiLevelChoice {
 export interface AiFactionSetting {
   difficulty: string;
   algorithm: string;
+  randomness: number;
+  aggression: number;
+  purchase_variety: number;
   weights: {
     material: number;
     territory: number;
@@ -1418,7 +1424,14 @@ export const api = {
       body: JSON.stringify(catalog),
     }),
   adminGetAi: () => fetchJson<AdminAiSettings>('/admin/ai'),
-  adminPutAi: (body: { difficulty: string; algorithm: string; levels: AdminAiLevel[] }) =>
+  adminPutAi: (body: {
+    difficulty: string;
+    algorithm: string;
+    levels: AdminAiLevel[];
+    randomness: number;
+    aggression: number;
+    purchase_variety: number;
+  }) =>
     fetchJson<AdminAiSettings & { ok: boolean }>('/admin/ai', {
       method: 'PUT',
       body: JSON.stringify(body),

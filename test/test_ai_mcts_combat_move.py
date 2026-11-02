@@ -136,7 +136,7 @@ def test_legal_actions_capped():
 
 def test_legal_actions_include_attack_or_end_phase():
     state, ud, td, fd, cd, port_d = _load_wotr_setup()
-    _plant_attackers_near_enemy(state, ud, td)
+    _plant_attackers_near_enemy(state, ud, td, attackers=12)
     ctx = _combat_move_ctx(state, ud, td, fd, cd, port_d)
     problem = CombatMoveProblem(ctx)
     actions = problem.legal_actions(state)
@@ -146,6 +146,45 @@ def test_legal_actions_include_attack_or_end_phase():
         a.payload.get("to") for a in actions if a.type == "move_units"
     }
     assert "minas_morgul" in move_targets
+
+
+def test_hopeless_high_value_attack_is_not_offered():
+    """A juicy territory is not attacked when the combat sim says the fight is lost."""
+    state, ud, td, fd, cd, port_d = _load_wotr_setup()
+    _plant_attackers_near_enemy(state, ud, td, attackers=1)
+    dest = state.territories["minas_morgul"]
+    def_uid = next(
+        (uid for uid, udef in ud.items() if getattr(udef, "faction", "") == "mordor"),
+        None,
+    )
+    if def_uid is None:
+        pytest.skip("no mordor unit in setup")
+    dh = int(getattr(ud[def_uid], "health", 1) or 1)
+    dest.units = [
+        Unit(
+            instance_id=f"mcts_cm_def_{i}",
+            unit_id=def_uid,
+            remaining_movement=0,
+            remaining_health=dh,
+            base_movement=0,
+            base_health=dh,
+            loaded_onto=None,
+        )
+        for i in range(12)
+    ]
+    ctx = _combat_move_ctx(state, ud, td, fd, cd, port_d)
+    problem = CombatMoveProblem(ctx)
+    targets = {
+        a.payload.get("to") for a in problem.legal_actions(state) if a.type == "move_units"
+    }
+    assert "minas_morgul" not in targets
+
+    _plant_attackers_near_enemy(state, ud, td, attackers=12)
+    problem = CombatMoveProblem(ctx)
+    targets = {
+        a.payload.get("to") for a in problem.legal_actions(state) if a.type == "move_units"
+    }
+    assert "minas_morgul" in targets
 
 
 def test_legal_actions_excludes_end_phase_when_forbidden():
@@ -167,7 +206,7 @@ def test_legal_actions_excludes_end_phase_when_forbidden():
 
 def test_apply_move_units_advances_pending():
     state, ud, td, fd, cd, port_d = _load_wotr_setup()
-    _plant_attackers_near_enemy(state, ud, td)
+    _plant_attackers_near_enemy(state, ud, td, attackers=12)
     ctx = _combat_move_ctx(state, ud, td, fd, cd, port_d)
     problem = CombatMoveProblem(ctx)
     actions = problem.legal_actions(state)
@@ -418,6 +457,58 @@ def test_ship_three_hex_sail_is_not_queued():
         assert not (raw.payload.get("to") == "sea_zone_5" and ship_id in ids)
         after, _ = apply_action(state, raw, ud, td, fd, cd, port_d)
         _replay_combat_queue(after, ud, td, fd)
+
+
+def test_ladder_is_not_sent_to_conquer_alone():
+    """A siege ladder cannot be the only unit in an attack, and a stuck one is cancelled or joined."""
+    state, ud, td, fd, cd, port_d = _load_motw_setup()
+    state.phase = "combat_move"
+    state.current_faction = "isengard"
+
+    def unit(iid, uid):
+        defn = ud[uid]
+        return Unit(iid, uid, defn.movement, defn.health, defn.movement, defn.health, None)
+
+    for terr in state.territories.values():
+        terr.units = [u for u in terr.units if ud[u.unit_id].faction != "isengard"]
+
+    origin = state.territories["south_dunland"]
+    origin.owner = "isengard"
+    origin.units = [u for u in origin.units if ud[u.unit_id].faction != "isengard"]
+    origin.units.append(unit("ladder_alone", "siege_ladder"))
+    dest = state.territories["fords_of_isen"]
+    dest.units = []
+    dest.owner = "rohan"
+
+    ctx = _combat_move_ctx(state, ud, td, fd, cd, port_d, faction_id="isengard")
+    problem = CombatMoveProblem(ctx)
+    for action in problem.legal_actions(state):
+        raw = action.unwrap()
+        if raw.type != "move_units":
+            continue
+        ids = raw.payload.get("unit_instance_ids") or []
+        assert "ladder_alone" not in ids
+
+    state.pending_moves.append(
+        PendingMove("south_dunland", "fords_of_isen", ["ladder_alone"], "combat_move", [])
+    )
+    stuck = CombatMoveProblem(ctx)
+    rescue = [a.unwrap() for a in stuck.legal_actions(state)]
+    assert rescue
+    assert all(a.type != "end_phase" for a in rescue)
+    assert any(a.type == "cancel_move" for a in rescue)
+
+    origin.units.append(unit("uruk_partner", "urukhai_warrior"))
+    joined = CombatMoveProblem(ctx)
+    rescue = [a.unwrap() for a in joined.legal_actions(state)]
+    assert all(a.type != "end_phase" for a in rescue)
+    assert any(
+        a.type == "move_units"
+        and a.payload.get("to") == "fords_of_isen"
+        and "uruk_partner" in (a.payload.get("unit_instance_ids") or [])
+        and "ladder_alone" not in (a.payload.get("unit_instance_ids") or [])
+        for a in rescue
+    )
 
 
 def test_decide_keeps_heuristic_when_mcts_disabled(monkeypatch):

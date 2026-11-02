@@ -402,8 +402,21 @@ def _search_core(
         stats.tree_nodes = _count_nodes(root)
 
     values = {a: child.value for a, child in root.children.items()}
-    best_action, _best_child = root.best_child_by_visits()
+    best_action = _choose_root_action(root, rng)
     return best_action, values, root
+
+
+def _choose_root_action(root: Node[S, A], rng: random.Random) -> A:
+    """Most-visited child. Randomness draws from the visit softmax instead."""
+    from backend.ai.randomness import softmax_pick
+    from backend.ai.style import randomness
+
+    ranked = [(action, child.visit_count) for action, child in root.children.items()]
+    picked = softmax_pick(ranked, randomness(), rng)
+    if picked is None:
+        best_action, _best_child = root.best_child_by_visits()
+        return best_action
+    return picked
 
 
 def run_mcts(

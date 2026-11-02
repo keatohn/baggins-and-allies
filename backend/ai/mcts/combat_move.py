@@ -3,10 +3,10 @@ Combat-move MCTS Problem: top-K heuristic proposal enumerator + leaf evaluator.
 
 The action space for combat_move is enormous (unit x destination x grouping).
 This Problem reuses the existing greedy policy as an *action generator*: enumerate
-(from, to) pairs from movable units, apply garrison pruning, rank with cheap
-formula scores (no combat sims during expansion), and keep the top-K candidates
-plus end_phase when legal. MCTS then composes multi-front sequences of move_units
-before ending the phase.
+(from, to) pairs from movable units, apply garrison pruning, rank each defended
+battle with the combat sim (the same trials the heuristic uses), and keep the
+top-K candidates that are actually worth fighting, plus end_phase when legal.
+MCTS then composes multi-front sequences of move_units before ending the phase.
 
 Heuristics remain evaluators/priors, not sole deciders.
 """
@@ -16,30 +16,38 @@ from __future__ import annotations
 import random
 from typing import Any
 
-from backend.engine.actions import Action, end_phase, move_units
+from backend.engine.actions import Action, cancel_move, end_phase, move_units
 from backend.engine.movement import _is_water_zone, resolve_territory_key_in_state
 from backend.engine.queries import (
     get_movable_units,
     get_unit_move_targets,
     get_unit_faction,
     filter_unit_instances_that_can_reach,
+    get_ladder_only_attack_destinations,
     validate_action,
 )
 from backend.engine.reducer import apply_action, get_state_after_pending_moves
 from backend.engine.definitions import faction_acts_as
 
 from backend.ai.context import AIContext
+from backend.engine.combat_sim import SimOptions, run_simulation
+
 from backend.ai.formulas import (
     battle_gain_if_win,
     expected_net_gain,
     get_unit_power_cost,
 )
+from backend.ai.habits import COMBAT_SIM_TRIALS
+from backend.ai.style import scale_combat_gain
 from backend.ai.combat_move import (
+    _committed_attacker_stacks,
     _defender_stacks,
     _is_attackable_territory,
     _is_cavalry_combat,
     _stacks_for_unit_ids,
     _with_raid_boats,
+    is_ladder_instance,
+    unit_ids_are_unaccompanied_ladders,
 )
 from backend.ai.garrison import (
     move_attacks_enemy_stack_that_threatens_origin,
@@ -76,6 +84,8 @@ class CombatMoveProblem(Problem):
         self.rng = rng if rng is not None else random.Random()
         # Eval weights fixed for this search (env read once per decide() call).
         self._eval_weights = get_eval_weights()
+        # (stacks, territory, options) -> (win rate, attacker casualty cost, defender casualty cost)
+        self._battle_cache: dict[tuple, tuple[float, float, float]] = {}
         # Root-phase constraints (API-provided); recomputed per state where needed.
         self._root_can_end_phase = bool(
             (ctx.available_actions or {}).get("can_end_phase", True)
@@ -105,6 +115,10 @@ class CombatMoveProblem(Problem):
             return []
         if (state.phase or "combat_move") != "combat_move":
             return []
+
+        rescue = self._ladder_rescue_actions(state)
+        if rescue is not None:
+            return rescue
 
         actions: list[HashableAction] = []
         for from_tid, to_tid, unit_ids, charge_through in self._enumerate_top_k_cached(state):
@@ -165,11 +179,18 @@ class CombatMoveProblem(Problem):
 
     def priors(self, state: Any) -> dict[HashableAction, float] | None:
         """
-        Heuristic priors: weight each top-K move by its cheap formula score;
+        Heuristic priors: weight each top-K move by its combat-sim expected gain;
         end_phase gets a modest baseline so it is considered when no good moves remain.
         """
         if state.winner is not None or (state.phase or "combat_move") != "combat_move":
             return None
+
+        rescue = self._ladder_rescue_actions(state)
+        if rescue is not None:
+            return {
+                action: (1.0 if action.type == "move_units" else 0.4)
+                for action in rescue
+            }
 
         scored: list[tuple[HashableAction, float]] = []
         for from_tid, to_tid, unit_ids, charge_through in self._enumerate_top_k_cached(state):
@@ -202,8 +223,9 @@ class CombatMoveProblem(Problem):
         Generate up to MAX_COMBAT_MOVE_BRANCHES ranked (from, to, unit_ids, charge_through) tuples.
 
         Mirrors the greedy policy's candidate construction (attackable destinations,
-        garrison pruning, charge-path intersection) but ranks with pure formulas so
-        expansion stays cheap. No combat sims here.
+        garrison pruning, charge-path intersection). Defended battles are ranked by
+        the combat sim. A fight below the minimum win rate, or with negative expected
+        gain and no confident win, is not offered.
         """
         faction_id = self.faction_id
         ud, td, fd = self.ud, self.td, self.fd
@@ -300,11 +322,15 @@ class CombatMoveProblem(Problem):
             )
             if sea_raid:
                 pruned = _with_raid_boats(state, from_tid, pruned, ud)
+            if unit_ids_are_unaccompanied_ladders(state, ud, pruned, to_tid):
+                continue
             # Rank by the preferred charge; a later option is substituted only
             # when that path does not survive a full pending replay.
             score = self._cheap_move_score(
                 state, from_tid, to_tid, pruned, charge_options[0], state_after=state_after
             )
+            if score <= 0:
+                continue
             candidates.append((score, from_tid, to_tid, pruned, charge_options))
 
         candidates.sort(key=lambda x: x[0], reverse=True)
@@ -447,7 +473,85 @@ class CombatMoveProblem(Problem):
         tdef = self.td.get(tid)
         return bool(tdef and getattr(tdef, "ownable", True))
 
-    # ----- Cheap scoring (no sims) -----
+    # ----- Battle scoring (combat sim) -----
+
+    def _board_after_pending(self, state: Any) -> Any:
+        """Board after combat-move orders already queued. Falls back to `state` if replay fails."""
+        try:
+            if any(getattr(pm, "phase", None) == "combat_move" for pm in (state.pending_moves or [])):
+                return get_state_after_pending_moves(state, "combat_move", self.ud, self.td, self.fd)
+        except ValueError:
+            return state
+        return state
+
+    def _sim_battle(
+        self,
+        board: Any,
+        att_stacks: list[dict],
+        def_stacks: list[dict],
+        territory_id: str,
+        *,
+        sea_raid: bool,
+    ) -> tuple[float, float]:
+        """Win rate and expected net gain from the combat sim. Cached for this search."""
+        tdef = self.td.get(territory_id)
+        stronghold = bool(getattr(tdef, "is_stronghold", False))
+        terr = board.territories.get(territory_id) if board is not None else None
+        hp = None
+        if stronghold and tdef is not None:
+            base = int(getattr(tdef, "stronghold_base_health", 0) or 0)
+            if base > 0:
+                cur = getattr(terr, "stronghold_current_health", None) if terr is not None else None
+                hp = int(cur) if cur is not None else base
+        opts = SimOptions(
+            must_conquer=stronghold,
+            casualty_order_attacker="best_attack" if stronghold else "best_unit",
+            is_sea_raid=sea_raid,
+            stronghold_initial_hp=hp,
+        )
+        key = (
+            tuple(sorted((s.get("unit_id"), int(s.get("count") or 0)) for s in att_stacks)),
+            tuple(sorted((s.get("unit_id"), int(s.get("count") or 0)) for s in def_stacks)),
+            territory_id,
+            stronghold,
+            sea_raid,
+            hp,
+        )
+        cached = self._battle_cache.get(key)
+        if cached is None:
+            sim = run_simulation(
+                att_stacks,
+                def_stacks,
+                territory_id,
+                self.ud,
+                self.td,
+                n_trials=COMBAT_SIM_TRIALS,
+                options=opts,
+                seed=1,
+            )
+            cached = (
+                float(sim.p_attacker_win),
+                float(sim.attacker_casualty_cost_mean),
+                float(sim.defender_casualty_cost_mean),
+            )
+            self._battle_cache[key] = cached
+        p_win, att_cas, def_cas = cached
+        # Killing an unowned garrison is not an economic gain.
+        if terr is not None and getattr(terr, "owner", None) is None:
+            def_cas = 0.0
+        raw = expected_net_gain(
+            p_win,
+            territory_id,
+            self.td,
+            self.fd,
+            def_cas,
+            att_cas,
+            self.cd,
+            self.port_d,
+            self.ud,
+        )
+        net = scale_combat_gain(raw - def_cas + att_cas, def_cas, att_cas)
+        return p_win, net
 
     def _cheap_move_score(
         self,
@@ -460,8 +564,10 @@ class CombatMoveProblem(Problem):
         state_after: Any | None = None,
     ) -> float:
         """
-        Formula-only rank for a candidate move. Rough win rate from power ratio;
-        no combat sims so expansion stays cheap. Used for both top-K ranking and priors.
+        Rank a candidate by the combat sim's expected gain. A likely loss stays
+        when the casualties and the territory still come out ahead. Aggression
+        slides the balance between those two. A negative total is dropped because
+        ending the phase is worth more.
         """
         move_stacks = _stacks_for_unit_ids(state, from_tid, unit_ids, self.ud)
         if not move_stacks:
@@ -473,49 +579,91 @@ class CombatMoveProblem(Problem):
         if our_power <= 0:
             return -1.0
 
-        board = state_after if state_after is not None else state
-        def_stacks = _defender_stacks(board, to_tid, self.faction_id, self.fd, self.ud)
+        board = state_after if state_after is not None else self._board_after_pending(state)
+        from_def = self.td.get(from_tid)
+        to_def = self.td.get(to_tid)
+        sea_raid = bool(from_def and to_def and _is_water_zone(from_def) and not _is_water_zone(to_def))
 
-        # Destination gain (objective + power), only for territories we actually conquer.
-        dest_gain = 0.0
-        if self._is_conquest(to_tid, state):
-            dest_gain += battle_gain_if_win(to_tid, self.td, self.fd)
+        def _merge(base: list[dict], extra: list[dict]) -> list[dict]:
+            combined: dict[str, int] = {}
+            for stack in base + extra:
+                uid = stack.get("unit_id")
+                if not uid:
+                    continue
+                combined[uid] = combined.get(uid, 0) + int(stack.get("count") or 0)
+            return [{"unit_id": uid, "count": count} for uid, count in combined.items()]
+
+        # Charge-through fights the moving stack alone. The destination fight
+        # includes attackers already committed there. A via we expect to lose
+        # value on lowers the move; it does not delete it on its own.
+        via_adjustment = 0.0
         for via in charge_through or []:
-            if self._is_conquest(via, state):
-                dest_gain += battle_gain_if_win(via, self.td, self.fd)
+            via_def = _defender_stacks(board, via, self.faction_id, self.fd, self.ud)
+            if not via_def:
+                continue
+            _p_via, net_via = self._sim_battle(board, move_stacks, via_def, via, sea_raid=False)
+            via_adjustment += net_via
 
+        def_stacks = _defender_stacks(board, to_tid, self.faction_id, self.fd, self.ud)
         if not def_stacks:
-            # Empty / free conquest.
-            total = dest_gain
+            total = 0.0
+            if self._is_conquest(to_tid, state):
+                total += battle_gain_if_win(to_tid, self.td, self.fd)
             for via in [to_tid, *(charge_through or [])]:
                 if self._is_conquest(via, state):
                     total += expected_net_gain(
                         1.0, via, self.td, self.fd, 0.0, 0.0, self.cd, self.port_d, self.ud
                     )
-            # Mild preference for moving toward enemy strongholds (distance not computed here).
-            return total
+            return total + via_adjustment
 
-        def_power = sum(
-            int(s.get("count", 0) or 0) * get_unit_power_cost(self.ud.get(s.get("unit_id")))
-            for s in def_stacks
-        )
-        # Conservative power-ratio win estimate (no sim).
-        p = our_power / (our_power + def_power + 1e-6)
-        p = min(0.95, p * 0.9)
-        if p < 0.2:
-            return -5.0  # suicide attack: strongly discourage
-        net = expected_net_gain(
-            p,
-            to_tid,
-            self.td,
-            self.fd,
-            def_power * p * 0.5,  # expected defender casualty value
-            our_power * (1.0 - p) * 0.35,  # expected attacker casualty value
-            self.cd,
-            self.port_d,
-            self.ud,
-        )
-        return net + dest_gain * p
+        committed = _committed_attacker_stacks(board, to_tid, self.faction_id, self.ud, self.fd)
+        att_stacks = _merge(committed, move_stacks)
+        _p_win, net = self._sim_battle(board, att_stacks, def_stacks, to_tid, sea_raid=sea_raid)
+        return net + via_adjustment
+
+    def _ladder_rescue_actions(self, state: Any) -> list[HashableAction] | None:
+        """Partner moves or a cancel when a ladder is already attacking alone.
+
+        Returns None when no ladder is stuck. A stuck ladder is the only thing
+        this position may do: the phase cannot end until it is joined or cancelled,
+        and another solo ladder is not offered.
+        """
+        alone = get_ladder_only_attack_destinations(state, self.ud)
+        if not alone:
+            return None
+        pending_unit_ids: set[str] = set()
+        for pm in state.pending_moves or []:
+            if getattr(pm, "phase", None) == "combat_move":
+                pending_unit_ids.update(getattr(pm, "unit_instance_ids", None) or [])
+        groups: dict[tuple[str, str], list[str]] = {}
+        for unit_info in get_movable_units(state, self.faction_id, self.ud, self.fd):
+            iid = unit_info.get("instance_id")
+            from_tid = unit_info.get("territory_id")
+            if not iid or not from_tid or iid in pending_unit_ids:
+                continue
+            if is_ladder_instance(state, self.ud, iid):
+                continue
+            targets, _routes = get_unit_move_targets(state, iid, self.ud, self.td, self.fd)
+            for to_tid in alone:
+                if to_tid in (targets or {}):
+                    groups.setdefault((from_tid, to_tid), []).append(iid)
+        actions: list[HashableAction] = []
+        for (from_tid, to_tid), unit_ids in groups.items():
+            action = move_units(self.faction_id, from_tid, to_tid, unit_ids)
+            if validate_action(state, action, self.ud, self.td, self.fd, self.cd, self.port_d).valid:
+                actions.append(HashableAction(action))
+        if actions:
+            return actions
+        alone_ids = {iid for ids in alone.values() for iid in ids}
+        for index, pm in enumerate(state.pending_moves or []):
+            if getattr(pm, "phase", None) != "combat_move":
+                continue
+            if not alone_ids.intersection(getattr(pm, "unit_instance_ids", None) or []):
+                continue
+            action = cancel_move(self.faction_id, index)
+            if validate_action(state, action, self.ud, self.td, self.fd, self.cd, self.port_d).valid:
+                actions.append(HashableAction(action))
+        return actions
 
     # ----- End-phase legality -----
 
@@ -530,6 +678,8 @@ class CombatMoveProblem(Problem):
             else:
                 sim = state  # no same-phase pendings: post-pending board is this state
         except ValueError:
+            return False
+        if get_ladder_only_attack_destinations(state, self.ud):
             return False
         if getattr(sim, "loaded_naval_must_attack_instance_ids", None):
             return False

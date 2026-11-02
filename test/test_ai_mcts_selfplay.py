@@ -48,6 +48,7 @@ from backend.ai.mcts import tree_cache
 from backend.ai.mcts.action_key import HashableAction
 from backend.ai.mcts.dice import sample_dice_for_continue, sample_dice_for_initiate
 from backend.ai.mcts.eval_weights import get_eval_weights
+from backend.ai.settings import style_env
 
 SETUP_ID = "motw_1.0"
 
@@ -418,6 +419,7 @@ def run_matchup(
     default_algorithm: str = "heuristic",
     env_overrides: dict[str, dict[str, str]] | None = None,
     difficulties: dict[str, str] | None = None,
+    styles: dict[str, dict] | None = None,
     max_faction_turns: int | None = None,
     max_cycles: int | None = 1,
     setup_id: str = SETUP_ID,
@@ -484,7 +486,13 @@ def run_matchup(
         difficulty = (difficulties or {}).get(fid) or None
         decide_times: list[float] = []
         t0 = time.perf_counter()
-        with _algorithm_env(algorithm), _difficulty_env(difficulty), _weight_env(resolved_overrides.get(fid, {})):
+        faction_style = (styles or {}).get(fid)
+        with (
+            _algorithm_env(algorithm),
+            _difficulty_env(difficulty),
+            _weight_env(resolved_overrides.get(fid, {})),
+            style_env(faction_style) if faction_style else contextlib.nullcontext(),
+        ):
             action_types, state = run_faction_turn(
                 state, ud, td, fd, cd, port_d, fid,
                 per_action_cap_s=per_action_cap_s, rng=rng, decide_times=decide_times,

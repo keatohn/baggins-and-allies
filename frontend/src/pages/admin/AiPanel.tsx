@@ -7,6 +7,33 @@ type Props = {
   onError: (message: string) => void;
 };
 
+function StyleSlider({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="admin-page__field">
+      <span className="admin-page__field-label">
+        {label} <span className="admin-ai-style__value">{value.toFixed(2)}</span>
+      </span>
+      <input
+        className="admin-ai-style__slider"
+        type="range"
+        min={0}
+        max={1}
+        step={0.05}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+    </label>
+  );
+}
+
 function uniqueLevelId(name: string, used: string[]): string {
   const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24) || 'level';
   let id = base;
@@ -24,6 +51,9 @@ export function AiPanel({ onSaved, onError }: Props) {
   const [difficulty, setDifficulty] = useState('normal');
   const [algorithm, setAlgorithm] = useState('heuristic');
   const [levels, setLevels] = useState<AdminAiLevel[]>([]);
+  const [randomness, setRandomness] = useState(0);
+  const [aggression, setAggression] = useState(0.5);
+  const [purchaseVariety, setPurchaseVariety] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -36,6 +66,9 @@ export function AiPanel({ onSaved, onError }: Props) {
         setDifficulty(res.difficulty);
         setAlgorithm(res.algorithm);
         setLevels(res.levels ?? []);
+        setRandomness(res.randomness ?? 0);
+        setAggression(res.aggression ?? 0.5);
+        setPurchaseVariety(res.purchase_variety ?? 0);
       })
       .catch((e) => {
         if (!cancelled) onError(e instanceof Error ? e.message : 'Could not load AI settings');
@@ -126,6 +159,20 @@ export function AiPanel({ onSaved, onError }: Props) {
         A computer faction shows these level names only when its algorithm is MCTS. Heuristic factions
         do not use a level.
       </p>
+      <p className="admin-page__hint">
+        These three apply to both players, including games already in progress, and randomness
+        applies to purchases as well as moves. At 0 the best option is taken. As it rises, every
+        lower-ranked option gets a larger share, down the whole list, until 1 picks among them
+        about equally. Aggression only changes combat move, sliding weight from our losses toward
+        the territory. Purchase variety evens the counts across every unit that can be bought:
+        higher variety is a tighter spread, not a nudge toward one different unit. The board
+        weights in Sims are MCTS only. The heuristic player does not read them.
+      </p>
+      <div className="admin-ai-style">
+        <StyleSlider label="Randomness" value={randomness} onChange={setRandomness} />
+        <StyleSlider label="Aggression" value={aggression} onChange={setAggression} />
+        <StyleSlider label="Purchase variety" value={purchaseVariety} onChange={setPurchaseVariety} />
+      </div>
       <div className="admin-ai-levels" role="list">
         {levels.map((level, index) => (
           <div key={level.id} className="admin-ai-levels__row" role="listitem">
@@ -218,11 +265,21 @@ export function AiPanel({ onSaved, onError }: Props) {
           disabled={saving || levels.length === 0}
           onClick={() => {
             setSaving(true);
-            api.adminPutAi({ difficulty, algorithm, levels })
+            api.adminPutAi({
+              difficulty,
+              algorithm,
+              levels,
+              randomness,
+              aggression,
+              purchase_variety: purchaseVariety,
+            })
               .then((res) => {
                 setDifficulty(res.difficulty);
                 setAlgorithm(res.algorithm);
                 setLevels(res.levels ?? []);
+                setRandomness(res.randomness ?? 0);
+                setAggression(res.aggression ?? 0.5);
+                setPurchaseVariety(res.purchase_variety ?? 0);
                 onSaved();
               })
               .catch((e) => onError(e instanceof Error ? e.message : 'Save failed'))

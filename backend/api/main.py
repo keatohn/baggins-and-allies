@@ -2214,6 +2214,9 @@ class AdminAiSettingsBody(BaseModel):
     difficulty: str = "normal"
     algorithm: str = "heuristic"
     levels: list[AiLevelBody] | None = None
+    randomness: float = 0.0
+    aggression: float = 0.5
+    purchase_variety: float = 0.0
 
 
 def _admin_ai_payload(settings: dict) -> dict:
@@ -2257,6 +2260,9 @@ class AdminSimFactionBody(BaseModel):
     difficulty: str = "normal"
     algorithm: str = "mcts"
     weights: dict[str, float] = Field(default_factory=dict)
+    randomness: float | None = None
+    aggression: float | None = None
+    purchase_variety: float | None = None
 
 
 class AdminSimBody(BaseModel):
@@ -2308,6 +2314,7 @@ def admin_run_sim(
             ai_defaults["difficulty"],
             ai_defaults["levels"],
             ai_defaults["algorithm"],
+            ai_defaults,
         )
         for fid, fdef in fd.items()
         if fid and _sim_faction_plays(fdef)
@@ -2317,6 +2324,7 @@ def admin_run_sim(
             setup, setup_id, ud, td, fd, cd, port_d,
             factions=factions, max_cycles=cycles, seed=int(body.seed or 1),
             levels=ai_defaults["levels"],
+            style=ai_defaults,
         )
     except Exception as e:
         record = {
@@ -2341,7 +2349,7 @@ def _sim_faction_plays(fdef) -> bool:
     return bool(text) and text != "neutral"
 
 
-def _run_admin_sim(setup, setup_id, ud, td, fd, cd, port_d, *, factions, max_cycles, seed, levels=None):
+def _run_admin_sim(setup, setup_id, ud, td, fd, cd, port_d, *, factions, max_cycles, seed, levels=None, style=None):
     from test.test_ai_mcts_selfplay import (
         format_matchup_report,
         run_matchup,
@@ -2362,7 +2370,7 @@ def _run_admin_sim(setup, setup_id, ud, td, fd, cd, port_d, *, factions, max_cyc
         subfaction_rules=setup.get("subfaction_rules"),
     )
     from backend.ai.mcts.budget import budget_catalog_scope
-    from backend.ai.settings import stamp_ai_on_state
+    from backend.ai.settings import stamp_ai_on_state, style_env
 
     ordered = [fid for fid in (state.turn_order or []) if fid in factions]
     for fid in factions:
@@ -2380,12 +2388,13 @@ def _run_admin_sim(setup, setup_id, ud, td, fd, cd, port_d, *, factions, max_cyc
         fid: {name: str(value) for name, value in factions[fid]["weights"].items()}
         for fid in ordered
     }
-    with budget_catalog_scope(levels):
+    with style_env(style), budget_catalog_scope(levels):
         result = run_matchup(
             state, ud, td, fd, cd, port_d,
             algorithms,
             difficulties=difficulties,
             env_overrides=env_overrides,
+            styles=factions,
             max_cycles=max_cycles,
             seed=seed,
             setup_id=setup_id,
@@ -6424,11 +6433,11 @@ def do_ai_step(
         available_actions=available_actions,
     )
     from backend.ai.mcts.budget import budget_catalog_scope
-    from backend.ai.settings import faction_search_env, load_ai_defaults
+    from backend.ai.settings import faction_search_env, load_ai_defaults, style_env
 
     faction_setting = _faction_search_setting(row, state.current_faction)
-    levels = load_ai_defaults(db)["levels"]
-    with budget_catalog_scope(levels):
+    ai_defaults = load_ai_defaults(db)
+    with style_env(ai_defaults), budget_catalog_scope(ai_defaults["levels"]):
         if faction_setting is None:
             action = decide(ctx)
         else:

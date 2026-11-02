@@ -27,6 +27,7 @@ from backend.ai.formulas import (
     get_unit_power_cost,
 )
 from backend.ai.habits import MIN_POWER_RESERVE
+from backend.ai.style import roster_evenness
 from backend.ai.mcts.action_key import HashableAction
 from backend.ai.mcts.eval_weights import get_eval_weights
 from backend.ai.mcts.search import Problem
@@ -309,6 +310,7 @@ class PurchaseProblem(Problem):
             d = defense_value_per_power(udef, cost, 0)
             a = attack_value_per_power(udef, cost, 0)
             raw += count * (w_def * d + w_off * a)
+        raw *= self._purchase_evenness(state, None)
         # Soft-normalize: tanh-like squash keeps values in [-1, 1] without hard clipping.
         return raw / (1.0 + abs(raw))
 
@@ -327,7 +329,27 @@ class PurchaseProblem(Problem):
             d = defense_value_per_power(udef, cost, 0)
             a = attack_value_per_power(udef, cost, 0)
             total += count * (w_def * d + w_off * a)
+        total *= self._purchase_evenness(state, bundle)
         return max(0.05, total)
+
+    def _purchase_evenness(self, state: Any, bundle: dict[str, int] | None) -> float:
+        """1 for an even basket. Falls as one purchasable type takes every copy."""
+        counts: dict[str, int] = {}
+        fpu = (getattr(state, "faction_purchased_units", None) or {}).get(self.faction_id, [])
+        for stack in fpu:
+            uid = getattr(stack, "unit_id", "")
+            count = int(getattr(stack, "count", 0) or 0)
+            if uid and count > 0:
+                counts[uid] = counts.get(uid, 0) + count
+        for uid, count in (bundle or {}).items():
+            if uid and count > 0:
+                counts[uid] = counts.get(uid, 0) + int(count)
+        roster = [
+            str(row.get("unit_id"))
+            for row in self._purchasable
+            if row.get("unit_id")
+        ]
+        return roster_evenness(counts, roster)
 
 
 def decide_purchase_mcts(ctx: AIContext) -> Action | None:
