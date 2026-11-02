@@ -690,6 +690,25 @@ def _forfeited_ids(config: dict) -> set[str]:
     return {str(x) for x in raw if x}
 
 
+def _forfeited_factions(config: dict, pid: str) -> list[str]:
+    """Factions a removed player gave up. Stored ids win; older games only have reassignment notes."""
+    recorded = config.get("forfeited_player_factions")
+    raw = recorded.get(pid) if isinstance(recorded, dict) else None
+    if isinstance(raw, str):
+        raw = [raw]
+    fids: list[str] = []
+    if isinstance(raw, list):
+        for fid in raw:
+            fid_s = str(fid).strip()
+            if fid_s and fid_s not in fids:
+                fids.append(fid_s)
+    if fids:
+        return fids
+    from backend.api.game_results import _faction_ids_from_reassignments
+
+    return _faction_ids_from_reassignments(config, pid)
+
+
 def _stat_counts(faction_ids: list[str], by_faction: dict) -> dict[str, int]:
     counts = {k: 0 for k in STAT_KEYS}
     for fid in faction_ids:
@@ -851,8 +870,16 @@ def award_game_xp(db: Session, row: Any, state: Any) -> list[dict[str, Any]]:
     rules = cfg["rules"]
     alliances = alliances_from_config(config)
     grouped = human_factions(row)
-    vs_ai = len(grouped) <= 1
     forfeited = _forfeited_ids(config)
+    # A forfeit removes the player from the roster. Their factions are kept so the
+    # finished game can still pay the battles and units they earned, scaled by the forfeit multiplier.
+    for pid in forfeited:
+        if pid in grouped:
+            continue
+        fids = _forfeited_factions(config, pid)
+        if fids:
+            grouped[pid] = fids
+    vs_ai = len(grouped) <= 1
     turn_number = int(getattr(state, "turn_number", 1) or 1)
     winner = getattr(state, "winner", None)
     when = getattr(row, "completed_at", None) or datetime.utcnow()

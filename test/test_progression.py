@@ -369,6 +369,45 @@ def test_forfeit_multiplier_scales_xp_and_opponent_gets_the_win(db_session, play
     assert other.xp == 150
 
 
+def test_removed_forfeiter_is_paid_for_stats(db_session, players):
+    admin, user = players
+    other = Player(
+        id=str(uuid.uuid4()),
+        email="other@example.com",
+        username="otheruser",
+        password_hash="x",
+        is_admin=False,
+    )
+    db_session.add(other)
+    db_session.commit()
+    cfg = default_progression()
+    cfg["rules"] = _rules(forfeit_multiplier=0.5)
+    save_progression(db_session, cfg)
+    config = _definitions()
+    config["forfeited_player_ids"] = [user.id]
+    config["forfeited_player_factions"] = {user.id: ["gondor"]}
+    config["ai_factions"] = ["gondor"]
+    row = _add_game(
+        db_session,
+        [{"player_id": other.id, "faction_id": "mordor"}],
+        config=config,
+    )
+    _finish(db_session, row, [
+        {"type": "combat_ended", "payload": {
+            "winner": "attacker",
+            "attacker_faction": "gondor",
+            "defender_faction": "mordor",
+            "defender_casualty_ids": ["a", "b"],
+            "attacker_casualty_ids": ["c"],
+        }},
+    ], winner="evil")
+    db_session.refresh(user)
+    db_session.refresh(other)
+    # Gondor lost: 50 finish + 3 for the battle + 2 units, times 0.5. Mordor won and stays on the people multiplier.
+    assert user.xp == 28
+    assert other.xp == 151
+
+
 def test_daily_cap_limits_a_second_game_the_same_day(db_session, players, make_client):
     admin, user = players
     client = make_client(admin)

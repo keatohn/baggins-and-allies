@@ -465,7 +465,8 @@ export function TierXpPanel({
         <h3 className="admin-form__subtitle">XP rules</h3>
         <p className="admin-form__micro">
           XP is awarded once, when a game finishes. Stat XP is added up, cut off at the per-game cap, then
-          multiplied. A game counts as against the computer when only one human is playing. Rounds use the
+          multiplied. A game counts as against the computer when only one human took part, including
+          anyone who forfeited. Rounds use the
           game’s round counter: it starts at 1 and goes up after every faction has taken a turn. A player
           who forfeited gets the same award times the forfeit multiplier, on top of the people or computer
           multiplier. 0 gives them nothing. The daily cap uses the day the game finished, and 0 turns it off.
