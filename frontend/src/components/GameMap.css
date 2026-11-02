@@ -1121,6 +1121,13 @@
   padding: 0.28rem;
 }
 
+.map-nav-arrow {
+  width: 10px;
+  height: 10px;
+  display: block;
+  flex-shrink: 0;
+}
+
 .map-controls-toggle {
   width: 26px;
   height: 26px;

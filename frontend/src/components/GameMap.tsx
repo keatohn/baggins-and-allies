@@ -30,6 +30,16 @@ import {
   usesFordEscortBudget,
 } from '../fordEscort';
 
+/** Filled triangle. Text ◀/▶ render as emoji on mobile. */
+function MapNavArrow({ direction }: { direction: 'left' | 'right' }) {
+  const points = direction === 'left' ? '8.6,1.4 2.2,6 8.6,10.6' : '3.4,1.4 9.8,6 3.4,10.6';
+  return (
+    <svg className="map-nav-arrow" viewBox="0 0 12 12" aria-hidden>
+      <polygon points={points} fill="currentColor" />
+    </svg>
+  );
+}
+
 /** Walk ancestors — hit target may be inside the path, not the node that carries `id`. */
 function territoryIdsUnderPoint(clientX: number, clientY: number): string[] {
   const out: string[] = [];
@@ -5583,7 +5593,7 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                     title="Show map controls"
                     aria-label="Show map controls"
                   >
-                    ◀
+                    <MapNavArrow direction="left" />
                   </button>
                 ) : (
                   <>
@@ -5595,7 +5605,7 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                         title="Hide map controls"
                         aria-label="Hide map controls"
                       >
-                        ▶
+                        <MapNavArrow direction="right" />
                       </button>
                       <button
                         type="button"
@@ -5611,9 +5621,9 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                       <button onClick={panUp} title="Pan Up">▲</button>
                     </div>
                     <div className="controls-row">
-                      <button onClick={panLeft} title="Pan Left">◀</button>
+                      <button onClick={panLeft} title="Pan Left" aria-label="Pan Left"><MapNavArrow direction="left" /></button>
                       <button onClick={resetView} title="Reset View">⌂</button>
-                      <button onClick={panRight} title="Pan Right">▶</button>
+                      <button onClick={panRight} title="Pan Right" aria-label="Pan Right"><MapNavArrow direction="right" /></button>
                     </div>
                     <div className="controls-row">
                       <button onClick={panDown} title="Pan Down">▼</button>

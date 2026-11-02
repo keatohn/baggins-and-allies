@@ -236,8 +236,9 @@
   }
 
   .tray-units {
-    align-items: flex-start;
-    justify-content: flex-start;
+    justify-content: center;
+    align-items: center;
+    align-content: flex-start;
     max-height: min(42dvh, 280px);
     overflow-x: hidden;
     overflow-y: auto;

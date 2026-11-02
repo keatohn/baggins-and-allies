@@ -1002,9 +1002,59 @@ button.friends-list__person .friends-list__name {
   color: var(--ink-faded);
 }
 
+/* In-game header scrolls (overflow) on phones and shrinks its icon buttons to 28px.
+   Match that size; the modals themselves are portaled to document.body so this
+   overflow cannot clip them. */
+@media (max-width: 900px) and (orientation: portrait) {
+  .account-menu--header .account-menu__btn {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    min-height: 28px;
+  }
+
+  .account-menu--header .account-menu__icon {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+@media (max-width: 900px) and (orientation: landscape) {
+  .account-menu--header .account-menu__btn {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+  }
+
+  .account-menu--header .account-menu__icon {
+    width: 20px;
+    height: 20px;
+  }
+}
+
 @media (max-width: 767px) {
   .account-menu--menu {
     transform: scale(0.92);
     transform-origin: top right;
+  }
+
+  .account-modal__header {
+    padding: 0.38rem 0.5rem;
+  }
+
+  .account-modal__title {
+    font-size: clamp(0.65rem, 2.35vw, 0.78rem);
+    line-height: 1.15;
+    letter-spacing: 0.04em;
+  }
+
+  .account-modal__close {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    min-height: 28px;
+    font-size: 1.15rem;
+    border-radius: 4px;
   }
 }

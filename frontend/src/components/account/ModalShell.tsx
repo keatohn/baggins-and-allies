@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 interface ModalShellProps {
   title: string;
@@ -27,7 +28,7 @@ export default function ModalShell({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose, closeOnEscape]);
 
-  return (
+  return createPortal(
     <div className="account-modal-overlay" role="presentation" onClick={onClose}>
       <div
         className={`account-modal ${className}`.trim()}
@@ -49,6 +50,7 @@ export default function ModalShell({
         </header>
         <div className="account-modal__body">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

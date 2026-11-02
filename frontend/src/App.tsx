@@ -4641,8 +4641,14 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
             className="sidebar-toggle"
             onClick={() => setSidebarCollapsed(c => !c)}
             title={sidebarCollapsed ? 'Show panel' : 'Hide panel'}
+            aria-label={sidebarCollapsed ? 'Show panel' : 'Hide panel'}
           >
-            {sidebarCollapsed ? '◀' : '▶'}
+            <svg className="sidebar-toggle-arrow" viewBox="0 0 12 12" aria-hidden>
+              <polygon
+                points={sidebarCollapsed ? '8.6,1.4 2.2,6 8.6,10.6' : '3.4,1.4 9.8,6 3.4,10.6'}
+                fill="currentColor"
+              />
+            </svg>
           </button>
           {!sidebarCollapsed && (
             <Sidebar
