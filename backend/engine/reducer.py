@@ -2632,6 +2632,15 @@ def _handle_initiate_combat(
             land_adj = getattr(territory_defs.get(territory_id), "adjacent", []) or []
             if territory_id not in sea_adj and sea_zone_id not in land_adj:
                 raise ValueError(f"Territory {territory_id} is not adjacent to sea zone {sea_zone_id}")
+        # Sea raid may not target allied land: same-alliance units on the hex are bystanders, so
+        # the empty-defender conquer path would seize the ally's hex and destroy their camp.
+        # (Own land is rejected above; normal land combat is unaffected.)
+        if territory.owner is not None and attacker_alliance is not None:
+            owner_alliance = getattr(faction_defs.get(territory.owner), "alliance", None)
+            if owner_alliance == attacker_alliance:
+                raise ValueError(
+                    f"Cannot sea raid allied territory {territory_id} (owner={territory.owner})"
+                )
         _normalize_unit_health_for_combat(sea_zone.units, unit_defs)
         _normalize_unit_health_for_combat(territory.units, unit_defs)
         # Sea raid land battle: fleet passengers (in sea) plus any attacker-side units on land

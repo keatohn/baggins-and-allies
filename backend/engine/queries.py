@@ -1383,6 +1383,19 @@ def _validate_initiate_combat(
             land_adj = getattr(territory_def, "adjacent", []) or []
             if territory_id not in sea_adj and sea_zone_id not in land_adj:
                 return ValidationResult(False, f"Territory {territory_id} is not adjacent to sea zone {sea_zone_id}")
+        # A sea raid may not target the attacker's own or allied land. Same-alliance units on
+        # the hex are bystanders (not defenders), so the empty-defender conquer path would
+        # seize an ally's hex and destroy their camp before liberation restores ownership.
+        owner = territory.owner
+        if owner is not None:
+            if owner == attacker_faction:
+                return ValidationResult(False, f"Cannot attack own territory {territory_id}")
+            owner_alliance = faction_defs.get(owner, FactionDefinition("", "", "", "", "")).alliance
+            if attacker_alliance and owner_alliance == attacker_alliance:
+                return ValidationResult(
+                    False,
+                    f"Cannot sea raid {territory_id}: it is owned by an allied faction ({owner})",
+                )
         # Sea raid land battle roster must match _handle_initiate_combat: fleet passengers in sea
         # plus attacker-faction non-naval units on the land hex (e.g. aerial joining the same assault).
         raid_attackers: dict[str, Unit] = {}
