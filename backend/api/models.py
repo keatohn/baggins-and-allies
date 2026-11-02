@@ -118,7 +118,9 @@ class GameResult(Base):
 
     Written once when a game flips to status=finished (idempotent per game).
     AI factions have no roster entries today; is_ai is reserved for future use.
-    forfeited=true marks players who left mid-game. Headline W-L still counts them.
+    forfeited=true marks players who left on an earlier round than the game ended.
+    A forfeit on the ending round is stored with forfeited=false. Rows with no
+    forfeit_round are older games and still count as completed.
     """
 
     __tablename__ = "game_results"
@@ -133,7 +135,11 @@ class GameResult(Base):
     alliance = Column(String(16), nullable=False)  # good | evil | neutral
     won = Column(Boolean, nullable=False, default=False)
     forfeited = Column(Boolean, nullable=False, default=False)
-    is_ai = Column(Boolean, nullable=False, default=False)  # reserved; human rows only for now
+    # Round number at the moment they forfeited. Null on rows written before this was stored.
+    forfeit_round = Column(Integer, nullable=True)
+    battles_won = Column(Integer, nullable=False, default=0)
+    strongholds_captured = Column(Integer, nullable=False, default=0)
+    is_ai = Column(Boolean, nullable=False, default=False)  # computer rows use a difficulty id, not a player
     setup_id = Column(String(128), nullable=True, index=True)
     scenario_name = Column(String(255), nullable=True)  # display-name snapshot at game end
     turn_count = Column(Integer, nullable=True)

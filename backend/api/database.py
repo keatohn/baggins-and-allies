@@ -210,6 +210,36 @@ def _ensure_player_temp_password_columns():
             conn.execute(text("ALTER TABLE players ADD COLUMN IF NOT EXISTS temp_password_expires_at TIMESTAMP"))
 
 
+def _ensure_game_result_stat_columns():
+    """Add forfeit round and per-faction battle totals on game_results."""
+    statements = (
+        "ALTER TABLE game_results ADD COLUMN forfeit_round INTEGER",
+        "ALTER TABLE game_results ADD COLUMN battles_won INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE game_results ADD COLUMN strongholds_captured INTEGER NOT NULL DEFAULT 0",
+    )
+    if DATABASE_URL.startswith("sqlite"):
+        with engine.begin() as conn:
+            rows = conn.execute(text("PRAGMA table_info(game_results)")).fetchall()
+            names = {row[1] for row in rows}
+            if "forfeit_round" not in names:
+                conn.execute(text(statements[0]))
+            if "battles_won" not in names:
+                conn.execute(text(statements[1]))
+            if "strongholds_captured" not in names:
+                conn.execute(text(statements[2]))
+    else:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE game_results ADD COLUMN IF NOT EXISTS forfeit_round INTEGER"
+            ))
+            conn.execute(text(
+                "ALTER TABLE game_results ADD COLUMN IF NOT EXISTS battles_won INTEGER NOT NULL DEFAULT 0"
+            ))
+            conn.execute(text(
+                "ALTER TABLE game_results ADD COLUMN IF NOT EXISTS strongholds_captured INTEGER NOT NULL DEFAULT 0"
+            ))
+
+
 def _ensure_player_xp_column():
     """Add players.xp if missing (existing SQLite/Postgres DBs before the tier system)."""
     if DATABASE_URL.startswith("sqlite"):
@@ -251,6 +281,7 @@ def init_db():
     _ensure_player_last_opened_columns()
     _ensure_player_temp_password_columns()
     _ensure_player_xp_column()
+    _ensure_game_result_stat_columns()
     _sync_admin_column_and_flags()
     db = SessionLocal()
     try:

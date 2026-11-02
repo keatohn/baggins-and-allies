@@ -189,8 +189,10 @@ def test_forfeit_flagged_and_computer_excluded(db_session, players):
     _try_save_game(game.id, state, db_session)
 
     rows = _results_for(db_session, game.id)
-    by_pid = {r.player_id: r for r in rows}
-    assert set(by_pid) == {alice.id, bob.id}  # computer excluded
+    humans = [r for r in rows if not r.is_ai]
+    by_pid = {r.player_id: r for r in humans}
+    assert set(by_pid) == {alice.id, bob.id}
+    assert any(r.is_ai and r.faction_id == "rohan" for r in rows)
     assert by_pid[alice.id].forfeited is True
     assert by_pid[alice.id].won is False
     assert by_pid[bob.id].forfeited is False
@@ -219,8 +221,10 @@ def test_removed_forfeiter_still_gets_row(db_session, players):
     _try_save_game(game.id, state, db_session)
 
     rows = _results_for(db_session, game.id)
-    by_pid = {r.player_id: r for r in rows}
+    humans = [r for r in rows if not r.is_ai]
+    by_pid = {r.player_id: r for r in humans}
     assert set(by_pid) == {alice.id, bob.id}
+    assert any(r.is_ai and r.faction_id == "gondor" for r in rows)
     assert by_pid[alice.id].forfeited is True
     assert by_pid[alice.id].won is False
     assert by_pid[alice.id].alliance == "good"

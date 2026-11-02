@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from .achievements import WHITELISTED_STATS, list_achievements
 from .models import Achievement, GameResult, PlayerAchievement
+from .player_stats import completed_result
 
 
 def _parse_participants(raw: Any) -> list[str]:
@@ -53,6 +54,7 @@ def _aggregate_by_game(rows: list[GameResult]) -> list[dict[str, Any]]:
                 "game_id": str(row.game_id),
                 "won": bool(row.won),
                 "forfeited": bool(row.forfeited),
+                "forfeit_round": int(row.forfeit_round) if row.forfeit_round is not None else None,
                 "alliance": str(row.alliance) if row.alliance else None,
                 "turn_count": int(row.turn_count) if row.turn_count is not None else None,
                 "duration_seconds": int(row.duration_seconds) if row.duration_seconds is not None else None,
@@ -61,6 +63,8 @@ def _aggregate_by_game(rows: list[GameResult]) -> list[dict[str, Any]]:
         else:
             entry["won"] = entry["won"] or bool(row.won)
             entry["forfeited"] = entry["forfeited"] or bool(row.forfeited)
+            if row.forfeit_round is not None and entry["forfeit_round"] is None:
+                entry["forfeit_round"] = int(row.forfeit_round)
             if row.alliance and not entry["alliance"]:
                 entry["alliance"] = str(row.alliance)
     ordered = sorted(
@@ -90,7 +94,10 @@ def compute_achievement_stats(db: Session, player_id: str) -> dict[str, Any]:
         .filter(GameResult.player_id == player_id)
         .all()
     )
-    games = _aggregate_by_game(rows)
+    games = [
+        g for g in _aggregate_by_game(rows)
+        if completed_result(g.get("forfeit_round"), g.get("turn_count"))
+    ]
     n = len(games)
     wins = sum(1 for g in games if g["won"])
     by_alliance: dict[str, list[dict[str, Any]]] = defaultdict(list)

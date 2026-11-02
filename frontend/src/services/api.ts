@@ -1058,12 +1058,17 @@ export interface GameListPlayer {
   forfeited?: boolean;
 }
 
-/** Aggregated W-L block from GET /players/{id}/stats (forfeits count as normal results). */
+/** Aggregated W-L block from GET /players/{id}/stats.
+
+Early forfeits (left before the ending round) are omitted. Same-round forfeits count.
+ */
 export interface PlayerStatsOverall {
   games: number;
   wins: number;
   losses: number;
   win_pct: number | null;
+  battles_won?: number;
+  strongholds_captured?: number;
 }
 
 export interface PlayerStatsAlliance {

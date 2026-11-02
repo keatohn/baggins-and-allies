@@ -97,12 +97,16 @@ def _finish_game(
     forfeited_player_ids=None,
     turn_number=10,
     created_at=None,
+    config_extra=None,
 ):
     """Create a game and flip it finished via save_game (writes game_results)."""
     state = GameState.from_dict({})
     state.winner = winner
     state.turn_number = turn_number
     created = created_at or (datetime.utcnow() - timedelta(days=1))
+    cfg = _config(setup_id=setup_id, forfeited_player_ids=forfeited_player_ids or [])
+    if config_extra:
+        cfg.update(config_extra)
     game = Game(
         id=str(uuid.uuid4()),
         name="Stats game",
@@ -110,7 +114,7 @@ def _finish_game(
         created_by=players_list[0]["player_id"] if players_list else None,
         game_state=json.dumps(state.to_dict()),
         players=json.dumps(players_list),
-        config=json.dumps(_config(setup_id=setup_id, forfeited_player_ids=forfeited_player_ids or [])),
+        config=json.dumps(cfg),
         created_at=created,
     )
     session.add(game)
@@ -418,3 +422,92 @@ def test_both_alliances_count_win_and_loss(db_session, players, make_client):
     assert data["overall"]["losses"] == 1
     assert data["by_alliance"]["evil"] == {"games": 1, "wins": 1, "win_pct": 100.0}
     assert data["by_alliance"]["good"] == {"games": 1, "wins": 0, "win_pct": 0.0}
+
+
+def _stat_blob(**counts):
+    base = {
+        "battles_won": 0,
+        "strongholds_captured": 0,
+        "territories_captured": 0,
+        "enemy_units_destroyed": 0,
+    }
+    base.update(counts)
+    return base
+
+
+def test_early_forfeit_is_omitted_and_same_round_counts(db_session, players, make_client):
+    alice, bob, _carol = players
+    _finish_game(
+        db_session,
+        players_list=[
+            {"player_id": alice.id, "faction_id": "gondor"},
+            {"player_id": bob.id, "faction_id": "mordor"},
+        ],
+        winner="evil",
+        turn_number=8,
+        forfeited_player_ids=[alice.id],
+        config_extra={"forfeited_player_rounds": {alice.id: 3}},
+    )
+    same = _finish_game(
+        db_session,
+        players_list=[
+            {"player_id": alice.id, "faction_id": "gondor"},
+            {"player_id": bob.id, "faction_id": "mordor"},
+        ],
+        winner="good",
+        turn_number=5,
+        forfeited_player_ids=[alice.id],
+        config_extra={
+            "forfeited_player_rounds": {alice.id: 5},
+            "forfeited_player_stat_snapshot": {alice.id: {"gondor": _stat_blob(battles_won=2, strongholds_captured=1)}},
+            "xp_stats": {"by_faction": {"gondor": _stat_blob(battles_won=2, strongholds_captured=1)}},
+        },
+    )
+    client = make_client(alice)
+    data = client.get(f"/players/{alice.id}/stats").json()
+    assert data["overall"]["games"] == 1
+    assert data["overall"]["wins"] == 1
+    assert data["overall"]["losses"] == 0
+    assert data["overall"]["battles_won"] == 2
+    assert data["overall"]["strongholds_captured"] == 1
+    row = (
+        db_session.query(GameResult)
+        .filter(GameResult.game_id == same.id, GameResult.player_id == alice.id)
+        .one()
+    )
+    assert row.forfeited is False
+    assert row.forfeit_round == 5
+
+
+def test_head_to_head_has_one_row_per_computer_difficulty(db_session, players, make_client):
+    alice, _bob, _carol = players
+    _finish_game(
+        db_session,
+        players_list=[{"player_id": alice.id, "faction_id": "gondor"}],
+        winner="good",
+        config_extra={
+            "ai_factions": ["mordor", "isengard"],
+            "ai_difficulty": "easy",
+            "ai_faction_settings": {
+                "mordor": {"difficulty": "easy"},
+                "isengard": {"difficulty": "hard"},
+            },
+        },
+    )
+    _finish_game(
+        db_session,
+        players_list=[{"player_id": alice.id, "faction_id": "gondor"}],
+        winner="evil",
+        config_extra={
+            "ai_factions": ["mordor", "isengard"],
+            "ai_difficulty": "easy",
+        },
+    )
+    client = make_client(alice)
+    data = client.get(f"/players/{alice.id}/stats").json()
+    h2h = {(e["username"], e["kind"]): e for e in data["head_to_head"]}
+    assert h2h[("Computer (Easy)", "against")]["games"] == 2
+    assert h2h[("Computer (Easy)", "against")]["wins"] == 1
+    assert h2h[("Computer (Hard)", "against")]["games"] == 1
+    assert h2h[("Computer (Hard)", "against")]["wins"] == 1
+    assert ("Computer (Easy)", "with") not in h2h

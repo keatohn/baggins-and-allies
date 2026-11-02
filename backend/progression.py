@@ -690,6 +690,124 @@ def _forfeited_ids(config: dict) -> set[str]:
     return {str(x) for x in raw if x}
 
 
+def _int_counts(raw: Any) -> dict[str, int]:
+    out = {key: 0 for key in STAT_KEYS}
+    if not isinstance(raw, dict):
+        return out
+    for key in STAT_KEYS:
+        try:
+            out[key] = max(0, int(raw.get(key) or 0))
+        except (TypeError, ValueError):
+            out[key] = 0
+    return out
+
+
+def _xp_by_faction(config: dict) -> dict:
+    stats = config.get("xp_stats")
+    by = stats.get("by_faction") if isinstance(stats, dict) else None
+    return by if isinstance(by, dict) else {}
+
+
+def _faction_baselines(config: dict) -> dict:
+    raw = config.get("faction_stat_baseline")
+    return raw if isinstance(raw, dict) else {}
+
+
+def record_forfeit_progress(
+    config: dict, player_id: str, faction_ids: list[str], turn_number: int
+) -> None:
+    """Remember the round they left and the battles they had earned on these factions.
+
+    The baseline moves forward so whoever takes the faction is not credited for
+    play that already happened.
+    """
+    by = _xp_by_faction(config)
+    baselines = dict(_faction_baselines(config))
+    earned: dict[str, dict[str, int]] = {}
+    for fid in faction_ids:
+        fid_s = str(fid)
+        current = _int_counts(by.get(fid_s))
+        base = _int_counts(baselines.get(fid_s))
+        earned[fid_s] = {key: max(0, current[key] - base[key]) for key in STAT_KEYS}
+        baselines[fid_s] = current
+    config["faction_stat_baseline"] = baselines
+    rounds = config.get("forfeited_player_rounds")
+    if not isinstance(rounds, dict):
+        rounds = {}
+    rounds[str(player_id)] = int(turn_number)
+    config["forfeited_player_rounds"] = rounds
+    snaps = config.get("forfeited_player_stat_snapshot")
+    if not isinstance(snaps, dict):
+        snaps = {}
+    snaps[str(player_id)] = earned
+    config["forfeited_player_stat_snapshot"] = snaps
+
+
+def forfeit_round_of(config: dict, player_id: str) -> int | None:
+    rounds = config.get("forfeited_player_rounds")
+    if not isinstance(rounds, dict) or str(player_id) not in rounds:
+        return None
+    try:
+        return int(rounds[str(player_id)])
+    except (TypeError, ValueError):
+        return None
+
+
+def forfeit_counts_as_leave(round_at: int | None, end_turn: int | None) -> bool:
+    """A forfeit counts only when they left before the round the game ended on."""
+    if round_at is None or end_turn is None:
+        return False
+    return round_at < end_turn
+
+
+def snapshot_counts(config: dict, player_id: str) -> dict[str, int] | None:
+    snaps = config.get("forfeited_player_stat_snapshot")
+    raw = snaps.get(str(player_id)) if isinstance(snaps, dict) else None
+    if not isinstance(raw, dict):
+        return None
+    if any(key in raw for key in STAT_KEYS):
+        return _int_counts(raw)
+    total = {key: 0 for key in STAT_KEYS}
+    for faction_counts in raw.values():
+        part = _int_counts(faction_counts if isinstance(faction_counts, dict) else None)
+        for key in STAT_KEYS:
+            total[key] += part[key]
+    return total
+
+
+def faction_result_counts(config: dict, faction_id: str) -> dict[str, int]:
+    """End-of-game totals for a faction, minus whatever was already snapshotted at a handoff."""
+    current = _int_counts(_xp_by_faction(config).get(str(faction_id)))
+    base = _int_counts(_faction_baselines(config).get(str(faction_id)))
+    return {key: max(0, current[key] - base[key]) for key in STAT_KEYS}
+
+
+def counts_for_player(
+    config: dict, player_id: str, faction_ids: list[str], *, use_snapshot: bool
+) -> dict[str, int]:
+    if use_snapshot:
+        snap = snapshot_counts(config, player_id)
+        if snap is not None:
+            return snap
+    total = {key: 0 for key in STAT_KEYS}
+    for fid in faction_ids:
+        part = faction_result_counts(config, fid)
+        for key in STAT_KEYS:
+            total[key] += part[key]
+    return total
+
+
+def faction_snapshot_counts(config: dict, player_id: str, faction_id: str) -> dict[str, int] | None:
+    snaps = config.get("forfeited_player_stat_snapshot")
+    raw = snaps.get(str(player_id)) if isinstance(snaps, dict) else None
+    if not isinstance(raw, dict):
+        return None
+    part = raw.get(str(faction_id))
+    if isinstance(part, dict):
+        return _int_counts(part)
+    return None
+
+
 def _forfeited_factions(config: dict, pid: str) -> list[str]:
     """Factions a removed player gave up. Stored ids win; older games only have reassignment notes."""
     recorded = config.get("forfeited_player_factions")
@@ -733,8 +851,15 @@ def score_player(
     turn_number: int,
     by_faction: dict,
     rules: dict[str, Any],
+    counts: dict[str, int] | None = None,
+    count_completion: bool = True,
 ) -> tuple[int, dict[str, Any]]:
-    """XP for one player before the daily cap. 0 means write no ledger row."""
+    """XP for one player before the daily cap. 0 means write no ledger row.
+
+    ``count_completion`` is false when they forfeited on an earlier round than the
+    game ended. The completion and win bonuses are withheld; battle and stronghold
+    XP still pay, then the forfeit multiplier scales that remainder.
+    """
     meta: dict[str, Any] = {
         "forfeited": forfeited,
         "vs_ai": vs_ai,
@@ -745,7 +870,8 @@ def score_player(
         meta["below_min_rounds"] = True
         return 0, meta
     won = bool(winner) and any(alliances.get(fid) == winner for fid in faction_ids)
-    counts = _stat_counts(faction_ids, by_faction)
+    if counts is None:
+        counts = _stat_counts(faction_ids, by_faction)
     stats_xp = (
         counts["strongholds_captured"] * int(rules["stronghold_captured"])
         + counts["territories_captured"] * int(rules["territory_captured"])
@@ -753,7 +879,12 @@ def score_player(
         + counts["battles_won"] * int(rules["battle_won"])
     )
     stats_xp = min(stats_xp, int(rules["stats_cap_per_game"]))
-    base = int(rules["game_completed"]) + (int(rules["game_won"]) if won else 0)
+    if count_completion:
+        base = int(rules["game_completed"]) + (int(rules["game_won"]) if won else 0)
+    else:
+        won = False
+        base = 0
+        meta["early_forfeit"] = True
     multiplier = float(rules["vs_ai_multiplier"] if vs_ai else rules["multiplayer_multiplier"])
     if forfeited:
         meta["forfeit_multiplier"] = float(rules["forfeit_multiplier"])
@@ -890,15 +1021,22 @@ def award_game_xp(db: Session, row: Any, state: Any) -> list[dict[str, Any]]:
         player = db.query(Player).filter(Player.id == pid).first()
         if player is None:
             continue
+        round_at = forfeit_round_of(config, pid)
+        early = pid in forfeited and forfeit_counts_as_leave(round_at, turn_number)
+        legacy_forfeit = pid in forfeited and round_at is None
         amount, meta = score_player(
             faction_ids=faction_ids,
             alliances=alliances,
             winner=str(winner) if winner else None,
-            forfeited=pid in forfeited,
+            forfeited=early or legacy_forfeit,
             vs_ai=vs_ai,
             turn_number=turn_number,
             by_faction=by_faction,
             rules=rules,
+            counts=counts_for_player(
+                config, pid, faction_ids, use_snapshot=pid in forfeited and round_at is not None
+            ),
+            count_completion=not early,
         )
         amount = _apply_daily_cap(db, pid, amount, meta, rules, when)
         if amount <= 0:

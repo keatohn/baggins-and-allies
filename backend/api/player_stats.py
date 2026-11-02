@@ -1,6 +1,7 @@
 """Aggregate finished-game stats from game_results for profile pages.
 
-Headline W-L includes every finished game (forfeits count as normal results).
+A forfeit counts only when that player left on an earlier round than the game
+ended. Same-round forfeits and older rows with no stored round stay in the record.
 All filters are SQL against game_results; scenario responses use the display-name
 snapshot stored at game end.
 """
@@ -14,7 +15,15 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from .game_results import computer_display_name
 from .models import GameResult, Player
+
+
+def completed_result(forfeit_round: int | None, turn_count: int | None) -> bool:
+    """False when they forfeited before the round the game ended on."""
+    if forfeit_round is None or turn_count is None:
+        return True
+    return int(forfeit_round) >= int(turn_count)
 
 
 def _parse_participants(raw: Any) -> list[str]:
@@ -119,6 +128,9 @@ def _aggregate_by_game(rows: list[GameResult]) -> list[dict[str, Any]]:
                 "player_id": str(row.player_id),
                 "won": bool(row.won),
                 "forfeited": bool(row.forfeited),
+                "forfeit_round": int(row.forfeit_round) if row.forfeit_round is not None else None,
+                "battles_won": int(row.battles_won or 0),
+                "strongholds_captured": int(row.strongholds_captured or 0),
                 "alliance": str(row.alliance) if row.alliance else None,
                 "setup_id": str(row.setup_id) if row.setup_id else None,
                 "scenario_name": str(row.scenario_name) if row.scenario_name else None,
@@ -133,6 +145,10 @@ def _aggregate_by_game(rows: list[GameResult]) -> list[dict[str, Any]]:
         else:
             entry["won"] = entry["won"] or bool(row.won)
             entry["forfeited"] = entry["forfeited"] or bool(row.forfeited)
+            if row.forfeit_round is not None and entry["forfeit_round"] is None:
+                entry["forfeit_round"] = int(row.forfeit_round)
+            entry["battles_won"] += int(row.battles_won or 0)
+            entry["strongholds_captured"] += int(row.strongholds_captured or 0)
             if row.alliance and not entry["alliance"]:
                 entry["alliance"] = str(row.alliance)
             if row.faction_id:
@@ -229,9 +245,14 @@ def compute_player_stats(
             .all()
         )
 
-    games = _aggregate_by_game(base_rows)
+    games = [
+        g for g in _aggregate_by_game(base_rows)
+        if completed_result(g["forfeit_round"], g["turn_count"])
+    ]
 
     wins = sum(1 for g in games if g["won"])
+    battles_won = sum(int(g["battles_won"]) for g in games)
+    strongholds_captured = sum(int(g["strongholds_captured"]) for g in games)
     games_played = len(games)
 
     by_alliance: dict[str, dict[str, Any]] = {}
@@ -308,7 +329,7 @@ def compute_player_stats(
     rows = [
         {
             "player_id": b["player_id"],
-            "username": usernames.get(b["player_id"]),
+            "username": usernames.get(b["player_id"]) or computer_display_name(b["player_id"]),
             "kind": b["kind"],
             "games": b["games"],
             "wins": b["wins"],
@@ -353,6 +374,8 @@ def compute_player_stats(
             "wins": wins,
             "losses": games_played - wins,
             "win_pct": _win_pct(wins, games_played),
+            "battles_won": battles_won,
+            "strongholds_captured": strongholds_captured,
         },
         "by_alliance": by_alliance,
         "by_scenario": by_scenario,
@@ -375,7 +398,14 @@ def compute_player_stats(
 def _empty_stats(player_id: str) -> dict[str, Any]:
     return {
         "player_id": player_id,
-        "overall": {"games": 0, "wins": 0, "losses": 0, "win_pct": None},
+        "overall": {
+            "games": 0,
+            "wins": 0,
+            "losses": 0,
+            "win_pct": None,
+            "battles_won": 0,
+            "strongholds_captured": 0,
+        },
         "by_alliance": {
             "good": {"games": 0, "wins": 0, "win_pct": None},
             "evil": {"games": 0, "wins": 0, "win_pct": None},

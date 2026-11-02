@@ -65,6 +65,7 @@ from backend.progression import (
     accumulate_xp_stats,
     adjust_player_xp,
     award_game_xp,
+    record_forfeit_progress,
     backfill_finished_games,
     load_progression,
     player_progression_view,
@@ -1002,28 +1003,6 @@ def save_game(
     if row:
         row.game_state = json.dumps(state.to_dict())
         just_finished = state.winner is not None and row.status != "finished"
-        if just_finished:
-            row.status = "finished"
-            row.completed_at = datetime.utcnow()
-            wrote_results = 0
-            try:
-                from .game_results import ensure_game_results_for_row
-
-                wrote_results = ensure_game_results_for_row(db, row)
-            except Exception as e:
-                # Results are stats-only; never block the game save.
-                print(f"[game_results] write failed for game {game_id}: {e}", flush=True)
-            if wrote_results:
-                try:
-                    from .achievement_eval import evaluate_for_game
-
-                    awards = evaluate_for_game(db, game_id)
-                    if awards:
-                        keys = [a["key"] for a in awards]
-                        print(f"[achievements] awarded {keys} for game {game_id}", flush=True)
-                except Exception as e:
-                    # Achievements are cosmetic; never block the game save.
-                    print(f"[achievements] evaluation failed for game {game_id}: {e}", flush=True)
         if events:
             try:
                 config = json.loads(row.config) if isinstance(row.config, str) else {}
@@ -1055,6 +1034,27 @@ def save_game(
             except (TypeError, json.JSONDecodeError):
                 pass
         if just_finished:
+            row.status = "finished"
+            row.completed_at = datetime.utcnow()
+            wrote_results = 0
+            try:
+                from .game_results import ensure_game_results_for_row
+
+                wrote_results = ensure_game_results_for_row(db, row)
+            except Exception as e:
+                # Results are stats-only; never block the game save.
+                print(f"[game_results] write failed for game {game_id}: {e}", flush=True)
+            if wrote_results:
+                try:
+                    from .achievement_eval import evaluate_for_game
+
+                    awards = evaluate_for_game(db, game_id)
+                    if awards:
+                        keys = [a["key"] for a in awards]
+                        print(f"[achievements] awarded {keys} for game {game_id}", flush=True)
+                except Exception as e:
+                    # Achievements are cosmetic; never block the game save.
+                    print(f"[achievements] evaluation failed for game {game_id}: {e}", flush=True)
             try:
                 with db.begin_nested():
                     award_game_xp(db, row, state)
@@ -1921,7 +1921,9 @@ def get_player_stats(
 ):
     """Public (any logged-in player) career stats from game_results.
 
-    Headline W-L includes every finished game (forfeits count as normal results).
+    Headline W-L skips a player who forfeited before the round the game ended.
+    A forfeit on that ending round still counts. Older rows with no forfeit round
+    still count.
     Filters: scenario (setup_id), opponent/teammate (player_id),
     alliance (good|evil), from/to (ISO dates on game end).
     """
@@ -4504,13 +4506,22 @@ def forfeit_game(
     forfeited_set = set(str(x) for x in forfeited)
     config["forfeited_player_ids"] = forfeited
     # Record the factions this player controlled so game_results can write rows for them
-    # after they are removed from the roster (stats keep the forfeit as a normal W-L game).
+    # after they are removed from the roster. The round is captured before any skip-turn
+    # so a game that ends on this round is not treated as an earlier forfeit.
     if row.status != "lobby":
         factions_cfg = config.get("forfeited_player_factions")
         if not isinstance(factions_cfg, dict):
             factions_cfg = {}
         factions_cfg[player_id_str] = sorted(str(f) for f in my_faction_ids)
         config["forfeited_player_factions"] = factions_cfg
+        forfeit_turn = 1
+        try:
+            raw_state = json.loads(row.game_state) if isinstance(row.game_state, str) else row.game_state
+            if isinstance(raw_state, dict) and raw_state.get("turn_number") is not None:
+                forfeit_turn = int(raw_state.get("turn_number") or 1)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            forfeit_turn = 1
+        record_forfeit_progress(config, player_id_str, [str(fid) for fid in my_faction_ids], forfeit_turn)
     # Persist a player-readable reassignment summary so the toast can be specific after refresh/rejoin.
     reassign_cfg = config.get("forfeit_reassignments")
     if not isinstance(reassign_cfg, dict):

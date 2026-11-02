@@ -102,6 +102,61 @@ def _faction_ids_from_reassignments(config: dict, player_id: str) -> list[str]:
     return out
 
 
+def _difficulty_for_faction(config: dict, faction_id: str) -> str:
+    default = config.get("ai_difficulty") if isinstance(config, dict) else None
+    default_s = str(default).strip().lower() if isinstance(default, str) and default.strip() else "normal"
+    settings = config.get("ai_faction_settings") if isinstance(config, dict) else None
+    row = settings.get(str(faction_id)) if isinstance(settings, dict) else None
+    if isinstance(row, dict):
+        raw = row.get("difficulty")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip().lower()
+    return default_s
+
+
+def computer_player_id(difficulty: str) -> str:
+    """One identity per difficulty so head-to-head collapses every faction on that level."""
+    text = str(difficulty or "normal").strip().lower() or "normal"
+    return f"{_COMPUTER_PLAYER_ID}:{text}"
+
+
+def computer_display_name(player_id: str) -> str | None:
+    prefix = f"{_COMPUTER_PLAYER_ID}:"
+    if not str(player_id).startswith(prefix):
+        return None
+    label = str(player_id)[len(prefix):].replace("_", " ").strip()
+    pretty = " ".join(word.capitalize() for word in label.split())
+    return f"Computer ({pretty})" if pretty else "Computer"
+
+
+def _computer_roster(config: dict, players_list: Any) -> list[dict]:
+    """One row per AI faction. Difficulty comes from per-faction settings, else the game default."""
+    faction_ids: list[Any] = []
+    raw = config.get("ai_factions") if isinstance(config, dict) else None
+    if isinstance(raw, list):
+        faction_ids.extend(raw)
+    if isinstance(players_list, list):
+        for entry in players_list:
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("player_id") or "") != _COMPUTER_PLAYER_ID:
+                continue
+            faction_ids.append(entry.get("faction_id"))
+    out: list[dict] = []
+    seen: set[str] = set()
+    for fid in faction_ids:
+        fid_s = str(fid).strip() if fid is not None else ""
+        if not fid_s or fid_s in seen:
+            continue
+        seen.add(fid_s)
+        out.append({
+            "player_id": computer_player_id(_difficulty_for_faction(config, fid_s)),
+            "faction_id": fid_s,
+            "is_ai": True,
+        })
+    return out
+
+
 def _human_roster(players_list: Any) -> list[dict]:
     """Roster entries with a real human player_id (not computer / empty)."""
     out: list[dict] = []
@@ -152,6 +207,7 @@ def ensure_game_results_for_row(db: Session, row: GameModel) -> int:
         winner = str(winner)
 
     roster = _human_roster(players_list)
+    computers = _computer_roster(config, players_list)
     forfeited_ids = {
         str(x)
         for x in (config.get("forfeited_player_ids") or [])
@@ -181,8 +237,12 @@ def ensure_game_results_for_row(db: Session, row: GameModel) -> int:
         for fid_s in fids:
             if fid_s:
                 entries.append({"player_id": pid_s, "faction_id": fid_s})
+    entries.extend(computers)
 
-    participant_ids = sorted({e["player_id"] for e in entries})
+    participant_ids = sorted({
+        e["player_id"] for e in entries if not str(e["player_id"]).startswith(f"{_COMPUTER_PLAYER_ID}:")
+        and str(e["player_id"]) != _COMPUTER_PLAYER_ID
+    })
 
     setup_id = config.get("setup_id") if isinstance(config.get("setup_id"), str) else None
     scenario_name = _scenario_display_name(config, db)
@@ -198,22 +258,44 @@ def ensure_game_results_for_row(db: Session, row: GameModel) -> int:
     shadow_of_war = bool(state.get("shadow_of_war"))
     participant_json = json.dumps(participant_ids)
 
+    from backend.progression import (
+        faction_result_counts,
+        faction_snapshot_counts,
+        forfeit_counts_as_leave,
+        forfeit_round_of,
+    )
+
     now = datetime.utcnow()
     rows: list[GameResult] = []
     for entry in entries:
         alliance = _faction_alliance_from_config(config, entry["faction_id"])
         won = winner is not None and alliance == winner
-        forfeited = entry["player_id"] in forfeited_ids
+        pid = entry["player_id"]
+        is_ai = bool(entry.get("is_ai"))
+        round_at = None if is_ai else forfeit_round_of(config, pid)
+        left_early = (not is_ai) and pid in forfeited_ids and forfeit_counts_as_leave(round_at, turn_count)
+        # No stored round: older forfeits keep forfeited=true and still count as completed.
+        forfeited = left_early or (pid in forfeited_ids and round_at is None and not is_ai)
+        if is_ai:
+            counts = {"battles_won": 0, "strongholds_captured": 0}
+        elif round_at is not None:
+            snap = faction_snapshot_counts(config, pid, entry["faction_id"])
+            counts = snap if snap is not None else faction_result_counts(config, entry["faction_id"])
+        else:
+            counts = faction_result_counts(config, entry["faction_id"])
         rows.append(
             GameResult(
                 id=str(uuid.uuid4()),
                 game_id=game_id,
-                player_id=entry["player_id"],
+                player_id=pid,
                 faction_id=entry["faction_id"],
                 alliance=alliance,
                 won=won,
                 forfeited=forfeited,
-                is_ai=False,
+                forfeit_round=round_at,
+                battles_won=int(counts.get("battles_won") or 0),
+                strongholds_captured=int(counts.get("strongholds_captured") or 0),
+                is_ai=is_ai,
                 setup_id=setup_id,
                 scenario_name=scenario_name,
                 turn_count=turn_count,

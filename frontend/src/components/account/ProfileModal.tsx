@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, setAuthToken } from '../../services/api';
 import type { AuthPlayer, AvatarIconChoice, PlayerStats } from '../../services/api';
@@ -185,8 +185,44 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
   const floor = player.tier_floor_xp ?? player.tier?.min_xp ?? 0;
   const ceiling = player.next_tier_xp;
   const span = ceiling != null ? Math.max(1, ceiling - floor) : 1;
-  const xpPct = ceiling != null ? Math.min(100, Math.max(0, Math.round(((xp - floor) / span) * 100))) : 100;
+  const xpPct = ceiling != null ? Math.min(100, Math.max(0, ((xp - floor) / span) * 100)) : 100;
   const xpToNext = ceiling != null ? Math.max(0, ceiling - xp) : null;
+  const trackRef = useRef<HTMLDivElement>(null);
+  const currentRef = useRef<HTMLSpanElement>(null);
+  const remainRef = useRef<HTMLSpanElement>(null);
+  const minRef = useRef<HTMLSpanElement>(null);
+  const maxRef = useRef<HTMLSpanElement>(null);
+  const [markerAbove, setMarkerAbove] = useState(xpPct);
+  const [markerBelow, setMarkerBelow] = useState(xpPct);
+
+  useLayoutEffect(() => {
+    const track = trackRef.current;
+    if (!track) return;
+    const place = () => {
+      const width = track.clientWidth;
+      if (width <= 0) return;
+      const desired = (xpPct / 100) * width;
+      const aboveHalf = (currentRef.current?.offsetWidth ?? 0) / 2;
+      const belowHalf = (remainRef.current?.offsetWidth ?? 0) / 2;
+      const minWidth = minRef.current?.offsetWidth ?? 0;
+      const maxWidth = maxRef.current?.offsetWidth ?? 0;
+      const gap = 8;
+      const aboveCenter = Math.min(Math.max(desired, aboveHalf), Math.max(aboveHalf, width - aboveHalf));
+      let belowMin = belowHalf;
+      let belowMax = Math.max(belowHalf, width - belowHalf);
+      belowMin = Math.max(belowMin, minWidth + gap + belowHalf);
+      belowMax = Math.min(belowMax, width - maxWidth - gap - belowHalf);
+      const belowCenter = belowMin > belowMax
+        ? (minWidth + gap + Math.max(minWidth + gap, width - maxWidth - gap)) / 2
+        : Math.min(belowMax, Math.max(belowMin, desired));
+      setMarkerAbove((aboveCenter / width) * 100);
+      setMarkerBelow((belowCenter / width) * 100);
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(track);
+    return () => observer.disconnect();
+  }, [xpPct, xp, xpToNext, floor, ceiling, player.next_tier?.name]);
 
   const ring = tierRingProps(player.tier);
   const tierFill =
@@ -224,7 +260,17 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
               </button>
             )}
           </div>
-          {player.tier?.name && <p className="profile-avatar-tier">{player.tier.name}</p>}
+          <p className="profile-avatar-tier">
+            {player.tier?.name ? (
+              <>
+                {player.tier.name}
+                <span className="profile-avatar-tier__sep" aria-hidden="true">
+                  ·
+                </span>
+              </>
+            ) : null}
+            {xp} XP
+          </p>
         </div>
 
         {!readOnly && editingAvatar && (
@@ -284,25 +330,36 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
 
       <section className="account-section" aria-label="Tier and XP">
         <div className="account-xp">
-          <div className="account-xp__row">
-            <span className="account-xp__tier">{player.tier?.name ?? '—'}</span>
-            <span className="account-xp__xp">{xp} XP</span>
+          <div className="account-xp__track" ref={trackRef}>
+            <div className="account-xp__above">
+              <span ref={currentRef} className="account-xp__marker" style={{ left: `${markerAbove}%` }}>
+                {xp} XP
+              </span>
+            </div>
+            <div
+              className="account-xp__bar"
+              role="progressbar"
+              aria-valuemin={floor}
+              aria-valuemax={ceiling ?? xp}
+              aria-valuenow={xp}
+              aria-label="XP toward the next tier"
+            >
+              <span className="account-xp__fill" style={{ width: `${xpPct}%`, background: tierFill }} />
+            </div>
+            <div className="account-xp__below">
+              <span ref={minRef} className="account-xp__end">
+                {floor} XP
+              </span>
+              <span ref={remainRef} className="account-xp__marker account-xp__remain" style={{ left: `${markerBelow}%` }}>
+                {player.next_tier && xpToNext != null ? `${xpToNext} to ${player.next_tier.name}` : 'Highest tier'}
+              </span>
+              {ceiling != null ? (
+                <span ref={maxRef} className="account-xp__end account-xp__end--max">
+                  {ceiling} XP
+                </span>
+              ) : null}
+            </div>
           </div>
-          <div
-            className="account-xp__bar"
-            role="progressbar"
-            aria-valuemin={floor}
-            aria-valuemax={ceiling ?? xp}
-            aria-valuenow={xp}
-            aria-label="XP toward the next tier"
-          >
-            <span className="account-xp__fill" style={{ width: `${xpPct}%`, background: tierFill }} />
-          </div>
-          <p className="account-subtle">
-            {player.next_tier && xpToNext != null
-              ? `${xpToNext} XP to ${player.next_tier.name}`
-              : 'Highest tier'}
-          </p>
         </div>
       </section>
 
@@ -320,8 +377,17 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
               <span className="account-stats__record">
                 <RecordLine wins={stats.overall.wins} losses={stats.overall.losses} pct={stats.overall.win_pct} />
               </span>
-              <span className="account-stats__games">
-                {stats.overall.games} {stats.overall.games === 1 ? 'game' : 'games'}
+              <span className="account-stats__totals">
+                <span>
+                  {stats.overall.games} {stats.overall.games === 1 ? 'game' : 'games'} completed
+                </span>
+                <span>
+                  {stats.overall.battles_won ?? 0} {(stats.overall.battles_won ?? 0) === 1 ? 'battle' : 'battles'} won
+                </span>
+                <span>
+                  {stats.overall.strongholds_captured ?? 0}{' '}
+                  {(stats.overall.strongholds_captured ?? 0) === 1 ? 'stronghold' : 'strongholds'} conquered
+                </span>
               </span>
             </div>
             <div className="account-stats__alliances">

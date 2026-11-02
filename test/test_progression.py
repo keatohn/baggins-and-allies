@@ -408,6 +408,88 @@ def test_removed_forfeiter_is_paid_for_stats(db_session, players):
     assert other.xp == 151
 
 
+def test_same_round_forfeit_is_not_penalized(db_session, players):
+    _admin, user = players
+    other = Player(
+        id=str(uuid.uuid4()),
+        email="other2@example.com",
+        username="other2",
+        password_hash="x",
+        is_admin=False,
+    )
+    db_session.add(other)
+    db_session.commit()
+    cfg = default_progression()
+    cfg["rules"] = _rules(forfeit_multiplier=0.5)
+    save_progression(db_session, cfg)
+    config = _definitions()
+    config["forfeited_player_ids"] = [user.id]
+    config["forfeited_player_factions"] = {user.id: ["gondor"]}
+    config["forfeited_player_rounds"] = {user.id: 4}
+    config["forfeited_player_stat_snapshot"] = {
+        user.id: {"gondor": {"battles_won": 1, "strongholds_captured": 0, "territories_captured": 0, "enemy_units_destroyed": 0}},
+    }
+    config["faction_stat_baseline"] = {
+        "gondor": {"battles_won": 1, "strongholds_captured": 0, "territories_captured": 0, "enemy_units_destroyed": 0},
+    }
+    config["ai_factions"] = ["gondor"]
+    row = _add_game(
+        db_session,
+        [{"player_id": other.id, "faction_id": "mordor"}],
+        config=config,
+        turn=4,
+    )
+    _finish(db_session, row, [], winner="evil", turn=4)
+    db_session.refresh(user)
+    # Loss on the ending round: 50 completed + 3 for the battle, people multiplier, no forfeit scale.
+    assert user.xp == 53
+
+
+def test_early_forfeit_drops_completion_bonus_and_uses_snapshot(db_session, players):
+    _admin, user = players
+    other = Player(
+        id=str(uuid.uuid4()),
+        email="other3@example.com",
+        username="other3",
+        password_hash="x",
+        is_admin=False,
+    )
+    db_session.add(other)
+    db_session.commit()
+    cfg = default_progression()
+    cfg["rules"] = _rules(forfeit_multiplier=0.5)
+    save_progression(db_session, cfg)
+    config = _definitions()
+    config["forfeited_player_ids"] = [user.id]
+    config["forfeited_player_factions"] = {user.id: ["gondor"]}
+    config["forfeited_player_rounds"] = {user.id: 2}
+    config["forfeited_player_stat_snapshot"] = {
+        user.id: {"gondor": {"battles_won": 1, "strongholds_captured": 1, "territories_captured": 0, "enemy_units_destroyed": 0}},
+    }
+    config["faction_stat_baseline"] = {
+        "gondor": {"battles_won": 1, "strongholds_captured": 1, "territories_captured": 0, "enemy_units_destroyed": 0},
+    }
+    config["xp_stats"] = {
+        "by_faction": {
+            "gondor": {"battles_won": 4, "strongholds_captured": 3, "territories_captured": 0, "enemy_units_destroyed": 0},
+        },
+    }
+    config["ai_factions"] = ["gondor"]
+    row = _add_game(
+        db_session,
+        [{"player_id": other.id, "faction_id": "mordor"}],
+        config=config,
+        turn=6,
+    )
+    _finish(db_session, row, [], winner="evil", turn=6)
+    db_session.refresh(user)
+    db_session.refresh(other)
+    # Snapshot only: 15 + 3, times 0.5. Later Gondor battles are not theirs. No completion bonus.
+    assert user.xp == 9
+    # Mordor won. Gondor's later 3 battles and 2 strongholds belong to nobody human.
+    assert other.xp == 150
+
+
 def test_daily_cap_limits_a_second_game_the_same_day(db_session, players, make_client):
     admin, user = players
     client = make_client(admin)
