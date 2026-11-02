@@ -560,6 +560,8 @@ interface GameMapProps {
    * their calculated position.
    */
   mapOverrides?: MapOverridesData | null;
+  /** Admin map: opening-attack arrows with the combat-sim win chance beside each one. */
+  openingAttacks?: { from: string; to: string; pAttackerWin: number; title: string }[];
   /**
    * Reports the calculated spot anchors (pre-override, viewBox coords) whenever they recompute.
    * Used by the admin Maps editor as a hidden "oracle" so its dots match the game exactly.
@@ -1056,6 +1058,7 @@ function GameMap({
   territorySignals = {},
   animCues,
   mapOverrides = null,
+  openingAttacks = [],
   onSpotsCalculated,
 }: GameMapProps) {
   // Backend stores override points as [x,y] arrays; normalize once so every consumer
@@ -2039,6 +2042,51 @@ function GameMap({
       };
     }).filter(Boolean);
   }, [pendingMoves, territoryCentroids, gameState.phase, territoryData]);
+
+  const openingArrows = useMemo(() => {
+    if (!openingAttacks.length || Object.keys(territoryCentroids).length === 0) return [];
+    const centroidFor = (id: string) => {
+      const direct = territoryCentroids[id];
+      if (direct) return direct;
+      const lower = id.toLowerCase();
+      if (territoryCentroids[lower]) return territoryCentroids[lower];
+      for (const key of Object.keys(territoryCentroids)) {
+        if (key.toLowerCase() === lower) return territoryCentroids[key];
+      }
+      return undefined;
+    };
+    return openingAttacks.flatMap((attack) => {
+      const from = centroidFor(attack.from);
+      const to = centroidFor(attack.to);
+      if (!from || !to) return [];
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      const length = Math.hypot(dx, dy);
+      if (length < 1e-6) return [];
+      const shortenStart = 55;
+      const shortenEnd = 80;
+      const totalShorten = Math.min(shortenStart + shortenEnd, length * 0.85);
+      const startRatio = totalShorten > 0 ? shortenStart / (shortenStart + shortenEnd) : 0;
+      const startX = from.x + (dx / length) * totalShorten * startRatio;
+      const startY = from.y + (dy / length) * totalShorten * startRatio;
+      const endX = to.x - (dx / length) * totalShorten * (1 - startRatio);
+      const endY = to.y - (dy / length) * totalShorten * (1 - startRatio);
+      return [{
+        key: `${attack.from}->${attack.to}`,
+        startX,
+        startY,
+        endX,
+        endY,
+        midX: (startX + endX) / 2,
+        midY: (startY + endY) / 2,
+        dx,
+        dy,
+        length,
+        pAttackerWin: attack.pAttackerWin,
+        title: attack.title,
+      }];
+    });
+  }, [openingAttacks, territoryCentroids]);
 
   // Fit whole map to view once per map load. Run at 0, 50, 200, 500ms so we catch layout (wrapper is often 0x0 on first paint).
   // Store fit scale so we never zoom out past it.
@@ -4354,6 +4402,9 @@ function GameMap({
                         <marker id="arrowhead-move" markerWidth="5" markerHeight="5" refX="3.5" refY="2.5" orient="auto">
                           <polygon points="0,0 5,2.5 0,5" fill="#2e7d32" />
                         </marker>
+                        <marker id="arrowhead-opening" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                          <polygon points="0,0 6,3 0,6" fill="#7a1f1a" />
+                        </marker>
                       </defs>
                       {/* Raster lives inside this SVG (after territory paths) so paint order is correct in Chrome/WebKit. HTML <img> as a sibling of <svg> can composite under filtered paths on sea-heavy crops (e.g. MotW) — there is no separate WOTR-only stacking path; WOTR just tripped the bug less often. */}
                       {pngFailedForMap !== mapBase && (
@@ -4384,6 +4435,32 @@ function GameMap({
                           onError={() => setMapOverlayRasterHidden(true)}
                         />
                       )}
+                      {openingArrows.map((arrow) => (
+                        <g key={`opening-${arrow.key}`}>
+                          <line
+                            x1={arrow.startX}
+                            y1={arrow.startY}
+                            x2={arrow.endX}
+                            y2={arrow.endY}
+                            stroke="#fffef8"
+                            strokeWidth="11"
+                            strokeLinecap="round"
+                            pointerEvents="none"
+                          />
+                          <line
+                            className="opening-arrow"
+                            x1={arrow.startX}
+                            y1={arrow.startY}
+                            x2={arrow.endX}
+                            y2={arrow.endY}
+                            stroke="#7a1f1a"
+                            strokeWidth="6"
+                            strokeLinecap="round"
+                            markerEnd="url(#arrowhead-opening)"
+                            pointerEvents="none"
+                          />
+                        </g>
+                      ))}
                       {moveArrows.map((arrow, idx) => arrow && (
                         <g key={`arrow-${idx}`}>
                           <line
@@ -5536,6 +5613,37 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                         );
                       })}
                     </div>
+
+                    {openingArrows.length > 0 ? (
+                      <div className="opening-pill-layer">
+                        {openingArrows.map((arrow) => {
+                          const scale = Math.max(transform.scale, 0.05);
+                          const along = svgToScreen(arrow.dx, arrow.dy);
+                          const alongLen = Math.hypot(along.x, along.y) || 1;
+                          const gap = 18 / scale;
+                          const mid = svgToScreen(arrow.midX, arrow.midY);
+                          const win = Math.round(arrow.pAttackerWin * 100);
+                          const hue = Math.max(0, Math.min(1, arrow.pAttackerWin)) * 120;
+                          return (
+                            <div
+                              key={arrow.key}
+                              className="opening-pill"
+                              title={arrow.title}
+                              style={{
+                                left: mid.x + (-along.y / alongLen) * gap,
+                                top: mid.y + (along.x / alongLen) * gap,
+                                backgroundColor: `hsl(${hue}, 72%, 36%)`,
+                                transform: `translate(-50%, -50%) scale(${1 / scale})`,
+                              }}
+                              onPointerDown={(e) => e.stopPropagation()}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {win}%
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
 
                     {/* Transient action animations: travel ghosts, combat flashes, conquest banners */}
                     <div className="map-anim-layer" aria-hidden>

@@ -166,7 +166,7 @@ export function MapViewPane({
 }) {
   const mapBase = toMapBase(mapAsset);
   const wrapRef = useRef<HTMLDivElement | null>(null);
-  const [view, setView] = useState<'setup' | 'graph'>('setup');
+  const [view, setView] = useState<'setup' | 'graph' | 'openings'>('setup');
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [paths, setPaths] = useState<Map<string, TerritoryPathData>>(new Map());
@@ -186,6 +186,13 @@ export function MapViewPane({
   const [discardOpen, setDiscardOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [openings, setOpenings] = useState<{
+    key: string;
+    factionName: string;
+    arrows: { from: string; to: string; pAttackerWin: number; title: string }[];
+  } | null>(null);
+  const [openingLoading, setOpeningLoading] = useState(false);
+  const [openingError, setOpeningError] = useState<string | null>(null);
 
   const base = useMemo<MapSetupDraft>(
     () => ({ territories, starting_setup: startingSetup, camps, ports }),
@@ -380,6 +387,75 @@ export function MapViewPane({
       turn_order: order,
     };
   }, [cur.starting_setup, mapBase]);
+
+  const openingRequest = useMemo(
+    () => ({
+      key: stableJson({
+        manifest,
+        units,
+        factions,
+        territories: cur.territories,
+        camps: cur.camps,
+        ports: cur.ports,
+        starting_setup: cur.starting_setup,
+      }),
+      body: {
+        manifest,
+        units,
+        factions,
+        territories: cur.territories,
+        camps: cur.camps,
+        ports: cur.ports,
+        starting_setup: cur.starting_setup,
+      },
+    }),
+    [manifest, units, factions, cur.territories, cur.camps, cur.ports, cur.starting_setup],
+  );
+
+  useEffect(() => {
+    if (view !== 'openings') return;
+    if (openings?.key === openingRequest.key) return;
+    let cancelled = false;
+    setOpeningLoading(true);
+    setOpeningError(null);
+    const timer = window.setTimeout(() => {
+      const body = openingRequest.body;
+      void api
+        .openingAttacks({ ...body, n_trials: 2000 })
+        .then((res) => {
+          if (cancelled) return;
+          const nameOf = (table: Dict, id: string) => territoryLabel(id, table[id]);
+          const stacksOf = (stacks: { unit_id: string; count: number }[]) =>
+            stacks.map((stack) => `${stack.count}× ${nameOf(units, stack.unit_id)}`).join(', ');
+          setOpenings({
+            key: openingRequest.key,
+            factionName: res.faction_name || res.faction_id,
+            arrows: res.attacks.map((attack) => {
+              const from = nameOf(cur.territories, attack.from_territory);
+              const to = nameOf(cur.territories, attack.to_territory);
+              const wins = Math.round(attack.p_attacker_win * 100);
+              const conquers = Math.round(attack.p_conquer * 100);
+              return {
+                from: attack.from_territory,
+                to: attack.to_territory,
+                pAttackerWin: attack.p_attacker_win,
+                title: `${from} → ${to}. Attack wins ${wins}%. Conquers ${conquers}%. ${stacksOf(attack.attacker_stacks)} vs ${stacksOf(attack.defender_stacks)}${attack.is_sea_raid ? '. Sea raid.' : ''}`,
+              };
+            }),
+          });
+          setOpeningLoading(false);
+        })
+        .catch((e: unknown) => {
+          if (cancelled) return;
+          setOpeningError(e instanceof Error ? e.message : 'Could not simulate openings');
+          setOpeningLoading(false);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [view, openingRequest, openings, units, cur.territories]);
 
   const requestClose = () => {
     if (saving) return;
@@ -740,7 +816,9 @@ export function MapViewPane({
   };
 
   const description =
-    view === 'setup'
+    view === 'openings'
+      ? 'Opening attacks for the first faction. Each arrow runs from a territory with its units to a place those units can attack that already has defenders. The pill is the combat sim’s chance the attack wins.'
+      : view === 'setup'
       ? editing
         ? 'Choose a territory from the list or the map, then set its owner, power, camp, port, stronghold, and starting units.'
         : 'The map as it starts on turn 1. Click a territory for its details. Scroll to zoom, drag to pan.'
@@ -763,7 +841,11 @@ export function MapViewPane({
               Map view
             </h2>
             <div className="admin-mapview__toggle" role="group" aria-label="Map view mode">
-              {(['setup', 'graph'] as const).map((mode) => (
+              {([
+                ['setup', 'Setup'],
+                ['graph', 'Graph'],
+                ['openings', 'Openings'],
+              ] as const).map(([mode, label]) => (
                 <button
                   key={mode}
                   type="button"
@@ -771,7 +853,7 @@ export function MapViewPane({
                   aria-pressed={view === mode}
                   onClick={() => setView(mode)}
                 >
-                  {mode === 'setup' ? 'Setup' : 'Graph'}
+                  {label}
                 </button>
               ))}
             </div>
@@ -795,7 +877,7 @@ export function MapViewPane({
               ) : null}
               {editKey ? (
                 <div className="admin-graph__props">
-                  {view === 'setup' ? (
+                  {view !== 'graph' ? (
                     <label className="admin-graph__prop">
                       Owner
                       <select
@@ -831,7 +913,7 @@ export function MapViewPane({
                       }}
                     />
                   </label>
-                  {view === 'setup' ? (
+                  {view !== 'graph' ? (
                     <>
                       <label className="admin-graph__prop admin-graph__check">
                         <input
@@ -1010,7 +1092,7 @@ export function MapViewPane({
         {view === 'graph' && loading ? <p className="admin-form__micro">Loading map…</p> : null}
         {view === 'graph' && err ? <p className="admin-page__error">{err}</p> : null}
         {saveError ? <p className="admin-page__error">{saveError}</p> : null}
-        {view === 'setup' || (!loading && !err) ? (
+        {view !== 'graph' || (!loading && !err) ? (
           <div className="admin-graph__body">
             {editing ? (
               <div className="admin-graph__side">
@@ -1039,7 +1121,7 @@ export function MapViewPane({
                 </div>
               </div>
             ) : null}
-            {view === 'setup' ? (
+            {view !== 'graph' ? (
               <div className="admin-mapview__game">
                 <GameMap
                   gameState={gameState}
@@ -1065,6 +1147,9 @@ export function MapViewPane({
                   pendingMoveConfirm={null}
                   onSetPendingMove={NOOP}
                   pendingMoves={NO_MOVES}
+                  openingAttacks={
+                    view === 'openings' && openings?.key === openingRequest.key ? openings.arrows : []
+                  }
                 />
               </div>
             ) : (
@@ -1179,9 +1264,20 @@ export function MapViewPane({
             <p className="admin-graph__status">No territory selected</p>
           )
         ) : null}
+        {view === 'openings' ? (
+          <p className="admin-graph__status">
+            {openingError
+              ? openingError
+              : !openings || openingLoading || openings.key !== openingRequest.key
+                ? 'Simulating opening attacks…'
+                : openings.arrows.length
+                  ? `${openings.factionName}: ${openings.arrows.length} opening ${openings.arrows.length === 1 ? 'attack' : 'attacks'}. Hover a pill for the stacks.`
+                  : `${openings.factionName} has no opening attack into a territory with defenders.`}
+          </p>
+        ) : null}
         {selectedKey && shown[selectedKey] ? (
           <p className="admin-graph__status admin-graph__status--info">{infoText(selectedKey)}</p>
-        ) : view === 'setup' ? (
+        ) : view !== 'graph' ? (
           <p className="admin-graph__status">{editing ? 'Choose a territory' : 'No territory selected'}</p>
         ) : null}
         {discardOpen ? (

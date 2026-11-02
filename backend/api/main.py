@@ -2149,7 +2149,7 @@ class OpeningAttacksRequest(BaseModel):
     camps: dict[str, Any] = {}
     ports: dict[str, Any] = {}
     starting_setup: dict[str, Any]
-    n_trials: int = 1000
+    n_trials: int = 2000
 
 
 def _rows_with_ids(table: dict[str, Any] | None) -> dict[str, Any]:
