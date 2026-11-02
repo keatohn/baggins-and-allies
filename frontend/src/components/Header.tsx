@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { GameState } from '../types/game';
-import type { ApiFactionStats, SpecialDefinition } from '../services/api';
+import type { ApiFactionStats, ApiSubfactionRule, SpecialDefinition } from '../services/api';
 import StrongholdAllianceBar from './StrongholdAllianceBar';
 import AccountMenu from './AccountMenu';
 import { useMenuScroll } from './MenuScrollContext';
@@ -33,6 +33,14 @@ interface HeaderProps {
   unitsBySpecial?: Record<string, Array<{ unitId: string; name: string; faction: string; factionDisplayName: string; cost: number; homeTerritoryDisplayNames?: string[] }>>;
   /** Open Combat Simulator modal (button shown between Menu and Specials when set). */
   onOpenCombatSim?: () => void;
+  /** Scenario subfaction rules, keyed by subfaction id. */
+  subfactionRules?: Record<string, ApiSubfactionRule>;
+  /** Unit id → display name, for recruitment lines. */
+  unitNames?: Record<string, string>;
+  /** Special rules that apply to this game. */
+  specialRules?: { type?: string; name?: string; description?: string }[];
+  /** Catalog names and descriptions, used when a scenario leaves the description blank. */
+  catalogRules?: { id: string; name: string; description: string }[];
 }
 
 type FactionMark = { id: string; name: string; icon: string; color: string };
@@ -51,7 +59,104 @@ function subfactionMarks(
   return marks;
 }
 
-function Header({ gameState, turnOrderForTicker, factionData, factionStats, ringsByFaction, ringsOfPower = null, unitsByFaction = {}, gameName = null, setupDisplayName = null, specials = {}, specialsOrder: _specialsOrder = [], unitsBySpecial = {}, onOpenCombatSim }: HeaderProps) {
+type HelpSubfaction = { id: string; name: string; parentName: string; rules: string[] };
+type HelpSpecialRule = { key: string; name: string; description: string };
+
+const SMALL_RULE_WORDS = new Set(['of', 'the', 'and', 'a']);
+
+function specialRuleTitle(
+  rule: { type?: string; name?: string },
+  catalogName?: string,
+): string {
+  const own = rule.name?.trim();
+  if (own) return own;
+  const fromCatalog = catalogName?.trim();
+  if (fromCatalog) return fromCatalog;
+  const words = (rule.type ?? '').split('_').filter(Boolean);
+  if (words.length === 0) return 'Special rule';
+  return words
+    .map((word, index) => (index > 0 && SMALL_RULE_WORDS.has(word) ? word : word.charAt(0).toUpperCase() + word.slice(1)))
+    .join(' ');
+}
+
+function helpSpecialRules(
+  rules: { type?: string; name?: string; description?: string }[] | undefined,
+  catalogRules: { id: string; name: string; description: string }[],
+): HelpSpecialRule[] {
+  const catalog = new Map(catalogRules.map((entry) => [entry.id, entry]));
+  const out: HelpSpecialRule[] = [];
+  (rules ?? []).forEach((rule, index) => {
+    const type = typeof rule.type === 'string' ? rule.type.trim() : '';
+    if (!type) return;
+    const entry = catalog.get(type);
+    const own = typeof rule.description === 'string' ? rule.description.trim() : '';
+    const description = own || entry?.description?.trim() || '';
+    out.push({
+      key: `${type}-${index}`,
+      name: specialRuleTitle(rule, entry?.name),
+      description,
+    });
+  });
+  return out;
+}
+
+function recruitmentLine(
+  recruitment: ApiSubfactionRule['recruitment'],
+  parentName: string,
+  unitNames: Record<string, string>,
+): string | null {
+  if (!recruitment || typeof recruitment !== 'object') return null;
+  const unitId = typeof recruitment.unit_id === 'string' ? recruitment.unit_id.trim() : '';
+  const count = recruitment.count;
+  if (!unitId || typeof count !== 'number' || !Number.isInteger(count) || count < 1) return null;
+  const unitName = unitNames[unitId] || unitId;
+  if (recruitment.mode === 'fixed') {
+    return `Each turn, ${parentName} receives ${count} ${unitName} to mobilize.`;
+  }
+  if (recruitment.mode === 'per_territory') {
+    const every = count === 1
+      ? 'each territory this subfaction held at the start of the turn'
+      : `every ${count} territories this subfaction held at the start of the turn`;
+    return `Each turn, ${parentName} receives 1 ${unitName} for ${every}.`;
+  }
+  return null;
+}
+
+function subfactionRuleLines(
+  parentName: string,
+  rule: ApiSubfactionRule | undefined,
+  unitNames: Record<string, string>,
+): string[] {
+  const economy = rule?.economy === 'pool' ? 'pool' : 'none';
+  const purchasable = rule?.purchasable_by_parent === true;
+  const mobilization = rule?.mobilization === 'any_home' ? 'any_home' : 'camps';
+  const capture = rule?.capture === 'unit_faction' ? 'unit_faction' : 'liberate_else_parent';
+  const movement = rule?.movement === 'home_only' ? 'home_only' : 'with_parent';
+  const lines = [
+    economy === 'pool'
+      ? `Power from its territories is added to ${parentName}'s income.`
+      : 'Its territories produce no power.',
+    purchasable
+      ? `${parentName} can purchase its units.`
+      : `${parentName} cannot purchase its units.`,
+  ];
+  const grant = recruitmentLine(rule?.recruitment, parentName, unitNames);
+  if (grant) lines.push(grant);
+  lines.push(
+    mobilization === 'any_home'
+      ? 'Its units mobilize on land it owns, or in sea and river zones beside that land, without using camp or port capacity.'
+      : `Its units mobilize at camps and ports, including ${parentName}'s, and count toward mobilization capacity.`,
+    movement === 'home_only'
+      ? 'Its units may only enter territories that originally belong to this subfaction.'
+      : `Its units move with ${parentName} and may enter the same territories.`,
+    capture === 'unit_faction'
+      ? `Territory taken by its units alone belongs to this subfaction. A force mixed with other units gives the land to ${parentName}. Allied original owners are still liberated.`
+      : `Territory it captures belongs to ${parentName}. If the land originally belonged to an ally, including this subfaction, it is liberated instead.`,
+  );
+  return lines;
+}
+
+function Header({ gameState, turnOrderForTicker, factionData, factionStats, ringsByFaction, ringsOfPower = null, unitsByFaction = {}, gameName = null, setupDisplayName = null, specials = {}, specialsOrder: _specialsOrder = [], unitsBySpecial = {}, onOpenCombatSim, subfactionRules = {}, unitNames = {}, specialRules = [], catalogRules = [] }: HeaderProps) {
   const { navigateWithScroll } = useMenuScroll();
   const [statsOpen, setStatsOpen] = useState(false);
   const [ringsOpen, setRingsOpen] = useState(false);
@@ -64,6 +169,25 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
   const alliances = factionStats?.alliances ?? {};
   const allianceOrder = ['good', 'evil'].filter(a => a in alliances);
   const turnOrder = (turnOrderForTicker?.length ? turnOrderForTicker : gameState.turn_order) ?? [];
+  const helpSubfactions = useMemo((): HelpSubfaction[] => {
+    const entries = Object.entries(factionData).filter(([, fd]) => fd.parent);
+    if (entries.length === 0) return [];
+    const rank = (parent?: string) => {
+      const index = parent ? turnOrder.indexOf(parent) : -1;
+      return index < 0 ? turnOrder.length + 1 : index;
+    };
+    entries.sort((a, b) => rank(a[1].parent) - rank(b[1].parent));
+    return entries.map(([id, fd]) => {
+      const parentName = (fd.parent && factionData[fd.parent]?.name) || fd.parent || 'its parent';
+      return {
+        id,
+        name: fd.name || id,
+        parentName,
+        rules: subfactionRuleLines(parentName, subfactionRules[id], unitNames),
+      };
+    });
+  }, [factionData, subfactionRules, turnOrder, unitNames]);
+  const helpRules = useMemo(() => helpSpecialRules(specialRules, catalogRules), [specialRules, catalogRules]);
   return (
     <>
       <header
@@ -293,13 +417,14 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
                 <p>We recommend reading up on the basic rules using a free online Axis &amp; Allies rulebook or YouTube tutorial.</p>
               </section>
               <section className="help-section">
-                <h3>Familiar with Axis & Allies?</h3>
+                <h3>What&apos;s Unique About Baggins & Allies?</h3>
                 <p>Baggins & Allies has the same game mechanics, but with maps from Middle-earth, unique Lord of the Rings units per faction, and a few additional twists:</p>
                 <ul className="help-icon-list">
                   <li>Combat uses <strong>10-sided dice.</strong></li>
                   <li>Neutral units like cave trolls and goblins spawn in unowned territories. They can only defend against attacks.</li>
                   <li>Unit specials modify combat. Reference the <strong>Specials</strong> button (★ SP) for details on unit abilities and combat modifiers.</li>
                   <li>Terrain types can impact combat. Mountains and rivers block ground movement. Bridges allow ground units to cross over a river. Aerial units can fly over mountains and rivers.</li>
+                  <li>River zones are like sea zones but can be traversed by rowboats, not ships. Rowboats can be mobilized to any territory adjacent to your own, with a limit based on the adjacent power production.</li>
                 </ul>
               </section>
               <section className="help-section">
@@ -374,6 +499,40 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
                   <li><strong>Naval</strong> — naval units are limited to sea zones only.</li>
                 </ul>
               </section>
+              {helpRules.length > 0 && (
+                <section className="help-section">
+                  <h3>Special Rules</h3>
+                  {helpRules.map((rule) => (
+                    <div key={rule.key} className="help-special-rule">
+                      <h4>{rule.name}</h4>
+                      {rule.description ? <p>{rule.description}</p> : null}
+                    </div>
+                  ))}
+                </section>
+              )}
+              {helpSubfactions.length > 0 && (
+                <section className="help-section">
+                  <h3>Subfactions</h3>
+                  <p>
+                    A subfaction fights as part of a parent faction and does not take its own turn. The parent commands its units. Its territories keep the subfaction&apos;s colors on the map.
+                  </p>
+                  <p className="help-subfaction-note">
+                    If the parent loses its capital, it no longer collects that subfaction&apos;s pooled power, gains its free recruits, or places its units.
+                  </p>
+                  {helpSubfactions.map((sub) => (
+                    <div key={sub.id} className="help-subfaction">
+                      <h4>
+                        {sub.name} <span className="help-subfaction-parent">({sub.parentName})</span>
+                      </h4>
+                      <ul className="help-icon-list">
+                        {sub.rules.map((rule) => (
+                          <li key={rule}>{rule}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </section>
+              )}
             </div>
           </div>
         </div >

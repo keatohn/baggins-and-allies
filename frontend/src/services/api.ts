@@ -163,6 +163,10 @@ export interface ApiGameState {
   shadowed_territories?: string[];
   /** Power cost per stronghold HP repaired (from setup manifest). */
   stronghold_repair_cost?: number;
+  /** Scenario rules for each subfaction id. Missing ids use the engine defaults. */
+  subfaction_rules?: Record<string, ApiSubfactionRule>;
+  /** Special rules that apply to this game. A description here overrides the catalog. */
+  special_rules?: { type?: string; name?: string; description?: string }[];
   /**
    * Current power production for territories under an evolving_territory special rule.
    * Territories omitted here still use the printed definition value.
@@ -452,6 +456,22 @@ export interface ApiTerritoryDefinition {
   ownable: boolean;
   /** Filename in public/assets/territories. Omitted = no panel art. */
   image?: string | null;
+}
+
+export interface ApiSubfactionRecruitment {
+  mode?: string;
+  unit_id?: string;
+  count?: number;
+}
+
+/** Resolved manifest rule for one subfaction. Omitted keys use the engine defaults. */
+export interface ApiSubfactionRule {
+  economy?: string;
+  recruitment?: ApiSubfactionRecruitment | null;
+  purchasable_by_parent?: boolean;
+  mobilization?: string;
+  capture?: string;
+  movement?: string;
 }
 
 export interface ApiSubfactionDefinition {

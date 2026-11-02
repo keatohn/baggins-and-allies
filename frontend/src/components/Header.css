@@ -531,6 +531,37 @@
   line-height: 1.45;
 }
 
+.help-section .help-subfaction-note,
+.help-special-rule p {
+  margin-top: 0.45rem;
+}
+
+.help-subfaction,
+.help-special-rule {
+  margin-top: 0.9rem;
+}
+
+.help-section > .help-special-rule:first-of-type {
+  margin-top: 0;
+}
+
+.help-subfaction h4,
+.help-special-rule h4 {
+  margin: 0 0 0.2rem;
+  font-size: 0.98rem;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.help-subfaction-parent {
+  font-weight: 500;
+  color: var(--ink-light);
+}
+
+.help-subfaction .help-icon-list {
+  margin-top: 0.2rem;
+}
+
 .help-icon-list {
   margin: 0;
   padding-left: 1.25rem;
@@ -1847,6 +1878,11 @@
     font-size: clamp(0.64rem, 2.25vw, 0.76rem);
     margin: 0 0 0.35rem;
     line-height: 1.2;
+  }
+
+  .help-subfaction h4,
+  .help-special-rule h4 {
+    font-size: clamp(0.6rem, 2.1vw, 0.72rem);
   }
 
   .help-section p,

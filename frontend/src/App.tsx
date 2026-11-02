@@ -653,6 +653,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   );
   const [territorySignals, setTerritorySignals] = useState<TerritorySignalMap>({});
   const [signalPresets, setSignalPresets] = useState<SignalPreset[]>([]);
+  const [catalogRules, setCatalogRules] = useState<{ id: string; name: string; description: string }[]>([]);
   const [mapOverrides, setMapOverrides] = useState<MapOverridesData | null>(null);
   const [signalBusy, setSignalBusy] = useState(false);
   const [availableActions, setAvailableActions] = useState<AvailableActionsResponse | null>(null);
@@ -1008,6 +1009,20 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     return data;
   }, [definitions]);
 
+  const unitNames = useMemo(() => {
+    const names: Record<string, string> = {};
+    for (const [id, unit] of Object.entries(unitDefs)) names[id] = unit.name;
+    return names;
+  }, [unitDefs]);
+
+  const helpSpecialRules = useMemo(() => {
+    const rules = [...(backendState?.special_rules ?? [])];
+    if (backendState?.rings_of_power && !rules.some((rule) => rule?.type === 'rings_of_power')) {
+      rules.push({ type: 'rings_of_power' });
+    }
+    return rules;
+  }, [backendState?.special_rules, backendState?.rings_of_power]);
+
   const ringsByFaction = useMemo(() => {
     const rings = backendState?.rings ?? [];
     const territories = backendState?.territories ?? {};
@@ -1044,6 +1059,20 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       })
       .catch(() => {
         if (!cancelled) setSignalPresets([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getCatalog()
+      .then((catalog) => {
+        if (!cancelled) setCatalogRules(catalog.special_rules ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setCatalogRules([]);
       });
     return () => {
       cancelled = true;
@@ -4447,6 +4476,10 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         specialsOrder={definitions?.specials_order ?? []}
         unitsBySpecial={unitsBySpecial}
         onOpenCombatSim={() => setCombatSimModalOpen(true)}
+        subfactionRules={backendState?.subfaction_rules}
+        unitNames={unitNames}
+        specialRules={helpSpecialRules}
+        catalogRules={catalogRules}
       />
 
       {/* Combat Simulator modal: always mounted so form state persists when closed */}
