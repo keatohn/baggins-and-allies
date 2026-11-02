@@ -1,0 +1,11 @@
+.plaque-frame {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  aspect-ratio: var(--frame-w) / var(--frame-h);
+  background-image: var(--frame-img);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  pointer-events: none;
+}

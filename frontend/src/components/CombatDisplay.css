@@ -376,6 +376,12 @@
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .rolling-indicator {
+    animation: none;
+  }
+}
+
 /* Units Shelves - rows grouped by stat value */
 .units-shelves {
   flex: 1;

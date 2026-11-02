@@ -132,9 +132,66 @@ def test_subfaction_lookup_inherits_alliance_and_icon():
     assert faithful.capital == ""
     assert faithful.icon == "gondor.png"
     assert factions["andunie"].icon == "andunie.png"
+    assert factions["numenor"].banner is None
+    assert faithful.banner is None
+    assert factions["andunie"].banner is None
     assert faction_acts_as(factions, "faithful", "numenor")
     assert not faction_acts_as(factions, "faithful", "mordor")
     assert not faction_acts_as(factions, "numenor", "faithful")
+
+
+def test_banner_is_optional_and_not_inherited():
+    factions = factions_from_json({
+        "numenor": {
+            "id": "numenor",
+            "display_name": "Numenor",
+            "alliance": "good",
+            "capital": "numenor",
+            "color": "#265399",
+            "icon": "gondor.png",
+            "banner": " numenor_shield.png ",
+            "subfactions": [
+                {"id": "faithful", "display_name": "The Faithful", "color": "#3d6bb3"},
+                {
+                    "id": "andunie",
+                    "display_name": "Andunie",
+                    "color": "#1d3f73",
+                    "icon": "andunie.png",
+                    "banner": "andunie_banner.png",
+                },
+            ],
+        },
+        "mordor": {
+            "id": "mordor",
+            "display_name": "Mordor",
+            "alliance": "evil",
+            "capital": "barad_dur",
+            "color": "#8b2500",
+            "icon": "mordor.png",
+            "banner": "  ",
+        },
+    })
+    assert factions["numenor"].banner == "numenor_shield.png"
+    faithful = factions.get("faithful")
+    assert faithful is not None
+    assert faithful.icon == "gondor.png"
+    assert faithful.banner is None
+    assert factions["andunie"].banner == "andunie_banner.png"
+    assert factions["mordor"].banner is None
+
+    bad = validate_setup_documents(
+        {"id": "t", "name": "t"},
+        {},
+        {"numenor": {"id": "numenor", "display_name": "Numenor", "terrain_type": "land", "adjacent": [], "produces": {}, "is_stronghold": True}},
+        {"numenor": {"id": "numenor", "display_name": "Numenor", "alliance": "good", "capital": "numenor", "color": "#000", "banner": 1, "subfactions": [
+            {"id": "faithful", "display_name": "The Faithful", "color": "#111", "banner": 2},
+        ]}},
+        {},
+        {},
+        {"turn_order": ["numenor"], "territory_owners": {}, "starting_units": {}},
+    )
+    assert any('faction "numenor" banner must be a string' in err for err in bad)
+    assert any("subfactions[0].banner must be a string" in err for err in bad)
 
 
 def test_setup_validation_allows_subfaction_owners_and_rejects_turn_order():

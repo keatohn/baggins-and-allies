@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import MenuLink from '../components/MenuLink';
+import { useMenuScroll } from '../components/MenuScrollContext';
 import { api, getAuthToken, getResolvedApiBase, usesViteApiProxy } from '../services/api';
 import type { AdminSetupBundle, AdminSetupListItem, AuthPlayer, Catalog, UnitFormulas } from '../services/api';
 import {
@@ -23,9 +25,12 @@ import { BalanceModal } from './admin/BalanceModal';
 import { GamesReportModal } from './admin/GamesReportModal';
 import { AiPanel } from './admin/AiPanel';
 import { SimsPanel } from './admin/SimsPanel';
+import { QueryPanel } from './admin/QueryPanel';
+import { UsersReportModal } from './admin/UsersReportModal';
 import { previewStatsFromBundle } from './admin/previewStats';
 import { completeTerritoryAsymmetries } from './admin/territoryGraph';
 import { MapViewPane, type MapSetupDraft } from './admin/MapViewPane';
+import { MapOverridesPane } from './admin/MapOverridesPane';
 import { GameStatsModal, UnitStatsModal, type UnitStatsExtraColumn } from '../components/StatsModals';
 import './Admin.css';
 
@@ -65,6 +70,10 @@ function printedTerritoryPower(territories: AdminSetupBundle['territories'] | un
     out[id] = Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0;
   }
   return out;
+}
+
+function cloneSetupBundle(bundle: AdminSetupBundle): AdminSetupBundle {
+  return JSON.parse(JSON.stringify(bundle)) as AdminSetupBundle;
 }
 
 function factionAndSubfactionIds(factions: AdminSetupBundle['factions'] | undefined): string[] {
@@ -316,12 +325,16 @@ function CreateSetupDialog({
 
 export default function Admin() {
   const navigate = useNavigate();
+  const { holdScroll, revealScroll } = useMenuScroll();
   const [player, setPlayer] = useState<AuthPlayer | null>(null);
   const [loading, setLoading] = useState(true);
+  const heldForLoadRef = useRef(false);
   const [setups, setSetups] = useState<AdminSetupListItem[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
   const [activeTab, setActiveTab] = useState<TabKey>('manifest');
   const [bundle, setBundle] = useState<AdminSetupBundle | null>(null);
+  const [savedBundle, setSavedBundle] = useState<AdminSetupBundle | null>(null);
+  const [discarded, setDiscarded] = useState(false);
   const [jsonTab, setJsonTab] = useState<Partial<Record<TabKey, boolean>>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -329,6 +342,7 @@ export default function Admin() {
   const [saving, setSaving] = useState(false);
   const [loadingBundle, setLoadingBundle] = useState(false);
   const [mapViewOpen, setMapViewOpen] = useState(false);
+  const [mapsOpen, setMapsOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [resolveAsymmetriesOpen, setResolveAsymmetriesOpen] = useState(false);
@@ -355,6 +369,8 @@ export default function Admin() {
   const [gameStatsOpen, setGameStatsOpen] = useState(false);
   const [balanceOpen, setBalanceOpen] = useState(false);
   const [gamesOpen, setGamesOpen] = useState(false);
+  const [usersOpen, setUsersOpen] = useState(false);
+  const [queryOpen, setQueryOpen] = useState(false);
   const audioJson = useMemo(() => ({ gains: audioGains, menu_music: menuMusic }), [audioGains, menuMusic]);
   const signalsJson = useMemo(() => ({ presets: signalPresets }), [signalPresets]);
   const [statsWithRings, setStatsWithRings] = useState(true);
@@ -411,6 +427,9 @@ export default function Admin() {
       navigate('/', { replace: true });
       return;
     }
+    // Hold the scroll closed while authMe loads so "Loading…" isn't revealed.
+    heldForLoadRef.current = true;
+    holdScroll();
     api
       .authMe()
       .then((p) => {
@@ -419,7 +438,14 @@ export default function Admin() {
       })
       .catch(() => navigate('/', { replace: true }))
       .finally(() => setLoading(false));
-  }, [navigate]);
+  }, [navigate, holdScroll]);
+
+  useEffect(() => {
+    if (!loading && heldForLoadRef.current) {
+      heldForLoadRef.current = false;
+      revealScroll();
+    }
+  }, [loading, revealScroll]);
 
   const refreshList = useCallback(() => {
     setLoadError(null);
@@ -465,17 +491,22 @@ export default function Admin() {
     setLoadingBundle(true);
     setSaveError(null);
     setSaveOk(false);
+    setDiscarded(false);
+    setSavedBundle(null);
     setLoadError(null);
     api
       .adminGetSetup(id)
       .then((b) => {
-        setBundle({
+        const next = cloneSetupBundle({
           ...b,
           manifest: { ...b.manifest, id: b.id },
         } as AdminSetupBundle);
+        setBundle(next);
+        setSavedBundle(cloneSetupBundle(next));
       })
       .catch((e: Error) => {
         setBundle(null);
+        setSavedBundle(null);
         setLoadError(e.message);
       })
       .finally(() => setLoadingBundle(false));
@@ -485,6 +516,23 @@ export default function Admin() {
     if (!player?.is_admin || !selectedId) return;
     loadBundle(selectedId);
   }, [player?.is_admin, selectedId, loadBundle]);
+
+  const setupDirty = useMemo(() => {
+    if (globalOpen || !bundle || !savedBundle) return false;
+    return JSON.stringify(bundle) !== JSON.stringify(savedBundle);
+  }, [globalOpen, bundle, savedBundle]);
+
+  useEffect(() => {
+    if (discarded && setupDirty) setDiscarded(false);
+  }, [discarded, setupDirty]);
+
+  const discardSetupChanges = () => {
+    if (!savedBundle) return;
+    setBundle(cloneSetupBundle(savedBundle));
+    setSaveError(null);
+    setSaveOk(false);
+    setDiscarded(true);
+  };
 
   const handleSave = async () => {
     setSaveError(null);
@@ -841,17 +889,35 @@ export default function Admin() {
     }
   };
 
-  const openSection = (section: 'setups' | 'catalog' | 'formulas' | 'audio' | 'signals' | 'ai' | 'sims' | 'games') => {
+  const openSection = (section: 'setups' | 'catalog' | 'formulas' | 'audio' | 'signals' | 'ai' | 'sims' | 'query') => {
     setCatalogOpen(section === 'catalog');
     setFormulasOpen(section === 'formulas');
     setAudioOpen(section === 'audio');
     setSignalsOpen(section === 'signals');
     setAiOpen(section === 'ai');
     setSimsOpen(section === 'sims');
-    setGamesOpen(section === 'games');
+    setQueryOpen(section === 'query');
     setSaveOk(false);
     setSaveError(null);
   };
+
+  const navItems = [
+    { label: 'AI', active: aiOpen, onClick: () => openSection('ai') },
+    { label: 'Sims', active: simsOpen, onClick: () => openSection('sims') },
+    { label: 'Audio', active: audioOpen, onClick: () => openSection('audio') },
+    { label: 'Catalog', active: catalogOpen, onClick: () => openSection('catalog') },
+    { label: 'Formulas', active: formulasOpen, onClick: () => openSection('formulas') },
+    { label: 'Games', active: gamesOpen, onClick: () => setGamesOpen(true) },
+    { label: 'Maps', active: mapsOpen, onClick: () => setMapsOpen(true) },
+    { label: 'Query', active: queryOpen, onClick: () => openSection('query') },
+    {
+      label: 'Setups',
+      active: !globalOpen && !queryOpen && !gamesOpen && !usersOpen,
+      onClick: () => openSection('setups'),
+    },
+    { label: 'Signals', active: signalsOpen, onClick: () => openSection('signals') },
+    { label: 'Users', active: usersOpen, onClick: () => setUsersOpen(true) },
+  ].sort((a, b) => a.label.localeCompare(b.label));
 
   if (loading) {
     return <div className="admin-page admin-page--loading">Loading…</div>;
@@ -862,72 +928,26 @@ export default function Admin() {
   }
 
   return (
-    <div className="admin-page">
+    <div className={`admin-page${queryOpen ? ' admin-page--query' : ''}`}>
       <div className="admin-page__nav">
-        <Link to="/" className="page-menu-btn">
+        <MenuLink to="/" className="page-menu-btn">
           Menu
-        </Link>
+        </MenuLink>
         <div className="admin-page__nav-tools">
-          <button
-            type="button"
-            className={`page-menu-btn${aiOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => openSection('ai')}
-          >
-            AI
-          </button>
-          <button
-            type="button"
-            className={`page-menu-btn${audioOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => openSection('audio')}
-          >
-            Audio
-          </button>
-          <button
-            type="button"
-            className={`page-menu-btn${catalogOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => openSection('catalog')}
-          >
-            Catalog
-          </button>
-          <button
-            type="button"
-            className={`page-menu-btn${formulasOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => openSection('formulas')}
-          >
-            Formulas
-          </button>
-          <button
-            type="button"
-            className={`page-menu-btn${gamesOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => openSection('games')}
-          >
-            Games
-          </button>
-          <button
-            type="button"
-            className={`page-menu-btn${!globalOpen && !gamesOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => openSection('setups')}
-          >
-            Setups
-          </button>
-          <button
-            type="button"
-            className={`page-menu-btn${signalsOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => openSection('signals')}
-          >
-            Signals
-          </button>
-          <button
-            type="button"
-            className={`page-menu-btn${simsOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => openSection('sims')}
-          >
-            Sims
-          </button>
+          {navItems.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              className={`page-menu-btn${item.active ? ' admin-page__nav-btn--active' : ''}`}
+              onClick={item.onClick}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {formulasOpen ? (
+      {queryOpen ? null : formulasOpen ? (
         <div className="admin-page__toolbar admin-page__toolbar--wrap">
           <label className="admin-page__checkbox-label">
             <input
@@ -1010,7 +1030,7 @@ export default function Admin() {
       </div>
       )}
 
-      {loadError ? (
+      {loadError && !queryOpen ? (
         <div className="admin-page__error">
           {loadError}
           {loadError === 'Not Found' ? (
@@ -1040,7 +1060,7 @@ export default function Admin() {
         </div>
       ) : null}
 
-      {setups.length === 0 && !loadError && !loadingBundle && !globalOpen ? (
+      {setups.length === 0 && !loadError && !loadingBundle && !globalOpen && !queryOpen ? (
         <p className="admin-page__empty">
           No setups in the database. Restart the API once so it can create the <code>setups</code> table and seed from{' '}
           <code>backend/data/setups</code> (only runs when the table is empty). Then use <strong>New setup</strong> to add
@@ -1048,7 +1068,9 @@ export default function Admin() {
         </p>
       ) : null}
 
-      {globalOpen ? (
+      {queryOpen ? (
+        <QueryPanel />
+      ) : globalOpen ? (
         <div className="admin-page__panel">{renderTabBody()}</div>
       ) : (
       <>
@@ -1102,7 +1124,7 @@ export default function Admin() {
       </>
       )}
 
-      <div className="admin-page__actions">
+      {!queryOpen ? <div className="admin-page__actions">
         <button
           type="button"
           className="admin-page__btn admin-page__btn--primary"
@@ -1111,6 +1133,16 @@ export default function Admin() {
         >
           {saving ? 'Saving…' : 'Save'}
         </button>
+        {!globalOpen ? (
+          <button
+            type="button"
+            className="admin-page__btn"
+            disabled={!setupDirty || saving || loadingBundle}
+            onClick={discardSetupChanges}
+          >
+            Cancel
+          </button>
+        ) : null}
         <button
           type="button"
           className="admin-page__btn admin-page__btn--danger"
@@ -1119,10 +1151,10 @@ export default function Admin() {
         >
           Delete setup
         </button>
-      </div>
+      </div> : null}
 
-      {saveError ? <div className="admin-page__error">{saveError}</div> : null}
-      {asymmetryError ? (
+      {!queryOpen && saveError ? <div className="admin-page__error">{saveError}</div> : null}
+      {!queryOpen && asymmetryError ? (
         <button
           type="button"
           className="admin-page__btn admin-page__error-action"
@@ -1132,7 +1164,7 @@ export default function Admin() {
           Resolve Asymmetries
         </button>
       ) : null}
-      {saveOk ? (
+      {!queryOpen && saveOk ? (
         <p className="admin-page__success">
           {audioOpen
             ? 'Saved audio mix.'
@@ -1146,6 +1178,9 @@ export default function Admin() {
                     ? 'Saved AI defaults. New games will store them.'
                 : 'Saved. New games will use this data.'}
         </p>
+      ) : null}
+      {!queryOpen && !globalOpen && discarded ? (
+        <p className="admin-page__success">Discarded unsaved changes. Nothing was saved.</p>
       ) : null}
 
       <CreateSetupDialog open={createOpen} onClose={() => setCreateOpen(false)} setups={setups} onCreated={onCreatedSetup} />
@@ -1161,6 +1196,12 @@ export default function Admin() {
           units={(bundle.units as DictEntityMap) ?? {}}
           onClose={() => setMapViewOpen(false)}
           onSave={saveSetupFromMap}
+        />
+      ) : null}
+      {mapsOpen ? (
+        <MapOverridesPane
+          territories={(bundle?.territories as DictEntityMap) ?? {}}
+          onClose={() => setMapsOpen(false)}
         />
       ) : null}
       {resolveAsymmetriesOpen && (
@@ -1264,6 +1305,7 @@ export default function Admin() {
         />
       )}
       {gamesOpen && <GamesReportModal onClose={() => setGamesOpen(false)} />}
+      {usersOpen && <UsersReportModal onClose={() => setUsersOpen(false)} />}
     </div>
   );
 }

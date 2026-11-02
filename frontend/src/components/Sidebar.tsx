@@ -6,6 +6,7 @@ import { inferSignalAlliance, presetMatchesRelation, territorySignalRelation, ty
 import type { PendingMoveConfirm } from './GameMap';
 import { highestPowerHeroUnitId, ringCornerClass, ringIconSrc, ringsOnUnit, type RingView } from '../ringsDisplay';
 import type { BulkMoveConfirmState, PendingMobilization, BulkMobilizeConfirmState } from '../App';
+import PhaseStepper from './PhaseStepper';
 import './Sidebar.css';
 
 type UnitDefsSidebar = Record<string, {
@@ -167,6 +168,8 @@ interface SidebarProps {
   forcedNavalStandoffSeaZoneIds?: string[];
   /** Current faction color: tints Actions / Territory / Event log panel borders only. */
   turnAccentColor?: string;
+  /** Effective power (after discounts) for the current turn; shown in the turn/phase panel. */
+  effectivePower?: number;
   /** Cross-setup signal catalog. */
   signalPresets?: SignalPreset[];
   /** Pins visible to this player's alliances, keyed by territory id. */
@@ -605,6 +608,7 @@ function Sidebar({
   isCurrentFactionAI = false,
   forcedNavalStandoffSeaZoneIds = [],
   turnAccentColor,
+  effectivePower,
   signalPresets = [],
   territorySignals = {},
   signalAlliances = [],
@@ -676,11 +680,34 @@ function Sidebar({
   const capitalOwner = currentFactionCapital ? territoryData[currentFactionCapital]?.owner : undefined;
   const capitalCaptured = !!currentFactionCapital && capitalOwner !== gameState.current_faction;
 
+  const currentFactionName = factionData[gameState.current_faction]?.name ?? '';
+  const power = effectivePower ?? gameState.faction_resources[gameState.current_faction]?.power ?? 0;
+
   return (
     <aside
       className={`sidebar${turnAccentColor ? ' sidebar--turn-accent' : ''}`}
       style={turnAccentColor ? { ['--sidebar-panel-accent' as string]: turnAccentColor } : undefined}
     >
+      {/* Turn / phase / power — always visible (even when spectating); lives here so the
+          header never has to squeeze it. */}
+      <div className="panel turn-status-panel">
+        <h2 className="turn-status-heading">
+          <span className="turn-status-title">
+            Turn {gameState.turn_number}
+            {currentFactionName && (
+              <>
+                <span className="turn-status-sep" aria-hidden>—</span>
+                <span className="turn-status-faction">{currentFactionName}</span>
+              </>
+            )}
+          </span>
+          <span className="turn-status-power" title="Power">
+            Power: <strong>{power}P</strong>
+          </span>
+        </h2>
+        <PhaseStepper phase={gameState.phase} factionColor={turnAccentColor} />
+      </div>
+
       {/* Actions Panel — only when it's this player's turn (canAct) */}
       {canAct && (
         <div className="panel actions-panel">

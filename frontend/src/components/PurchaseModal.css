@@ -10,6 +10,7 @@
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  animation: modalOverlayIn 0.25s ease-out;
 }
 
 .modal {
@@ -21,6 +22,36 @@
   max-height: 90vh;
   display: flex;
   flex-direction: column;
+  animation: modalIn 0.3s ease-out;
+}
+
+@keyframes modalOverlayIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.92);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay,
+  .modal {
+    animation: none;
+  }
 }
 
 .purchase-modal {

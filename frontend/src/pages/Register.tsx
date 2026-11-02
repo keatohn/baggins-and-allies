@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
 import { api, setAuthToken } from '../services/api';
+import { useMenuScroll } from '../components/MenuScrollContext';
+import MenuLink from '../components/MenuLink';
 import './Auth.css';
 
 export default function Register() {
-  const navigate = useNavigate();
+  const { navigateWithScroll } = useMenuScroll();
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -22,7 +23,7 @@ export default function Register() {
     try {
       const res = await api.register(email.trim(), username.trim(), password);
       setAuthToken(res.access_token);
-      navigate('/', { replace: true });
+      navigateWithScroll('/', { replace: true });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Registration failed';
       const isGeneric = /^(Failed to fetch|Load failed|NetworkError|Network request failed)$/i.test(msg.trim());
@@ -84,7 +85,7 @@ export default function Register() {
         </button>
       </form>
       <p className="auth-page__footer">
-        Already have an account? <Link to="/login">Log in</Link>
+        Already have an account? <MenuLink to="/login">Log in</MenuLink>
       </p>
     </div>
   );

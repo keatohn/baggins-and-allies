@@ -2,7 +2,7 @@
   "id": "wotla_1.0",
   "display_name": "War of the Last Alliance",
   "is_active": true,
-  "map_asset": "wotla_map_1.0",
+  "map_asset": "wotla_map_1.1",
   "context": {
     "year": "SA 3434",
     "map": "Middle-earth",

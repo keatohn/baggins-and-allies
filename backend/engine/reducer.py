@@ -4873,11 +4873,12 @@ def _handle_end_phase(
             
             territory.owner = new_owner
 
-            # Destroy any camp in this territory when captured/liberated — except camps in capitals (those remain)
+            # Destroy any camp in this territory when captured/liberated — except camps in capitals (those remain).
+            # Manifest destroy_camp_on_conquer defaults True; False leaves the camp standing for the new owner.
             is_capital = any(
                 getattr(f, "capital", None) == territory_id for f in (faction_defs or {}).values()
             )
-            if not is_capital:
+            if getattr(state, "destroy_camp_on_conquer", True) and not is_capital:
                 def _camp_in_territory(cid: str) -> bool:
                     if state.dynamic_camps.get(cid) == territory_id:
                         return True

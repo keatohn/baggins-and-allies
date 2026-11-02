@@ -4,6 +4,7 @@ Provides REST API endpoints for game state management and actions.
 """
 
 import json
+import logging
 import os
 import random
 import secrets
@@ -13,10 +14,10 @@ import uuid
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
 from fastapi.responses import JSONResponse
@@ -24,8 +25,21 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from .admin_query import SelectOnlyError, list_db_schema, run_admin_select
 from .database import get_db, get_db_file_path, init_db, SessionLocal
-from .models import Game as GameModel, Player
+from .models import FriendRequest, Game as GameModel, GameInvite, GameResult, Player
+from .player_stats import compute_player_stats, player_headline_record
+from .achievements import (
+    AchievementError,
+    achievement_to_dict,
+    create_achievement,
+    delete_achievement,
+    get_achievement,
+    list_achievements,
+    list_granted,
+    list_stats_catalog,
+    update_achievement,
+)
 from .auth import (
     create_access_token,
     get_current_player,
@@ -35,8 +49,30 @@ from .auth import (
     validate_username,
     verify_password,
 )
+from backend.avatar import (
+    DEFAULT_AVATAR_IMAGE,
+    IMAGE_RE,
+    load_default_avatar_color,
+    normalize_avatar_color,
+    normalize_avatar_image,
+    save_default_avatar_color,
+    stored_avatar_image,
+)
 
 from backend.balance.starting_strength import compute_starting_strength
+from backend.progression import (
+    ProgressionError,
+    accumulate_xp_stats,
+    adjust_player_xp,
+    award_game_xp,
+    backfill_finished_games,
+    load_progression,
+    player_progression_view,
+    profile_avatar_choices,
+    public_progression,
+    save_progression,
+    tier_for_xp,
+)
 from backend.engine.state import GameState, PendingMove
 from backend.engine.actions import (
     Action,
@@ -127,6 +163,7 @@ from backend.setup_data import (
     get_admin_setup_bundle,
     is_files_setup_source,
     list_all_setups_admin,
+    list_all_unit_icons,
     save_setup_bundle,
     try_list_setups_menu,
     try_load_setup,
@@ -134,8 +171,16 @@ from backend.setup_data import (
     try_scenario_display,
 )
 from backend.catalog import CatalogError, load_catalog, rule_descriptions, save_catalog, specials_for_units
+from backend.map_overrides import (
+    MapOverridesError,
+    list_map_bases,
+    load_map_overrides,
+    save_map_overrides,
+    validate_map_base,
+)
 from backend.unit_formulas import UnitFormulasError, load_unit_formulas, save_unit_formulas, train_regression
 from backend.setup_validation import validate_setup_payload
+from backend.email import send_temp_password_email
 from dataclasses import asdict
 from backend.engine.queries import (
     validate_action,
@@ -216,6 +261,22 @@ async def lifespan(app: FastAPI):
                     starting_setup = su["starting_setup"]
             except FileNotFoundError:
                 pass
+        try:
+            from .game_results import backfill_game_results
+
+            n = backfill_game_results(db)
+            if n:
+                print(f"[game_results] backfilled {n} row(s) for finished games", flush=True)
+        except Exception as e:
+            print(f"[game_results] startup backfill failed: {e}", flush=True)
+        try:
+            from .achievements import seed_default_achievements
+
+            seeded = seed_default_achievements(db)
+            if seeded:
+                print(f"[achievements] seeded {seeded} default achievement(s)", flush=True)
+        except Exception as e:
+            print(f"[achievements] startup seed failed: {e}", flush=True)
     finally:
         db.close()
     yield
@@ -330,6 +391,16 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    temp_password: str
+    new_password: str
+
+
 class AudioSettingsPatch(BaseModel):
     menu_music_volume: float | None = Field(None, ge=0.0, le=1.0)
     game_music_volume: float | None = Field(None, ge=0.0, le=1.0)
@@ -340,9 +411,15 @@ class AudioSettingsPatch(BaseModel):
     muted: bool | None = None
 
 
+class AvatarSettingsPatch(BaseModel):
+    image: str | None = Field(None, max_length=64)
+    color: str | None = Field(None, max_length=16)
+
+
 class PatchProfileRequest(BaseModel):
     username: str | None = None
     audio: AudioSettingsPatch | None = None
+    avatar: AvatarSettingsPatch | None = None
 
 
 class CreateGameRequest(BaseModel):
@@ -372,6 +449,10 @@ class CreateGameRequest(BaseModel):
 
 class JoinGameRequest(BaseModel):
     game_code: str
+
+
+class GameInviteCreateBody(BaseModel):
+    player_ids: list[str]
 
 
 class ClaimFactionRequest(BaseModel):
@@ -906,7 +987,11 @@ def save_game(
     db: Session | None = None,
     events: list | None = None,
 ) -> None:
-    """Persist game state to DB and cache. If events is provided, append to config event_log (capped)."""
+    """Persist game state to DB and cache. If events is provided, append to config event_log (capped).
+
+    The first save that records a winner also awards XP. A failure there is logged and
+    does not block the finished game; the admin backfill can award it later.
+    """
     from backend.engine.events import GameEvent
 
     games[game_id] = state
@@ -915,9 +1000,29 @@ def save_game(
     row = db.query(GameModel).filter(GameModel.id == game_id).first()
     if row:
         row.game_state = json.dumps(state.to_dict())
-        if state.winner is not None and row.status != "finished":
+        just_finished = state.winner is not None and row.status != "finished"
+        if just_finished:
             row.status = "finished"
             row.completed_at = datetime.utcnow()
+            wrote_results = 0
+            try:
+                from .game_results import ensure_game_results_for_row
+
+                wrote_results = ensure_game_results_for_row(db, row)
+            except Exception as e:
+                # Results are stats-only; never block the game save.
+                print(f"[game_results] write failed for game {game_id}: {e}", flush=True)
+            if wrote_results:
+                try:
+                    from .achievement_eval import evaluate_for_game
+
+                    awards = evaluate_for_game(db, game_id)
+                    if awards:
+                        keys = [a["key"] for a in awards]
+                        print(f"[achievements] awarded {keys} for game {game_id}", flush=True)
+                except Exception as e:
+                    # Achievements are cosmetic; never block the game save.
+                    print(f"[achievements] evaluation failed for game {game_id}: {e}", flush=True)
         if events:
             try:
                 config = json.loads(row.config) if isinstance(row.config, str) else {}
@@ -926,6 +1031,7 @@ def save_game(
                 log = config.get("event_log")
                 if not isinstance(log, list):
                     log = []
+                accepted: list[dict] = []
                 for e in events:
                     if isinstance(e, GameEvent):
                         event_dict = e.to_dict()
@@ -933,17 +1039,26 @@ def save_game(
                         if isinstance(payload, dict) and payload.get("debug_only") is True:
                             continue
                         log.append(event_dict)
+                        accepted.append(event_dict)
                     elif isinstance(e, dict):
                         payload = e.get("payload") if isinstance(e, dict) else None
                         if isinstance(payload, dict) and payload.get("debug_only") is True:
                             continue
                         log.append(e)
+                        accepted.append(e)
                 if len(log) > EVENT_LOG_MAX:
                     log = log[-EVENT_LOG_MAX:]
                 config["event_log"] = log
+                accumulate_xp_stats(config, accepted)
                 row.config = json.dumps(config)
             except (TypeError, json.JSONDecodeError):
                 pass
+        if just_finished:
+            try:
+                with db.begin_nested():
+                    award_game_xp(db, row, state)
+            except Exception:
+                logging.getLogger(__name__).exception("XP award failed for game %s", game_id)
         db.commit()
 
 
@@ -1266,14 +1381,27 @@ def _player_audio_response(player: Player) -> dict[str, Any]:
     }
 
 
-def _profile_response(player: Player) -> dict[str, Any]:
-    return {
+def _player_avatar_response(player: Player, db: Session) -> dict[str, Any]:
+    """Avatar with response-time defaults: hobbit icon on the admin default color."""
+    prefs = _player_prefs_dict(player)
+    raw = prefs.get("avatar")
+    avatar = raw if isinstance(raw, dict) else {}
+    image = normalize_avatar_image(avatar.get("image")) or DEFAULT_AVATAR_IMAGE
+    color = normalize_avatar_color(avatar.get("color")) or load_default_avatar_color(db)
+    return {"image": image, "color": color}
+
+
+def _profile_response(player: Player, db: Session) -> dict[str, Any]:
+    body = {
         "id": player.id,
         "email": player.email,
         "username": player.username,
         "is_admin": bool(getattr(player, "is_admin", False)),
         "audio": _player_audio_response(player),
+        "avatar": _player_avatar_response(player, db),
     }
+    body.update(player_progression_view(player, db))
+    return body
 
 
 @app.post("/auth/register")
@@ -1303,7 +1431,7 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(player)
         token = create_access_token(player_id)
-        return {"access_token": token, "player": _profile_response(player)}
+        return {"access_token": token, "player": _profile_response(player, db)}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
@@ -1316,14 +1444,65 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
     player = db.query(Player).filter(func.lower(Player.email) == email_norm).first()
     if not player or not verify_password(request.password, player.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    player.last_login = datetime.utcnow()
+    db.commit()
+    db.refresh(player)
     token = create_access_token(player.id)
-    return {"access_token": token, "player": _profile_response(player)}
+    return {"access_token": token, "player": _profile_response(player, db)}
+
+
+# Single-use temp password lifetime; override with TEMP_PASSWORD_EXPIRE_MINUTES (e.g. 15 or 120).
+TEMP_PASSWORD_EXPIRE_MINUTES = int(os.environ.get("TEMP_PASSWORD_EXPIRE_MINUTES", "60"))
+TEMP_PASSWORD_LENGTH = 12
+
+
+@app.post("/auth/forgot-password")
+def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Start the forgot-password flow: email a single-use temp password.
+
+    Always returns the same generic response so the endpoint never reveals
+    whether an email is registered. Unknown emails are a no-op.
+    """
+    email_norm = request.email.strip().lower()
+    player = db.query(Player).filter(func.lower(Player.email) == email_norm).first()
+    if player:
+        alphabet = string.ascii_letters + string.digits
+        temp_password = "".join(secrets.choice(alphabet) for _ in range(TEMP_PASSWORD_LENGTH))
+        expires_at = datetime.utcnow() + timedelta(minutes=TEMP_PASSWORD_EXPIRE_MINUTES)
+        player.temp_password_hash = hash_password(temp_password)
+        player.temp_password_expires_at = expires_at
+        db.commit()
+        send_temp_password_email(player.email, player.username, temp_password, expires_at)
+    return {"message": "If that email is registered, a temporary password has been sent."}
+
+
+@app.post("/auth/reset-password")
+def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """Replace the password with a new one after verifying the emailed temp password."""
+    email_norm = request.email.strip().lower()
+    player = db.query(Player).filter(func.lower(Player.email) == email_norm).first()
+    now = datetime.utcnow()
+    if (
+        not player
+        or not player.temp_password_hash
+        or not player.temp_password_expires_at
+        or player.temp_password_expires_at <= now
+        or not verify_password(request.temp_password.strip(), player.temp_password_hash)
+    ):
+        raise HTTPException(status_code=400, detail="Invalid or expired temporary password")
+    if not request.new_password.strip():
+        raise HTTPException(status_code=400, detail="New password is required")
+    player.password_hash = hash_password(request.new_password)
+    player.temp_password_hash = None
+    player.temp_password_expires_at = None
+    db.commit()
+    return {"message": "Password updated. You can now log in."}
 
 
 @app.get("/auth/me")
-def auth_me(player: Player = Depends(get_current_player)):
-    """Return current player (email, username, audio preferences)."""
-    return _profile_response(player)
+def auth_me(player: Player = Depends(get_current_player), db: Session = Depends(get_db)):
+    """Return current player (email, username, audio, avatar, XP and tier)."""
+    return _profile_response(player, db)
 
 
 @app.patch("/auth/me")
@@ -1332,11 +1511,12 @@ def update_profile(
     player: Player = Depends(get_current_player),
     db: Session = Depends(get_db),
 ):
-    """Update username and/or audio preferences (merged into stored JSON)."""
-    if request.username is None and request.audio is None:
+    """Update username and/or audio/avatar preferences (merged into stored JSON)."""
+    if request.username is None and request.audio is None and request.avatar is None:
         raise HTTPException(status_code=400, detail="No fields to update")
 
     prefs = _player_prefs_dict(player)
+    prefs_dirty = False
 
     if request.audio is not None:
         audio = prefs.get("audio") or {}
@@ -1358,6 +1538,30 @@ def update_profile(
         if request.audio.muted is not None:
             audio["muted"] = bool(request.audio.muted)
         prefs["audio"] = audio
+        prefs_dirty = True
+
+    if request.avatar is not None:
+        if request.avatar.image is None and request.avatar.color is None:
+            raise HTTPException(status_code=400, detail="Avatar image or color is required")
+        avatar = prefs.get("avatar")
+        avatar = dict(avatar) if isinstance(avatar, dict) else {}
+        if request.avatar.image is not None:
+            image = normalize_avatar_image(request.avatar.image)
+            if image is None or not IMAGE_RE.match(image):
+                raise HTTPException(status_code=400, detail="Image must be a plain .png filename")
+            allowed = {choice["name"] for choice in profile_avatar_choices(player, db)}
+            if image not in allowed and image != stored_avatar_image(player):
+                raise HTTPException(status_code=400, detail="That icon isn't available at your tier")
+            avatar["image"] = image
+        if request.avatar.color is not None:
+            color = normalize_avatar_color(request.avatar.color)
+            if color is None:
+                raise HTTPException(status_code=400, detail="Color must be a #rrggbb hex value")
+            avatar["color"] = color
+        prefs["avatar"] = avatar
+        prefs_dirty = True
+
+    if prefs_dirty:
         player.preferences = json.dumps(prefs)
 
     if request.username is not None:
@@ -1375,10 +1579,391 @@ def update_profile(
     try:
         db.commit()
         db.refresh(player)
-        return _profile_response(player)
+        return _profile_response(player, db)
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Update failed: {str(e)}")
+
+
+# ----- Friends -----
+
+
+@app.get("/profile/avatar-icons")
+def get_profile_avatar_icons(
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Unit icons this player can use. `new` marks icons that unlock at their current tier."""
+    return {"icons": profile_avatar_choices(player, db)}
+
+
+@app.get("/admin/unit-icons")
+def admin_unit_icons(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Every unit icon, so admin can set the tier required to use it as a profile picture."""
+    return {"icons": list_all_unit_icons(db)}
+
+
+class FriendRequestCreateBody(BaseModel):
+    username: str
+
+
+def _friendship_accepted(db: Session, a_id: str, b_id: str) -> bool:
+    return (
+        db.query(FriendRequest)
+        .filter(
+            FriendRequest.status == "accepted",
+            (
+                ((FriendRequest.requester_id == a_id) & (FriendRequest.addressee_id == b_id))
+                | ((FriendRequest.requester_id == b_id) & (FriendRequest.addressee_id == a_id))
+            ),
+        )
+        .first()
+        is not None
+    )
+
+
+def _pending_request_between(db: Session, a_id: str, b_id: str) -> FriendRequest | None:
+    return (
+        db.query(FriendRequest)
+        .filter(
+            FriendRequest.status == "pending",
+            (
+                ((FriendRequest.requester_id == a_id) & (FriendRequest.addressee_id == b_id))
+                | ((FriendRequest.requester_id == b_id) & (FriendRequest.addressee_id == a_id))
+            ),
+        )
+        .first()
+    )
+
+
+def _friend_relation(db: Session, viewer_id: str, other: Player) -> str:
+    """none | friend | pending_out (viewer sent) | pending_in (viewer must act)."""
+    if _friendship_accepted(db, viewer_id, other.id):
+        return "friend"
+    row = _pending_request_between(db, viewer_id, other.id)
+    if row is None:
+        return "none"
+    return "pending_out" if row.requester_id == viewer_id else "pending_in"
+
+
+def _friend_user_payload(db: Session, viewer_id: str, other: Player) -> dict[str, Any]:
+    return {
+        "id": other.id,
+        "username": other.username,
+        "relation": _friend_relation(db, viewer_id, other),
+        "avatar": _player_avatar_response(other, db),
+    }
+
+
+@app.get("/friends/search")
+def friends_search(
+    username: str,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Case-insensitive prefix search for usernames, with the viewer's relation to each."""
+    q = username.strip().lower()
+    if not q:
+        return {"users": []}
+    rows = (
+        db.query(Player)
+        .filter(func.lower(Player.username).like(f"{q}%"))
+        .order_by(Player.username)
+        .limit(20)
+        .all()
+    )
+    return {"users": [_friend_user_payload(db, player.id, p) for p in rows if p.id != player.id]}
+
+
+def _roster_player_ids(raw: str | None) -> list[str]:
+    try:
+        roster = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(roster, list):
+        return []
+    ids: list[str] = []
+    for entry in roster:
+        if not isinstance(entry, dict):
+            continue
+        pid = entry.get("player_id")
+        if isinstance(pid, str):
+            pid = pid.strip()
+            if pid and pid != "__computer__":
+                ids.append(pid)
+    return ids
+
+
+@app.get("/friends/played-with")
+def friends_played_with(
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Humans this player has shared an active or finished game with."""
+    ids: set[str] = set()
+    for (raw,) in (
+        db.query(GameResult.participant_ids).filter(GameResult.player_id == player.id).all()
+    ):
+        try:
+            parts = json.loads(raw or "[]")
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(parts, list):
+            continue
+        for pid in parts:
+            if isinstance(pid, str) and pid.strip() and pid.strip() not in (player.id, "__computer__"):
+                ids.add(pid.strip())
+    for (raw,) in db.query(GameModel.players).filter(GameModel.status == "active").all():
+        roster = _roster_player_ids(raw)
+        if player.id in roster:
+            ids.update(pid for pid in roster if pid != player.id)
+    if not ids:
+        return {"users": []}
+    others = db.query(Player).filter(Player.id.in_(ids)).all()
+    users = [_friend_user_payload(db, player.id, other) for other in others]
+    users.sort(key=lambda row: row["username"].lower())
+    return {"users": users}
+
+
+@app.post("/friends/requests")
+def friends_send_request(
+    body: FriendRequestCreateBody,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Send a friend request by username."""
+    q = body.username.strip()
+    addressee = (
+        db.query(Player).filter(func.lower(Player.username) == func.lower(q)).first()
+        if q
+        else None
+    )
+    if addressee is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    if addressee.id == player.id:
+        raise HTTPException(status_code=400, detail="Cannot send a friend request to yourself")
+    if _friendship_accepted(db, player.id, addressee.id):
+        raise HTTPException(status_code=409, detail="You are already friends")
+    if _pending_request_between(db, player.id, addressee.id) is not None:
+        raise HTTPException(status_code=409, detail="A friend request is already pending")
+    row = FriendRequest(
+        id=str(uuid.uuid4()),
+        requester_id=player.id,
+        addressee_id=addressee.id,
+        status="pending",
+    )
+    db.add(row)
+    db.commit()
+    return {
+        "ok": True,
+        "request": {
+            "id": row.id,
+            "username": addressee.username,
+            "direction": "outgoing",
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        },
+    }
+
+
+@app.get("/friends/requests")
+def friends_list_requests(
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Pending incoming (act on these) and outgoing (awaiting reply) friend requests."""
+    pending = db.query(FriendRequest).filter(FriendRequest.status == "pending").all()
+    incoming: list[dict[str, Any]] = []
+    outgoing: list[dict[str, Any]] = []
+    player_ids = {r.requester_id for r in pending} | {r.addressee_id for r in pending}
+    players = {
+        p.id: p for p in db.query(Player).filter(Player.id.in_(player_ids)).all()
+    } if player_ids else {}
+    for row in pending:
+        if row.addressee_id == player.id:
+            other = players.get(row.requester_id)
+            if other:
+                incoming.append(
+                    {
+                        "id": row.id,
+                        "username": other.username,
+                        "avatar": _player_avatar_response(other, db),
+                        "created_at": row.created_at.isoformat() if row.created_at else None,
+                    }
+                )
+        elif row.requester_id == player.id:
+            other = players.get(row.addressee_id)
+            if other:
+                outgoing.append(
+                    {
+                        "id": row.id,
+                        "username": other.username,
+                        "avatar": _player_avatar_response(other, db),
+                        "created_at": row.created_at.isoformat() if row.created_at else None,
+                    }
+                )
+    incoming.sort(key=lambda r: r["username"].lower())
+    outgoing.sort(key=lambda r: r["username"].lower())
+    return {"incoming": incoming, "outgoing": outgoing}
+
+
+@app.get("/friends/requests/pending-count")
+def friends_pending_count(
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Badge count: pending friend requests plus lobby invites still waiting on this player."""
+    request_count = (
+        db.query(FriendRequest)
+        .filter(FriendRequest.status == "pending", FriendRequest.addressee_id == player.id)
+        .count()
+    )
+    invite_count = _active_game_invites_query(db, player.id).count()
+    return {"count": request_count + invite_count}
+
+
+def _get_pending_request_for_player(
+    db: Session, request_id: str, player: Player, *, as_addressee: bool
+) -> FriendRequest:
+    row = db.query(FriendRequest).filter(FriendRequest.id == request_id).first()
+    if row is None or row.status != "pending":
+        raise HTTPException(status_code=404, detail="Friend request not found")
+    expected = row.addressee_id if as_addressee else row.requester_id
+    if expected != player.id:
+        raise HTTPException(status_code=404, detail="Friend request not found")
+    return row
+
+
+@app.post("/friends/requests/{request_id}/accept")
+def friends_accept_request(
+    request_id: str,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Accept an incoming pending request (addressee only)."""
+    row = _get_pending_request_for_player(db, request_id, player, as_addressee=True)
+    row.status = "accepted"
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/friends/requests/{request_id}/decline")
+def friends_decline_request(
+    request_id: str,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Decline an incoming pending request (addressee only); the row is removed."""
+    row = _get_pending_request_for_player(db, request_id, player, as_addressee=True)
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/friends")
+def friends_list(
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Accepted friends, sorted by username."""
+    rows = (
+        db.query(FriendRequest)
+        .filter(
+            FriendRequest.status == "accepted",
+            (FriendRequest.requester_id == player.id) | (FriendRequest.addressee_id == player.id),
+        )
+        .all()
+    )
+    other_ids = [
+        (r.addressee_id if r.requester_id == player.id else r.requester_id) for r in rows
+    ]
+    if not other_ids:
+        return {"friends": []}
+    others = {p.id: p for p in db.query(Player).filter(Player.id.in_(other_ids)).all()}
+    friends = [
+        _friend_user_payload(db, player.id, others[pid])
+        for pid in other_ids
+        if pid in others
+    ]
+    friends.sort(key=lambda f: f["username"].lower())
+    return {"friends": friends}
+
+
+# ----- Player profile & stats (public to any logged-in player) -----
+
+
+def _parse_date_param(value: str | None, field: str) -> datetime | None:
+    if value is None or value.strip() == "":
+        return None
+    try:
+        return datetime.fromisoformat(value.strip())
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid {field} date (expected ISO 8601)")
+
+
+@app.get("/players/{player_id}/stats")
+def get_player_stats(
+    player_id: str,
+    scenario: str | None = Query(None, description="Filter by setup_id"),
+    opponent: str | None = Query(None, description="Only games against this player_id"),
+    teammate: str | None = Query(None, description="Only games with this player_id as teammate"),
+    alliance: str | None = Query(None, pattern="^(good|evil)$", description="Filter by alliance played"),
+    date_from: str | None = Query(None, alias="from", description="ISO date lower bound"),
+    date_to: str | None = Query(None, alias="to", description="ISO date upper bound"),
+    _viewer: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Public (any logged-in player) career stats from game_results.
+
+    Headline W-L includes every finished game (forfeits count as normal results).
+    Filters: scenario (setup_id), opponent/teammate (player_id),
+    alliance (good|evil), from/to (ISO dates on game end).
+    """
+    target = db.query(Player).filter(Player.id == str(player_id)).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return compute_player_stats(
+        db,
+        str(target.id),
+        scenario=scenario,
+        opponent=opponent,
+        teammate=teammate,
+        alliance=alliance,
+        date_from=_parse_date_param(date_from, "from"),
+        date_to=_parse_date_param(date_to, "to"),
+    )
+
+
+@app.get("/players/{player_id}/profile")
+def get_player_profile(
+    player_id: str,
+    _viewer: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Public-lite profile card: username + headline record + achievements (for player-vs-player UI)."""
+    target = db.query(Player).filter(Player.id == str(player_id)).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Player not found")
+    try:
+        from .achievement_eval import player_achievement_grants, recompute_for_player
+
+        recompute_for_player(db, str(target.id))
+        achievements = player_achievement_grants(db, str(target.id))
+    except Exception as e:
+        print(f"[achievements] profile read failed for {target.id}: {e}", flush=True)
+        achievements = []
+    headline = player_headline_record(db, str(target.id))
+    body = {
+        "id": str(target.id),
+        "username": target.username,
+        "headline": headline,
+        "avatar": _player_avatar_response(target, db),
+        "achievements": achievements,
+    }
+    body.update(player_progression_view(target, db))
+    return body
 
 
 # ----- Games (create, list, join) -----
@@ -1419,6 +2004,33 @@ def admin_put_audio(
     """Replace the global per-file audio mix and (when sent) the menu music playlist."""
     gains, menu_music = save_audio_settings(db, body.gains, body.menu_music)
     return {"ok": True, "gains": gains, "menu_music": menu_music}
+
+
+class AdminProfileDefaultsBody(BaseModel):
+    default_avatar_color: str
+
+
+@app.get("/admin/profile-defaults")
+def admin_get_profile_defaults(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Current new-user profile defaults (avatar color). Existing users are never rewritten."""
+    return {"default_avatar_color": load_default_avatar_color(db)}
+
+
+@app.put("/admin/profile-defaults")
+def admin_put_profile_defaults(
+    body: AdminProfileDefaultsBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Set the default avatar color applied to users who never picked one."""
+    try:
+        color = save_default_avatar_color(db, body.default_avatar_color)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True, "default_avatar_color": color}
 
 
 @app.get("/signals")
@@ -1463,6 +2075,47 @@ def admin_put_catalog(
     except CatalogError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"ok": True, "catalog": catalog}
+
+
+@app.get("/admin/maps")
+def admin_list_maps(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Distinct map asset names (map bases) known from setups, for the admin Maps editor."""
+    return {"maps": list_map_bases(db)}
+
+
+@app.get("/maps/{map_base}/overrides")
+def get_map_overrides(
+    map_base: str,
+    db: Session = Depends(get_db),
+):
+    """Icon/location overrides for a map (public read: every client renders with them).
+
+    Positions are SVG viewBox coordinates. Territories absent from the result (or with
+    focus "calculated") use the frontend's computed centroids.
+    """
+    try:
+        base = validate_map_base(map_base)
+    except MapOverridesError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"map_base": base, "overrides": load_map_overrides(db, base)}
+
+
+@app.put("/admin/maps/{map_base}/overrides")
+def admin_put_map_overrides(
+    map_base: str,
+    body: dict[str, Any],
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Replace a map's icon/location overrides (shared by every setup using that map)."""
+    try:
+        overrides = save_map_overrides(db, map_base, body)
+    except MapOverridesError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True, "map_base": map_base, "overrides": overrides}
 
 
 @app.get("/admin/formulas")
@@ -1723,6 +2376,12 @@ def admin_balance(
     return compute_starting_strength(body.model_dump(), rings=rings)
 
 
+class AdminEndGameBody(BaseModel):
+    """Admin end-game: winning alliance, or none to void the game (no stats rows)."""
+
+    winner: str  # "good" | "evil" | "none" ("neither" accepted as alias for "none")
+
+
 @app.get("/admin/games")
 def admin_list_games(
     _admin: Player = Depends(get_current_admin),
@@ -1730,6 +2389,347 @@ def admin_list_games(
 ):
     """Every game (lobby, in progress, and finished) for the admin games report."""
     return {"games": _build_games_list(_admin, db, include_all=True)}
+
+
+@app.get("/admin/users")
+def admin_list_users(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Every registered user for the admin users report."""
+    cfg = load_progression(db)
+    rows = db.query(Player).order_by(Player.username).all()
+    users = []
+    for p in rows:
+        xp = int(p.xp or 0)
+        tier = tier_for_xp(xp, cfg["tiers"])
+        users.append({
+            "id": p.id,
+            "username": p.username,
+            "email": p.email,
+            "last_login": p.last_login.isoformat() if p.last_login else None,
+            "xp": xp,
+            "tier_id": tier["id"] if tier else None,
+            "tier_name": tier["name"] if tier else None,
+            "tier_rank": tier["rank"] if tier else None,
+        })
+    return {"users": users}
+
+
+@app.get("/admin/query/schema")
+def admin_query_schema(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Tables and columns on this server's database, for the admin query console."""
+    return list_db_schema(db)
+
+
+class AdminQueryBody(BaseModel):
+    sql: str = Field(..., min_length=1, max_length=20_000)
+
+
+@app.post("/admin/query")
+def admin_run_query(
+    body: AdminQueryBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Run one SELECT against this server's database. Writes and other statement types are rejected."""
+    try:
+        return run_admin_select(db, body.sql)
+    except SelectOnlyError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/progression")
+def get_progression(db: Session = Depends(get_db)):
+    """Tier names, thresholds, and avatar-frame assignments. Event XP values stay on the admin route."""
+    return public_progression(db)
+
+
+@app.get("/admin/progression")
+def admin_get_progression(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Full progression document, including how much XP each event is worth."""
+    return load_progression(db)
+
+
+class AdminProgressionBody(BaseModel):
+    version: int | None = None
+    currency_label: str | None = None
+    frames: list[dict[str, Any]] = Field(default_factory=list)
+    tiers: list[dict[str, Any]]
+    icon_min_tier: dict[str, str] = Field(default_factory=dict)
+    rules: dict[str, Any]
+
+
+@app.put("/admin/progression")
+def admin_put_progression(
+    body: AdminProgressionBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Replace tier names, thresholds, frames, and XP rules."""
+    try:
+        cfg = save_progression(db, body.model_dump())
+    except ProgressionError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True, "progression": cfg}
+
+
+@app.post("/admin/progression/backfill")
+def admin_backfill_progression(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Award XP for finished games that have not been awarded yet. Safe to run again."""
+    result = backfill_finished_games(db)
+    db.commit()
+    return {"ok": True, **result}
+
+
+class AdminXpAdjustBody(BaseModel):
+    amount: int
+    reason: str = Field(min_length=1, max_length=200)
+
+
+@app.post("/admin/users/{player_id}/xp")
+def admin_adjust_user_xp(
+    player_id: str,
+    body: AdminXpAdjustBody,
+    admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Grant or remove XP. The change is a ledger row with the reason."""
+    if body.amount == 0:
+        raise HTTPException(status_code=400, detail="Amount cannot be 0")
+    reason = body.reason.strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="A reason is required")
+    player = db.query(Player).filter(Player.id == player_id).first()
+    if not player:
+        raise HTTPException(status_code=404, detail="User not found")
+    applied = adjust_player_xp(db, player, body.amount, reason, admin.id)
+    db.commit()
+    db.refresh(player)
+    cfg = load_progression(db)
+    tier = tier_for_xp(int(player.xp or 0), cfg["tiers"])
+    return {
+        "ok": True,
+        "xp": int(player.xp or 0),
+        "applied": applied,
+        "tier_id": tier["id"] if tier else None,
+        "tier_name": tier["name"] if tier else None,
+        "tier_rank": tier["rank"] if tier else None,
+    }
+
+
+@app.post("/admin/games/{game_id}/end")
+def admin_end_game(
+    game_id: str,
+    body: AdminEndGameBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin: end an in-progress game now, choosing the winner or voiding it.
+
+    good/evil: sets state.winner, emits a victory event, and saves (writes game_results).
+    none: finishes the game with no winner and no game_results rows (void — no stats impact).
+    """
+    winner = (body.winner or "").strip().lower()
+    if winner == "neither":
+        winner = "none"
+    if winner not in ("good", "evil", "none"):
+        raise HTTPException(status_code=400, detail="winner must be good, evil, or none")
+
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Game not found")
+    if row.status == "finished":
+        raise HTTPException(status_code=400, detail="Game is already finished")
+    if row.status != "active":
+        raise HTTPException(status_code=400, detail="Only in-progress games can be ended")
+
+    try:
+        raw = json.loads(row.game_state) if isinstance(row.game_state, str) else row.game_state
+        state = GameState.from_dict(raw) if isinstance(raw, dict) else None
+    except (TypeError, json.JSONDecodeError):
+        state = None
+    if state is None:
+        raise HTTPException(status_code=400, detail="Game state is corrupt; cannot end game")
+
+    if winner == "none":
+        # Void: finish with no winner and no game_results rows (no stats impact).
+        state.winner = None
+        row.game_state = json.dumps(state.to_dict())
+        row.status = "finished"
+        row.completed_at = datetime.utcnow()
+        db.commit()
+    else:
+        _, td, fd, _, _ = get_game_definitions(game_id, db)
+        if not isinstance(fd, dict):
+            fd = {}
+        if not isinstance(td, dict):
+            td = {}
+        state.winner = winner
+        stronghold_counts: dict[str, int] = {}
+        controlled: list[str] = []
+        for territory_id, territory_state in state.territories.items():
+            territory_def = td.get(territory_id)
+            if not territory_def or not getattr(territory_def, "is_stronghold", False):
+                continue
+            owner = territory_state.owner
+            if not owner:
+                continue
+            faction_def = fd.get(owner)
+            if not faction_def:
+                continue
+            alliance = getattr(faction_def, "alliance", None)
+            if not alliance:
+                continue
+            stronghold_counts[alliance] = stronghold_counts.get(alliance, 0) + 1
+            if alliance == winner:
+                controlled.append(territory_id)
+        strongholds_criteria = state.victory_criteria.get("strongholds") or {}
+        strongholds_required = (
+            int(strongholds_criteria.get(winner, 0))
+            if isinstance(strongholds_criteria, dict)
+            else 0
+        )
+        from backend.engine.events import victory as victory_event
+
+        save_game(
+            game_id,
+            state,
+            db,
+            events=[
+                victory_event(
+                    winner,
+                    stronghold_counts,
+                    strongholds_required,
+                    controlled,
+                )
+            ],
+        )
+
+    if game_id in games:
+        del games[game_id]
+    if game_id in game_defs:
+        del game_defs[game_id]
+    return {"ok": True, "game_id": game_id, "winner": None if winner == "none" else winner, "status": "finished"}
+
+
+class AdminAchievementCreateBody(BaseModel):
+    key: str
+    name: str
+    description: str = ""
+    icon: str | None = None
+    category: str | None = None
+    tier: str | None = None
+    criteria: dict[str, Any]
+    sort_order: int = 0
+    active: bool = True
+
+
+class AdminAchievementPatchBody(BaseModel):
+    key: str | None = None
+    name: str | None = None
+    description: str | None = None
+    icon: str | None = None
+    category: str | None = None
+    tier: str | None = None
+    criteria: dict[str, Any] | None = None
+    sort_order: int | None = None
+    active: bool | None = None
+
+
+@app.get("/admin/achievements")
+def admin_list_achievements(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """All achievement definitions (including inactive) for the admin panel."""
+    rows = list_achievements(db, include_inactive=True)
+    return {"achievements": [achievement_to_dict(r) for r in rows]}
+
+
+@app.get("/admin/achievements/stats-catalog")
+def admin_achievement_stats_catalog(
+    _admin: Player = Depends(get_current_admin),
+):
+    """Whitelisted stat keys the criteria DSL accepts (for admin form dropdowns)."""
+    return {"stats": list_stats_catalog()}
+
+
+@app.get("/admin/achievements/granted")
+def admin_list_granted_achievements(
+    player: str | None = Query(None, description="Filter by player id"),
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Granted rows for debugging (optionally filtered by player)."""
+    return {"granted": list_granted(db, player_id=player)}
+
+
+@app.post("/admin/achievements")
+def admin_create_achievement(
+    body: AdminAchievementCreateBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Create an achievement definition. criteria is validated against the DSL whitelist."""
+    try:
+        row = create_achievement(
+            db,
+            key=body.key,
+            name=body.name,
+            description=body.description,
+            icon=body.icon,
+            category=body.category,
+            tier=body.tier,
+            criteria=body.criteria,
+            sort_order=body.sort_order,
+            active=body.active,
+        )
+    except AchievementError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return achievement_to_dict(row)
+
+
+@app.patch("/admin/achievements/{achievement_id}")
+def admin_patch_achievement(
+    achievement_id: str,
+    body: AdminAchievementPatchBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Update fields on an existing achievement definition."""
+    row = get_achievement(db, achievement_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Achievement not found")
+    changes = body.model_dump(exclude_unset=True)
+    try:
+        row = update_achievement(db, row, changes)
+    except AchievementError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return achievement_to_dict(row)
+
+
+@app.delete("/admin/achievements/{achievement_id}")
+def admin_delete_achievement(
+    achievement_id: str,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Delete an achievement definition and any grants."""
+    row = get_achievement(db, achievement_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Achievement not found")
+    delete_achievement(db, row)
+    return {"ok": True, "id": achievement_id}
 
 
 @app.get("/admin/setups")
@@ -1863,6 +2863,7 @@ def create_game(
         camp_defs=cd,
         victory_criteria=victory_criteria,
         camp_cost=camp_cost,
+        destroy_camp_on_conquer=parse_prefire_penalty_from_manifest(setup.get("destroy_camp_on_conquer")),
         stronghold_repair_cost=stronghold_repair_cost,
         prefire_penalty=parse_prefire_penalty_from_manifest(setup.get("prefire_penalty")),
         heroes_enabled=bool(request.heroes_enabled) or rings_on,
@@ -1988,41 +2989,90 @@ def _get_scenario_from_config(row, db: Session) -> dict[str, Any] | None:
         if not setup_id or not isinstance(setup_id, str):
             return None
         # DB manifest when setups are in DB; inactive setups still resolve for game cards.
-        return try_scenario_display(setup_id, db)
+        display = try_scenario_display(setup_id, db)
+        if isinstance(display, dict):
+            display["id"] = setup_id
+        return display
     except (TypeError, json.JSONDecodeError):
         pass
     return None
 
 
-def _build_games_list(player: Player, db: Session, *, include_all: bool = False) -> list[dict[str, Any]]:
+def _note_last_opened_game(db: Session, player: Player | None, game_id: str, row: GameModel | None) -> None:
+    """Remember the game this player just opened. Skips repeats so multiplayer polling does not write."""
+    if player is None or row is None:
+        return
+    if row.status == "finished":
+        return
+    if getattr(player, "last_opened_game_id", None) == game_id:
+        return
+    if str(player.id) in _get_forfeited_player_ids(row):
+        return
+    try:
+        pl = json.loads(row.players) if isinstance(row.players, str) else row.players
+    except (TypeError, json.JSONDecodeError):
+        return
+    if not isinstance(pl, list) or not any(str(p.get("player_id")) == str(player.id) for p in pl):
+        return
+    player.last_opened_game_id = game_id
+    player.last_opened_at = datetime.utcnow()
+    db.commit()
+
+
+def _build_games_list(
+    player: Player,
+    db: Session,
+    *,
+    include_all: bool = False,
+    status: str | None = None,
+    only_game_id: str | None = None,
+) -> list[dict[str, Any]]:
     """Build list of game dicts (with faction_stats and current_player_username).
 
     Default: games the player is in, excluding finished and games they forfeited.
+    status="finished": finished games the player was in (includes games they forfeited).
+    status="all": every game the player is in (any status; includes forfeited).
     include_all=True: every game (admin report) — no membership/status/forfeit filter,
     newest first.
     """
     query = db.query(GameModel)
-    if not include_all:
-        rows = query.filter(GameModel.status != "finished").all()
-    else:
+    if only_game_id:
+        query = query.filter(GameModel.id == only_game_id)
+    include_forfeited = bool(include_all or status in ("finished", "all"))
+    if include_all:
         rows = query.order_by(GameModel.created_at.desc()).all()
+    elif status == "finished":
+        rows = query.filter(GameModel.status == "finished").order_by(GameModel.created_at.desc()).all()
+    elif status == "all":
+        rows = query.order_by(GameModel.created_at.desc()).all()
+    else:
+        rows = query.filter(GameModel.status != "finished").all()
     mine = []
     player_ids = set()
     player_id_str = str(player.id)
+    forfeited_by_game: dict[str, list[str]] = {}
     for r in rows:
         try:
             pl = json.loads(r.players)
             if not isinstance(pl, list):
                 continue
             if not include_all:
-                if player_id_str not in {str(p.get("player_id")) for p in pl}:
+                roster_ids = {str(p.get("player_id")) for p in pl}
+                if include_forfeited:
+                    roster_ids |= set(_get_forfeited_player_ids(r))
+                if player_id_str not in roster_ids:
                     continue
-                if player_id_str in _get_forfeited_player_ids(r):
+                if not include_forfeited and player_id_str in _get_forfeited_player_ids(r):
                     continue
             for p in pl:
                 pid = p.get("player_id")
                 if pid is not None:
                     player_ids.add(str(pid))
+            # Forfeited players are removed from `players` but we keep their ids so lists can still show them.
+            current_forfeited = _get_forfeited_player_ids(r)
+            if current_forfeited:
+                forfeited_by_game[str(r.id)] = current_forfeited
+                player_ids.update(current_forfeited)
         except (json.JSONDecodeError, TypeError):
             continue
 
@@ -2038,9 +3088,12 @@ def _build_games_list(player: Player, db: Session, *, include_all: bool = False)
             if not isinstance(pl, list):
                 continue
             if not include_all:
-                if player_id_str not in {str(p.get("player_id")) for p in pl}:
+                roster_ids = {str(p.get("player_id")) for p in pl}
+                if include_forfeited:
+                    roster_ids |= set(_get_forfeited_player_ids(r))
+                if player_id_str not in roster_ids:
                     continue
-                if player_id_str in _get_forfeited_player_ids(r):
+                if not include_forfeited and player_id_str in _get_forfeited_player_ids(r):
                     continue
         except (json.JSONDecodeError, TypeError):
             continue
@@ -2117,15 +3170,43 @@ def _build_games_list(player: Player, db: Session, *, include_all: bool = False)
 
         scenario = _get_scenario_from_config(r, db)
 
-        players_out = [
-            {
-                "player_id": str(p.get("player_id")),
-                "username": players_by_id.get(str(p.get("player_id"))),
-                "faction_id": p.get("faction_id"),
-            }
-            for p in pl
-            if p.get("player_id") is not None
-        ]
+        # Unique players in turn order: a user controlling multiple factions appears once,
+        # ranked by the earliest of their factions in turn_order (stable otherwise).
+        turn_order_list = state_dict.get("turn_order") if isinstance(state_dict.get("turn_order"), list) else []
+        faction_rank = {str(fid): i for i, fid in enumerate(turn_order_list) if fid is not None}
+        players_by_pid: dict[str, dict[str, Any]] = {}
+        player_rank: dict[str, int] = {}
+        for p in pl:
+            pid = p.get("player_id")
+            if pid is None:
+                continue
+            pid_s = str(pid)
+            if pid_s not in players_by_pid:
+                players_by_pid[pid_s] = {
+                    "player_id": pid_s,
+                    "username": players_by_id.get(pid_s),
+                    "faction_id": p.get("faction_id"),
+                }
+            fid = p.get("faction_id")
+            if fid is not None:
+                rank = faction_rank.get(str(fid))
+                if rank is not None and (pid_s not in player_rank or rank < player_rank[pid_s]):
+                    player_rank[pid_s] = rank
+        players_out = sorted(
+            players_by_pid.values(),
+            key=lambda e: player_rank.get(e["player_id"], len(faction_rank)),
+        )
+        # Forfeited players were dropped from `players` on leave; re-append them (flagged) so reports/cards keep the original roster.
+        for fid_pid in forfeited_by_game.get(str(r.id), []):
+            if fid_pid not in players_by_pid:
+                players_out.append(
+                    {
+                        "player_id": fid_pid,
+                        "username": players_by_id.get(fid_pid),
+                        "faction_id": None,
+                        "forfeited": True,
+                    }
+                )
         raw_winner = state_dict.get("winner")
         winner = str(raw_winner) if isinstance(raw_winner, str) and raw_winner else None
 
@@ -2160,13 +3241,87 @@ def _build_games_list(player: Player, db: Session, *, include_all: bool = False)
 
 @app.get("/games")
 def list_my_games(
+    status: str | None = Query(None, pattern="^(active|finished|all)$", description="Filter by game status; default excludes finished"),
     player: Player = Depends(get_current_player),
     db: Session = Depends(get_db),
 ):
-    """List games the current player is in. Includes turn info, current player username, and faction_stats for the stronghold bar."""
-    mine = _build_games_list(player, db)
+    """List games the current player is in.
+
+    Default: active/lobby games (excludes finished and games this player forfeited).
+    status=finished: finished games this player was in (includes games they forfeited).
+    status=active: alias for the default.
+    status=all: every game this player is in.
+    """
+    query_status = status if status not in (None, "active") else None
+    mine = _build_games_list(player, db, status=query_status)
     # Return plain dict so FastAPI serializes it; include marker so client can confirm this handler ran
     return {"games": mine, "_list_version": 2}
+
+
+@app.get("/games/recent")
+def get_recent_game(
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """The game this player opened most recently, if they can still load it."""
+    gid = getattr(player, "last_opened_game_id", None)
+    if not gid:
+        return {"game": None}
+    mine = _build_games_list(player, db, only_game_id=str(gid))
+    return {"game": mine[0] if mine else None}
+
+
+def _lobby_player_ids(row: GameModel) -> set[str]:
+    try:
+        players_list = json.loads(row.players or "[]")
+    except json.JSONDecodeError:
+        return set()
+    return {str(p.get("player_id")) for p in players_list if p.get("player_id")}
+
+
+def _add_player_to_lobby(row: GameModel, player_id: str) -> bool:
+    """Append a human to a lobby roster. Returns True when they were not already in it."""
+    try:
+        players_list = json.loads(row.players or "[]")
+    except json.JSONDecodeError:
+        players_list = []
+    if any(str(p.get("player_id")) == str(player_id) for p in players_list):
+        return False
+    players_list.append({"player_id": str(player_id), "faction_id": None})
+    row.players = json.dumps(players_list)
+    return True
+
+
+def _require_lobby_member(row: GameModel | None, player: Player) -> GameModel:
+    if row is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+    if str(player.id) not in _lobby_player_ids(row):
+        raise HTTPException(status_code=403, detail="You are not in this game")
+    return row
+
+
+def _active_game_invites_query(db: Session, player_id: str):
+    """Pending invites whose game is still in the lobby."""
+    return (
+        db.query(GameInvite)
+        .join(GameModel, GameInvite.game_id == GameModel.id)
+        .filter(
+            GameInvite.invitee_id == player_id,
+            GameInvite.status == "pending",
+            GameModel.status == "lobby",
+        )
+    )
+
+
+def _invite_payload(invite: GameInvite, game: GameModel, inviter: Player) -> dict[str, Any]:
+    return {
+        "id": invite.id,
+        "game_id": game.id,
+        "game_name": game.name,
+        "inviter_id": inviter.id,
+        "inviter_username": inviter.username,
+        "created_at": invite.created_at.isoformat() if invite.created_at else None,
+    }
 
 
 @app.post("/games/join")
@@ -2184,13 +3339,142 @@ def join_game(
         raise HTTPException(status_code=404, detail="Game not found")
     if row.status != "lobby":
         raise HTTPException(status_code=400, detail="Game already started")
-    players_list = json.loads(row.players)
-    if any(str(p.get("player_id")) == str(player.id) for p in players_list):
-        return {"game_id": row.id, "message": "Already in game"}
-    players_list.append({"player_id": str(player.id), "faction_id": None})
-    row.players = json.dumps(players_list)
+    added = _add_player_to_lobby(row, str(player.id))
+    if added:
+        db.commit()
+        return {"game_id": row.id, "name": row.name}
+    return {"game_id": row.id, "message": "Already in game"}
+
+
+@app.get("/games/invites")
+def list_game_invites(
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Active lobby invitations for the current player. Empty once the game starts or they answer."""
+    rows = (
+        db.query(GameInvite, GameModel, Player)
+        .join(GameModel, GameInvite.game_id == GameModel.id)
+        .join(Player, GameInvite.inviter_id == Player.id)
+        .filter(
+            GameInvite.invitee_id == player.id,
+            GameInvite.status == "pending",
+            GameModel.status == "lobby",
+        )
+        .order_by(GameInvite.created_at.desc())
+        .all()
+    )
+    return {"invitations": [_invite_payload(invite, game, inviter) for invite, game, inviter in rows]}
+
+
+def _get_pending_invite_for_player(db: Session, invite_id: str, player: Player) -> tuple[GameInvite, GameModel]:
+    invite = db.query(GameInvite).filter(GameInvite.id == invite_id).first()
+    if invite is None or invite.status != "pending" or invite.invitee_id != player.id:
+        raise HTTPException(status_code=404, detail="Invitation not found")
+    game = db.query(GameModel).filter(GameModel.id == invite.game_id).first()
+    if game is None or game.status != "lobby":
+        raise HTTPException(status_code=404, detail="Invitation not found")
+    return invite, game
+
+
+@app.post("/games/invites/{invite_id}/accept")
+def accept_game_invite(
+    invite_id: str,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Join the lobby from an invitation and clear it."""
+    invite, game = _get_pending_invite_for_player(db, invite_id, player)
+    _add_player_to_lobby(game, str(player.id))
+    invite.status = "accepted"
     db.commit()
-    return {"game_id": row.id, "name": row.name}
+    return {"game_id": game.id, "name": game.name}
+
+
+@app.post("/games/invites/{invite_id}/decline")
+def decline_game_invite(
+    invite_id: str,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    invite, _game = _get_pending_invite_for_player(db, invite_id, player)
+    invite.status = "declined"
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/games/{game_id}/invites")
+def list_game_invites_sent(
+    game_id: str,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Pending invitee ids for a lobby the caller is in."""
+    row = _require_lobby_member(db.query(GameModel).filter(GameModel.id == game_id).first(), player)
+    if row.status != "lobby":
+        return {"invitee_ids": []}
+    ids = [
+        invite.invitee_id
+        for invite in db.query(GameInvite)
+        .filter(GameInvite.game_id == row.id, GameInvite.status == "pending")
+        .all()
+    ]
+    return {"invitee_ids": ids}
+
+
+@app.post("/games/{game_id}/invites")
+def send_game_invites(
+    game_id: str,
+    body: GameInviteCreateBody,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Invite friends into a multiplayer lobby. Already-pending invites stay pending."""
+    row = _require_lobby_member(db.query(GameModel).filter(GameModel.id == game_id).first(), player)
+    if row.game_code is None or row.status != "lobby":
+        raise HTTPException(status_code=400, detail="Invites are only for games still in the lobby")
+    member_ids = _lobby_player_ids(row)
+    requested = []
+    for raw in body.player_ids:
+        pid = str(raw).strip()
+        if pid and pid not in requested:
+            requested.append(pid)
+    if not requested:
+        raise HTTPException(status_code=400, detail="Choose at least one friend")
+    friends = {
+        other_id
+        for other_id in requested
+        if _friendship_accepted(db, player.id, other_id)
+    }
+    if friends != set(requested):
+        raise HTTPException(status_code=400, detail="You can only invite friends")
+    sent = 0
+    for invitee_id in requested:
+        if invitee_id == str(player.id) or invitee_id in member_ids:
+            continue
+        existing = (
+            db.query(GameInvite)
+            .filter(GameInvite.game_id == row.id, GameInvite.invitee_id == invitee_id)
+            .first()
+        )
+        if existing is None:
+            db.add(
+                GameInvite(
+                    id=str(uuid.uuid4()),
+                    game_id=row.id,
+                    inviter_id=str(player.id),
+                    invitee_id=invitee_id,
+                    status="pending",
+                )
+            )
+            sent += 1
+        elif existing.status != "pending":
+            existing.status = "pending"
+            existing.inviter_id = str(player.id)
+            existing.created_at = datetime.utcnow()
+            sent += 1
+    db.commit()
+    return {"sent": sent}
 
 
 def _safe_asdict_map(defs_dict):
@@ -2450,6 +3734,7 @@ def get_game_state(
                     event_log = events_for_viewer(el, state, game_id, db, player)
         except (TypeError, json.JSONDecodeError):
             pass
+    _note_last_opened_game(db, player, game_id, row)
     return {
         "game_id": game_id,
         "state": state_dict,
@@ -2652,6 +3937,12 @@ def get_forfeit_options(
     _, _, fd, _, _ = get_game_definitions(game_id, db)
     if not isinstance(fd, dict):
         fd = {}
+    other_humans = any(
+        str(p.get("player_id")) != player_id_str
+        and str(p.get("player_id")) != LOBBY_COMPUTER_PLAYER_ID
+        for p in players_list
+    )
+    forfeit_ends_game = row.status == "active" and not other_humans
     eligible_ids = _eligible_forfeit_assignee_ids(
         fd, players_list, lobby_claims, my_faction_ids, player_id_str,
     )
@@ -2669,7 +3960,7 @@ def get_forfeit_options(
             "display_name": display,
             "alliance": _faction_alliance(fd, fid),
         })
-    return {"factions": factions_out, "assignees": assignees}
+    return {"factions": factions_out, "assignees": assignees, "forfeit_ends_game": forfeit_ends_game}
 
 
 @app.get("/games/{game_id}/meta")
@@ -3087,6 +4378,12 @@ def forfeit_game(
     my_faction_ids = _forfeit_my_faction_ids(row, player_id_str, players_list, lobby_claims_cfg)
     if not my_faction_ids:
         raise HTTPException(status_code=400, detail="You have no factions to forfeit")
+    other_humans = any(
+        str(p.get("player_id")) != player_id_str
+        and str(p.get("player_id")) != LOBBY_COMPUTER_PLAYER_ID
+        for p in players_list
+    )
+    forfeit_ends_game = row.status == "active" and not other_humans
     fa = body.faction_assignments or {}
     if set(fa.keys()) != set(my_faction_ids):
         raise HTTPException(
@@ -3114,6 +4411,14 @@ def forfeit_game(
         forfeited = list(forfeited) + [player_id_str]
     forfeited_set = set(str(x) for x in forfeited)
     config["forfeited_player_ids"] = forfeited
+    # Record the factions this player controlled so game_results can write rows for them
+    # after they are removed from the roster (stats keep the forfeit as a normal W-L game).
+    if row.status != "lobby":
+        factions_cfg = config.get("forfeited_player_factions")
+        if not isinstance(factions_cfg, dict):
+            factions_cfg = {}
+        factions_cfg[player_id_str] = sorted(str(f) for f in my_faction_ids)
+        config["forfeited_player_factions"] = factions_cfg
     # Persist a player-readable reassignment summary so the toast can be specific after refresh/rejoin.
     reassign_cfg = config.get("forfeit_reassignments")
     if not isinstance(reassign_cfg, dict):
@@ -3152,36 +4457,39 @@ def forfeit_game(
         new_players = [p for p in players_list if str(p.get("player_id")) != player_id_str]
     else:
         # Advance past this player's turn while they still appear as owners in the DB (skip-turn auth).
-        try:
-            raw = json.loads(row.game_state) if isinstance(row.game_state, str) else row.game_state
-            if isinstance(raw, dict):
-                state = GameState.from_dict(raw)
-                faction_to_player_old = {
-                    str(p["faction_id"]): str(p["player_id"])
-                    for p in players_list
-                    if p.get("faction_id") is not None and p.get("player_id") is not None
-                }
-                _, _, fd_skip, _, _ = get_game_definitions(game_id, db)
-                faction_ids = state.turn_order if state.turn_order else (sorted(fd_skip.keys()) if fd_skip else [])
-                max_skips = len(faction_ids) if faction_ids else 1
-                auth = http_request.headers.get("Authorization") or http_request.headers.get("authorization")
-                headers = {"Authorization": auth} if auth else {}
-                with TestClient(app) as client:
-                    for _ in range(max_skips):
-                        owner = faction_to_player_old.get(state.current_faction)
-                        if owner not in forfeited_set:
-                            break
-                        r = client.post(f"/games/{game_id}/skip-turn", headers=headers)
-                        if r.status_code != 200:
-                            break
-                        db.refresh(row)
-                        raw = json.loads(row.game_state) if isinstance(row.game_state, str) else {}
-                        if isinstance(raw, dict):
-                            state = GameState.from_dict(raw)
-                        else:
-                            break
-        except Exception:
-            pass
+        # Skipped when this forfeit ends the game: no further turns, and cycle-wrap victory must not override the forced defeat.
+        # Also skipped on already-finished games: turns are over, no skip-turn round-trips needed.
+        if row.status == "active" and not forfeit_ends_game:
+            try:
+                raw = json.loads(row.game_state) if isinstance(row.game_state, str) else row.game_state
+                if isinstance(raw, dict):
+                    state = GameState.from_dict(raw)
+                    faction_to_player_old = {
+                        str(p["faction_id"]): str(p["player_id"])
+                        for p in players_list
+                        if p.get("faction_id") is not None and p.get("player_id") is not None
+                    }
+                    _, _, fd_skip, _, _ = get_game_definitions(game_id, db)
+                    faction_ids = state.turn_order if state.turn_order else (sorted(fd_skip.keys()) if fd_skip else [])
+                    max_skips = len(faction_ids) if faction_ids else 1
+                    auth = http_request.headers.get("Authorization") or http_request.headers.get("authorization")
+                    headers = {"Authorization": auth} if auth else {}
+                    with TestClient(app) as client:
+                        for _ in range(max_skips):
+                            owner = faction_to_player_old.get(state.current_faction)
+                            if owner not in forfeited_set:
+                                break
+                            r = client.post(f"/games/{game_id}/skip-turn", headers=headers)
+                            if r.status_code != 200:
+                                break
+                            db.refresh(row)
+                            raw = json.loads(row.game_state) if isinstance(row.game_state, str) else {}
+                            if isinstance(raw, dict):
+                                state = GameState.from_dict(raw)
+                            else:
+                                break
+            except Exception:
+                pass
 
         new_players = [p for p in players_list if str(p.get("player_id")) != player_id_str]
         ai_existing = [str(x) for x in (config.get("ai_factions") or []) if x]
@@ -3196,37 +4504,104 @@ def forfeit_game(
         config["ai_factions"] = list(ai_set)
 
     row.players = json.dumps(new_players)
-    # If host forfeited, promote first remaining player to host (by turn order in lobby, else first in list)
-    if str(row.created_by) == player_id_str and new_players:
+    # If host forfeited, record the flag (even a last-human forfeit that ends the game),
+    # then promote first remaining player to host (by turn order in lobby, else first in list)
+    if str(row.created_by) == player_id_str:
         config["host_forfeited"] = True
-        try:
-            state_dict = json.loads(row.game_state) if isinstance(row.game_state, str) else {}
-            turn_order = (state_dict or {}).get("turn_order") or []
-        except (TypeError, json.JSONDecodeError):
-            turn_order = []
-        remaining_ids = list(dict.fromkeys(str(p.get("player_id")) for p in new_players if p.get("player_id")))
-        new_host = None
-        if isinstance(turn_order, list) and turn_order and row.status == "lobby":
-            lobby_claims_after = config.get("lobby_claims") or {}
-            for fid in turn_order:
-                pid = lobby_claims_after.get(fid)
-                if (
-                    pid
-                    and str(pid) != LOBBY_COMPUTER_PLAYER_ID
-                    and str(pid) in remaining_ids
-                ):
-                    new_host = pid
-                    break
-        if new_host is None and remaining_ids:
-            new_host = remaining_ids[0]
-        if new_host:
-            row.created_by = new_host
+        if new_players:
+            try:
+                state_dict = json.loads(row.game_state) if isinstance(row.game_state, str) else {}
+                turn_order = (state_dict or {}).get("turn_order") or []
+            except (TypeError, json.JSONDecodeError):
+                turn_order = []
+            remaining_ids = list(dict.fromkeys(str(p.get("player_id")) for p in new_players if p.get("player_id")))
+            new_host = None
+            if isinstance(turn_order, list) and turn_order and row.status == "lobby":
+                lobby_claims_after = config.get("lobby_claims") or {}
+                for fid in turn_order:
+                    pid = lobby_claims_after.get(fid)
+                    if (
+                        pid
+                        and str(pid) != LOBBY_COMPUTER_PLAYER_ID
+                        and str(pid) in remaining_ids
+                    ):
+                        new_host = pid
+                        break
+            if new_host is None and remaining_ids:
+                new_host = remaining_ids[0]
+            if new_host:
+                row.created_by = new_host
     row.config = json.dumps(config)
     db.commit()
+
+    forfeit_winner: str | None = None
+    if forfeit_ends_game:
+        # Last human leaving: force the opposing alliance to win instead of running AI vs AI.
+        try:
+            raw = json.loads(row.game_state) if isinstance(row.game_state, str) else row.game_state
+            state = GameState.from_dict(raw) if isinstance(raw, dict) else None
+        except (TypeError, json.JSONDecodeError):
+            state = None
+        if state is not None and state.winner is None:
+            _, td_forfeit, fd_forfeit, _, _ = get_game_definitions(game_id, db)
+            if not isinstance(fd_forfeit, dict):
+                fd_forfeit = {}
+            if not isinstance(td_forfeit, dict):
+                td_forfeit = {}
+            forfeit_alliances = {
+                _faction_alliance(fd_forfeit, fid) for fid in my_faction_ids
+            }
+            forfeit_alliance = next(
+                (a for a in ("good", "evil") if a in forfeit_alliances), "good"
+            )
+            forfeit_winner = "evil" if forfeit_alliance == "good" else "good"
+            state.winner = forfeit_winner
+            stronghold_counts: dict[str, int] = {}
+            controlled: list[str] = []
+            for territory_id, territory_state in state.territories.items():
+                territory_def = td_forfeit.get(territory_id)
+                if not territory_def or not getattr(territory_def, "is_stronghold", False):
+                    continue
+                owner = territory_state.owner
+                if not owner:
+                    continue
+                faction_def = fd_forfeit.get(owner)
+                if not faction_def:
+                    continue
+                alliance = getattr(faction_def, "alliance", None)
+                if not alliance:
+                    continue
+                stronghold_counts[alliance] = stronghold_counts.get(alliance, 0) + 1
+                if alliance == forfeit_winner:
+                    controlled.append(territory_id)
+            strongholds_criteria = state.victory_criteria.get("strongholds") or {}
+            strongholds_required = (
+                int(strongholds_criteria.get(forfeit_winner, 0))
+                if isinstance(strongholds_criteria, dict)
+                else 0
+            )
+            from backend.engine.events import victory as victory_event
+
+            save_game(
+                game_id,
+                state,
+                db,
+                events=[
+                    victory_event(
+                        forfeit_winner,
+                        stronghold_counts,
+                        strongholds_required,
+                        controlled,
+                    )
+                ],
+            )
+
     if game_id in games:
         del games[game_id]
     if game_id in game_defs:
         del game_defs[game_id]
+    if forfeit_winner is not None:
+        return {"message": "Game over", "game_over": True, "winner": forfeit_winner}
     return {"message": "You have left the game"}
 
 

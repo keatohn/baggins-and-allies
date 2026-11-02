@@ -1,12 +1,16 @@
-import { useEffect, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../services/api';
+import { useMenuScroll } from '../components/MenuScrollContext';
+import MenuLink from '../components/MenuLink';
+import AccountMenu from '../components/AccountMenu';
 import type { GameListItem, AuthPlayer, ForfeitOptionsResponse } from '../services/api';
 import StrongholdAllianceBar from '../components/StrongholdAllianceBar';
 import './GameList.css';
 
 const DELETE_CONFIRM_PHRASE = 'DELETE GAME';
 const FORFEIT_CONFIRM_PHRASE = 'FORFEIT GAME';
+
+type GameListTab = 'active' | 'finished';
 
 function formatPhase(phase: string): string {
   if (phase === 'non_combat_move') return 'Non-Combat Move';
@@ -28,21 +32,36 @@ function truncateUsername(username: string, maxChars: number = 12): string {
   return `${username.slice(0, maxChars)}...`;
 }
 
+function allianceLabel(alliance: string | undefined): string {
+  if (!alliance) return 'your team';
+  return alliance.charAt(0).toUpperCase() + alliance.slice(1).toLowerCase();
+}
+
+function winnerLabel(g: GameListItem): string {
+  if (!g.winner) return 'No winner recorded';
+  return `${allianceLabel(g.winner)} wins`;
+}
+
 function playerNames(g: GameListItem): string | null {
-  const names = (g.players ?? [])
-    .map((p) => p.username?.trim())
-    .filter((n): n is string => Boolean(n));
+  const names: string[] = [];
+  for (const p of g.players ?? []) {
+    const n = p.username?.trim();
+    if (!n) continue;
+    const label = p.forfeited ? `${n} (forfeited)` : n;
+    if (!names.includes(label)) names.push(label);
+  }
   if (names.length > 0) return names.join(', ');
   if (g.current_player_username) return g.current_player_username;
   return null;
 }
 
 export default function GameList() {
-  const navigate = useNavigate();
+  const { navigateWithScroll, holdScroll, revealScroll } = useMenuScroll();
   const [player, setPlayer] = useState<AuthPlayer | null>(null);
   const [games, setGames] = useState<GameListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<GameListTab>('active');
   const [gameToDelete, setGameToDelete] = useState<string | null>(null);
   const [gameToForfeit, setGameToForfeit] = useState<string | null>(null);
   const [confirmText, setConfirmText] = useState('');
@@ -51,18 +70,46 @@ export default function GameList() {
   const [forfeitOptions, setForfeitOptions] = useState<ForfeitOptionsResponse | null>(null);
   const [forfeitOptionsLoading, setForfeitOptionsLoading] = useState(false);
   const [forfeitAssignments, setForfeitAssignments] = useState<Record<string, string>>({});
+  const [forfeitResult, setForfeitResult] = useState<
+    { gameName: string; allianceLabel: string; winningLabel?: string } | null
+  >(null);
+  const heldForLoadRef = useRef(false);
 
-  const loadGames = () => {
-    api.listGames()
+  const loadGames = useCallback((tab: GameListTab) => {
+    api
+      .listGames(tab)
       .then((r) => setGames(r.games))
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed'))
       .finally(() => setLoading(false));
-  };
+  }, []);
 
   useEffect(() => {
-    loadGames();
+    // Hold the scroll closed while the games list loads so "Loading…" isn't revealed.
+    heldForLoadRef.current = true;
+    holdScroll();
+    loadGames(activeTab);
     api.authMe().then(setPlayer).catch(() => setPlayer(null));
-  }, []);
+  }, [activeTab, holdScroll, loadGames]);
+
+  useEffect(() => {
+    if (!loading && heldForLoadRef.current) {
+      heldForLoadRef.current = false;
+      revealScroll();
+    }
+  }, [loading, revealScroll]);
+
+  const handleTabChange = (tab: GameListTab) => {
+    if (tab === activeTab) return;
+    setGameToDelete(null);
+    setGameToForfeit(null);
+    setConfirmText('');
+    setDeleteError(null);
+    setForfeitError(null);
+    setForfeitResult(null);
+    setLoading(true);
+    setError(null);
+    setActiveTab(tab);
+  };
 
   useEffect(() => {
     if (!gameToForfeit) {
@@ -118,6 +165,7 @@ export default function GameList() {
     setConfirmText('');
     setForfeitError(null);
     setDeleteError(null);
+    setForfeitResult(null);
   };
 
   const handleDeleteCancel = () => {
@@ -150,7 +198,15 @@ export default function GameList() {
     if (!forfeitOptions?.factions.length) return;
     setForfeitError(null);
     try {
-      await api.forfeitGame(gameToForfeit, { faction_assignments: forfeitAssignments });
+      const res = await api.forfeitGame(gameToForfeit, { faction_assignments: forfeitAssignments });
+      if (res.game_over) {
+        const endedName = games.find((g) => g.id === gameToForfeit)?.name;
+        setForfeitResult({
+          gameName: endedName ?? 'The game',
+          allianceLabel: allianceLabel(forfeitOptions.factions[0]?.alliance),
+          winningLabel: res.winner ? allianceLabel(res.winner) : undefined,
+        });
+      }
       setGames((prev) => prev.filter((g) => g.id !== gameToForfeit));
       setGameToForfeit(null);
       setConfirmText('');
@@ -161,13 +217,23 @@ export default function GameList() {
     }
   };
 
-  if (loading) return <div className="game-list-page">Loading…</div>;
+  if (loading) {
+    return (
+      <>
+        <AccountMenu />
+        <div className="game-list-page">Loading…</div>
+      </>
+    );
+  }
   if (error) {
     return (
-      <div className="game-list-page">
-        <p className="game-list__error">{error}</p>
-        <Link to="/">Back</Link>
-      </div>
+      <>
+        <AccountMenu />
+        <div className="game-list-page">
+          <p className="game-list__error">{error}</p>
+          <MenuLink to="/">Back</MenuLink>
+        </div>
+      </>
     );
   }
 
@@ -177,11 +243,51 @@ export default function GameList() {
 
   return (
     <div className="game-list-page" data-page="load-game">
+      <AccountMenu />
       <header className="game-list-page__header">
-        <Link to="/" className="page-menu-btn">Menu</Link>
+        <MenuLink to="/" className="page-menu-btn">Menu</MenuLink>
       </header>
+      {forfeitResult && (
+        <div className="game-list__result" role="status">
+          <p className="game-list__result-text">
+            <strong>Game over</strong> — {forfeitResult.gameName} has ended. Your alliance (
+            {forfeitResult.allianceLabel}) lost the game
+            {forfeitResult.winningLabel ? ` to ${forfeitResult.winningLabel}` : ''}.
+          </p>
+          <button
+            type="button"
+            className="game-list__result-close"
+            onClick={() => setForfeitResult(null)}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
+      <div className="game-list__tabs" role="tablist" aria-label="Filter games">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'active'}
+          className={`game-list__tab${activeTab === 'active' ? ' game-list__tab--active' : ''}`}
+          onClick={() => handleTabChange('active')}
+        >
+          In Progress
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'finished'}
+          className={`game-list__tab${activeTab === 'finished' ? ' game-list__tab--active' : ''}`}
+          onClick={() => handleTabChange('finished')}
+        >
+          Finished
+        </button>
+      </div>
       {games.length === 0 ? (
-        <p className="game-list__empty">No games yet.</p>
+        <p className="game-list__empty">
+          {activeTab === 'finished' ? 'No finished games yet.' : 'No games yet.'}
+        </p>
       ) : (
         <ul className="game-list">
           {games.map((g) => (
@@ -190,8 +296,8 @@ export default function GameList() {
                 className="game-list__card"
                 role="button"
                 tabIndex={0}
-                onClick={() => navigate('/game/' + g.id)}
-                onKeyDown={(e) => e.key === 'Enter' && navigate('/game/' + g.id)}
+                onClick={() => navigateWithScroll('/game/' + g.id)}
+                onKeyDown={(e) => e.key === 'Enter' && navigateWithScroll('/game/' + g.id)}
               >
                 <div className="game-list__card-main">
                   <h3 className="game-list__name">{g.name}</h3>
@@ -211,6 +317,32 @@ export default function GameList() {
                       </span>
                       {g.created_at && (
                         <span className="game-list__created">Created {formatCreatedAt(g.created_at)}</span>
+                      )}
+                      {playerNames(g) && (
+                        <span className="game-list__players" title={playerNames(g) ?? undefined}>
+                          Players: {playerNames(g)}
+                        </span>
+                      )}
+                    </div>
+                  ) : g.status === 'finished' ? (
+                    <div className="game-list__turn-info">
+                      <span className="game-list__turn-meta game-list__turn-meta--finished">
+                        <span className="game-list__status-pill game-list__status-pill--finished">Finished</span>
+                        {g.winner && (
+                          <>
+                            <span className="game-list__meta-sep">|</span>
+                            <span className="game-list__winner">{winnerLabel(g)}</span>
+                          </>
+                        )}
+                        {g.scenario?.display_name && (
+                          <>
+                            <span className="game-list__meta-sep">|</span>
+                            <span>{g.scenario.display_name}</span>
+                          </>
+                        )}
+                      </span>
+                      {g.completed_at && (
+                        <span className="game-list__created">Completed {formatCreatedAt(g.completed_at)}</span>
                       )}
                       {playerNames(g) && (
                         <span className="game-list__players" title={playerNames(g) ?? undefined}>
@@ -263,9 +395,9 @@ export default function GameList() {
                     <StrongholdAllianceBar factionStats={g.faction_stats} variant="gameList" />
                   </div>
                 )}
-                {((g.game_code != null && g.status !== 'lobby') || isHost(g)) && (
+                {((g.game_code != null && g.status !== 'lobby' && g.status !== 'finished') || isHost(g)) && (
                   <div className="game-list__card-actions">
-                    {g.game_code != null && g.status !== 'lobby' && (
+                    {g.game_code != null && g.status !== 'lobby' && g.status !== 'finished' && (
                       <button
                         type="button"
                         className="game-list__forfeit-btn"
@@ -332,12 +464,24 @@ export default function GameList() {
         <div className="game-list__modal-overlay" onClick={handleForfeitCancel}>
           <div className="game-list__modal" onClick={(e) => e.stopPropagation()}>
             <h2 className="game-list__modal-title">Forfeit this game?</h2>
-            <p className="game-list__modal-text">
-              You will be removed from <strong>{forfeitingGame.name}</strong>. Choose who will control each of your
-              factions. Then type <strong>{FORFEIT_CONFIRM_PHRASE}</strong> to confirm.
-            </p>
+            {forfeitOptions?.forfeit_ends_game ? (
+              <p className="game-list__modal-text">
+                You are the last human player — forfeiting will immediately end{' '}
+                <strong>{forfeitingGame.name}</strong> and your alliance (
+                {allianceLabel(forfeitOptions.factions[0]?.alliance)}) will lose the game. Type{' '}
+                <strong>{FORFEIT_CONFIRM_PHRASE}</strong> to confirm.
+              </p>
+            ) : (
+              <p className="game-list__modal-text">
+                You will be removed from <strong>{forfeitingGame.name}</strong>. Choose who will control each of your
+                factions. Then type <strong>{FORFEIT_CONFIRM_PHRASE}</strong> to confirm.
+              </p>
+            )}
             {forfeitOptionsLoading && <p className="game-list__modal-text">Loading options…</p>}
-            {!forfeitOptionsLoading && forfeitOptions && forfeitOptions.factions.length > 0 && (
+            {!forfeitOptionsLoading &&
+              forfeitOptions &&
+              forfeitOptions.factions.length > 0 &&
+              !forfeitOptions.forfeit_ends_game && (
               <ul className="game-list__forfeit-faction-list">
                 {forfeitOptions.factions.map((f) => (
                   <li key={f.faction_id} className="game-list__forfeit-faction-row">

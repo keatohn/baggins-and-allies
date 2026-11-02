@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
 import { api, type AuthPlayer, type SetupInfo } from '../services/api';
 import ScenarioTimeline from '../components/ScenarioTimeline';
+import { useMenuScroll } from '../components/MenuScrollContext';
+import MenuLink from '../components/MenuLink';
+import AccountMenu from '../components/AccountMenu';
 import './CreateGame.css';
 
 function RuleLabel({ name, description }: { name: string; description?: string }) {
@@ -52,7 +54,7 @@ function RuleLabel({ name, description }: { name: string; description?: string }
 }
 
 export default function CreateGame() {
-  const navigate = useNavigate();
+  const { navigateWithScroll, holdScroll, revealScroll, withScrollTransition } = useMenuScroll();
   const [name, setName] = useState('');
   const [mode, setMode] = useState<'single' | 'multi' | 'computer'>('single');
   const [player, setPlayer] = useState<AuthPlayer | null>(null);
@@ -67,6 +69,7 @@ export default function CreateGame() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<'scenario' | 'settings'>('scenario');
+  const heldForLoadRef = useRef(false);
 
   // Backend returns menu scenarios (public, plus admin-only for admins) that have context.
   const scenariosWithContext = setups.filter(
@@ -80,6 +83,9 @@ export default function CreateGame() {
   useEffect(() => {
     let cancelled = false;
     setSetupsError(null);
+    // Hold the scroll closed while scenarios load so the loading hint isn't revealed.
+    heldForLoadRef.current = true;
+    holdScroll();
     api.getSetups().then(({ setups: list, rule_descriptions: descriptions }) => {
       if (!cancelled) {
         setSetups(Array.isArray(list) ? list : []);
@@ -98,7 +104,14 @@ export default function CreateGame() {
       if (!cancelled) setLoadingSetups(false);
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [holdScroll]);
+
+  useEffect(() => {
+    if (!loadingSetups && heldForLoadRef.current) {
+      heldForLoadRef.current = false;
+      revealScroll();
+    }
+  }, [loadingSetups, revealScroll]);
 
   useEffect(() => {
     if (scenariosWithContext.length > 0 && (selectedSetupId === null || !scenariosWithContext.some((s) => s.id === selectedSetupId)))
@@ -114,6 +127,11 @@ export default function CreateGame() {
   }, [selectedSetupId, setups]);
 
   const selectedScenario = scenariosWithContext.find((s) => s.id === selectedSetupId) ?? null;
+
+  const confirmScenario = (id: string) => {
+    setSelectedSetupId(id);
+    withScrollTransition(() => setStep('settings'));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -133,7 +151,7 @@ export default function CreateGame() {
       const initialState = res.state != null
         ? { ...res.state, turn_order: res.turn_order ?? res.state.turn_order }
         : undefined;
-      navigate(`/game/${res.game_id}`, {
+      navigateWithScroll(`/game/${res.game_id}`, {
         replace: true,
         state: initialState != null ? { initialState, gameId: res.game_id } : undefined,
       });
@@ -146,6 +164,7 @@ export default function CreateGame() {
 
   return (
     <div className="create-game-page">
+      <AccountMenu />
       <h1 className="create-game-page__title">Create game</h1>
       {step === 'scenario' ? (
         <div className="create-game-form">
@@ -164,25 +183,13 @@ export default function CreateGame() {
                 scenarios={scenariosWithContext}
                 selectedId={selectedSetupId}
                 onSelect={setSelectedSetupId}
+                onConfirm={confirmScenario}
               />
             )}
           </div>
-          {scenariosWithContext.length > 0 && (
-            <button
-              type="button"
-              className="create-game-form__submit primary create-game-form__continue"
-              disabled={loadingSetups || selectedSetupId == null}
-              onClick={() => setStep('settings')}
-            >
-              Continue
-            </button>
-          )}
         </div>
       ) : (
         <form className="create-game-form create-game-form--settings" onSubmit={handleSubmit}>
-          <button type="button" className="page-menu-btn" onClick={() => setStep('scenario')}>
-            Back
-          </button>
           {selectedScenario && (
             <p className="create-game-form__chosen">
               {selectedScenario.display_name}
@@ -299,12 +306,17 @@ export default function CreateGame() {
               </button>
             </div>
           </div>
-          <button type="submit" className="create-game-form__submit primary" disabled={loading || loadingSetups || selectedSetupId == null}>
-            {loading ? 'Creating…' : 'Create game'}
-          </button>
+          <div className="create-game-form__actions">
+            <button type="button" className="page-menu-btn" onClick={() => withScrollTransition(() => setStep('scenario'))}>
+              Back
+            </button>
+            <button type="submit" className="create-game-form__submit primary" disabled={loading || loadingSetups || selectedSetupId == null}>
+              {loading ? 'Creating…' : 'Create game'}
+            </button>
+          </div>
         </form>
       )}
-      <Link to="/" className="page-menu-btn create-game-page__menu-anchor">Menu</Link>
+      <MenuLink to="/" className="page-menu-btn create-game-page__menu-anchor">Menu</MenuLink>
     </div>
   );
 }

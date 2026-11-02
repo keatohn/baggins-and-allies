@@ -8,6 +8,7 @@ const MAP_VIEWBOX: Record<string, { width: number; height: number }> = {
   'wotr_map_1.2': { width: 3500, height: 2600 },
   'motw_map_1.2': { width: 3500, height: 1650 },
   'wotla_map_1.0': { width: 3500, height: 2600 },
+  'wotla_map_1.1': { width: 3500, height: 2400 },
   'woteas_map_1.0': { width: 3600, height: 1600 },
 };
 

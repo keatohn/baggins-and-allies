@@ -24,11 +24,60 @@
 }
 
 .sidebar.sidebar--turn-accent .panel.actions-panel,
+.sidebar.sidebar--turn-accent .panel.turn-status-panel,
 .sidebar.sidebar--turn-accent .panel.territory-panel,
 .sidebar.sidebar--turn-accent .panel.event-log {
   border-width: 2px;
   border-color: color-mix(in srgb, var(--sidebar-panel-accent) 50%, var(--ink-faded));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--sidebar-panel-accent) 20%, transparent);
+}
+
+/* Turn / phase / power panel (top of sidebar, above Actions) — container-type lets the
+   phase stepper drop pill labels when the sidebar is resized narrow or on mobile. */
+.turn-status-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+  container-type: inline-size;
+}
+
+.turn-status-panel .turn-status-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.6rem;
+  margin-bottom: 0;
+}
+
+.turn-status-panel .turn-status-title {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.turn-status-panel .turn-status-sep {
+  color: var(--ink-faded);
+}
+
+.turn-status-panel .turn-status-faction {
+  /* Tint toward ink so light faction colors stay readable on parchment */
+  color: color-mix(in srgb, var(--sidebar-panel-accent, var(--ink)) 55%, var(--ink));
+}
+
+.turn-status-panel .turn-status-power {
+  font-family: var(--font-parchment);
+  font-size: 0.9rem;
+  color: var(--ink-light);
+  white-space: nowrap;
+}
+
+.turn-status-panel .turn-status-power strong {
+  color: var(--gold-dark);
+  font-weight: 700;
 }
 
 /* Territory: don't shrink to a sliver under flex siblings */
@@ -1118,6 +1167,106 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
   background: var(--parchment);
 }
 
+.territory-rings {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.territory-unit-icon-wrap img.territory-unit-ring {
+  position: absolute;
+  width: 42%;
+  height: 42%;
+  max-width: 12px;
+  max-height: 12px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.territory-unit-icon-wrap img.territory-unit-ring.ring-corner-tl { top: 0; left: 0; }
+.territory-unit-icon-wrap img.territory-unit-ring.ring-corner-tr { top: 0; right: 0; }
+.territory-unit-icon-wrap img.territory-unit-ring.ring-corner-bl { bottom: 0; left: 0; }
+.territory-unit-icon-wrap img.territory-unit-ring.ring-corner-br { bottom: 0; right: 0; }
+
+.territory-rings__icon {
+  width: 16px;
+  height: 16px;
+  max-width: 16px;
+  max-height: 16px;
+  min-width: 16px;
+  flex: 0 0 16px;
+  object-fit: contain;
+  margin-right: 4px;
+}
+
+.ring-carry-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.territory-rings li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 4px;
+  background: rgba(42, 28, 16, 0.12);
+  font-size: 0.85rem;
+}
+
+.territory-rings__power {
+  color: var(--ink-soft, #5c4a32);
+}
+
+.ring-carry {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.25rem 0.45rem;
+  border-radius: 4px;
+  background: rgba(42, 28, 16, 0.12);
+}
+
+.ring-carry__icon {
+  width: 24px;
+  height: 24px;
+  max-width: 24px;
+  max-height: 24px;
+  min-width: 24px;
+  flex: 0 0 24px;
+  object-fit: contain;
+}
+
+.ring-carry__label {
+  flex: 1;
+  font-size: 0.85rem;
+}
+
+.ring-carry__options {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.ring-carry__option {
+  border: 1px solid rgba(42, 28, 16, 0.35);
+  background: transparent;
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.ring-carry__option--active {
+  background: rgba(42, 28, 16, 0.85);
+  color: #f4e4c4;
+}
+
 /* Narrow width *or* short landscape on small devices (not wide desktop with a short window). */
 @media (max-width: 767px),
   ((max-width: 960px) and (max-height: 520px) and (orientation: landscape)),
@@ -1342,6 +1491,10 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
     margin-bottom: 0.2rem;
     letter-spacing: 0.028em;
     font-weight: 600;
+  }
+
+  .turn-status-panel .turn-status-power {
+    font-size: clamp(0.5rem, 1.6vw, 0.62rem);
   }
 
   .move-confirm h3 {
@@ -1589,104 +1742,4 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
   .log-entry {
     padding: 0.12rem 0;
   }
-}
-
-.territory-rings {
-  list-style: none;
-  margin: 0 0 0.5rem;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.territory-unit-icon-wrap img.territory-unit-ring {
-  position: absolute;
-  width: 42%;
-  height: 42%;
-  max-width: 12px;
-  max-height: 12px;
-  object-fit: contain;
-  pointer-events: none;
-}
-
-.territory-unit-icon-wrap img.territory-unit-ring.ring-corner-tl { top: 0; left: 0; }
-.territory-unit-icon-wrap img.territory-unit-ring.ring-corner-tr { top: 0; right: 0; }
-.territory-unit-icon-wrap img.territory-unit-ring.ring-corner-bl { bottom: 0; left: 0; }
-.territory-unit-icon-wrap img.territory-unit-ring.ring-corner-br { bottom: 0; right: 0; }
-
-.territory-rings__icon {
-  width: 16px;
-  height: 16px;
-  max-width: 16px;
-  max-height: 16px;
-  min-width: 16px;
-  flex: 0 0 16px;
-  object-fit: contain;
-  margin-right: 4px;
-}
-
-.ring-carry-prompt {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.territory-rings li {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.2rem 0.45rem;
-  border-radius: 4px;
-  background: rgba(42, 28, 16, 0.12);
-  font-size: 0.85rem;
-}
-
-.territory-rings__power {
-  color: var(--ink-soft, #5c4a32);
-}
-
-.ring-carry {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  padding: 0.25rem 0.45rem;
-  border-radius: 4px;
-  background: rgba(42, 28, 16, 0.12);
-}
-
-.ring-carry__icon {
-  width: 24px;
-  height: 24px;
-  max-width: 24px;
-  max-height: 24px;
-  min-width: 24px;
-  flex: 0 0 24px;
-  object-fit: contain;
-}
-
-.ring-carry__label {
-  flex: 1;
-  font-size: 0.85rem;
-}
-
-.ring-carry__options {
-  display: flex;
-  gap: 0.25rem;
-}
-
-.ring-carry__option {
-  border: 1px solid rgba(42, 28, 16, 0.35);
-  background: transparent;
-  border-radius: 999px;
-  padding: 0.15rem 0.55rem;
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.8rem;
-}
-
-.ring-carry__option--active {
-  background: rgba(42, 28, 16, 0.85);
-  color: #f4e4c4;
 }

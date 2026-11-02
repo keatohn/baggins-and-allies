@@ -177,6 +177,9 @@ def validate_setup_documents(
         cap = _faction_capital_territory_id(f.get("capital"))
         if cap is not None and cap not in territory_ids:
             errors.append(f'faction "{fid}" capital "{cap}" is not a known territory')
+        banner = f.get("banner")
+        if banner is not None and banner != "" and not isinstance(banner, str):
+            errors.append(f'faction "{fid}" banner must be a string when set')
         subs = f.get("subfactions")
         if subs is None:
             continue
@@ -209,6 +212,9 @@ def validate_setup_documents(
             icon = sub.get("icon")
             if icon is not None and not isinstance(icon, str):
                 errors.append(f"{prefix}.icon must be a string when set")
+            banner = sub.get("banner")
+            if banner is not None and banner != "" and not isinstance(banner, str):
+                errors.append(f"{prefix}.banner must be a string when set")
 
     owner_ids = faction_ids | subfaction_ids
     for uid, u in units.items():

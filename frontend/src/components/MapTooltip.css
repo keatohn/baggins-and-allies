@@ -1,0 +1,84 @@
+/* Shared styled tooltips for map chrome (territory markers + unit badges).
+   CSS-only positioning via data-tip + ::after — no JS, no library.
+   Replaces native title= on map markers, which sat in a pointer-events:none
+   layer and were invisible/delayed/unstyled. */
+
+/* Double class raises specificity so pointer-events/position beat GameMap.css badge rules
+   (`.territory-power-badge` / `.sea-zone-number` set pointer-events:none) regardless of CSS order. */
+.map-tip.map-tip {
+  position: relative;
+  pointer-events: auto;
+}
+
+/* Badges that are already absolutely positioned must keep that (inline power badge stays relative in flow). */
+.territory-power-badge.map-tip:not(.territory-power-badge--inline),
+.sea-zone-number.map-tip {
+  position: absolute;
+}
+
+.map-tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  z-index: 40;
+  width: max-content;
+  max-width: min(240px, 60vw);
+  padding: 0.4rem 0.65rem;
+  border: 1.5px solid var(--gold-dark);
+  border-radius: 6px;
+  background: linear-gradient(180deg, var(--parchment-light) 0%, var(--parchment) 100%);
+  color: var(--ink);
+  font-family: var(--font-parchment);
+  font-size: 0.8rem;
+  font-weight: 500;
+  font-style: normal;
+  line-height: 1.35;
+  letter-spacing: 0;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  /* Hide immediately; show after a short dwell so sweeping the map doesn't flicker */
+  transition: opacity 0.12s ease 0.18s, visibility 0s linear 0.3s;
+}
+
+/* Hover only on hover-capable pointers: on touch, :hover sticks after a tap and would
+   obscure the map after every unit/territory select (tap already selects — no sticky bubble). */
+@media (hover: hover) and (pointer: fine) {
+  .map-tip:hover::after {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.12s ease 0.12s, visibility 0s linear 0.12s;
+  }
+
+  /* Nested tips (e.g. passenger badge inside a unit token): hovering a child suppresses ancestor bubbles */
+  .map-tip:hover:has(.map-tip:hover)::after {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+.map-tip:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.12s ease, visibility 0s linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-tip::after {
+    transition: none;
+  }
+}
+
+/* Compact screens: slightly tighter bubble so it crowds the map less */
+@media (max-width: 767px) {
+  .map-tip::after {
+    max-width: min(200px, 72vw);
+    font-size: 0.75rem;
+    padding: 0.35rem 0.55rem;
+  }
+}

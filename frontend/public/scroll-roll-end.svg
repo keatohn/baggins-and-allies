@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 28">
+  <defs>
+    <radialGradient id="paper" cx="34%" cy="36%" r="75%">
+      <stop offset="0%" stop-color="#e4d2ae"/>
+      <stop offset="58%" stop-color="#d0ba94"/>
+      <stop offset="100%" stop-color="#b89a70"/>
+    </radialGradient>
+  </defs>
+  <!-- Char runs to the box edge so the clipped silhouette stays dark. Paper sits inside it. -->
+  <ellipse cx="40" cy="14" rx="48" ry="16" fill="#3a2412"/>
+  <ellipse cx="40" cy="14" rx="40" ry="12.4" fill="#5c3c22"/>
+  <ellipse cx="40" cy="14.2" rx="32" ry="9.2" fill="url(#paper)"/>
+  <ellipse cx="40" cy="14.4" rx="22" ry="6" fill="#c4aa82"/>
+  <ellipse cx="40" cy="14.6" rx="13" ry="3.4" fill="#dcc6a2"/>
+  <ellipse cx="40" cy="14.8" rx="6" ry="1.6" fill="#c0a67a"/>
+  <ellipse cx="31" cy="12" rx="10" ry="2.2" fill="#f0e2c4" opacity="0.45"/>
+</svg>

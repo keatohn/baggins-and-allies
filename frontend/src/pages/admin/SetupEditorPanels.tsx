@@ -5,6 +5,7 @@ import FACTION_ICON_PNG from 'virtual:faction-icon-png';
 import TERRITORY_IMAGE_PNG from 'virtual:territory-image-png';
 import SCENARIO_IMAGE from 'virtual:scenario-image';
 import { api, type AdminSetupBundle, type AdminSetupListItem } from '../../services/api';
+import { ColorField } from './ColorField';
 import { NumberField } from './NumberField';
 
 function linesToList(s: string): string[] {
@@ -365,6 +366,19 @@ function FactionIconField({ value, onApply }: { value: unknown; onApply: (icon: 
       dir="factions"
       noneLabel="None (uses faction id)"
       ariaLabel="Faction icon"
+      onApply={onApply}
+    />
+  );
+}
+
+function FactionBannerField({ value, onApply }: { value: unknown; onApply: (banner: string | undefined) => void }) {
+  return (
+    <AssetPngField
+      value={value}
+      files={FACTION_ICON_PNG}
+      dir="factions"
+      noneLabel="None (map uses icon)"
+      ariaLabel="Faction banner"
       onApply={onApply}
     />
   );
@@ -1319,6 +1333,14 @@ export function ManifestPanel({
         />,
       )}
       {fieldRow(
+        'Destroy camp on conquer',
+        <input
+          type="checkbox"
+          checked={manifest.destroy_camp_on_conquer !== false}
+          onChange={(e) => onManifestChange({ ...manifest, destroy_camp_on_conquer: e.target.checked })}
+        />,
+      )}
+      {fieldRow(
         'Stronghold repair cost',
         <NumberField
           className="admin-form__input admin-form__input--narrow"
@@ -1992,36 +2014,6 @@ export function TerritoriesPanel({
   );
 }
 
-function parseHexColor(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const s = value.trim();
-  if (/^#[0-9a-fA-F]{6}$/.test(s)) return `#${s.slice(1).toLowerCase()}`;
-  return null;
-}
-
-function FactionColorField({ value, onApply }: { value: unknown; onApply: (c: string) => void }) {
-  const raw = typeof value === 'string' ? value : '';
-  const hex = parseHexColor(value);
-  return (
-    <div className="admin-color-picker">
-      <input
-        type="color"
-        className="admin-color-picker__swatch"
-        value={hex ?? '#888888'}
-        onChange={(e) => onApply(e.target.value.toLowerCase())}
-        aria-label="Faction color palette"
-      />
-      <input
-        type="text"
-        className="admin-form__input admin-color-picker__hex"
-        spellCheck={false}
-        value={raw}
-        onChange={(e) => onApply(e.target.value)}
-      />
-    </div>
-  );
-}
-
 function SubfactionsField({
   value,
   onChange,
@@ -2041,7 +2033,7 @@ function SubfactionsField({
     <div className="admin-subfactions">
       <h3 className="admin-form__subtitle">Subfactions</h3>
       <p className="admin-form__micro">
-        Controlled on this faction&apos;s turn. They do not appear in the turn order. Leave the icon empty to use this faction&apos;s icon.
+        Controlled on this faction&apos;s turn. They do not appear in the turn order. Leave the icon empty to use this faction&apos;s icon. Leave the banner empty to use the subfaction&apos;s icon on the map.
       </p>
       {rows.map((row, i) => (
         <div key={i} className="admin-subfaction">
@@ -2065,7 +2057,7 @@ function SubfactionsField({
           )}
           {fieldRow(
             'Color',
-            <FactionColorField value={row.color} onApply={(color) => patchRow(i, { color })} />,
+            <ColorField value={row.color} onApply={(color) => patchRow(i, { color })} />,
           )}
           {fieldRow(
             'Icon filename',
@@ -2077,6 +2069,10 @@ function SubfactionsField({
               ariaLabel="Subfaction icon"
               onApply={(icon) => patchRow(i, { icon })}
             />,
+          )}
+          {fieldRow(
+            'Banner',
+            <FactionBannerField value={row.banner} onApply={(banner) => patchRow(i, { banner })} />,
           )}
           <button type="button" className="admin-page__btn" onClick={() => onChange(rows.filter((_, j) => j !== i))}>
             Remove subfaction
@@ -2123,11 +2119,15 @@ export function FactionsPanel({
           )}
           {fieldRow(
             'Color',
-            <FactionColorField value={f.color} onApply={(color) => patch({ color })} />,
+            <ColorField value={f.color} onApply={(color) => patch({ color })} />,
           )}
           {fieldRow(
             'Icon',
             <FactionIconField value={f.icon} onApply={(icon) => patch({ icon })} />,
+          )}
+          {fieldRow(
+            'Banner',
+            <FactionBannerField value={f.banner} onApply={(banner) => patch({ banner })} />,
           )}
           {fieldRow(
             'Music',

@@ -3,6 +3,7 @@
  */
 
 import { syncAudioFromAuthPlayer, setAudioFileGains, setMenuMusicFiles } from '../audio/gameAudio';
+import type { MapOverridesData } from '../types/game';
 import type { SignalPreset, TerritorySignalMap } from '../territorySignals';
 
 /**
@@ -457,6 +458,8 @@ export interface ApiSubfactionDefinition {
   color: string;
   /** Filename in assets/factions. Omitted = use the parent faction's icon. */
   icon?: string | null;
+  /** Map stronghold/capital art. Omitted = use this subfaction's icon. */
+  banner?: string | null;
 }
 
 export interface ApiFactionDefinition {
@@ -466,6 +469,8 @@ export interface ApiFactionDefinition {
   color: string;
   capital: string;
   icon?: string;
+  /** Map stronghold and capital art in assets/factions. Omitted = use icon. */
+  banner?: string | null;
   /** Turn music in assets/audio/music; stem(s) with .mp3/.ogg fallbacks. One file or ordered list (playlist cycles until turn changes). Omitted = use faction id. */
   music?: string | string[];
   subfactions?: ApiSubfactionDefinition[];
@@ -638,6 +643,35 @@ export interface PlayerAudioSettings {
   master_volume?: number;
 }
 
+export type TierGlow = 'none' | 'soft' | 'pulse';
+
+/** How a tier draws the ring around the profile circle. `frame_src` is resolved by the server. */
+export interface TierVisual {
+  frame_id: string;
+  ring_color: string;
+  glow: TierGlow;
+  frame_src?: string | null;
+  frame_label?: string | null;
+}
+
+export interface ProgressionTier {
+  id: string;
+  name: string;
+  /** 1 is the lowest tier. Derived from minimum XP, not stored on the player. */
+  rank?: number;
+  min_xp: number;
+  color: string;
+  icon: string;
+  description: string;
+  visual: TierVisual;
+}
+
+/** Avatar circle: unit icon filename + #rrggbb background color. */
+export interface PlayerAvatarSettings {
+  image: string;
+  color: string;
+}
+
 export interface AuthPlayer {
   id: string;
   email: string;
@@ -646,6 +680,39 @@ export interface AuthPlayer {
   is_admin?: boolean;
   /** From server when preferences exist; omitted on older API responses. */
   audio?: PlayerAudioSettings;
+  /** Avatar with response-time defaults (hobbit icon on the default color). */
+  avatar?: PlayerAvatarSettings;
+  xp?: number;
+  tier?: ProgressionTier | null;
+  next_tier?: ProgressionTier | null;
+  tier_floor_xp?: number;
+  next_tier_xp?: number | null;
+}
+
+/** Search result / friend-list row with the viewer's relation to that user. */
+export interface GameInvitation {
+  id: string;
+  game_id: string;
+  game_name: string;
+  inviter_id: string;
+  inviter_username: string;
+  created_at?: string | null;
+}
+
+export interface FriendUser {
+  id: string;
+  username: string;
+  /** none | friend | pending_out (viewer sent) | pending_in (viewer must act). */
+  relation?: 'none' | 'friend' | 'pending_out' | 'pending_in';
+  avatar?: PlayerAvatarSettings;
+}
+
+/** A pending friend request row (incoming = act on it; outgoing = awaiting reply). */
+export interface FriendRequestItem {
+  id: string;
+  username: string;
+  avatar?: PlayerAvatarSettings;
+  created_at?: string | null;
 }
 
 export interface AdminSetupListItem {
@@ -698,6 +765,77 @@ export interface AdminSimRun {
   leader?: string | null;
   error?: string;
   report?: string;
+}
+
+/** Row in the admin users report. */
+export interface AdminUserItem {
+  id: string;
+  username: string;
+  email: string;
+  /** ISO timestamp of the most recent successful login; null until first login. */
+  last_login: string | null;
+  xp?: number;
+  tier_id?: string | null;
+  tier_name?: string | null;
+  /** 1 is the lowest tier. Used to sort the admin users table. */
+  tier_rank?: number | null;
+}
+
+export interface AdminQueryColumn {
+  name: string;
+  type: string;
+  nullable: boolean;
+}
+
+export interface AdminQuerySchemaTable {
+  name: string;
+  kind: 'table' | 'view' | string;
+  columns: AdminQueryColumn[];
+}
+
+export interface AdminQueryResult {
+  columns: string[];
+  rows: unknown[][];
+  row_count: number;
+  truncated: boolean;
+}
+
+export interface ProgressionFrame {
+  id: string;
+  label: string;
+  src: string;
+}
+
+export interface ProgressionRules {
+  game_completed: number;
+  game_won: number;
+  stronghold_captured: number;
+  territory_captured: number;
+  enemy_unit_destroyed: number;
+  battle_won: number;
+  multiplayer_multiplier: number;
+  vs_ai_multiplier: number;
+  min_rounds_to_count: number;
+  stats_cap_per_game: number;
+  forfeit_multiplier: number;
+  daily_cap: number;
+}
+
+/** Admin-edited XP and tier catalog. Tier is derived from XP; it is not stored on the player. */
+export interface AvatarIconChoice {
+  name: string;
+  /** True when this icon's minimum tier is the player's current tier, and that tier is not the lowest. */
+  new: boolean;
+}
+
+export interface ProgressionConfig {
+  version: number;
+  currency_label: string;
+  frames: ProgressionFrame[];
+  tiers: ProgressionTier[];
+  /** Unit icon filename -> minimum tier id. Icons omitted here use the lowest tier. */
+  icon_min_tier?: Record<string, string>;
+  rules: ProgressionRules;
 }
 
 /** Full setup document for admin editor (matches backend setup JSON files). */
@@ -837,6 +975,12 @@ export interface PatchProfileBody {
     master_volume?: number;
     muted?: boolean;
   };
+  avatar?: {
+    /** Plain .png unit icon filename. */
+    image?: string;
+    /** #rrggbb background color. */
+    color?: string;
+  };
 }
 
 export interface AuthResponse {
@@ -896,12 +1040,87 @@ export interface GameMeta {
 export interface ForfeitOptionsResponse {
   factions: { faction_id: string; display_name: string; alliance: string }[];
   assignees: { id: string; label: string }[];
+  /** True when this is the last human in an active game — forfeiting ends the game and loses for their alliance. */
+  forfeit_ends_game?: boolean;
 }
 
 export interface GameListPlayer {
   player_id: string;
   username: string | null;
   faction_id: string | null;
+  /** True when this player left via forfeit; kept in the list so the original roster shows. */
+  forfeited?: boolean;
+}
+
+/** Aggregated W-L block from GET /players/{id}/stats (forfeits count as normal results). */
+export interface PlayerStatsOverall {
+  games: number;
+  wins: number;
+  losses: number;
+  win_pct: number | null;
+}
+
+export interface PlayerStatsAlliance {
+  games: number;
+  wins: number;
+  win_pct: number | null;
+}
+
+export interface PlayerStatsScenario {
+  setup_id: string | null;
+  scenario_name: string;
+  games: number;
+  wins: number;
+  win_pct: number | null;
+}
+
+export interface PlayerStatsHeadToHead {
+  player_id: string;
+  username: string | null;
+  kind: 'against' | 'with';
+  games: number;
+  wins: number;
+  losses: number;
+  win_pct: number | null;
+}
+
+export interface PlayerStats {
+  player_id: string;
+  overall: PlayerStatsOverall;
+  by_alliance: Record<'good' | 'evil', PlayerStatsAlliance>;
+  by_scenario: PlayerStatsScenario[];
+  head_to_head: PlayerStatsHeadToHead[];
+  streaks: {
+    current_win: number;
+    current_loss: number;
+    best_win_streak: number;
+    best_loss_streak: number;
+  };
+  most_played_scenario: { setup_id: string | null; scenario_name: string; games: number } | null;
+  favorite_faction: string | null;
+  longest_game_seconds: number | null;
+}
+
+export interface PlayerProfileCard {
+  id: string;
+  username: string;
+  headline: PlayerStatsOverall;
+  avatar?: PlayerAvatarSettings;
+  xp?: number;
+  tier: ProgressionTier | null;
+  next_tier?: ProgressionTier | null;
+  tier_floor_xp?: number;
+  next_tier_xp?: number | null;
+  achievements: unknown[];
+}
+
+export interface PlayerStatsQuery {
+  scenario?: string;
+  opponent?: string;
+  teammate?: string;
+  alliance?: 'good' | 'evil';
+  from?: string;
+  to?: string;
 }
 
 export interface GameListItem {
@@ -934,6 +1153,8 @@ export interface GameListItem {
   winner?: string | null;
   /** Setup display name from manifest when game config has setup_id (same shape as lobby meta). */
   scenario?: {
+    /** Setup/scenario id (e.g. "fellowship"); present since the admin games report needs it for filtering. */
+    id?: string;
     display_name: string;
     context?: Record<string, unknown>;
     lobby_music?: string[];
@@ -1009,6 +1230,18 @@ export const api = {
     syncAudioFromAuthPlayer(res.player);
     return res;
   },
+  /** Start forgot-password: backend emails a single-use temp password. Response is always generic. */
+  forgotPassword: async (email: string) => {
+    return authFetchJson<{ message: string }>('/auth/forgot-password', { email });
+  },
+  /** Complete forgot-password with the emailed temp password and a new password. */
+  resetPassword: async (email: string, tempPassword: string, newPassword: string) => {
+    return authFetchJson<{ message: string }>('/auth/reset-password', {
+      email,
+      temp_password: tempPassword,
+      new_password: newPassword,
+    });
+  },
   authMe: async () => {
     const p = await fetchJson<AuthPlayer>('/auth/me');
     syncAudioFromAuthPlayer(p);
@@ -1023,9 +1256,108 @@ export const api = {
     return p;
   },
 
+  /** Distinct unit icon filenames across all setups (profile avatar picker). */
+  getAvatarIcons: () => fetchJson<{ icons: AvatarIconChoice[] }>('/profile/avatar-icons'),
+  adminListUnitIcons: () => fetchJson<{ icons: string[] }>('/admin/unit-icons'),
+
+  /** Prefix search for usernames with the viewer's relation to each (max 20). */
+  searchFriends: (username: string) =>
+    fetchJson<{ users: FriendUser[] }>(`/friends/search?username=${encodeURIComponent(username)}`),
+  /** Humans this player has shared an active or finished game with. */
+  listPlayedWith: () => fetchJson<{ users: FriendUser[] }>('/friends/played-with'),
+  /** Send a friend request by username. 409 on duplicate/existing friendship. */
+  sendFriendRequest: (username: string) =>
+    fetchJson<{ ok: boolean; request: FriendRequestItem }>('/friends/requests', {
+      method: 'POST',
+      body: JSON.stringify({ username }),
+    }),
+  /** Pending requests: incoming (act on these) + outgoing (awaiting reply). */
+  listFriendRequests: () =>
+    fetchJson<{ incoming: FriendRequestItem[]; outgoing: FriendRequestItem[] }>('/friends/requests'),
+  /** Badge count: pending friend requests plus active lobby invitations. */
+  getPendingFriendCount: () => fetchJson<{ count: number }>('/friends/requests/pending-count'),
+  acceptFriendRequest: (requestId: string) =>
+    fetchJson<{ ok: boolean }>(`/friends/requests/${encodeURIComponent(requestId)}/accept`, {
+      method: 'POST',
+    }),
+  declineFriendRequest: (requestId: string) =>
+    fetchJson<{ ok: boolean }>(`/friends/requests/${encodeURIComponent(requestId)}/decline`, {
+      method: 'POST',
+    }),
+  /** Accepted friends list. */
+  listFriends: () => fetchJson<{ friends: FriendUser[] }>('/friends'),
+  /** Lobby invitations still waiting on this player. */
+  listGameInvites: () =>
+    fetchJson<{ invitations: GameInvitation[] }>('/games/invites'),
+  acceptGameInvite: (inviteId: string) =>
+    fetchJson<{ game_id: string; name: string }>(`/games/invites/${encodeURIComponent(inviteId)}/accept`, {
+      method: 'POST',
+    }),
+  declineGameInvite: (inviteId: string) =>
+    fetchJson<{ ok: boolean }>(`/games/invites/${encodeURIComponent(inviteId)}/decline`, {
+      method: 'POST',
+    }),
+  /** Pending invitee ids for a lobby the caller is in. */
+  listLobbyInvites: (gameId: string) =>
+    fetchJson<{ invitee_ids: string[] }>(`/games/${encodeURIComponent(gameId)}/invites`),
+  sendGameInvites: (gameId: string, playerIds: string[]) =>
+    fetchJson<{ sent: number }>(`/games/${encodeURIComponent(gameId)}/invites`, {
+      method: 'POST',
+      body: JSON.stringify({ player_ids: playerIds }),
+    }),
+
+  /** Admin: default avatar color applied to users who never picked one. */
+  adminGetProfileDefaults: () =>
+    fetchJson<{ default_avatar_color: string }>('/admin/profile-defaults'),
+  adminPutProfileDefaults: (defaultAvatarColor: string) =>
+    fetchJson<{ ok: boolean; default_avatar_color: string }>('/admin/profile-defaults', {
+      method: 'PUT',
+      body: JSON.stringify({ default_avatar_color: defaultAvatarColor }),
+    }),
+
   adminListSetups: () =>
     fetchJson<{ setups: AdminSetupListItem[] }>('/admin/setups'),
   adminListGames: () => fetchJson<{ games: GameListItem[] }>('/admin/games'),
+  adminListUsers: () => fetchJson<{ users: AdminUserItem[] }>('/admin/users'),
+  /** Tables and columns on the database this server is using. */
+  adminQuerySchema: () => fetchJson<{ tables: AdminQuerySchemaTable[] }>('/admin/query/schema'),
+  /** Run one SELECT against the database this server is using. */
+  adminQuery: (sql: string) =>
+    fetchJson<AdminQueryResult>('/admin/query', {
+      method: 'POST',
+      body: JSON.stringify({ sql }),
+    }),
+  /** Public tier list and avatar frames. Does not include XP amounts. */
+  getProgression: () =>
+    fetchJson<{ currency_label: string; frames: ProgressionFrame[]; tiers: ProgressionTier[] }>('/progression'),
+  adminGetProgression: () => fetchJson<ProgressionConfig>('/admin/progression'),
+  adminPutProgression: (config: ProgressionConfig) =>
+    fetchJson<{ ok: boolean; progression: ProgressionConfig }>('/admin/progression', {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    }),
+  adminBackfillProgression: () =>
+    fetchJson<{ ok: boolean; games: number; awarded: number; xp: number; unreadable: number }>(
+      '/admin/progression/backfill',
+      { method: 'POST' },
+    ),
+  adminAdjustUserXp: (playerId: string, amount: number, reason: string) =>
+    fetchJson<{ ok: boolean; xp: number; applied: number; tier_id: string | null; tier_name: string | null; tier_rank: number | null }>(
+      `/admin/users/${encodeURIComponent(playerId)}/xp`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ amount, reason }),
+      },
+    ),
+  /** Admin: end an in-progress game now. winner: "good" | "evil" | "none" (void, no stats rows). */
+  adminEndGame: (gameId: string, winner: 'good' | 'evil' | 'none') =>
+    fetchJson<{ ok: boolean; game_id: string; winner: string | null; status: string }>(
+      `/admin/games/${encodeURIComponent(gameId)}/end`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ winner }),
+      },
+    ),
   getAudioGains: async () => {
     const r = await fetchJson<{ gains: AudioGainsMap; menu_music?: string[] }>('/audio/gains');
     setAudioFileGains(r.gains);
@@ -1034,6 +1366,20 @@ export const api = {
   },
   getSignals: () => fetchJson<{ presets: SignalPreset[] }>('/signals'),
   getCatalog: () => fetchJson<Catalog>('/catalog'),
+  /** Public read: icon/location overrides for a map (every client renders with them). */
+  getMapOverrides: (mapBase: string) =>
+    fetchJson<{ map_base: string; overrides: MapOverridesData }>(`/maps/${encodeURIComponent(mapBase)}/overrides`),
+  /** Admin: distinct map asset names known from setups, for the Maps editor. */
+  adminListMaps: () => fetchJson<{ maps: string[] }>('/admin/maps'),
+  /** Admin: replace a map's whole overrides blob (shared by every setup using that map). */
+  adminPutMapOverrides: (mapBase: string, overrides: MapOverridesData) =>
+    fetchJson<{ ok: boolean; map_base: string; overrides: MapOverridesData }>(
+      `/admin/maps/${encodeURIComponent(mapBase)}/overrides`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(overrides),
+      },
+    ),
   adminPutCatalog: (catalog: Catalog) =>
     fetchJson<{ ok: boolean; catalog: Catalog }>('/admin/catalog', {
       method: 'PUT',
@@ -1148,8 +1494,29 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ difficulty }),
     }),
-  listGames: () =>
-    fetchJson<{ games: GameListItem[] }>(`/games?_=${Date.now()}`, { cache: 'no-store' }),
+  listGames: (status?: 'active' | 'finished' | 'all') => {
+    const qs = new URLSearchParams({ _: String(Date.now()) });
+    if (status) qs.set('status', status);
+    return fetchJson<{ games: GameListItem[] }>(`/games?${qs.toString()}`, { cache: 'no-store' });
+  },
+  /** Most recently opened game still on this player's load list, or null. */
+  recentGame: () =>
+    fetchJson<{ game: GameListItem | null }>(`/games/recent?_=${Date.now()}`, { cache: 'no-store' }),
+  /** Public (any logged-in user): career stats for a player. */
+  getPlayerStats: (playerId: string, query?: PlayerStatsQuery) => {
+    const qs = new URLSearchParams();
+    if (query?.scenario) qs.set('scenario', query.scenario);
+    if (query?.opponent) qs.set('opponent', query.opponent);
+    if (query?.teammate) qs.set('teammate', query.teammate);
+    if (query?.alliance) qs.set('alliance', query.alliance);
+    if (query?.from) qs.set('from', query.from);
+    if (query?.to) qs.set('to', query.to);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return fetchJson<PlayerStats>(`/players/${encodeURIComponent(playerId)}/stats${suffix}`);
+  },
+  /** Public-lite profile card (username + headline record). */
+  getPlayerProfile: (playerId: string) =>
+    fetchJson<PlayerProfileCard>(`/players/${encodeURIComponent(playerId)}/profile`),
   joinGame: (gameCode: string) =>
     fetchJson<{ game_id: string; name: string }>('/games/join', {
       method: 'POST',
@@ -1183,7 +1550,7 @@ export const api = {
   getForfeitOptions: (gameId: string) =>
     fetchJson<ForfeitOptionsResponse>(`/games/${gameId}/forfeit-options`),
   forfeitGame: (gameId: string, body: { faction_assignments: Record<string, string> }) =>
-    fetchJson<{ message: string }>(`/games/${gameId}/forfeit`, {
+    fetchJson<{ message: string; game_over?: boolean; winner?: string }>(`/games/${gameId}/forfeit`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

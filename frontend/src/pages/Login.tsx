@@ -1,13 +1,21 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { api, setAuthToken } from '../services/api';
+import { useMenuScroll } from '../components/MenuScrollContext';
+import MenuLink from '../components/MenuLink';
 import './Auth.css';
 
 export default function Login() {
-  const navigate = useNavigate();
+  const { navigateWithScroll } = useMenuScroll();
+  const location = useLocation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [resetNotice] = useState(() =>
+    (location.state as { passwordReset?: boolean } | null)?.passwordReset
+      ? 'Password updated. You can now log in.'
+      : null,
+  );
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -17,7 +25,7 @@ export default function Login() {
     try {
       const res = await api.login(email.trim(), password);
       setAuthToken(res.access_token);
-      navigate('/', { replace: true });
+      navigateWithScroll('/', { replace: true });
     } catch (err) {
       const raw = err instanceof Error ? err.message : 'Login failed';
       const isNetwork =
@@ -43,6 +51,7 @@ export default function Login() {
     <div className="auth-page">
       <h1 className="auth-page__title">Log in</h1>
       <form className="auth-form" onSubmit={handleSubmit}>
+        {resetNotice && <p className="auth-form__notice">{resetNotice}</p>}
         {error && <p className="auth-form__error">{error}</p>}
         <label className="auth-form__label">
           Email
@@ -71,7 +80,10 @@ export default function Login() {
         </button>
       </form>
       <p className="auth-page__footer">
-        Don’t have an account? <Link to="/register">Create Account</Link>
+        <MenuLink to="/forgot-password">Forgot password?</MenuLink>
+      </p>
+      <p className="auth-page__footer">
+        Don’t have an account? <MenuLink to="/register">Create Account</MenuLink>
       </p>
     </div>
   );
