@@ -237,6 +237,9 @@ export function SimsPanel({ setups, onError }: Props) {
                       <option value="mcts">MCTS</option>
                       <option value="heuristic">Heuristic</option>
                     </select>
+                    {usesMcts ? null : (
+                      <span className="admin-sim-faction__heuristic">Heuristic has no difficulty.</span>
+                    )}
                   </label>
                   {usesMcts ? (
                     <label className="admin-page__field">
@@ -254,9 +257,7 @@ export function SimsPanel({ setups, onError }: Props) {
                         ))}
                       </select>
                     </label>
-                  ) : (
-                    <p className="admin-sim-faction__heuristic">Heuristic has no difficulty.</p>
-                  )}
+                  ) : null}
                   {WEIGHT_FIELDS.map((field) => (
                     <label key={field.key} className="admin-page__field">
                       <span className="admin-page__field-label">{field.label}</span>
