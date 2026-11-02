@@ -21,6 +21,8 @@ import type { SignalPreset } from '../territorySignals';
 import { isValidSetupId } from './admin/setupId';
 import { BalanceModal } from './admin/BalanceModal';
 import { GamesReportModal } from './admin/GamesReportModal';
+import { AiPanel } from './admin/AiPanel';
+import { SimsPanel } from './admin/SimsPanel';
 import { previewStatsFromBundle } from './admin/previewStats';
 import { completeTerritoryAsymmetries } from './admin/territoryGraph';
 import { MapViewPane, type MapSetupDraft } from './admin/MapViewPane';
@@ -346,7 +348,9 @@ export default function Admin() {
   const [formulasOpen, setFormulasOpen] = useState(false);
   const [formulasJsonMode, setFormulasJsonMode] = useState(false);
   const [formulas, setFormulas] = useState<UnitFormulas>(EMPTY_FORMULAS);
-  const globalOpen = audioOpen || signalsOpen || catalogOpen || formulasOpen;
+  const [aiOpen, setAiOpen] = useState(false);
+  const [simsOpen, setSimsOpen] = useState(false);
+  const globalOpen = audioOpen || signalsOpen || catalogOpen || formulasOpen || aiOpen || simsOpen;
   const [unitStatsOpen, setUnitStatsOpen] = useState(false);
   const [gameStatsOpen, setGameStatsOpen] = useState(false);
   const [balanceOpen, setBalanceOpen] = useState(false);
@@ -525,6 +529,7 @@ export default function Admin() {
       }
       return;
     }
+    if (aiOpen || simsOpen) return;
     if (formulasOpen) {
       setSaving(true);
       try {
@@ -647,6 +652,31 @@ export default function Admin() {
   };
 
   const renderTabBody = () => {
+    if (aiOpen) {
+      return (
+        <AiPanel
+          onSaved={() => {
+            setSaveError(null);
+            setSaveOk(true);
+          }}
+          onError={(message) => {
+            setSaveOk(false);
+            setSaveError(message);
+          }}
+        />
+      );
+    }
+    if (simsOpen) {
+      return (
+        <SimsPanel
+          setups={setups}
+          onError={(message) => {
+            setSaveOk(false);
+            setSaveError(message);
+          }}
+        />
+      );
+    }
     if (formulasOpen) {
       if (formulasJsonMode) {
         return <JsonTabEditor value={formulas} onChange={(p) => setFormulas(asFormulas(p))} />;
@@ -811,11 +841,14 @@ export default function Admin() {
     }
   };
 
-  const openSection = (section: 'setups' | 'catalog' | 'formulas' | 'audio' | 'signals') => {
+  const openSection = (section: 'setups' | 'catalog' | 'formulas' | 'audio' | 'signals' | 'ai' | 'sims' | 'games') => {
     setCatalogOpen(section === 'catalog');
     setFormulasOpen(section === 'formulas');
     setAudioOpen(section === 'audio');
     setSignalsOpen(section === 'signals');
+    setAiOpen(section === 'ai');
+    setSimsOpen(section === 'sims');
+    setGamesOpen(section === 'games');
     setSaveOk(false);
     setSaveError(null);
   };
@@ -837,10 +870,17 @@ export default function Admin() {
         <div className="admin-page__nav-tools">
           <button
             type="button"
-            className={`page-menu-btn${!globalOpen && !gamesOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => openSection('setups')}
+            className={`page-menu-btn${aiOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => openSection('ai')}
           >
-            Setups
+            AI
+          </button>
+          <button
+            type="button"
+            className={`page-menu-btn${audioOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => openSection('audio')}
+          >
+            Audio
           </button>
           <button
             type="button"
@@ -858,10 +898,17 @@ export default function Admin() {
           </button>
           <button
             type="button"
-            className={`page-menu-btn${audioOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => openSection('audio')}
+            className={`page-menu-btn${gamesOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => openSection('games')}
           >
-            Audio
+            Games
+          </button>
+          <button
+            type="button"
+            className={`page-menu-btn${!globalOpen && !gamesOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => openSection('setups')}
+          >
+            Setups
           </button>
           <button
             type="button"
@@ -872,10 +919,10 @@ export default function Admin() {
           </button>
           <button
             type="button"
-            className={`page-menu-btn${gamesOpen ? ' admin-page__nav-btn--active' : ''}`}
-            onClick={() => setGamesOpen(true)}
+            className={`page-menu-btn${simsOpen ? ' admin-page__nav-btn--active' : ''}`}
+            onClick={() => openSection('sims')}
           >
-            Games
+            Sims
           </button>
         </div>
       </div>
@@ -1059,7 +1106,7 @@ export default function Admin() {
         <button
           type="button"
           className="admin-page__btn admin-page__btn--primary"
-          disabled={(globalOpen ? false : !bundle) || saving}
+          disabled={simsOpen || gamesOpen || (globalOpen ? false : !bundle) || saving}
           onClick={handleSave}
         >
           {saving ? 'Saving…' : 'Save'}
@@ -1095,6 +1142,8 @@ export default function Admin() {
                 ? 'Saved catalog.'
                 : formulasOpen
                   ? 'Saved formulas.'
+                  : aiOpen
+                    ? 'Saved AI defaults. New games will store them.'
                 : 'Saved. New games will use this data.'}
         </p>
       ) : null}

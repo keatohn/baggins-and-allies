@@ -656,6 +656,31 @@ export interface AdminSetupListItem {
   updated_at: string | null;
 }
 
+export interface AdminAiDifficulty {
+  id: string;
+  iterations: number;
+  seconds: number;
+}
+
+export interface AdminAiSettings {
+  difficulty: string;
+  algorithm: string;
+  algorithms: string[];
+  difficulties: AdminAiDifficulty[];
+}
+
+export interface AdminSimRun {
+  id?: string;
+  created_at?: string;
+  setup_id?: string;
+  difficulty?: string;
+  matchup?: string;
+  winner?: string | null;
+  leader?: string | null;
+  error?: string;
+  report?: string;
+}
+
 /** Full setup document for admin editor (matches backend setup JSON files). */
 export interface AdminSetupBundle {
   id: string;
@@ -824,6 +849,10 @@ export interface GameMeta {
   } | null;
   /** Faction IDs controlled by AI (single-player or fill slots). When current_faction is in this list, call POST /games/{id}/ai-step to advance. */
   ai_factions?: string[];
+  /** Computer strength stored with this game (easy, normal, or hard). */
+  ai_difficulty?: string;
+  /** Computer policy stored with this game (heuristic or mcts). */
+  ai_algorithm?: string;
   /** Player IDs who forfeited; their turns are auto-skipped. Used for forfeit notification toast. */
   forfeited_player_ids?: string[];
   /** Forfeit summary by forfeited player id, e.g. ["Gondor -> Alice", "Rohan -> Computer"]. */
@@ -984,6 +1013,18 @@ export const api = {
     fetchJson<{ ok: boolean; catalog: Catalog }>('/admin/catalog', {
       method: 'PUT',
       body: JSON.stringify(catalog),
+    }),
+  adminGetAi: () => fetchJson<AdminAiSettings>('/admin/ai'),
+  adminPutAi: (body: { difficulty: string; algorithm: string }) =>
+    fetchJson<AdminAiSettings & { ok: boolean }>('/admin/ai', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  adminListSims: () => fetchJson<{ runs: AdminSimRun[] }>('/admin/sims'),
+  adminRunSim: (body: { setup_id: string; difficulty: string; matchup: string; max_cycles: number }) =>
+    fetchJson<{ ok: boolean; run: AdminSimRun; runs: AdminSimRun[] }>('/admin/sims', {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
   adminGetFormulas: () => fetchJson<UnitFormulas>('/admin/formulas'),
   adminPutFormulas: (formulas: UnitFormulas) =>

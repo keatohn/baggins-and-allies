@@ -261,6 +261,43 @@
   margin-left: auto;
 }
 
+.admin-page__ai {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.admin-page__hint {
+  margin: 0;
+  line-height: 1.45;
+  color: var(--ink-light);
+}
+
+.admin-page__sim-layout {
+  display: grid;
+  grid-template-columns: minmax(12rem, 18rem) 1fr;
+  gap: 0.75rem;
+}
+
+.admin-page__sim-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.admin-page__sim-report {
+  margin: 0;
+  padding: 0.75rem;
+  overflow: auto;
+  max-height: 32rem;
+  white-space: pre-wrap;
+  background: var(--parchment);
+  border: 1px solid var(--ink);
+}
+
 .admin-page__nav .page-menu-btn {
   margin-bottom: 0;
 }

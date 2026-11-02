@@ -17,9 +17,81 @@ from backend.ai.non_combat_move import decide_non_combat_move
 from backend.engine.special_rules import territory_defs_with_current_power
 
 
-def _mcts_enabled() -> bool:
-    """True when AI_ALGORITHM=mcts routes purchase, combat, combat_move, non_combat_move, and mobilization through MCTS."""
-    return (os.environ.get("AI_ALGORITHM") or "heuristic").strip().lower() == "mcts"
+def _mcts_enabled(state) -> bool:
+    """True when this decision should search.
+
+    AI_ALGORITHM wins when set, so sweeps stay explicit. Otherwise the game's
+    stored ai_algorithm is used. Unset env and older games stay heuristic.
+    """
+    env = (os.environ.get("AI_ALGORITHM") or "").strip().lower()
+    if env:
+        return env == "mcts"
+    stored = getattr(state, "ai_algorithm", None) if state is not None else None
+    return isinstance(stored, str) and stored.strip().lower() == "mcts"
+
+
+def decide(ctx: AIContext) -> Action | None:
+    """One legal action, or None when the phase cannot move and cannot end."""
+    return _ensure_legal(ctx, _decide(ctx))
+
+
+def _action_is_legal(ctx: AIContext, action: Action | None) -> bool:
+    if action is None:
+        return False
+    from backend.engine.queries import validate_action
+
+    verdict = validate_action(
+        ctx.state, action, ctx.unit_defs, ctx.territory_defs,
+        ctx.faction_defs, ctx.camp_defs, ctx.port_defs,
+    )
+    return bool(verdict.valid)
+
+
+def _ensure_legal(ctx: AIContext, action: Action | None) -> Action | None:
+    """Drop an illegal proposal so /ai-step does not retry the same error forever.
+
+    A rejected mobilize falls back to a placement the reducer accepts. Other
+    phases try the heuristic policy once, then end the phase when that is legal.
+    """
+    if _action_is_legal(ctx, action):
+        return action
+    phase = ctx.phase
+    if phase == "mobilization":
+        fallback = _fallback_mobilize(ctx)
+        if _action_is_legal(ctx, fallback):
+            return fallback
+    elif phase == "combat_move":
+        _ensure_strategic(ctx)
+        alt = decide_combat_move(ctx)
+        if _action_is_legal(ctx, alt):
+            return alt
+    elif phase == "non_combat_move":
+        _ensure_strategic(ctx)
+        alt = decide_non_combat_move(ctx)
+        if _action_is_legal(ctx, alt):
+            return alt
+    elif phase == "purchase":
+        _ensure_strategic(ctx)
+        alt = decide_purchase(ctx)
+        if _action_is_legal(ctx, alt):
+            return alt
+    elif phase == "combat":
+        if ctx.state.active_combat:
+            alt = decide_combat(ctx)
+            if _action_is_legal(ctx, alt):
+                return alt
+            cont = continue_combat(ctx.faction_id, dice_rolls={"attacker": [], "defender": []})
+            if _action_is_legal(ctx, cont):
+                return cont
+        else:
+            alt = decide_initiate_combat(ctx)
+            if _action_is_legal(ctx, alt):
+                return alt
+    if (ctx.available_actions or {}).get("can_end_phase", True):
+        ending = end_phase(ctx.faction_id)
+        if _action_is_legal(ctx, ending):
+            return ending
+    return None
 
 
 def _ensure_strategic(ctx: AIContext) -> None:
@@ -32,7 +104,7 @@ def _ensure_strategic(ctx: AIContext) -> None:
         ctx.strategic = build_strategic_turn_context(ctx)
 
 
-def decide(ctx: AIContext) -> Action | None:
+def _decide(ctx: AIContext) -> Action | None:
     """
     Return the next action for the current faction and phase, or None if the AI
     has no action (caller may then end_phase / skip_turn).
@@ -48,7 +120,7 @@ def decide(ctx: AIContext) -> Action | None:
     phase = ctx.phase
 
     if phase == "purchase":
-        if _mcts_enabled():
+        if _mcts_enabled(ctx.state):
             from backend.ai.mcts.purchase import decide_purchase_mcts
 
             action = decide_purchase_mcts(ctx)
@@ -59,7 +131,7 @@ def decide(ctx: AIContext) -> Action | None:
         return decide_purchase(ctx)
 
     if phase == "combat":
-        if _mcts_enabled():
+        if _mcts_enabled(ctx.state):
             from backend.ai.mcts.combat import decide_combat_mcts
 
             action = decide_combat_mcts(ctx)
@@ -86,7 +158,7 @@ def decide(ctx: AIContext) -> Action | None:
         return end_phase(ctx.faction_id)
 
     if phase == "combat_move":
-        if _mcts_enabled():
+        if _mcts_enabled(ctx.state):
             from backend.ai.mcts.combat_move import decide_combat_move_mcts
 
             action = decide_combat_move_mcts(ctx)
@@ -104,7 +176,7 @@ def decide(ctx: AIContext) -> Action | None:
         return None
 
     if phase == "non_combat_move":
-        if _mcts_enabled():
+        if _mcts_enabled(ctx.state):
             from backend.ai.mcts.non_combat_move import decide_non_combat_move_mcts
 
             action = decide_non_combat_move_mcts(ctx)
@@ -121,7 +193,7 @@ def decide(ctx: AIContext) -> Action | None:
         return None
 
     if phase == "mobilization":
-        if _mcts_enabled():
+        if _mcts_enabled(ctx.state):
             from backend.ai.mcts.mobilization import decide_mobilization_mcts
 
             action = decide_mobilization_mcts(ctx)

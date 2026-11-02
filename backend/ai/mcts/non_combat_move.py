@@ -13,7 +13,6 @@ formulas only (no defense sims) so the tree stays affordable.
 
 from __future__ import annotations
 
-import os
 import random
 from typing import Any
 
@@ -42,8 +41,6 @@ from backend.ai.mcts.search import Problem
 
 # Cap on branching factor per node (top-K proposals + optional end_phase).
 MAX_NON_COMBAT_MOVE_BRANCHES = 12
-
-DEFAULT_DIFFICULTY_ENV = "AI_MCTS_DIFFICULTY"
 
 # Extra prior weight for moves that rescue a stuck aerial (phase cannot end otherwise).
 _AERIAL_RESCUE_PRIOR_BONUS = 2.5
@@ -208,10 +205,10 @@ class NonCombatMoveProblem(Problem):
 
         # One shared post-pending snapshot for every per-unit reachability call below
         # (identical result to each call computing its own, N times cheaper).
-        if any(getattr(pm, "phase", None) == "non_combat_move" for pm in (state.pending_moves or [])):
-            slot_state = get_state_after_pending_moves(state, "non_combat_move", ud, td, fd)
-        else:
-            slot_state = state
+        # A queue the reducer cannot replay must not raise out of search.
+        slot_state = self._board_after_pending(state)
+        if slot_state is None:
+            return [], {}
 
         # Group movable instances by (from, to) for friendly/allied/neutral destinations.
         from_to_units: dict[tuple[str, str], list[str]] = {}
@@ -310,12 +307,20 @@ class NonCombatMoveProblem(Problem):
 
         return _is_water_boat(self.ud.get(unit_id))
 
+    def _board_after_pending(self, state: Any):
+        """Post-pending board, or None when the queued moves cannot be replayed."""
+        if not any(getattr(pm, "phase", None) == "non_combat_move" for pm in (state.pending_moves or [])):
+            return state
+        try:
+            return get_state_after_pending_moves(state, "non_combat_move", self.ud, self.td, self.fd)
+        except ValueError:
+            return None
+
     def _stuck_aerial_instance_ids(self, state: Any) -> set[str]:
         """Aerials still on unfriendly land after pending moves (phase cannot end until they move)."""
-        if any(getattr(pm, "phase", None) == "non_combat_move" for pm in (state.pending_moves or [])):
-            sim = get_state_after_pending_moves(state, "non_combat_move", self.ud, self.td, self.fd)
-        else:
-            sim = state  # no same-phase pendings: post-pending board is this state
+        sim = self._board_after_pending(state)
+        if sim is None:
+            return set()
         stuck = get_aerial_units_must_move(sim, self.ud, self.td, self.fd, self.faction_id)
         return {entry.get("instance_id") for entry in stuck if entry.get("instance_id")}
 
@@ -363,10 +368,9 @@ class NonCombatMoveProblem(Problem):
         True when non_combat_move may end: no aerial units left on unfriendly land
         (mirrors the API / reducer end-phase guard via state after pending moves).
         """
-        if any(getattr(pm, "phase", None) == "non_combat_move" for pm in (state.pending_moves or [])):
-            sim = get_state_after_pending_moves(state, "non_combat_move", self.ud, self.td, self.fd)
-        else:
-            sim = state  # no same-phase pendings: post-pending board is this state
+        sim = self._board_after_pending(state)
+        if sim is None:
+            return True
         stuck = get_aerial_units_must_move(sim, self.ud, self.td, self.fd, self.faction_id)
         return not stuck
 
@@ -389,7 +393,7 @@ def decide_non_combat_move_mcts(ctx: AIContext, rng: random.Random | None = None
     Entry point: run non-combat-move MCTS and return the chosen root action.
     Falls back to None if search yields nothing (caller keeps the heuristic path).
     """
-    from backend.ai.mcts.budget import get_phase_budget
+    from backend.ai.mcts.budget import get_phase_budget, resolve_game_difficulty
     from backend.ai.mcts.search import run_mcts_reuse
 
     if not ctx.state or not ctx.faction_id:
@@ -400,7 +404,7 @@ def decide_non_combat_move_mcts(ctx: AIContext, rng: random.Random | None = None
         return None
 
     problem = NonCombatMoveProblem(ctx, rng=rng)
-    budget = get_phase_budget("non_combat_move", os.environ.get(DEFAULT_DIFFICULTY_ENV))
+    budget = get_phase_budget("non_combat_move", resolve_game_difficulty(ctx.state))
     # 3.4: moves apply verbatim, so consecutive /ai-step calls chain the same
     # multi-move subtree instead of re-searching the expensive enumerator.
     action = run_mcts_reuse(problem, ctx.state, budget)

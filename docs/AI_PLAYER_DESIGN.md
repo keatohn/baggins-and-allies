@@ -19,7 +19,7 @@
 
 2. **Minimax / MCTS**
    - Used when we need to look ahead (opponent responses, combat outcomes). Heavier and more complex.
-   - **Not in v1**: We can add a shallow lookahead or combat sim later; first version is heuristic-only per phase.
+   - **Shipped behind a flag.** `AI_ALGORITHM=mcts` runs a search for purchase, combat, combat move, non-combat move, and mobilization. The default stays `heuristic` (see **Search status** below).
 
 3. **Scripted / finite-state**
    - Per phase: “in purchase do X; in combat_move do Y”. Easy to reason about and debug.
@@ -315,7 +315,7 @@ Once the **Formulas to define** section is filled in and you’ve answered these
 
 ## Frontend Integration (Summary)
 
-- **Game meta**: Backend returns `ai_factions: string[]` in `GET /games/{id}/meta`. Frontend `GameMeta` includes `ai_factions?: string[]`.
+- **Game meta**: Backend returns `ai_factions: string[]` in `GET /games/{id}/meta`, plus `ai_difficulty` and `ai_algorithm` copied from the game at create time. Frontend `GameMeta` includes those fields. The same two values are on the saved game state, so a finished game can be scored later (profile stats, XP, achievements) without guessing which computer was in the match.
 - **When it's the AI's turn**: If `gameMeta.ai_factions` includes `backendState.current_faction`, the frontend shows **"Computer's turn"** in the header (instead of the faction name) and runs an AI step loop: call `POST /games/{id}/ai-step`, apply the returned state and events, then wait **AI_STEP_DELAY_MS** (e.g. 2.5 s) before refreshing and repeating. This gives the human time to see each action (purchase, move, combat, etc.) instead of the turn flying by.
 - **Delay**: `AI_STEP_DELAY_MS = 2500` in `App.tsx`; configurable. One delay between each AI action.
 - **Create game**: For single-player vs-AI, the backend defaults `ai_factions` to all factions except the first in turn order (human plays first faction). The client can override by sending `ai_factions` in the create request. When the game loads, meta includes `ai_factions` and the AI loop runs on their turn.
@@ -352,3 +352,20 @@ API changes (in `backend/api/main.py`):
 - **Definitions and available actions** come from the same code path as the human client (`get_game`, `get_game_definitions`, `_build_available_actions`). The AI sees the same rules and options as the UI.
 
 This keeps the AI correct by construction: if the engine allows an action, the AI can choose it; if the engine forbids it, the AI cannot apply it.
+
+---
+
+## Search status
+
+MCTS is in the tree for every phase. The default policy is still the heuristic.
+
+**Eval weights (3.6c).** The measured mcts-vs-mcts grid on `motw_1.0` at easy difficulty was mostly games that hit the cap, so the only signal is who led at cutoff: material 0.5 was +0.75, material 2.0 +0.25, territory 2.0 +0.25, territory 0.5 −0.25, purchase-defense 0.0 −0.50, purchase-defense 1.0 +0.50, each versus the baseline weights. Those are not decisive wins. The weights stay at the defaults in `backend/ai/mcts/eval_weights.py` (material 1, territory 1, purchase defense 0.5).
+
+**Default algorithm (3.7).** The same capped games do not show MCTS winning at least as often as the heuristic. `AI_ALGORITHM` stays unset, which means heuristic. A game can still store `ai_algorithm: "mcts"` from the admin default, and that is what `decide` uses when the env var is unset. Sweeps that set `AI_ALGORITHM` or `AI_MCTS_DIFFICULTY` override the stored game.
+
+**Admin.** The admin page has **AI** (default difficulty and algorithm for new games) and **Sims** (one short AI-vs-AI report for a scenario). The tool row is alphabetical: AI, Audio, Catalog, Formulas, Games, Setups, Signals, Sims.
+
+**Loopholes and stuck turns.**
+- Heuristic mobilization was batching every land purchase onto one scored territory. A port such as Pelargir has power, but that power is the naval pool, so `citadel_guard` (home unit, home is not Pelargir) was rejected with the camp-or-home rule. The map only offers each unit the destinations the engine lists, so a human could not make that placement. The heuristic now places a land stack on a standing camp owned at turn start, or a single home unit on its home, and `validate_action` checks the batch before it is returned.
+- `decide` drops any proposal `validate_action` rejects. Mobilization then uses the placement fallback. Other phases try the heuristic once and, when the phase is allowed to end, return `end_phase` instead of handing the client an error it would retry forever.
+- Non-combat search catches a pending queue the reducer cannot replay, instead of raising out of the search. Combat move already refuses candidates that fail that replay.

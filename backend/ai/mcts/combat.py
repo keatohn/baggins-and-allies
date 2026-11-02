@@ -12,7 +12,6 @@ MCTS resolve battles in sequence and then end the phase when no contested remain
 
 from __future__ import annotations
 
-import os
 import random
 from typing import Any
 
@@ -33,8 +32,6 @@ from backend.ai.mcts.search import Problem
 # Cap on branching factor per node. Combat space is small but retreats + multi-battles
 # can still grow; keep MCTS search tractable.
 MAX_COMBAT_BRANCHES = 32
-
-DEFAULT_DIFFICULTY_ENV = "AI_MCTS_DIFFICULTY"
 
 
 class CombatProblem(Problem):
@@ -229,7 +226,7 @@ def decide_combat_mcts(ctx: AIContext, rng: random.Random | None = None) -> Acti
     Dice are left empty for initiate/continue so the API can fill real rolls.
     Falls back to end_phase if search yields nothing (safety net).
     """
-    from backend.ai.mcts.budget import get_phase_budget
+    from backend.ai.mcts.budget import get_phase_budget, resolve_game_difficulty
     from backend.ai.mcts.search import run_mcts_reuse
 
     if not ctx.state or not ctx.faction_id:
@@ -240,7 +237,7 @@ def decide_combat_mcts(ctx: AIContext, rng: random.Random | None = None) -> Acti
         return None
 
     problem = CombatProblem(ctx, rng=rng)
-    budget = get_phase_budget("combat", os.environ.get(DEFAULT_DIFFICULTY_ENV))
+    budget = get_phase_budget("combat", resolve_game_difficulty(ctx.state))
     # 3.4: reuse often misses here — decide() strips dice and the API fills real
     # rolls before apply, so the next state differs from the searched child.
     action = run_mcts_reuse(problem, ctx.state, budget)

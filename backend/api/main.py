@@ -353,6 +353,10 @@ class CreateGameRequest(BaseModel):
     map_asset: str | None = None
     """Faction IDs controlled by AI (single-player or fill slots). Omitted = no AI factions."""
     ai_factions: list[str] | None = None
+    """easy|normal|hard. Omitted = the admin default, which is stored on the game."""
+    ai_difficulty: str | None = None
+    """heuristic|mcts. Omitted = the admin default, which is stored on the game."""
+    ai_algorithm: str | None = None
     """Hero-tagged units. Default True. When False they cannot be purchased and are omitted from starting placement."""
     heroes_enabled: bool = True
     """When True, each alliance sees armies only on its land and one territory beyond. Default off."""
@@ -1476,6 +1480,167 @@ def admin_put_formulas(
     return {"ok": True, "formulas": save_unit_formulas(db, body)}
 
 
+class AdminAiSettingsBody(BaseModel):
+    difficulty: str = "normal"
+    algorithm: str = "heuristic"
+
+
+@app.get("/admin/ai")
+def admin_get_ai(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Default computer strength and policy for new games, plus the search caps."""
+    from backend.ai.mcts.budget import budget_catalog
+    from backend.ai.settings import ALGORITHMS, load_ai_defaults
+
+    settings = load_ai_defaults(db)
+    return {
+        **settings,
+        "algorithms": list(ALGORITHMS),
+        "difficulties": budget_catalog(),
+    }
+
+
+@app.put("/admin/ai")
+def admin_put_ai(
+    body: AdminAiSettingsBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Save the default knobs. New games copy them onto game state and config."""
+    from backend.ai.mcts.budget import budget_catalog
+    from backend.ai.settings import ALGORITHMS, save_ai_defaults
+
+    settings = save_ai_defaults(db, body.model_dump())
+    return {
+        "ok": True,
+        **settings,
+        "algorithms": list(ALGORITHMS),
+        "difficulties": budget_catalog(),
+    }
+
+
+class AdminSimBody(BaseModel):
+    setup_id: str
+    difficulty: str = "easy"
+    matchup: str = "mcts-vs-mcts"
+    max_cycles: int = 1
+    seed: int = 1
+
+
+@app.get("/admin/sims")
+def admin_list_sims(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    from backend.ai.settings import load_sim_runs
+
+    return {"runs": load_sim_runs(db)}
+
+
+@app.post("/admin/sims")
+def admin_run_sim(
+    body: AdminSimBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Run one short AI-vs-AI game for a scenario and keep the report."""
+    from backend.ai.settings import normalize_difficulty, normalize_matchup, save_sim_run
+
+    setup_id = (body.setup_id or "").strip()
+    if not setup_id:
+        raise HTTPException(status_code=400, detail="setup_id is required")
+    setup = try_load_setup(setup_id, db)
+    if not setup:
+        raise HTTPException(status_code=404, detail=f"Setup not found: {setup_id}")
+    try:
+        ud, td, fd, cd, port_d = try_load_static_definitions(setup_id, db)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    cycles = max(1, min(int(body.max_cycles or 1), 2))
+    difficulty = normalize_difficulty(body.difficulty)
+    matchup = normalize_matchup(body.matchup)
+    try:
+        record = _run_admin_sim(
+            setup, setup_id, ud, td, fd, cd, port_d,
+            difficulty=difficulty, matchup=matchup, max_cycles=cycles, seed=int(body.seed or 1),
+        )
+    except Exception as e:
+        record = {
+            "setup_id": setup_id,
+            "difficulty": difficulty,
+            "matchup": matchup,
+            "error": str(e),
+            "report": str(e),
+        }
+    record["id"] = str(uuid.uuid4())
+    record["created_at"] = datetime.utcnow().isoformat() + "Z"
+    runs = save_sim_run(db, record)
+    return {"ok": "error" not in record, "run": record, "runs": runs}
+
+
+def _run_admin_sim(setup, setup_id, ud, td, fd, cd, port_d, *, difficulty, matchup, max_cycles, seed):
+    from test.test_ai_mcts_selfplay import (
+        format_matchup_report,
+        run_matchup,
+        _alliance_algorithms,
+    )
+
+    by_alliance = {
+        "mcts-vs-mcts": {"good": "mcts", "evil": "mcts"},
+        "mcts-vs-heuristic": {"good": "mcts", "evil": "heuristic"},
+        "heuristic-vs-mcts": {"good": "heuristic", "evil": "mcts"},
+        "heuristic-vs-heuristic": {"good": "heuristic", "evil": "heuristic"},
+    }[matchup]
+    state = initialize_game_state(
+        faction_defs=fd,
+        territory_defs=td,
+        unit_defs=ud,
+        starting_setup=setup["starting_setup"],
+        camp_defs=cd,
+        victory_criteria=setup.get("victory_criteria"),
+        camp_cost=setup.get("camp_cost"),
+        stronghold_repair_cost=setup.get("stronghold_repair_cost"),
+        prefire_penalty=parse_prefire_penalty_from_manifest(setup.get("prefire_penalty")),
+        heroes_enabled=True,
+        special_rules=setup.get("special_rules"),
+        subfaction_rules=setup.get("subfaction_rules"),
+    )
+    from backend.ai.settings import stamp_ai_on_state
+
+    stamp_ai_on_state(state, difficulty, "mcts" if "mcts" in matchup else "heuristic")
+    faction_ids = list(state.turn_order or [])
+    algorithms = _alliance_algorithms(fd, faction_ids, by_alliance)
+    previous_difficulty = os.environ.get("AI_MCTS_DIFFICULTY")
+    os.environ["AI_MCTS_DIFFICULTY"] = difficulty
+    try:
+        result = run_matchup(
+            state, ud, td, fd, cd, port_d,
+            algorithms,
+            max_cycles=max_cycles,
+            seed=seed,
+            setup_id=setup_id,
+        )
+    finally:
+        if previous_difficulty is None:
+            os.environ.pop("AI_MCTS_DIFFICULTY", None)
+        else:
+            os.environ["AI_MCTS_DIFFICULTY"] = previous_difficulty
+    return {
+        "setup_id": setup_id,
+        "difficulty": difficulty,
+        "matchup": matchup,
+        "winner": result.get("winner"),
+        "leader": result.get("leader"),
+        "turns_driven": result.get("turns_driven"),
+        "cycles_completed": result.get("cycles_completed"),
+        "wall_time": result.get("wall_time"),
+        "standings": result.get("standings"),
+        "report": format_matchup_report(result),
+    }
+
+
 class AdminTrainFormulaBody(BaseModel):
     setup_ids: list[str]
     features: list[str]
@@ -1721,6 +1886,14 @@ def create_game(
     # ai_factions set on start from unclaimed factions (single-player) or not used (multiplayer)
     if request.ai_factions:
         config_snapshot["ai_factions"] = list(request.ai_factions)
+    from backend.ai.settings import load_ai_defaults, normalize_algorithm, normalize_difficulty, stamp_ai_on_state
+
+    ai_defaults = load_ai_defaults(db)
+    ai_difficulty = normalize_difficulty(request.ai_difficulty or ai_defaults["difficulty"])
+    ai_algorithm = normalize_algorithm(request.ai_algorithm or ai_defaults["algorithm"])
+    stamp_ai_on_state(state, ai_difficulty, ai_algorithm)
+    config_snapshot["ai_difficulty"] = state.ai_difficulty
+    config_snapshot["ai_algorithm"] = state.ai_algorithm
     row = GameModel(
         id=game_id,
         name=request.name,
@@ -1943,6 +2116,8 @@ def _build_games_list(player: Player, db: Session, *, include_all: bool = False)
             "scenario": scenario,
             "players": players_out,
             "winner": winner,
+            "ai_difficulty": _ai_setting_from_config(r, "ai_difficulty", "normal"),
+            "ai_algorithm": _ai_setting_from_config(r, "ai_algorithm", "heuristic"),
         }
         mine.append(item)
     return mine
@@ -2307,6 +2482,23 @@ def _get_ai_factions_from_config(row) -> list[str]:
     return []
 
 
+def _ai_setting_from_config(row, key: str, default: str) -> str:
+    """Read a stored AI knob from the game config snapshot. Missing values use default."""
+    from backend.ai.settings import normalize_algorithm, normalize_difficulty
+
+    if not getattr(row, "config", None):
+        return default
+    try:
+        config = json.loads(row.config) if isinstance(row.config, str) else row.config
+    except (TypeError, json.JSONDecodeError):
+        return default
+    if not isinstance(config, dict) or key not in config:
+        return default
+    if key == "ai_algorithm":
+        return normalize_algorithm(config.get(key))
+    return normalize_difficulty(config.get(key))
+
+
 def _faction_alliance(fd: dict, faction_id: str) -> str:
     fdef = fd.get(faction_id) if isinstance(fd, dict) else None
     if not fdef:
@@ -2475,6 +2667,8 @@ def get_game_meta(
         "player_usernames": players_by_id,
         "scenario": scenario,
         "ai_factions": ai_factions,
+        "ai_difficulty": _ai_setting_from_config(row, "ai_difficulty", "normal"),
+        "ai_algorithm": _ai_setting_from_config(row, "ai_algorithm", "heuristic"),
         "forfeited_player_ids": forfeited_player_ids,
         "forfeit_reassignments": forfeit_reassignments,
         "host_forfeited": host_forfeited,

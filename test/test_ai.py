@@ -404,6 +404,12 @@ def test_mobilization_splits_forward_camp_and_capital():
     state, ud, td, fd, cd, port_d = _load_wotr_setup()
     state.phase = "mobilization"
     state.current_faction = "gondor"
+    # Camp power counts only for hexes owned at turn start. A bare mobilization
+    # fixture has to set that snapshot or every camp reports power 0 and the
+    # only positive-power row is a port, which is not a land destination.
+    state.faction_territories_at_turn_start["gondor"] = [
+        tid for tid, terr in state.territories.items() if getattr(terr, "owner", None) == "gondor"
+    ]
     state.faction_purchased_units["gondor"] = [
         UnitStack(unit_id="gondor_soldier", count=6)
     ]
@@ -419,8 +425,7 @@ def test_mobilization_splits_forward_camp_and_capital():
     a1 = decide_mobilization(ctx)
     assert a1 is not None and a1.type == "mobilize_units"
     v1 = validate_action(state, a1, ud, td, fd, cd, port_d)
-    if not v1.valid:
-        pytest.skip(f"AI mobilization proposal not valid for engine (non-deterministic target): {v1.error}")
+    assert v1.valid, v1.error
     dest1 = a1.payload.get("destination")
     assert dest1 == "west_osgiliath"
     n1 = sum(u.get("count", 0) for u in (a1.payload.get("units") or []))
@@ -453,6 +458,9 @@ def test_ai_decide_mobilization_phase():
     state, ud, td, fd, cd, port_d = _load_wotr_setup()
     state.phase = "mobilization"
     state.current_faction = "gondor"
+    state.faction_territories_at_turn_start["gondor"] = [
+        tid for tid, terr in state.territories.items() if getattr(terr, "owner", None) == "gondor"
+    ]
     state.faction_purchased_units["gondor"] = [UnitStack(unit_id="gondor_soldier", count=2)]
     from backend.engine.queries import get_mobilization_capacity, get_mobilization_territories
     cap = get_mobilization_capacity(state, "gondor", td, cd, port_d, ud)

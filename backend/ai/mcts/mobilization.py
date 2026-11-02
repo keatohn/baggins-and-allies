@@ -21,7 +21,6 @@ formulas only (no defense sims) so the tree stays affordable.
 
 from __future__ import annotations
 
-import os
 import random
 from typing import Any
 
@@ -51,8 +50,6 @@ from backend.ai.mcts.search import Problem
 
 # Cap on branching factor per node (top-K proposals + optional end_phase).
 MAX_MOBILIZATION_BRANCHES = 12
-
-DEFAULT_DIFFICULTY_ENV = "AI_MCTS_DIFFICULTY"
 
 # Extra prior weight for queue_camp_placement (camps block end_phase until placed).
 _CAMP_PRIOR_BONUS = 1.5
@@ -500,7 +497,7 @@ def decide_mobilization_mcts(ctx: AIContext, rng: random.Random | None = None) -
     Entry point: run mobilization MCTS and return the chosen root action.
     Falls back to None if search yields nothing (caller keeps the heuristic path).
     """
-    from backend.ai.mcts.budget import get_phase_budget
+    from backend.ai.mcts.budget import get_phase_budget, resolve_game_difficulty
     from backend.ai.mcts.search import run_mcts_reuse
 
     if not ctx.state or not ctx.faction_id:
@@ -511,7 +508,7 @@ def decide_mobilization_mcts(ctx: AIContext, rng: random.Random | None = None) -
         return None
 
     problem = MobilizationProblem(ctx, rng=rng)
-    budget = get_phase_budget("mobilization", os.environ.get(DEFAULT_DIFFICULTY_ENV))
+    budget = get_phase_budget("mobilization", resolve_game_difficulty(ctx.state))
     # 3.4: placements apply verbatim, so consecutive /ai-step calls chain the
     # same multi-placement subtree instead of re-searching.
     action = run_mcts_reuse(problem, ctx.state, budget)

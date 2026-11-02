@@ -13,7 +13,6 @@ Heuristics remain evaluators/priors, not sole deciders.
 
 from __future__ import annotations
 
-import os
 import random
 from typing import Any
 
@@ -51,8 +50,6 @@ from backend.ai.mcts.search import Problem
 
 # Cap on branching factor per node (top-K proposals + optional end_phase).
 MAX_COMBAT_MOVE_BRANCHES = 12
-
-DEFAULT_DIFFICULTY_ENV = "AI_MCTS_DIFFICULTY"
 
 
 class CombatMoveProblem(Problem):
@@ -553,7 +550,7 @@ def decide_combat_move_mcts(ctx: AIContext, rng: random.Random | None = None) ->
     Entry point: run combat-move MCTS and return the chosen root action.
     Falls back to None if search yields nothing (caller keeps the heuristic path).
     """
-    from backend.ai.mcts.budget import get_phase_budget
+    from backend.ai.mcts.budget import get_phase_budget, resolve_game_difficulty
     from backend.ai.mcts.search import run_mcts_reuse
 
     if not ctx.state or not ctx.faction_id:
@@ -564,7 +561,7 @@ def decide_combat_move_mcts(ctx: AIContext, rng: random.Random | None = None) ->
         return None
 
     problem = CombatMoveProblem(ctx, rng=rng)
-    budget = get_phase_budget("combat_move", os.environ.get(DEFAULT_DIFFICULTY_ENV))
+    budget = get_phase_budget("combat_move", resolve_game_difficulty(ctx.state))
     # 3.4: moves apply verbatim, so consecutive /ai-step calls chain the same
     # multi-move subtree instead of re-searching the expensive enumerator.
     action = run_mcts_reuse(problem, ctx.state, budget)

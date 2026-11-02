@@ -96,3 +96,30 @@ def get_phase_budget(phase: str, difficulty: str | None = None) -> SearchBudget:
 
 def _resolve_difficulty(difficulty: str | None) -> str:
     return (difficulty or os.environ.get("AI_MCTS_DIFFICULTY") or DEFAULT_DIFFICULTY).strip().lower()
+
+
+def resolve_game_difficulty(state) -> str:
+    """Env override, then the difficulty stored on the game, then the default.
+
+    Self-play sets AI_MCTS_DIFFICULTY so a sweep is not silently rewritten by
+    whatever the game row was stamped with.
+    """
+    env = (os.environ.get("AI_MCTS_DIFFICULTY") or "").strip()
+    if env:
+        return env
+    stored = getattr(state, "ai_difficulty", None) if state is not None else None
+    if isinstance(stored, str) and stored.strip():
+        return stored.strip()
+    return DEFAULT_DIFFICULTY
+
+
+def budget_catalog() -> list[dict[str, float | int | str]]:
+    """Difficulty knobs the admin page shows. Numbers are the base search caps."""
+    return [
+        {
+            "id": name,
+            "iterations": budget.max_iterations,
+            "seconds": budget.max_time_seconds,
+        }
+        for name, budget in BUDGETS.items()
+    ]
