@@ -696,13 +696,21 @@ def resolve_combat_round(
         defender_casualties, defender_wounded = _defender_apply(
             hits_to_defender_units, from_ladder=False)
 
-    # Bombikazi: paired bombikazi + bomb self-destruct (add to casualties, remove from list)
+    # Bombikazi: paired bombikazi + bomb self-destruct after this round. Re-derive the pairing
+    # from attackers still living after this round's hits (same as the siegeworks-round path):
+    # a unit already destroyed above is never appended a second time, units killed in a
+    # preceding pre-round are not in this roster at all, and nothing detonates when the pair
+    # no longer exists among the living.
     if bombikazi_self_destruct_ids:
-        self_destruct_set = set(bombikazi_self_destruct_ids)
-        for uid in bombikazi_self_destruct_ids:
-            attacker_casualties.append(uid)
-        attacker_units[:] = [
-            u for u in attacker_units if u.instance_id not in self_destruct_set]
+        living_bombikazi, living_bombs = get_bombikazi_pairing(
+            attacker_units, unit_defs)
+        self_destruct_set = set(living_bombikazi) | set(living_bombs)
+        if self_destruct_set:
+            attacker_casualties.extend(sorted(self_destruct_set))
+            attacker_wounded = [
+                w for w in attacker_wounded if w not in self_destruct_set]
+            attacker_units[:] = [
+                u for u in attacker_units if u.instance_id not in self_destruct_set]
 
     result = RoundResult(
         attacker_hits=attacker_hits,
@@ -1360,7 +1368,8 @@ def get_attacker_effective_dice_and_bombikazi_self_destruct(
         else:
             effective_dice[unit.instance_id] = base_dice
     self_destruct_ids = (
-        list(paired_bombikazi | paired_bombs) if use_paired_fused_siegework_rules else []
+        sorted(paired_bombikazi | paired_bombs)
+        if use_paired_fused_siegework_rules else []
     )
     return effective_dice, self_destruct_ids, effective_attack_override
 
