@@ -157,11 +157,11 @@
   justify-content: center;
   font-family: 'Cinzel', serif;
   font-weight: 700;
-  font-size: clamp(0.95rem, 8cqi, 1.7rem);
-  letter-spacing: 0.06em;
+  font-size: clamp(0.7rem, 4.6cqi, 1.35rem);
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   text-align: center;
-  line-height: 1.1;
+  line-height: 1.05;
 }
 
 .main-menu__panel-body {
