@@ -5,17 +5,22 @@ import { NumberField } from './NumberField';
 import { TierXpPanel } from './TierXpPanel';
 import { ColorField } from './ColorField';
 
+/** Last login is stored as naive UTC. Show it in US Eastern (EST or EDT). */
 function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return '—';
   try {
-    const d = new Date(iso);
+    const trimmed = iso.trim().replace(' ', 'T');
+    const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(trimmed);
+    const d = new Date(hasZone ? trimmed : `${trimmed}Z`);
     if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleString(undefined, {
+    return d.toLocaleString('en-US', {
+      timeZone: 'America/New_York',
       month: 'short',
       day: 'numeric',
       year: 'numeric',
       hour: 'numeric',
       minute: '2-digit',
+      timeZoneName: 'short',
     });
   } catch {
     return iso;
