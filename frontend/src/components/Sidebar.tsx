@@ -147,6 +147,8 @@ interface SidebarProps {
   onCancelQueuedCampPlacement?: (placementIndex: number) => void;
   /** Non-combat move: aerial units that must move to friendly territory before phase can end. */
   aerialUnitsMustMove?: { territory_id: string; unit_id: string; instance_id: string }[];
+  /** Combat move: ladder instance IDs in pending attacks with no other unit type (ladder cannot attack alone). */
+  ladderOnlyAttackInstanceIds?: string[];
   /** Defender casualty order per territory (from backend). Shown when selected territory is owned by current faction. */
   territoryDefenderCasualtyOrder?: Record<string, string>;
   /** Territories whose defensive casualty priority stays hidden. */
@@ -596,6 +598,7 @@ function Sidebar({
   pendingCampPlacements = [],
   onCancelQueuedCampPlacement,
   aerialUnitsMustMove = [],
+  ladderOnlyAttackInstanceIds = [],
   territoryDefenderCasualtyOrder = {},
   shadowedTerritories,
   rings = [],
@@ -1391,6 +1394,11 @@ function Sidebar({
             <>
               {gameState.phase === 'combat_move' && !pendingMoveConfirm && !bulkMoveConfirm && (gameState.pending_moves || []).filter(m => m.phase === 'combat_move').length === 0 && (
                 <p className="phase-instruction">Drag units into territories on the map.</p>
+              )}
+              {gameState.phase === 'combat_move' && !pendingMoveConfirm && !bulkMoveConfirm && ladderOnlyAttackInstanceIds.length > 0 && (
+                <p className="phase-instruction ladder-only-attack-msg">
+                  ⚠️ Ladders cannot attack alone — add another unit type to each marked attack (or cancel the ladder move) before ending phase.
+                </p>
               )}
               {gameState.phase === 'non_combat_move' && !pendingMoveConfirm && !bulkMoveConfirm && (gameState.pending_moves || []).filter(m => m.phase === 'non_combat_move').length === 0 && (
                 <>

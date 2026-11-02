@@ -1087,6 +1087,11 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
   font-weight: 600;
 }
 
+.phase-instruction.ladder-only-attack-msg {
+  color: var(--gold-dark, #9a7b2e);
+  font-weight: 600;
+}
+
 .phase-instruction .aerial-must-move-where {
   font-weight: 400;
   color: var(--ink-faded);
