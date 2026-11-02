@@ -2,21 +2,23 @@
 
 Hits are applied one at a time. After each hit we re-sort to pick the next casualty. The unit that sorts first (lowest sort key) takes the hit.
 
-## Defender order (land, with stronghold territory)
+## Step 0: stronghold wall soak (not a unit order)
 
-When the defender is in a **stronghold territory** (`territory_def.is_stronghold`):
+In a **stronghold territory** (`territory_def.is_stronghold`), the wall is a separate HP pool on the territory (`TerritoryState.stronghold_current_health`) — it is not a unit and is never part of the sort below.
 
-1. **is_stronghold** (desc for normal hits, asc for ladder hits):
-   - **Normal attacker hits**: stronghold takes first hits (is_stronghold **desc** — units in stronghold soak first).
-   - **Hits from ladder attackers**: assign to non-stronghold first (is_stronghold **asc** — ladder infantry bypass stronghold; their hits go to defender units that are not stronghold first). If all defenders are in the stronghold, this is a no-op for ordering.
-2. **remaining_health** (desc): healthiest unit takes the hit first (soak with high HP).
-3. **Casualty order mode** (battle config): best_unit or best_attack/best_defense (cost vs effective stat).
-4. **(Naval only) cargo_value** (asc): boats with less valuable cargo sink first.
-5. **num_specials** (asc): fewer specials first.
-6. **remaining_movement** (asc): immobile units first.
-7. **instance_id**: deterministic tiebreaker.
+- **Normal attacker hits** drain the wall first; only overflow lands on defender units.
+- **Hits from ladder-climbing infantry** bypass the wall entirely and go straight to defender units.
 
-When the defender is **not** in a stronghold territory, steps 1–2 collapse (no stronghold key; remaining_health is first).
+Once hits reach defender units, ladder and non-ladder hits are assigned identically — there is no per-unit "stronghold" sort key (no unit has an `is_stronghold` flag; only territories do).
+
+## Defender order (land)
+
+1. **remaining_health** (desc): healthiest unit takes the hit first (soak with high HP).
+2. **Casualty order mode** (battle config): best_unit or best_attack/best_defense (cost vs effective stat).
+3. **(Naval only) cargo_value** (asc): boats with less valuable cargo sink first.
+4. **num_specials** (asc): fewer specials first.
+5. **remaining_movement** (asc): immobile units first.
+6. **instance_id**: deterministic tiebreaker.
 
 ## Attacker order
 
