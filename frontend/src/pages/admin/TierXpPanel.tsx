@@ -339,9 +339,10 @@ export function TierXpPanel({
       <section>
         <h3 className="admin-form__subtitle">Profile icons</h3>
         <p className="admin-form__micro">
-          Each unit icon has a minimum tier. Players only see icons at or below their own tier. An icon left
-          on tier 1 is available from the start. Icons that unlock at the player’s current tier, other than
-          tier 1, get a mark in the picker.
+          Icons are grouped by the lowest tier that can use them. Tier 1 is at the top, and each step down
+          is a higher tier. The arrows move an icon into the group above or below. Players only see icons
+          at or below their own tier. Icons that unlock at the player’s current tier, other than tier 1,
+          get a mark in the picker.
         </p>
         <label className="admin-form__label">
           Find an icon
@@ -357,25 +358,57 @@ export function TierXpPanel({
           <p className="admin-form__micro">No icons match.</p>
         ) : null}
         <div className="admin-icon-unlocks">
-          {visibleIcons.map((name) => {
-            const minTier = unlocks[name] && rankById.has(unlocks[name]) ? unlocks[name] : lowestId;
+          {ranked.map(({ tier, rank }, tierIndex) => {
+            const icons = visibleIcons
+              .filter((name) => {
+                const assigned = unlocks[name] && rankById.has(unlocks[name]) ? unlocks[name] : lowestId;
+                return assigned === tier.id;
+              })
+              .sort((a, b) => a.localeCompare(b));
+            if (iconQueryNorm && icons.length === 0) return null;
             return (
-              <label key={name} className="admin-icon-unlock">
-                <img src={`/assets/units/${name}`} alt="" />
-                <span>{name.replace(/\.png$/i, '').replace(/_/g, ' ')}</span>
-                <select
-                  className="admin-form__input"
-                  aria-label={`Minimum tier for ${name}`}
-                  value={minTier}
-                  onChange={(e) => setIconTier(name, e.target.value)}
-                >
-                  {ranked.map(({ tier, rank }) => (
-                    <option key={tier.id} value={tier.id}>
-                      {rank} · {tier.name || tier.id}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <section key={tier.id} className="admin-icon-group" aria-label={`Tier ${rank}`}>
+                <h4 className="admin-icon-group__title">
+                  Tier {rank}
+                  {tier.name ? ` · ${tier.name}` : ''}
+                </h4>
+                {icons.length === 0 ? <p className="admin-form__micro">No icons</p> : null}
+                {icons.map((name) => {
+                  const label = name.replace(/\.png$/i, '').replace(/_/g, ' ');
+                  return (
+                    <div key={name} className="admin-icon-unlock">
+                      <img src={`/assets/units/${name}`} alt="" />
+                      <span>{label}</span>
+                      <span className="admin-icon-unlock__arrows">
+                        <button
+                          type="button"
+                          className="admin-icon-unlock__arrow"
+                          aria-label={`Move ${label} up`}
+                          disabled={tierIndex === 0}
+                          onClick={() => {
+                            const above = ranked[tierIndex - 1];
+                            if (above) setIconTier(name, above.tier.id);
+                          }}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          className="admin-icon-unlock__arrow"
+                          aria-label={`Move ${label} down`}
+                          disabled={tierIndex === ranked.length - 1}
+                          onClick={() => {
+                            const below = ranked[tierIndex + 1];
+                            if (below) setIconTier(name, below.tier.id);
+                          }}
+                        >
+                          ↓
+                        </button>
+                      </span>
+                    </div>
+                  );
+                })}
+              </section>
             );
           })}
         </div>
