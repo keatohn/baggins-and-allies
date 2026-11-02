@@ -102,7 +102,7 @@ export function TierXpPanel({
 }: {
   config: ProgressionConfig;
   onChange: (next: ProgressionConfig) => void;
-  unitIcons: string[];
+  unitIcons: string[] | null;
 }) {
   const setTier = (id: string, patch: Partial<ProgressionTier>) => {
     onChange({
@@ -131,7 +131,7 @@ export function TierXpPanel({
   const unlocks = config.icon_min_tier ?? {};
   const [iconQuery, setIconQuery] = useState('');
   const iconQueryNorm = iconQuery.trim().toLowerCase();
-  const visibleIcons = unitIcons.filter((name) => name.toLowerCase().includes(iconQueryNorm));
+  const visibleIcons = (unitIcons ?? []).filter((name) => name.toLowerCase().includes(iconQueryNorm));
 
   const setIconTier = (name: string, tierId: string) => {
     const next = { ...unlocks };
@@ -353,11 +353,12 @@ export function TierXpPanel({
             onChange={(e) => setIconQuery(e.target.value)}
           />
         </label>
-        {unitIcons.length === 0 ? <p className="admin-form__micro">Loading icons…</p> : null}
-        {unitIcons.length > 0 && visibleIcons.length === 0 ? (
+        {unitIcons == null ? <p className="admin-form__micro">Loading icons…</p> : null}
+        {unitIcons != null && unitIcons.length === 0 ? <p className="admin-form__micro">No unit icons found.</p> : null}
+        {unitIcons != null && unitIcons.length > 0 && visibleIcons.length === 0 ? (
           <p className="admin-form__micro">No icons match.</p>
         ) : null}
-        <div className="admin-icon-unlocks">
+        {unitIcons != null && unitIcons.length > 0 ? <div className="admin-icon-unlocks">
           {ranked.map(({ tier, rank }, tierIndex) => {
             const icons = visibleIcons
               .filter((name) => {
@@ -411,7 +412,7 @@ export function TierXpPanel({
               </section>
             );
           })}
-        </div>
+        </div> : null}
       </section>
 
       <section>
