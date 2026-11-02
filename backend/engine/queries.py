@@ -1675,6 +1675,14 @@ def _validate_retreat(
     if not state.active_combat:
         return ValidationResult(False, "No active combat to retreat from")
 
+    if not getattr(state.active_combat, "attackers_have_rolled", True):
+        # Mirror _handle_retreat: retreat is blocked until round 1 has been run
+        # (defender archer/stealth prefire happens before the attacker rolls).
+        return ValidationResult(
+            False,
+            "Cannot retreat until attackers have rolled (after archer or stealth prefire, continue combat first)",
+        )
+
     if getattr(state.active_combat, "sea_zone_id", None):
         return ValidationResult(False, "Retreat is not allowed during a sea raid")
 
@@ -1931,14 +1939,24 @@ def _purchased_units_have_a_destination(
     )
     parent_power: dict[str, int] = {}
     parent_home: dict[tuple[str, str], int] = {}
-    for bucket in (capacity.get("territories") or [], capacity.get("port_territories") or []):
-        for row in bucket:
-            tid = row.get("territory_id")
-            if not tid:
-                continue
-            parent_power[tid] = int(row.get("power", 0) or 0)
-            for uid, n in (row.get("home_unit_capacity") or {}).items():
-                parent_home[(tid, uid)] = int(n or 0)
+    # Land capacity comes from camp/home rows only. Port rows are a naval pool
+    # (get_mobilization_capacity: "Ports only mobilize naval to sea zones"), so
+    # their power is not a legal land destination — counting it deadlocked
+    # end_phase when a pool unit fit no remaining camp/home slot. Port home
+    # slots (e.g. Corsair -> Umbar) still count.
+    for row in capacity.get("territories") or []:
+        tid = row.get("territory_id")
+        if not tid:
+            continue
+        parent_power[tid] = int(row.get("power", 0) or 0)
+        for uid, n in (row.get("home_unit_capacity") or {}).items():
+            parent_home[(tid, uid)] = int(n or 0)
+    for row in capacity.get("port_territories") or []:
+        tid = row.get("territory_id")
+        if not tid:
+            continue
+        for uid, n in (row.get("home_unit_capacity") or {}).items():
+            parent_home[(tid, uid)] = int(n or 0)
     for row in capacity.get("sea_zones") or []:
         parent_power[row.get("sea_zone_id")] = int(row.get("power", 0) or 0)
     for row in capacity.get("river_zones") or []:
@@ -2274,15 +2292,19 @@ def filter_unit_instances_that_can_reach(
     unit_defs: dict[str, UnitDefinition],
     territory_defs: dict[str, TerritoryDefinition],
     faction_defs: dict[str, FactionDefinition],
+    slot_check_state: GameState | None = None,
 ) -> list[str]:
     """
     Return only those unit instance IDs that can reach to_territory_id.
     Uses each unit's remaining_movement and phase; never includes a unit that cannot reach.
+
+    slot_check_state: optional snapshot for land→sea embark capacity (same-phase pending
+    applied). Pass once per build to avoid redundant deepcopy per unit.
     """
     result = []
     for iid in unit_instance_ids:
         targets, _ = get_unit_move_targets(
-            state, iid, unit_defs, territory_defs, faction_defs
+            state, iid, unit_defs, territory_defs, faction_defs, slot_check_state
         )
         if to_territory_id in (targets or {}):
             result.append(iid)

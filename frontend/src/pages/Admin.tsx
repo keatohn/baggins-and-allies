@@ -23,6 +23,8 @@ import type { SignalPreset } from '../territorySignals';
 import { isValidSetupId } from './admin/setupId';
 import { BalanceModal } from './admin/BalanceModal';
 import { GamesReportModal } from './admin/GamesReportModal';
+import { AiPanel } from './admin/AiPanel';
+import { SimsPanel } from './admin/SimsPanel';
 import { QueryPanel } from './admin/QueryPanel';
 import { UsersReportModal } from './admin/UsersReportModal';
 import { previewStatsFromBundle } from './admin/previewStats';
@@ -360,7 +362,9 @@ export default function Admin() {
   const [formulasOpen, setFormulasOpen] = useState(false);
   const [formulasJsonMode, setFormulasJsonMode] = useState(false);
   const [formulas, setFormulas] = useState<UnitFormulas>(EMPTY_FORMULAS);
-  const globalOpen = audioOpen || signalsOpen || catalogOpen || formulasOpen;
+  const [aiOpen, setAiOpen] = useState(false);
+  const [simsOpen, setSimsOpen] = useState(false);
+  const globalOpen = audioOpen || signalsOpen || catalogOpen || formulasOpen || aiOpen || simsOpen;
   const [unitStatsOpen, setUnitStatsOpen] = useState(false);
   const [gameStatsOpen, setGameStatsOpen] = useState(false);
   const [balanceOpen, setBalanceOpen] = useState(false);
@@ -573,6 +577,7 @@ export default function Admin() {
       }
       return;
     }
+    if (aiOpen || simsOpen) return;
     if (formulasOpen) {
       setSaving(true);
       try {
@@ -695,6 +700,31 @@ export default function Admin() {
   };
 
   const renderTabBody = () => {
+    if (aiOpen) {
+      return (
+        <AiPanel
+          onSaved={() => {
+            setSaveError(null);
+            setSaveOk(true);
+          }}
+          onError={(message) => {
+            setSaveOk(false);
+            setSaveError(message);
+          }}
+        />
+      );
+    }
+    if (simsOpen) {
+      return (
+        <SimsPanel
+          setups={setups}
+          onError={(message) => {
+            setSaveOk(false);
+            setSaveError(message);
+          }}
+        />
+      );
+    }
     if (formulasOpen) {
       if (formulasJsonMode) {
         return <JsonTabEditor value={formulas} onChange={(p) => setFormulas(asFormulas(p))} />;
@@ -859,17 +889,21 @@ export default function Admin() {
     }
   };
 
-  const openSection = (section: 'setups' | 'catalog' | 'formulas' | 'audio' | 'signals' | 'query') => {
+  const openSection = (section: 'setups' | 'catalog' | 'formulas' | 'audio' | 'signals' | 'ai' | 'sims' | 'query') => {
     setCatalogOpen(section === 'catalog');
     setFormulasOpen(section === 'formulas');
     setAudioOpen(section === 'audio');
     setSignalsOpen(section === 'signals');
+    setAiOpen(section === 'ai');
+    setSimsOpen(section === 'sims');
     setQueryOpen(section === 'query');
     setSaveOk(false);
     setSaveError(null);
   };
 
   const navItems = [
+    { label: 'AI', active: aiOpen, onClick: () => openSection('ai') },
+    { label: 'Sims', active: simsOpen, onClick: () => openSection('sims') },
     { label: 'Audio', active: audioOpen, onClick: () => openSection('audio') },
     { label: 'Catalog', active: catalogOpen, onClick: () => openSection('catalog') },
     { label: 'Formulas', active: formulasOpen, onClick: () => openSection('formulas') },
@@ -1094,7 +1128,7 @@ export default function Admin() {
         <button
           type="button"
           className="admin-page__btn admin-page__btn--primary"
-          disabled={(globalOpen ? false : !bundle) || saving}
+          disabled={simsOpen || gamesOpen || (globalOpen ? false : !bundle) || saving}
           onClick={handleSave}
         >
           {saving ? 'Saving…' : 'Save'}
@@ -1140,6 +1174,8 @@ export default function Admin() {
                 ? 'Saved catalog.'
                 : formulasOpen
                   ? 'Saved formulas.'
+                  : aiOpen
+                    ? 'Saved AI defaults. New games will store them.'
                 : 'Saved. New games will use this data.'}
         </p>
       ) : null}

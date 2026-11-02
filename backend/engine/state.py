@@ -48,6 +48,19 @@ def _ensure_territory_sea_raid_passenger_instance_ids(value: Any) -> dict[str, l
     }
 
 
+def _stored_ai_choice(value: Any, allowed: tuple[str, ...], default: str) -> str:
+    text = str(value or "").strip().lower()
+    return text if text in allowed else default
+
+
+def _stored_difficulty_id(value: Any) -> str:
+    """Level ids are admin-defined, so a save may name one that is not easy/normal/hard."""
+    text = str(value or "").strip().lower()
+    if 1 <= len(text) <= 32 and all(("a" <= char <= "z") or ("0" <= char <= "9") or char == "_" for char in text):
+        return text
+    return "normal"
+
+
 def _ensure_territory_signals(value: Any) -> dict[str, dict[str, dict[str, str]]]:
     """alliance -> territory_id -> {preset_id, label, icon, color, faction_id}."""
     if not isinstance(value, dict):
@@ -790,6 +803,10 @@ class GameState:
     territory_sea_raid_passenger_instance_ids: dict[str, list[str]] = field(default_factory=dict)
     # Alliance -> territory_id -> {preset_id, label, icon, color, faction_id}. Visible only to that alliance.
     territory_signals: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
+    # Computer strength for this game (easy|normal|hard). Older saves default to normal.
+    ai_difficulty: str = "normal"
+    # Computer policy for this game (heuristic|mcts). Older saves stay heuristic.
+    ai_algorithm: str = "heuristic"
 
     def copy(self) -> "GameState":
         """Return a deep copy of this game state."""
@@ -860,6 +877,8 @@ class GameState:
             "territory_sea_raid_passenger_instance_ids": getattr(self, "territory_sea_raid_passenger_instance_ids", {}),
             "starting_territory_owners": dict(getattr(self, "starting_territory_owners", {}) or {}),
             "territory_signals": getattr(self, "territory_signals", {}) or {},
+            "ai_difficulty": getattr(self, "ai_difficulty", None) or "normal",
+            "ai_algorithm": getattr(self, "ai_algorithm", None) or "heuristic",
         }
 
     @classmethod
@@ -976,6 +995,8 @@ class GameState:
             if isinstance(data.get("starting_territory_owners"), dict)
             else {},
             territory_signals=_ensure_territory_signals(data.get("territory_signals")),
+            ai_difficulty=_stored_difficulty_id(data.get("ai_difficulty")),
+            ai_algorithm=_stored_ai_choice(data.get("ai_algorithm"), ("heuristic", "mcts"), "heuristic"),
         )
 
     def to_json(self, indent: int = 2) -> str:

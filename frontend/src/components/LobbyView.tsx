@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import api, { type GameMeta, type AuthPlayer, type Definitions, type FriendUser } from '../services/api';
+import api, { type GameMeta, type AuthPlayer, type Definitions, type AiFactionSetting, type AiLevelChoice, type FriendUser } from '../services/api';
 import { useMenuScroll } from './MenuScrollContext';
 import './LobbyView.css';
 
@@ -10,6 +10,90 @@ const LOBBY_POLL_MS = 3000;
 
 /** Matches backend LOBBY_COMPUTER_PLAYER_ID — lobby_claims value for AI-controlled slot. */
 const LOBBY_COMPUTER_ID = '__computer__';
+
+const WEIGHT_FIELDS: { key: keyof AiFactionSetting['weights']; label: string; max?: number }[] = [
+  { key: 'material', label: 'Material' },
+  { key: 'territory', label: 'Territory' },
+  { key: 'stronghold', label: 'Stronghold' },
+  { key: 'power_prod', label: 'Power' },
+  { key: 'board_scale', label: 'Scale' },
+  { key: 'purchase_defense', label: 'Purchase defense', max: 1 },
+];
+
+const FALLBACK_LEVELS: AiLevelChoice[] = [
+  { id: 'easy', name: 'Easy' },
+  { id: 'normal', name: 'Normal' },
+  { id: 'hard', name: 'Hard' },
+];
+
+function FactionSearchSettings({
+  setting,
+  levels,
+  disabled,
+  onDifficulty,
+  onAlgorithm,
+  onWeight,
+}: {
+  setting: AiFactionSetting | undefined;
+  levels: AiLevelChoice[];
+  disabled: boolean;
+  onDifficulty: (difficulty: string) => void;
+  onAlgorithm: (algorithm: string) => void;
+  onWeight: (key: keyof AiFactionSetting['weights'], value: number) => void;
+}) {
+  if (!setting) return <span className="lobby-view__waiting">Loading…</span>;
+  const choices = levels.length > 0 ? levels : FALLBACK_LEVELS;
+  const known = choices.some((level) => level.id === setting.difficulty);
+  return (
+    <div className="lobby-ai">
+      {(setting.algorithm || 'mcts') === 'mcts' && (
+        <label className="lobby-ai__field">
+          Difficulty
+          <select
+            value={setting.difficulty}
+            disabled={disabled}
+            onChange={(e) => onDifficulty(e.target.value)}
+          >
+            {!known && <option value={setting.difficulty}>{setting.difficulty}</option>}
+            {choices.map((level) => (
+              <option key={level.id} value={level.id}>
+                {level.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <label className="lobby-ai__field">
+        Algorithm
+        <select
+          value={setting.algorithm || 'mcts'}
+          disabled={disabled}
+          onChange={(e) => onAlgorithm(e.target.value)}
+        >
+          <option value="mcts">MCTS</option>
+          <option value="heuristic">Heuristic</option>
+        </select>
+      </label>
+      {WEIGHT_FIELDS.map((field) => (
+        <label key={field.key} className="lobby-ai__field">
+          {field.label}
+          <input
+            type="number"
+            min={0}
+            max={field.max}
+            step={0.1}
+            value={setting.weights[field.key]}
+            disabled={disabled}
+            onChange={(e) => {
+              const value = Number(e.target.value);
+              if (Number.isFinite(value)) onWeight(field.key, value);
+            }}
+          />
+        </label>
+      ))}
+    </div>
+  );
+}
 
 function allianceDisplayLabel(alliance: string): string {
   const a = alliance.trim();
@@ -48,6 +132,10 @@ export default function LobbyView({
   const [claimError, setClaimError] = useState<string | null>(null);
   const [startConfirmOpen, setStartConfirmOpen] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [factionSettings, setFactionSettings] = useState<Record<string, AiFactionSetting> | null>(null);
+  const [savingDifficulty, setSavingDifficulty] = useState(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveGen = useRef(0);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteFriends, setInviteFriends] = useState<FriendUser[] | null>(null);
   const [invitedIds, setInvitedIds] = useState<string[]>([]);
@@ -72,6 +160,66 @@ export default function LobbyView({
     const t = setInterval(refreshMeta, LOBBY_POLL_MS);
     return () => clearInterval(t);
   }, [refreshMeta]);
+
+  useEffect(() => {
+    if (meta.computer_only && meta.ai_faction_settings && factionSettings == null) {
+      setFactionSettings(meta.ai_faction_settings);
+    }
+  }, [meta.computer_only, meta.ai_faction_settings, factionSettings]);
+
+  const scheduleSettingsSave = (next: Record<string, AiFactionSetting>) => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    const gen = ++saveGen.current;
+    saveTimer.current = setTimeout(() => {
+      api.updateAiFactionSettings(gameId, next)
+        .then((res) => {
+          if (saveGen.current !== gen) return;
+          setFactionSettings(res.ai_faction_settings);
+          onMetaUpdate({ ...meta, ai_faction_settings: res.ai_faction_settings });
+        })
+        .catch((err) => {
+          if (saveGen.current !== gen) return;
+          setClaimError(err instanceof Error ? err.message : 'Could not save computer settings');
+        });
+    }, 400);
+  };
+
+  const updateFactionSetting = (
+    factionId: string,
+    patch: {
+      difficulty?: string;
+      algorithm?: string;
+      weight?: { key: keyof AiFactionSetting['weights']; value: number };
+    },
+  ) => {
+    setFactionSettings((current) => {
+      if (!current?.[factionId]) return current;
+      const row = current[factionId];
+      const nextRow: AiFactionSetting = {
+        ...row,
+        ...(patch.difficulty != null ? { difficulty: patch.difficulty } : {}),
+        ...(patch.algorithm != null ? { algorithm: patch.algorithm } : {}),
+        ...(patch.weight ? { weights: { ...row.weights, [patch.weight.key]: patch.weight.value } } : {}),
+      };
+      const next = { ...current, [factionId]: nextRow };
+      scheduleSettingsSave(next);
+      return next;
+    });
+  };
+
+  const handleDifficulty = async (difficulty: string) => {
+    if (!difficulty || difficulty === meta.ai_difficulty || savingDifficulty) return;
+    setClaimError(null);
+    setSavingDifficulty(true);
+    try {
+      const saved = await api.updateAiDifficulty(gameId, difficulty);
+      onMetaUpdate({ ...meta, ai_difficulty: saved.ai_difficulty });
+    } catch (err) {
+      setClaimError(err instanceof Error ? err.message : 'Could not save difficulty');
+    } finally {
+      setSavingDifficulty(false);
+    }
+  };
 
   const lobbyClaims = meta.lobby_claims ?? {};
   const playerUsernames = meta.player_usernames ?? {};
@@ -174,7 +322,8 @@ export default function LobbyView({
 
   const factions = definitions?.factions ?? {};
   const order = turnOrder.length ? turnOrder : Object.keys(factions);
-  const isSinglePlayer = !meta.game_code;
+  const isComputerOnly = meta.computer_only === true;
+  const isSinglePlayer = !meta.game_code && !isComputerOnly;
   const allFactionsClaimed = isSinglePlayer
     ? order.length > 0 && order.some((fid) => lobbyClaims[fid])
     : order.length > 0 && order.every((fid) => lobbyClaims[fid]);
@@ -190,8 +339,9 @@ export default function LobbyView({
     return seen.size;
   })();
 
-  const canStartGame =
-    isSinglePlayer
+  const canStartGame = isComputerOnly
+    ? order.length > 0
+    : isSinglePlayer
       ? allFactionsClaimed
       : allFactionsClaimed && multiplayerHumanPlayerCount >= 2;
 
@@ -252,11 +402,16 @@ export default function LobbyView({
 
   return (
     <div className="lobby-view-overlay">
-      <div className={`lobby-view${isSinglePlayer ? ' lobby-view--single-player' : ''}`}>
+      <div className={`lobby-view${isSinglePlayer ? ' lobby-view--single-player' : ''}${isComputerOnly ? ' lobby-view--computer' : ''}`}>
         <header className="lobby-view__header">
           <h1 className="lobby-view__title">
-            {isSinglePlayer ? 'Single player' : 'Lobby'}: {meta.name}
+            {isComputerOnly ? 'Computer only' : isSinglePlayer ? 'Single player' : 'Lobby'}: {meta.name}
           </h1>
+          {isComputerOnly && (
+            <p className="lobby-view__code">
+              Every faction is the computer. Difficulty is how long MCTS searches. Weights change how it scores armies and land, and they apply when that faction's algorithm is MCTS.
+            </p>
+          )}
           {meta.game_code && (
             <div className="lobby-view__code-row">
               <button
@@ -414,30 +569,61 @@ export default function LobbyView({
                     )}
                   </div>
                   <div className="lobby-view__faction-actions">
-                    {isSinglePlayer ? (
-                      <div
-                        className="lobby-view__binary-pills"
-                        role="group"
-                        aria-label={`${factionRowLabel}: you or computer`}
-                      >
-                        <button
-                          type="button"
-                          className={`lobby-view__pill lobby-view__pill--you ${isClaimedByMe ? 'lobby-view__pill--selected' : ''}`}
-                          onClick={() => handleClaim(fid, true)}
-                          disabled={loading}
-                          aria-pressed={isClaimedByMe}
+                    {isComputerOnly ? (
+                      <FactionSearchSettings
+                        setting={factionSettings?.[fid]}
+                        levels={meta.ai_levels ?? []}
+                        disabled={!isHost || claimingFactionId === fid}
+                        onDifficulty={(difficulty) => updateFactionSetting(fid, { difficulty })}
+                        onAlgorithm={(algorithm) => updateFactionSetting(fid, { algorithm })}
+                        onWeight={(key, value) => updateFactionSetting(fid, { weight: { key, value } })}
+                      />
+                    ) : isSinglePlayer ? (
+                      <div className="lobby-view__single-choice">
+                        <div
+                          className="lobby-view__binary-pills"
+                          role="group"
+                          aria-label={`${factionRowLabel}: you or computer`}
                         >
-                          {loading && isClaimedByMe ? '…' : playerDisplayName}
-                        </button>
-                        <button
-                          type="button"
-                          className={`lobby-view__pill lobby-view__pill--computer ${!isClaimedByMe ? 'lobby-view__pill--selected' : ''}`}
-                          onClick={() => handleClaim(fid, false)}
-                          disabled={loading}
-                          aria-pressed={!isClaimedByMe}
-                        >
-                          {loading && !isClaimedByMe ? '…' : 'Computer'}
-                        </button>
+                          <button
+                            type="button"
+                            className={`lobby-view__pill lobby-view__pill--you ${isClaimedByMe ? 'lobby-view__pill--selected' : ''}`}
+                            onClick={() => handleClaim(fid, true)}
+                            disabled={loading}
+                            aria-pressed={isClaimedByMe}
+                          >
+                            {loading && isClaimedByMe ? '…' : playerDisplayName}
+                          </button>
+                          <button
+                            type="button"
+                            className={`lobby-view__pill lobby-view__pill--computer ${!isClaimedByMe ? 'lobby-view__pill--selected' : ''}`}
+                            onClick={() => handleClaim(fid, false)}
+                            disabled={loading}
+                            aria-pressed={!isClaimedByMe}
+                          >
+                            {loading && !isClaimedByMe ? '…' : 'Computer'}
+                          </button>
+                        </div>
+                        {!isClaimedByMe && meta.ai_algorithm === 'mcts' && (meta.ai_levels?.length ?? 0) > 0 && (
+                          <div
+                            className="lobby-view__difficulty-pills"
+                            role="group"
+                            aria-label={`${displayName} difficulty`}
+                          >
+                            {meta.ai_levels!.map((level) => (
+                              <button
+                                key={level.id}
+                                type="button"
+                                className={`lobby-view__pill lobby-view__pill--difficulty${meta.ai_difficulty === level.id ? ' lobby-view__pill--selected' : ''}`}
+                                onClick={() => handleDifficulty(level.id)}
+                                disabled={!isHost || savingDifficulty}
+                                aria-pressed={meta.ai_difficulty === level.id}
+                              >
+                                {level.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div className="lobby-view__multiplayer-actions">
@@ -505,7 +691,9 @@ export default function LobbyView({
                 disabled={!canStartGame}
                 title={
                   !canStartGame
-                    ? isSinglePlayer
+                    ? isComputerOnly
+                      ? 'This scenario has no factions'
+                      : isSinglePlayer
                       ? 'Assign yourself to at least one faction to start'
                       : !allFactionsClaimed
                         ? 'Claim all factions to start'

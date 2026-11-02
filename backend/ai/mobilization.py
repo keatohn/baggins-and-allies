@@ -9,7 +9,7 @@ defense_expected_loss_by_territory) on top of distance-to-enemy, stronghold scor
 
 from collections import deque
 
-from backend.engine.actions import mobilize_units, end_phase, place_camp
+from backend.engine.actions import Action, mobilize_units, end_phase, place_camp
 from backend.engine.queries import (
     get_purchased_units,
     get_mobilization_capacity,
@@ -79,6 +79,74 @@ def _can_mobilize_home_unit(state, territory_id: str, territory_info: dict, unit
         if u.get("unit_id") == unit_id
     )
     return already < 1
+
+
+def _validated_mobilize(ctx: AIContext, faction_id: str, dest: str, stacks: list[dict]) -> Action | None:
+    """Return a mobilize_units the reducer accepts, dropping stacks that do not fit.
+
+    The heuristic used to batch every land purchase onto one scored territory.
+    A port with power (Pelargir) is not a land camp, so a home unit such as
+    citadel_guard in that batch fails the camp-or-home rule. Humans never see
+    that destination for that unit; the computer must not either.
+    """
+    from backend.engine.queries import validate_action
+
+    kept: list[dict] = []
+    for item in stacks:
+        unit_id = item.get("unit_id")
+        count = int(item.get("count") or 0)
+        if not unit_id or count <= 0:
+            continue
+        for n in range(count, 0, -1):
+            trial = kept + [{"unit_id": unit_id, "count": n}]
+            action = mobilize_units(faction_id, dest, trial)
+            verdict = validate_action(
+                ctx.state, action, ctx.unit_defs, ctx.territory_defs,
+                ctx.faction_defs, ctx.camp_defs, ctx.port_defs,
+            )
+            if verdict.valid:
+                kept = trial
+                break
+    if not kept:
+        return None
+    return mobilize_units(faction_id, dest, kept)
+
+
+def _commit_land_stacks(
+    ctx: AIContext,
+    faction_id: str,
+    dest_id: str,
+    t_info: dict,
+    land_stacks: list[tuple[str, int]],
+    rem_cap: int,
+) -> Action | None:
+    """Place only units this destination can legally take (standing camp, or that unit's home)."""
+    from backend.engine.queries import _territory_has_standing_camp
+
+    # Capacity already zeros camp power when the hex was not owned at turn start.
+    has_camp = _territory_has_standing_camp(ctx.state, dest_id, ctx.camp_defs or {})
+    camp_ok = has_camp and int(t_info.get("power") or 0) > 0
+    home_cap = t_info.get("home_unit_capacity") or {}
+    built: list[dict] = []
+    room = rem_cap if camp_ok else 0
+    if camp_ok:
+        for unit_id, count in land_stacks:
+            if room <= 0:
+                break
+            take = min(int(count or 0), room)
+            if take <= 0:
+                continue
+            built.append({"unit_id": unit_id, "count": take})
+            room -= take
+    else:
+        for unit_id, count in land_stacks:
+            if int(count or 0) <= 0 or unit_id not in home_cap:
+                continue
+            if not _can_mobilize_home_unit(ctx.state, dest_id, t_info, unit_id):
+                continue
+            built.append({"unit_id": unit_id, "count": 1})
+            break
+    return _validated_mobilize(ctx, faction_id, dest_id, built)
 
 
 def _remaining_sea_capacity(state, faction_id: str, sea_zone_id: str, zone_info: dict, td, port_d, ud) -> int:
@@ -488,9 +556,11 @@ def decide_mobilization(ctx: AIContext):
             best_home = pick_from_score_band(home_candidates)
             if best_home:
                 tid, unit_id = best_home
-                return mobilize_units(
-                    faction_id, tid, [{"unit_id": unit_id, "count": 1}]
+                home_action = _validated_mobilize(
+                    ctx, faction_id, tid, [{"unit_id": unit_id, "count": 1}]
                 )
+                if home_action is not None:
+                    return home_action
 
         # 2) Camp/port with power: score all valid destinations, then pick with band (vary and prefer frontline)
         candidates_land: list[tuple[tuple, float]] = []  # ((tid, rem, t_info), score)
@@ -556,21 +626,20 @@ def decide_mobilization(ctx: AIContext):
             best_land = pick_from_score_band(candidates_land) if candidates_land else None
             rem_cap_limit = None
 
-        if best_land:
-            dest_id, rem_cap, t_info = best_land
-            if rem_cap_limit is not None:
-                rem_cap = rem_cap_limit
-            unit_stacks = []
-            for unit_id, count in land_stacks:
-                if rem_cap <= 0:
-                    break
-                take = min(count, rem_cap)
-                if take <= 0:
-                    continue
-                unit_stacks.append({"unit_id": unit_id, "count": take})
-                rem_cap -= take
-            if unit_stacks:
-                return mobilize_units(faction_id, dest_id, unit_stacks)
+        attempts: list[tuple[tuple, int | None]] = []
+        if best_land is not None:
+            attempts.append((best_land, rem_cap_limit))
+        for entry in sorted(candidates_land, key=lambda item: item[1], reverse=True):
+            if best_land is not None and entry[0][0] == best_land[0]:
+                continue
+            attempts.append((entry[0], None))
+        for (dest_id, rem_cap, t_info), limit in attempts:
+            cap = rem_cap if limit is None else min(rem_cap, limit)
+            land_action = _commit_land_stacks(
+                ctx, faction_id, dest_id, t_info, land_stacks, cap,
+            )
+            if land_action is not None:
+                return land_action
 
     # Try naval: pick sea zone by strategic pressure (enemy coast) then capacity
     if naval_stacks:
@@ -597,7 +666,9 @@ def decide_mobilization(ctx: AIContext):
                 unit_stacks.append({"unit_id": unit_id, "count": take})
                 rem -= take
             if unit_stacks:
-                return mobilize_units(faction_id, zid, unit_stacks)
+                naval_action = _validated_mobilize(ctx, faction_id, zid, unit_stacks)
+                if naval_action is not None:
+                    return naval_action
 
     river_zones = capacity.get("river_zones", [])
     if river_stacks and river_zones:
@@ -628,6 +699,8 @@ def decide_mobilization(ctx: AIContext):
                 unit_stacks.append({"unit_id": unit_id, "count": take})
                 rem -= take
             if unit_stacks:
-                return mobilize_units(faction_id, zid, unit_stacks)
+                river_action = _validated_mobilize(ctx, faction_id, zid, unit_stacks)
+                if river_action is not None:
+                    return river_action
 
     return end_phase(faction_id)

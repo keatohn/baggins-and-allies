@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { api, type SetupInfo } from '../services/api';
+import { api, type AuthPlayer, type SetupInfo } from '../services/api';
 import ScenarioTimeline from '../components/ScenarioTimeline';
 import { useMenuScroll } from '../components/MenuScrollContext';
 import MenuLink from '../components/MenuLink';
@@ -56,7 +56,8 @@ function RuleLabel({ name, description }: { name: string; description?: string }
 export default function CreateGame() {
   const { navigateWithScroll, holdScroll, revealScroll, withScrollTransition } = useMenuScroll();
   const [name, setName] = useState('');
-  const [isMultiplayer, setIsMultiplayer] = useState(false);
+  const [mode, setMode] = useState<'single' | 'multi' | 'computer'>('single');
+  const [player, setPlayer] = useState<AuthPlayer | null>(null);
   const [heroesEnabled, setHeroesEnabled] = useState(true);
   const [shadowOfWar, setShadowOfWar] = useState(false);
   const [optionalRules, setOptionalRules] = useState<Record<string, boolean>>({});
@@ -74,6 +75,10 @@ export default function CreateGame() {
   const scenariosWithContext = setups.filter(
     (s) => s.context && typeof s.context === 'object' && Object.keys(s.context).length > 0
   );
+
+  useEffect(() => {
+    api.authMe().then(setPlayer).catch(() => setPlayer(null));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -135,12 +140,13 @@ export default function CreateGame() {
     try {
       const res = await api.createGame(
         name.trim() || 'My game',
-        isMultiplayer,
+        mode === 'multi',
         selectedSetupId ?? undefined,
         heroesEnabled,
         shadowOfWar,
         Boolean(selectedScenario?.rings_of_power) || optionalRules.rings_of_power === true,
         optionalRules,
+        mode === 'computer',
       );
       const initialState = res.state != null
         ? { ...res.state, turn_order: res.turn_order ?? res.state.turn_order }
@@ -203,21 +209,30 @@ export default function CreateGame() {
           </label>
           <div className="create-game-form__field">
             <span className="create-game-form__field-label">Mode</span>
-            <div className="create-game-form__picker" role="group" aria-label="Single or multiplayer">
+            <div className="create-game-form__picker" role="group" aria-label="Single, multiplayer, or computer only">
               <button
                 type="button"
-                className={`create-game-form__picker-option ${!isMultiplayer ? 'create-game-form__picker-option--active' : ''}`}
-                onClick={() => setIsMultiplayer(false)}
+                className={`create-game-form__picker-option ${mode === 'single' ? 'create-game-form__picker-option--active' : ''}`}
+                onClick={() => setMode('single')}
               >
                 Single Player
               </button>
               <button
                 type="button"
-                className={`create-game-form__picker-option ${isMultiplayer ? 'create-game-form__picker-option--active' : ''}`}
-                onClick={() => setIsMultiplayer(true)}
+                className={`create-game-form__picker-option ${mode === 'multi' ? 'create-game-form__picker-option--active' : ''}`}
+                onClick={() => setMode('multi')}
               >
                 Multiplayer
               </button>
+              {player?.is_admin && (
+                <button
+                  type="button"
+                  className={`create-game-form__picker-option ${mode === 'computer' ? 'create-game-form__picker-option--active' : ''}`}
+                  onClick={() => setMode('computer')}
+                >
+                  Computer Only
+                </button>
+              )}
             </div>
           </div>
           <div className="create-game-form__field">

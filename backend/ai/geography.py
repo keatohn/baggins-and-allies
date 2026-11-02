@@ -210,6 +210,79 @@ def territory_threatened_by_enemy_combat_move_next_turn(
     return False
 
 
+def count_enemies_that_can_reach_territories(
+    territory_ids,
+    state: "GameState",
+    faction_id: str,
+    fd: dict[str, "FactionDefinition"],
+    td: dict[str, "TerritoryDefinition"],
+    unit_defs: dict[str, "UnitDefinition"],
+) -> dict[str, int]:
+    """
+    Number of enemy units that could reach each given territory as a combat_move
+    destination next turn (full movement). Same rules as the single-territory
+    count, but computes each enemy unit's reachable set once for ALL destinations
+    — the single-destination version re-ran full-board reachability (and a state
+    deepcopy inside it) per call, which dominated MCTS move-phase enumeration.
+    Passes acting_faction_id instead of mutating state.current_faction, so search
+    states are never touched.
+    """
+    destinations = {tid for tid in territory_ids if tid}
+    counts: dict[str, int] = {tid: 0 for tid in destinations}
+    if not destinations:
+        return counts
+    our_fd = fd.get(faction_id)
+    our_alliance = getattr(our_fd, "alliance", "") if our_fd else ""
+    # One shared post-pending snapshot for every reachability call below: with a
+    # same-phase pending present, each call would otherwise deepcopy the whole
+    # state just to size embark slots (identical result, N times the cost).
+    has_pending = any(
+        getattr(pm, "phase", None) == "combat_move" for pm in (state.pending_moves or [])
+    )
+    if has_pending:
+        from backend.engine.reducer import get_state_after_pending_moves
+
+        slot_state = get_state_after_pending_moves(state, "combat_move", unit_defs, td, fd)
+    else:
+        slot_state = state
+    for tid, terr in (state.territories or {}).items():
+        for u in getattr(terr, "units", []) or []:
+            uf = get_unit_faction(u, unit_defs)
+            if uf == faction_id:
+                continue
+            if uf and fd.get(uf) and getattr(fd.get(uf), "alliance", "") == our_alliance:
+                continue
+            base_mov = getattr(u, "base_movement", 0) or 0
+            if base_mov <= 0:
+                continue
+            unit_full = Unit(
+                instance_id=u.instance_id,
+                unit_id=u.unit_id,
+                remaining_movement=base_mov,
+                remaining_health=getattr(u, "remaining_health", 1),
+                base_movement=base_mov,
+                base_health=getattr(u, "base_health", 1),
+                loaded_onto=getattr(u, "loaded_onto", None),
+            )
+            reachable, _ = get_reachable_territories_for_unit(
+                unit_full,
+                tid,
+                state,
+                unit_defs,
+                td,
+                fd,
+                "combat_move",
+                acting_faction_id=uf,
+                slot_check_state=slot_state,
+            )
+            if not reachable:
+                continue
+            for dest in destinations:
+                if dest in reachable:
+                    counts[dest] += 1
+    return counts
+
+
 def count_enemies_that_can_reach_territory_combat_move(
     territory_id: str,
     state: "GameState",
@@ -222,46 +295,9 @@ def count_enemies_that_can_reach_territory_combat_move(
     Number of enemy units that could reach this territory as a combat_move destination next turn
     (full movement). Same rules as non_combat reinforcement threat.
     """
-    our_fd = fd.get(faction_id)
-    our_alliance = getattr(our_fd, "alliance", "") if our_fd else ""
-    saved_faction = getattr(state, "current_faction", None)
-    count = 0
-    try:
-        for tid, terr in (state.territories or {}).items():
-            for u in getattr(terr, "units", []) or []:
-                uf = get_unit_faction(u, unit_defs)
-                if uf == faction_id:
-                    continue
-                if uf and fd.get(uf) and getattr(fd.get(uf), "alliance", "") == our_alliance:
-                    continue
-                base_mov = getattr(u, "base_movement", 0) or 0
-                if base_mov <= 0:
-                    continue
-                unit_full = Unit(
-                    instance_id=u.instance_id,
-                    unit_id=u.unit_id,
-                    remaining_movement=base_mov,
-                    remaining_health=getattr(u, "remaining_health", 1),
-                    base_movement=base_mov,
-                    base_health=getattr(u, "base_health", 1),
-                    loaded_onto=getattr(u, "loaded_onto", None),
-                )
-                state.current_faction = uf
-                reachable, _ = get_reachable_territories_for_unit(
-                    unit_full,
-                    tid,
-                    state,
-                    unit_defs,
-                    td,
-                    fd,
-                    "combat_move",
-                )
-                if territory_id in (reachable or {}):
-                    count += 1
-    finally:
-        if saved_faction is not None:
-            state.current_faction = saved_faction
-    return count
+    return count_enemies_that_can_reach_territories(
+        [territory_id], state, faction_id, fd, td, unit_defs
+    ).get(territory_id, 0)
 
 
 def adjacent_enemy_land_unit_count(
@@ -307,18 +343,27 @@ def effective_defensive_reinforce_pressure(
     unit_defs: dict[str, "UnitDefinition"],
     *,
     reach_beyond_local_cap: int | None = None,
+    precomputed_reach: int | None = None,
 ) -> int:
     """
     Blend global reach count with adjacent enemy land units. Raw reach inflates when many map-wide
     stacks can path here; cap how much reach can exceed local border count for reinforcement math.
+
+    precomputed_reach: optional caller-supplied value for `reach` (e.g. from a batched
+    count_enemies_that_can_reach_territories map) so the full-board reach scan is not
+    repeated per territory; when None, computed as before.
     """
     cap = (
         reach_beyond_local_cap
         if reach_beyond_local_cap is not None
         else NON_COMBAT_REINFORCE_REACH_BEYOND_LOCAL_CAP
     )
-    reach = count_enemies_that_can_reach_territory_combat_move(
-        territory_id, state, faction_id, fd, td, unit_defs
+    reach = (
+        precomputed_reach
+        if precomputed_reach is not None
+        else count_enemies_that_can_reach_territory_combat_move(
+            territory_id, state, faction_id, fd, td, unit_defs
+        )
     )
     adj = adjacent_enemy_land_unit_count(
         territory_id, state, faction_id, fd, td, unit_defs

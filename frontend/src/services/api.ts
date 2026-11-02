@@ -723,6 +723,50 @@ export interface AdminSetupListItem {
   updated_at: string | null;
 }
 
+export interface AdminAiLevel {
+  id: string;
+  name: string;
+  iterations: number;
+  seconds: number;
+}
+
+export interface AdminAiSettings {
+  difficulty: string;
+  algorithm: string;
+  algorithms: string[];
+  levels: AdminAiLevel[];
+}
+
+export interface AiLevelChoice {
+  id: string;
+  name: string;
+}
+
+export interface AiFactionSetting {
+  difficulty: string;
+  algorithm: string;
+  weights: {
+    material: number;
+    territory: number;
+    stronghold: number;
+    power_prod: number;
+    board_scale: number;
+    purchase_defense: number;
+  };
+}
+
+export interface AdminSimRun {
+  id?: string;
+  created_at?: string;
+  setup_id?: string;
+  difficulty?: string;
+  matchup?: string;
+  winner?: string | null;
+  leader?: string | null;
+  error?: string;
+  report?: string;
+}
+
 /** Row in the admin users report. */
 export interface AdminUserItem {
   id: string;
@@ -968,6 +1012,16 @@ export interface GameMeta {
   } | null;
   /** Faction IDs controlled by AI (single-player or fill slots). When current_faction is in this list, call POST /games/{id}/ai-step to advance. */
   ai_factions?: string[];
+  /** Computer strength stored with this game. The id matches one admin level. */
+  ai_difficulty?: string;
+  /** Computer policy stored with this game (heuristic or mcts). */
+  ai_algorithm?: string;
+  /** Easiest first. Names and order come from the admin AI tab. */
+  ai_levels?: AiLevelChoice[];
+  /** Admin Computer Only game: every faction is the computer. */
+  computer_only?: boolean;
+  /** Per-faction difficulty and board-score weights. Set in the Computer Only lobby. */
+  ai_faction_settings?: Record<string, AiFactionSetting>;
   /** Player IDs who forfeited; their turns are auto-skipped. Used for forfeit notification toast. */
   forfeited_player_ids?: string[];
   /** Forfeit summary by forfeited player id, e.g. ["Gondor -> Alice", "Rohan -> Computer"]. */
@@ -1331,6 +1385,18 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(catalog),
     }),
+  adminGetAi: () => fetchJson<AdminAiSettings>('/admin/ai'),
+  adminPutAi: (body: { difficulty: string; algorithm: string; levels: AdminAiLevel[] }) =>
+    fetchJson<AdminAiSettings & { ok: boolean }>('/admin/ai', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  adminListSims: () => fetchJson<{ runs: AdminSimRun[] }>('/admin/sims'),
+  adminRunSim: (body: { setup_id: string; difficulty: string; matchup: string; max_cycles: number }) =>
+    fetchJson<{ ok: boolean; run: AdminSimRun; runs: AdminSimRun[] }>('/admin/sims', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   adminGetFormulas: () => fetchJson<UnitFormulas>('/admin/formulas'),
   adminPutFormulas: (formulas: UnitFormulas) =>
     fetchJson<{ ok: boolean; formulas: UnitFormulas }>('/admin/formulas', {
@@ -1403,18 +1469,30 @@ export const api = {
     shadowOfWar: boolean = false,
     ringsOfPower: boolean = false,
     optionalRules?: Record<string, boolean>,
+    computerOnly: boolean = false,
   ) =>
     fetchJson<{ game_id: string; game_code: string | null; name: string; state?: ApiGameState; turn_order?: string[] }>('/games/create', {
       method: 'POST',
       body: JSON.stringify({
         name,
         is_multiplayer: isMultiplayer,
+        computer_only: computerOnly,
         heroes_enabled: heroesEnabled,
         shadow_of_war: shadowOfWar,
         rings_of_power: ringsOfPower,
         ...(optionalRules != null && { optional_rules: optionalRules }),
         ...(setupId != null && { setup_id: setupId }),
       }),
+    }),
+  updateAiFactionSettings: (gameId: string, factions: Record<string, AiFactionSetting>) =>
+    fetchJson<{ ai_faction_settings: Record<string, AiFactionSetting> }>(`/games/${gameId}/ai-faction-settings`, {
+      method: 'PUT',
+      body: JSON.stringify({ factions }),
+    }),
+  updateAiDifficulty: (gameId: string, difficulty: string) =>
+    fetchJson<{ ai_difficulty: string }>(`/games/${gameId}/ai-difficulty`, {
+      method: 'PUT',
+      body: JSON.stringify({ difficulty }),
     }),
   listGames: (status?: 'active' | 'finished' | 'all') => {
     const qs = new URLSearchParams({ _: String(Date.now()) });
