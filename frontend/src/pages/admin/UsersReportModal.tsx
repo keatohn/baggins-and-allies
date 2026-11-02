@@ -1,9 +1,20 @@
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { api } from '../../services/api';
 import type { AdminUserItem, ProgressionConfig } from '../../services/api';
 import AvatarColorPicker from '../../components/account/AvatarColorPicker';
 import { NumberField } from './NumberField';
 import { TierXpPanel } from './TierXpPanel';
+
+type UserSortKey = 'username' | 'email' | 'tier' | 'xp' | 'last_login';
+
+/** Last login is stored as naive UTC. */
+function loginTime(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const trimmed = iso.trim().replace(' ', 'T');
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(trimmed);
+  const time = Date.parse(hasZone ? trimmed : `${trimmed}Z`);
+  return Number.isNaN(time) ? null : time;
+}
 
 /** Last login is stored as naive UTC. Show it in US Eastern (EST or EDT). */
 function formatDateTime(iso: string | null | undefined): string {
@@ -49,6 +60,8 @@ export function UsersReportModal({ onClose }: { onClose: () => void }) {
   const [defaultsSaving, setDefaultsSaving] = useState(false);
   const [defaultsError, setDefaultsError] = useState<string | null>(null);
   const [defaultsSaved, setDefaultsSaved] = useState(false);
+  const [sortKey, setSortKey] = useState<UserSortKey>('username');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   useEffect(() => {
     let cancelled = false;
@@ -134,7 +147,9 @@ export function UsersReportModal({ onClose }: { onClose: () => void }) {
       const res = await api.adminAdjustUserXp(user.id, amount, reason);
       setUsers((prev) =>
         (prev ?? []).map((row) =>
-          row.id === user.id ? { ...row, xp: res.xp, tier_id: res.tier_id, tier_name: res.tier_name } : row,
+          row.id === user.id
+            ? { ...row, xp: res.xp, tier_id: res.tier_id, tier_name: res.tier_name, tier_rank: res.tier_rank }
+            : row,
         ),
       );
       setAdjustId(null);
@@ -169,6 +184,34 @@ export function UsersReportModal({ onClose }: { onClose: () => void }) {
       setBackfilling(false);
     }
   };
+
+  const toggleSort = (key: UserSortKey) => {
+    if (sortKey === key) setSortDir((dir) => (dir === 'asc' ? 'desc' : 'asc'));
+    else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  };
+
+  const sortedUsers = useMemo(() => {
+    const rows = users ?? [];
+    const dir = sortDir === 'asc' ? 1 : -1;
+    const text = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' });
+    const missingLast = (a: number | null, b: number | null) => {
+      if (a == null && b == null) return 0;
+      if (a == null) return 1;
+      if (b == null) return -1;
+      return dir * (a - b);
+    };
+    return [...rows].sort((a, b) => {
+      const tie = text(a.username, b.username);
+      if (sortKey === 'username') return dir * text(a.username, b.username);
+      if (sortKey === 'email') return dir * text(a.email, b.email) || tie;
+      if (sortKey === 'tier') return missingLast(a.tier_rank ?? null, b.tier_rank ?? null) || tie;
+      if (sortKey === 'xp') return dir * ((a.xp ?? 0) - (b.xp ?? 0)) || tie;
+      return missingLast(loginTime(a.last_login), loginTime(b.last_login)) || tie;
+    });
+  }, [users, sortKey, sortDir]);
 
   const saveDefaults = async () => {
     setDefaultsSaving(true);
@@ -279,16 +322,27 @@ export function UsersReportModal({ onClose }: { onClose: () => void }) {
                   <table className="games-report__table">
                     <thead>
                       <tr>
-                        <th>Username</th>
-                        <th>Email</th>
-                        <th>Tier</th>
-                        <th>XP</th>
-                        <th>Last login</th>
+                        {(
+                          [
+                            ['username', 'Username'],
+                            ['email', 'Email'],
+                            ['tier', 'Tier'],
+                            ['xp', 'XP'],
+                            ['last_login', 'Last login'],
+                          ] as const
+                        ).map(([key, label]) => (
+                          <th key={key} aria-sort={sortKey === key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                            <button type="button" className="games-report__sort" onClick={() => toggleSort(key)}>
+                              {label}
+                              {sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+                            </button>
+                          </th>
+                        ))}
                         <th />
                       </tr>
                     </thead>
                     <tbody>
-                      {users.map((u) => (
+                      {sortedUsers.map((u) => (
                         <Fragment key={u.id}>
                           <tr>
                             <td className="games-report__name">{u.username}</td>

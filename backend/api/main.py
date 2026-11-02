@@ -2230,6 +2230,7 @@ def admin_list_users(
             "xp": xp,
             "tier_id": tier["id"] if tier else None,
             "tier_name": tier["name"] if tier else None,
+            "tier_rank": tier["rank"] if tier else None,
         })
     return {"users": users}
 
@@ -2341,6 +2342,7 @@ def admin_adjust_user_xp(
         "applied": applied,
         "tier_id": tier["id"] if tier else None,
         "tier_name": tier["name"] if tier else None,
+        "tier_rank": tier["rank"] if tier else None,
     }
 
 

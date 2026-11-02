@@ -498,11 +498,13 @@ def test_admin_endpoints_and_profile_tier(db_session, players, make_client):
     row = next(u for u in listed.json()["users"] if u["id"] == user.id)
     assert row["xp"] == 0
     assert row["tier_name"] == "Shirefolk"
+    assert row["tier_rank"] == 1
 
     adjusted = client.post(f"/admin/users/{user.id}/xp", json={"amount": 25, "reason": "event prize"})
     assert adjusted.status_code == 200, adjusted.text
     assert adjusted.json()["xp"] == 25
     assert adjusted.json()["tier_name"] == "Wanderer"
+    assert adjusted.json()["tier_rank"] == 2
     clamped = client.post(f"/admin/users/{user.id}/xp", json={"amount": -1000, "reason": "reset"})
     assert clamped.json()["applied"] == -25
     assert clamped.json()["xp"] == 0

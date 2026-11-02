@@ -524,6 +524,29 @@
   border-bottom-width: 2px;
 }
 
+.games-report__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  background-image: none;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: normal;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.games-report__sort:hover {
+  color: var(--ink);
+}
+
 .games-report__col-name {
   width: 16%;
 }

@@ -733,6 +733,8 @@ export interface AdminUserItem {
   xp?: number;
   tier_id?: string | null;
   tier_name?: string | null;
+  /** 1 is the lowest tier. Used to sort the admin users table. */
+  tier_rank?: number | null;
 }
 
 export interface AdminQueryColumn {
@@ -1286,7 +1288,7 @@ export const api = {
       { method: 'POST' },
     ),
   adminAdjustUserXp: (playerId: string, amount: number, reason: string) =>
-    fetchJson<{ ok: boolean; xp: number; applied: number; tier_id: string | null; tier_name: string | null }>(
+    fetchJson<{ ok: boolean; xp: number; applied: number; tier_id: string | null; tier_name: string | null; tier_rank: number | null }>(
       `/admin/users/${encodeURIComponent(playerId)}/xp`,
       {
         method: 'POST',
