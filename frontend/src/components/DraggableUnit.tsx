@@ -20,6 +20,8 @@ interface DraggableUnitProps {
   showNavalMustAttack?: boolean;
   /** Defender fleet in a sea zone where an enemy mobilized in: must fight or sail away */
   showForcedNavalStandoff?: boolean;
+  /** Ladder in a pending combat-move attack with no other unit type: cannot attack alone */
+  showLadderOnlyAttack?: boolean;
   /** Naval unit: use larger token on map (1.5×) */
   isNaval?: boolean;
   /** Hero unit (`hero_id`): same larger token as naval */
@@ -44,6 +46,7 @@ function DraggableUnit({
   showAerialMustMove = false,
   showNavalMustAttack = false,
   showForcedNavalStandoff = false,
+  showLadderOnlyAttack = false,
   isNaval = false,
   isHero = false,
   passengerCount = 0,
@@ -79,9 +82,11 @@ function DraggableUnit({
       ? `${unitDef.name} ×${count} — Must attack (naval combat or sea raid) before ending phase`
       : showForcedNavalStandoff
         ? `${unitDef.name} ×${count} — Enemy fleet mobilized here: fight in combat phase or sail away this phase`
-        : passengerCount > 0
-        ? `${unitDef.name} (${passengerCount} aboard)`
-        : `${unitDef.name} ×${count}`;
+        : showLadderOnlyAttack
+          ? `${unitDef.name} ×${count} — Ladder cannot attack alone: add another unit type to the attack before ending phase`
+          : passengerCount > 0
+            ? `${unitDef.name} (${passengerCount} aboard)`
+            : `${unitDef.name} ×${count}`;
 
   return (
     <div
@@ -112,7 +117,7 @@ function DraggableUnit({
           ⚠️
         </span>
       )}
-      {(showNavalMustAttack || showForcedNavalStandoff) && !showAerialMustMove && (
+      {(showNavalMustAttack || showForcedNavalStandoff || showLadderOnlyAttack) && !showAerialMustMove && (
         <span className="unit-token-caution" aria-hidden>
           ⚠️
         </span>

@@ -18,7 +18,8 @@ from backend.engine.definitions import (
     faction_acts_as,
     is_transportable,
 )
-from backend.engine.utils import effective_territory_owner, faction_owns_capital
+from backend.engine.utils import effective_territory_owner, faction_owns_capital, has_unit_special
+from backend.engine.combat import SIEGEWORK_SPECIAL_LADDER
 from backend.engine.rings import power_for_faction
 from backend.engine.special_rules import territory_current_power
 from backend.engine.movement import (
@@ -2027,6 +2028,13 @@ def _validate_end_phase(
                 "Combat move cannot end while a naval unit sailed into a sea zone for load/sea raid but did not follow "
                 f"through (sea raid, naval battle, or load). Unresolved boats: {idle!s}.",
             )
+        ladder_only = get_ladder_only_attack_instance_ids(state, unit_defs)
+        if ladder_only:
+            return ValidationResult(
+                False,
+                "A ladder cannot attack alone: add at least one other unit type to the attack (or cancel the ladder's "
+                f"move) before ending combat move. Ladders without an attack partner: {ladder_only!s}.",
+            )
     if state.phase == "combat":
         if state.active_combat is not None:
             return ValidationResult(
@@ -3008,6 +3016,69 @@ def get_aerial_units_must_move(
                 "instance_id": unit.instance_id,
             })
     return result
+
+
+def get_ladder_attack_accompaniment(
+    state: GameState,
+    unit_defs: dict[str, UnitDefinition],
+) -> tuple[dict[str, list[str]], set[str]]:
+    """
+    Split pending combat-move attack destinations by whether a ladder is accompanied.
+
+    Ladders roll no dice and cannot conquer alone, so every combat-move destination that
+    receives a ladder must also receive at least one non-ladder unit in the pending attacks
+    on that territory (empty/unowned destinations included). Scans only pending moves with
+    phase == "combat_move" (the rule does not apply in non-combat move).
+
+    Returns (ladder_only, accompanied):
+      ladder_only: destination -> sorted ladder instance ids with no non-ladder unit pending there
+      accompanied: destinations that receive at least one non-ladder unit this phase
+    """
+    units_by_iid: dict[str, Unit] = {
+        u.instance_id: u
+        for territory in (state.territories or {}).values()
+        for u in (getattr(territory, "units", None) or [])
+    }
+    ladders_by_dest: dict[str, list[str]] = {}
+    accompanied: set[str] = set()
+    for pm in state.pending_moves or []:
+        if getattr(pm, "phase", None) != "combat_move":
+            continue
+        dest = pm.to_territory
+        for iid in getattr(pm, "unit_instance_ids", None) or []:
+            unit = units_by_iid.get(iid)
+            if unit is None:
+                continue
+            if has_unit_special(unit_defs.get(unit.unit_id), SIEGEWORK_SPECIAL_LADDER):
+                ladders_by_dest.setdefault(dest, []).append(iid)
+            else:
+                accompanied.add(dest)
+    ladder_only = {
+        dest: sorted(ids)
+        for dest, ids in ladders_by_dest.items()
+        if dest not in accompanied
+    }
+    return ladder_only, accompanied
+
+
+def get_ladder_only_attack_destinations(
+    state: GameState,
+    unit_defs: dict[str, UnitDefinition],
+) -> dict[str, list[str]]:
+    """Destinations whose pending combat-move attack contains ladders but no other unit type."""
+    return get_ladder_attack_accompaniment(state, unit_defs)[0]
+
+
+def get_ladder_only_attack_instance_ids(
+    state: GameState,
+    unit_defs: dict[str, UnitDefinition],
+) -> list[str]:
+    """Sorted ladder instance ids attacking with no other unit type in the pending attack."""
+    return sorted(
+        iid
+        for ids in get_ladder_only_attack_destinations(state, unit_defs).values()
+        for iid in ids
+    )
 
 
 def get_faction_stats(

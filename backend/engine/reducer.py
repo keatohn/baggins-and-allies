@@ -105,6 +105,7 @@ from backend.engine.queries import (
     _get_retreat_adjacent_ids,
     _territory_is_friendly_for_retreat,
     get_aerial_units_must_move,
+    get_ladder_only_attack_instance_ids,
     get_contested_territories,
     _sea_zone_adjacent_to_owned_port,
     _port_power_for_sea_zone,
@@ -4811,6 +4812,13 @@ def _handle_end_phase(
 
     # If ending combat_move phase, apply all pending combat moves first, then check loaded_naval_must_attack_instance_ids
     if state.phase == "combat_move":
+        # Ladder rule (checked before pending moves are consumed): a ladder cannot attack alone.
+        ladder_only = get_ladder_only_attack_instance_ids(state, unit_defs)
+        if ladder_only:
+            raise ValueError(
+                "A ladder cannot attack alone: add at least one other unit type to the attack (or cancel the ladder's "
+                f"move) before ending combat move. Ladders without an attack partner: {ladder_only!s}."
+            )
         state, move_events = _apply_pending_moves(
             state, "combat_move", unit_defs, territory_defs, faction_defs
         )

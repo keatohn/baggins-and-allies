@@ -524,6 +524,8 @@ interface GameMapProps {
   loadedNavalMustAttackInstanceIds?: string[];
   /** Boats that sailed in combat_move for load/raid eligibility but did not follow through — must resolve before ending phase. */
   combatMoveNavalIdleSailInstanceIds?: string[];
+  /** Ladder instance IDs in pending combat-move attacks with no other unit type (ladder cannot attack alone). */
+  ladderOnlyAttackInstanceIds?: string[];
   /** Defender boats in a mobilization naval standoff (must fight or sail away). */
   forcedNavalCombatInstanceIds?: string[];
   /**
@@ -1048,6 +1050,7 @@ function GameMap({
   aerialUnitsMustMove = [],
   loadedNavalMustAttackInstanceIds = [],
   combatMoveNavalIdleSailInstanceIds = [],
+  ladderOnlyAttackInstanceIds = [],
   forcedNavalCombatInstanceIds = [],
   seaZoneIdsEligibleForNavalTrayStackClick = EMPTY_ELIGIBLE_SEA_ZONES_FOR_TRAY,
   territorySignals = {},
@@ -1087,6 +1090,10 @@ function GameMap({
   const forcedNavalCombatInstanceIdSet = useMemo(
     () => new Set(forcedNavalCombatInstanceIds),
     [forcedNavalCombatInstanceIds]
+  );
+  const ladderOnlyAttackInstanceIdSet = useMemo(
+    () => new Set(ladderOnlyAttackInstanceIds),
+    [ladderOnlyAttackInstanceIds]
   );
 
   // ===== Action animation cues (purchase pop, combat flash, conquest) =====
@@ -5501,6 +5508,10 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                                       showAerialMustMove={aerialMustMoveKeySet.has(`${territoryId}_${unit_id}`)}
                                       showNavalMustAttack={showNavalMustAttackStacked}
                                       showForcedNavalStandoff={showForcedNavalStandoffStacked}
+                                      showLadderOnlyAttack={
+                                        gameState.phase === 'combat_move' &&
+                                        instanceIdsForUnit.some((id) => ladderOnlyAttackInstanceIdSet.has(id))
+                                      }
                                       isNaval={seaHullIds.has(unit_id)}
                                       isHero={Boolean(unitDefs[unit_id]?.hero_id)}
                                       ringIcons={ringsOnUnit(rings, territoryId, unit_id, territoryUnitsFull?.[territoryId] ?? territoryUnits[territoryId] ?? [], unitDefs)}

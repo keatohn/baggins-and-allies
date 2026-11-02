@@ -2784,6 +2784,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   ]);
 
   const aerialMustMove = availableActions?.aerial_units_must_move ?? [];
+  const ladderOnlyAttackIds = availableActions?.ladder_only_attack_instance_ids ?? [];
 
   const endPhaseDisabled =
     (gameState.phase === 'combat' && gameState.declared_battles.length > 0) ||
@@ -2802,9 +2803,11 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         : gameState.phase === 'non_combat_move' && aerialMustMove.length > 0
           ? 'Move all aerial units to friendly territory before ending phase'
           : gameState.phase === 'combat_move' && availableActions?.can_end_phase === false
-            ? (availableActions?.loaded_naval_must_attack_instance_ids?.length ?? 0) > 0
-              ? 'Sea zones that received a load must attack (naval combat or sea raid) before ending phase'
-              : 'Ships that sailed for combat must sea raid, fight a naval battle, or load troops for combat before ending phase'
+            ? (ladderOnlyAttackIds.length > 0
+                ? 'A ladder cannot attack alone — add another unit type to the attack (or cancel the ladder move) before ending phase'
+                : (availableActions?.loaded_naval_must_attack_instance_ids?.length ?? 0) > 0
+                  ? 'Sea zones that received a load must attack (naval combat or sea raid) before ending phase'
+                  : 'Ships that sailed for combat must sea raid, fight a naval battle, or load troops for combat before ending phase')
             : undefined;
 
   /** Apply purchase-phase draft to server once, then clear draft (so UI does not double-count vs committed resources). */
@@ -4567,6 +4570,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               combatMoveNavalIdleSailInstanceIds={
                 availableActions?.combat_move_naval_idle_sail_instance_ids ?? []
               }
+              ladderOnlyAttackInstanceIds={ladderOnlyAttackIds}
               forcedNavalCombatInstanceIds={availableActions?.forced_naval_combat_instance_ids ?? []}
               seaZoneIdsEligibleForNavalTrayStackClick={seaZoneIdsEligibleForNavalTrayStackClick}
               navalTray={
@@ -4716,6 +4720,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               onCancelRetreat={handleCancelRetreat}
               hasUnmobilizedPurchases={mobilizablePurchases.length > 0 || unplacedCamps.length > 0}
               aerialUnitsMustMove={aerialMustMove}
+              ladderOnlyAttackInstanceIds={ladderOnlyAttackIds}
               territoryDefenderCasualtyOrder={backendState?.territory_defender_casualty_order ?? {}}
               onSetTerritoryDefenderCasualtyOrder={handleSetTerritoryDefenderCasualtyOrder}
               activeCombatTerritoryId={acTerritoryId ?? null}

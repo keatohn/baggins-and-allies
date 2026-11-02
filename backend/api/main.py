@@ -189,6 +189,7 @@ from backend.engine.queries import (
     get_unit_move_targets,
     limit_embark_destinations_to_capacity,
     get_aerial_units_must_move,
+    get_ladder_only_attack_instance_ids,
     get_mobilization_territories,
     get_mobilization_river_zones,
     get_mobilization_sea_zones,
@@ -4733,6 +4734,9 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                     getattr(state_after_combat_moves, "combat_move_naval_idle_sail_instance_ids", []) or []
                 )
                 actions["combat_move_naval_idle_sail_instance_ids"] = idle_naval_sail_ids
+                # Ladder cannot attack alone: block end phase until another unit type joins the pending attack.
+                ladder_only_attack_ids = get_ladder_only_attack_instance_ids(state, ud)
+                actions["ladder_only_attack_instance_ids"] = ladder_only_attack_ids
                 forced_naval_ids = get_forced_naval_combat_instance_ids(
                     state_after_combat_moves, faction, ud, td, fd
                 )
@@ -4747,9 +4751,12 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                         standoff_seas.add(tkey)
                 actions["forced_naval_standoff_sea_zone_ids"] = sorted(standoff_seas)
                 # Allow end phase once every boat that must attack has declared (pending load moves will apply on end_phase)
-                # and no combat_move sail-only reposition into an eligible sea remains without sea raid / naval battle / load.
+                # and no combat_move sail-only reposition into an eligible sea remains without sea raid / naval battle / load
+                # and every pending ladder attack has at least one other unit type.
                 actions["can_end_phase"] = (
-                    len(effective_boat_ids) == 0 and len(idle_naval_sail_ids) == 0
+                    len(effective_boat_ids) == 0
+                    and len(idle_naval_sail_ids) == 0
+                    and len(ladder_only_attack_ids) == 0
                 )
             if phase == "non_combat_move":
                 # Apply pending moves first so aerial_units_must_move matches board state after declared

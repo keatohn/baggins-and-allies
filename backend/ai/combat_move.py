@@ -17,7 +17,8 @@ cavalry per destination across the whole combat_move phase (pending + new).
 from collections import Counter
 from collections.abc import Callable
 
-from backend.engine.actions import Action, move_units, end_phase
+from backend.engine.actions import Action, move_units, end_phase, cancel_move
+from backend.engine.combat import SIEGEWORK_SPECIAL_LADDER
 from backend.engine.definitions import faction_acts_as
 from backend.engine.movement import (
     _is_water_zone,
@@ -29,10 +30,13 @@ from backend.engine.queries import (
     get_movable_units,
     get_unit_move_targets,
     get_unit_faction,
+    get_ladder_attack_accompaniment,
+    get_ladder_only_attack_destinations,
     _is_water_boat,
     filter_unit_instances_that_can_reach,
     validate_action,
 )
+from backend.engine.utils import has_unit_special
 from backend.engine.reducer import get_state_after_pending_moves
 from backend.engine.combat_sim import run_simulation, SimOptions
 
@@ -818,6 +822,45 @@ def _last_resort_must_attack_move(
     return None
 
 
+def drop_unaccompanied_ladder_moves(
+    state,
+    unit_defs,
+    from_to_units: dict[tuple[str, str], list[str]],
+    charge_routes_per_unit: dict,
+) -> None:
+    """
+    Ladder rule (combat move): a ladder cannot attack alone — the phase could never end.
+    Remove all-ladder candidate moves whose destination has neither a pending non-ladder
+    unit nor a non-ladder unit in another candidate move (in place).
+    """
+    units_by_iid = {
+        u.instance_id: u
+        for terr in (state.territories or {}).values()
+        for u in (getattr(terr, "units", None) or [])
+    }
+
+    def _is_ladder(iid: str) -> bool:
+        unit = units_by_iid.get(iid)
+        return bool(unit and has_unit_special(unit_defs.get(unit.unit_id), SIEGEWORK_SPECIAL_LADDER))
+
+    _, accompanied_dests = get_ladder_attack_accompaniment(state, unit_defs)
+    companion_dests = {
+        to_tid
+        for (_from_tid, to_tid), iids in from_to_units.items()
+        if any(iid and not _is_ladder(iid) for iid in iids)
+    }
+    for key in [
+        k
+        for k, iids in from_to_units.items()
+        if iids
+        and all(_is_ladder(iid) for iid in iids)
+        and k[1] not in companion_dests
+        and k[1] not in accompanied_dests
+    ]:
+        from_to_units.pop(key, None)
+        charge_routes_per_unit.pop(key, None)
+
+
 def decide_combat_move(ctx: AIContext):
     """
     Pick one move_units (into an enemy territory) that balances multiple attacks.
@@ -864,6 +907,18 @@ def decide_combat_move(ctx: AIContext):
             if charge_routes.get(to_tid):
                 charge_routes_per_unit.setdefault(
                     key, {})[iid] = charge_routes[to_tid]
+
+    unit_by_iid = {
+        u.instance_id: u
+        for terr in (state.territories or {}).values()
+        for u in (getattr(terr, "units", None) or [])
+    }
+
+    def _is_ladder_iid(iid: str) -> bool:
+        unit = unit_by_iid.get(iid)
+        return bool(unit and has_unit_special(ud.get(unit.unit_id), SIEGEWORK_SPECIAL_LADDER))
+
+    drop_unaccompanied_ladder_moves(state, ud, from_to_units, charge_routes_per_unit)
 
     def _territory_power(tid: str) -> int:
         tdef = td.get(tid)
@@ -927,6 +982,34 @@ def decide_combat_move(ctx: AIContext):
             movable,
             pending_unit_ids,
         )
+
+    # Ladder rule: resolve a pending ladder-only attack before anything else so the phase can end.
+    # (Can exist from states declared under older rules, or when no partner could reach earlier.)
+    alone_ladder_dests = get_ladder_only_attack_destinations(state, ud)
+    if alone_ladder_dests:
+        # 1) Bring any non-ladder unit into each such attack.
+        for (from_tid, to_tid), unit_ids in from_to_units.items():
+            if to_tid not in alone_ladder_dests or not unit_ids:
+                continue
+            partner_ids = [iid for iid in unit_ids if not _is_ladder_iid(iid)]
+            if not partner_ids:
+                continue
+            return move_units(
+                faction_id,
+                from_tid,
+                to_tid,
+                partner_ids,
+                charge_through=_best_charge_path((from_tid, to_tid), partner_ids),
+            )
+        # 2) No partner can reach: cancel the ladder-only pending move instead.
+        alone_ids = {
+            iid for ids in alone_ladder_dests.values() for iid in ids
+        }
+        for move_index, pm in enumerate(state.pending_moves or []):
+            if getattr(pm, "phase", None) != "combat_move":
+                continue
+            if alone_ids.intersection(getattr(pm, "unit_instance_ids", None) or []):
+                return cancel_move(faction_id, move_index)
 
     if not from_to_units:
         if can_end_phase:
