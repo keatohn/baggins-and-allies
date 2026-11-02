@@ -1320,6 +1320,48 @@
   border-radius: 8px;
 }
 
+.admin-openings__factions {
+  display: flex;
+  gap: 0.35rem;
+  overflow-x: auto;
+  flex-shrink: 0;
+  padding: 0.4rem 0.55rem;
+  border-bottom: 1px solid var(--ink-faded);
+  background: rgba(255, 254, 248, 0.94);
+}
+
+.admin-openings__faction {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.68rem;
+  line-height: 1.1;
+  padding: 0.1rem 0.15rem;
+  cursor: pointer;
+}
+
+.admin-openings__faction .faction-seal {
+  width: 36px;
+  height: 36px;
+}
+
+.admin-openings__faction--selected .faction-seal {
+  box-shadow: 0 0 0 2px #d4a017;
+}
+
+.admin-openings__faction-name {
+  max-width: 4.6rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .admin-graph__header .admin-form__micro {
   margin: 0;
   grid-column: 1 / -1;

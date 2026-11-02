@@ -97,6 +97,22 @@ function territoryLabel(id: string, def: Record<string, unknown> | undefined): s
   return name || id;
 }
 
+function openingStatus(
+  selected: { factionId: string; factionName: string; arrows: unknown[] },
+  factions: { factionId: string; factionName: string; assumed: { to: string }[] }[],
+  territories: Dict,
+): string {
+  const count = selected.arrows.length;
+  const head = count
+    ? `${selected.factionName}: ${count} opening ${count === 1 ? 'attack' : 'attacks'}. Hover a pill for the stacks.`
+    : `${selected.factionName} has no opening attack into a territory with defenders.`;
+  const index = factions.findIndex((faction) => faction.factionId === selected.factionId);
+  const prior = factions.slice(0, Math.max(index, 0)).flatMap((faction) =>
+    faction.assumed.map((attack) => `${faction.factionName} took ${territoryLabel(attack.to, territories[attack.to])}`),
+  );
+  return prior.length ? `${head} Assumes ${prior.join(', ')}.` : head;
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
@@ -188,9 +204,19 @@ export function MapViewPane({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [openings, setOpenings] = useState<{
     key: string;
-    factionName: string;
-    arrows: { from: string; to: string; pAttackerWin: number; title: string }[];
+    factions: {
+      factionId: string;
+      factionName: string;
+      arrows: { from: string; to: string; pAttackerWin: number; title: string }[];
+      assumed: { from: string; to: string; pConquer: number }[];
+      board: {
+        owners: Record<string, string | null>;
+        units: Record<string, { unit_id: string; count: number }[]>;
+        strongholdHp: Record<string, number>;
+      };
+    }[];
   } | null>(null);
+  const [openingFactionId, setOpeningFactionId] = useState<string | null>(null);
   const [openingLoading, setOpeningLoading] = useState(false);
   const [openingError, setOpeningError] = useState<string | null>(null);
 
@@ -429,19 +455,32 @@ export function MapViewPane({
             stacks.map((stack) => `${stack.count}× ${nameOf(units, stack.unit_id)}`).join(', ');
           setOpenings({
             key: openingRequest.key,
-            factionName: res.faction_name || res.faction_id,
-            arrows: res.attacks.map((attack) => {
-              const from = nameOf(cur.territories, attack.from_territory);
-              const to = nameOf(cur.territories, attack.to_territory);
-              const wins = Math.round(attack.p_attacker_win * 100);
-              const conquers = Math.round(attack.p_conquer * 100);
-              return {
+            factions: res.factions.map((faction) => ({
+              factionId: faction.faction_id,
+              factionName: faction.faction_name || faction.faction_id,
+              assumed: faction.assumed.map((attack) => ({
                 from: attack.from_territory,
                 to: attack.to_territory,
-                pAttackerWin: attack.p_attacker_win,
-                title: `${from} → ${to}. Attack wins ${wins}%. Conquers ${conquers}%. ${stacksOf(attack.attacker_stacks)} vs ${stacksOf(attack.defender_stacks)}${attack.is_sea_raid ? '. Sea raid.' : ''}`,
-              };
-            }),
+                pConquer: attack.p_conquer,
+              })),
+              board: {
+                owners: faction.board.owners,
+                units: faction.board.units,
+                strongholdHp: faction.board.stronghold_hp ?? {},
+              },
+              arrows: faction.attacks.map((attack) => {
+                const from = nameOf(cur.territories, attack.from_territory);
+                const to = nameOf(cur.territories, attack.to_territory);
+                const wins = Math.round(attack.p_attacker_win * 100);
+                const conquers = Math.round(attack.p_conquer * 100);
+                return {
+                  from: attack.from_territory,
+                  to: attack.to_territory,
+                  pAttackerWin: attack.p_attacker_win,
+                  title: `${from} → ${to}. Attack wins ${wins}%. Conquers ${conquers}%. ${stacksOf(attack.attacker_stacks)} vs ${stacksOf(attack.defender_stacks)}${attack.is_sea_raid ? '. Sea raid.' : ''}`,
+                };
+              }),
+            })),
           });
           setOpeningLoading(false);
         })
@@ -800,24 +839,54 @@ export function MapViewPane({
     );
   };
 
+  const selectedOpening = useMemo(() => {
+    if (view !== 'openings' || !openings || openings.key !== openingRequest.key) return null;
+    return openings.factions.find((faction) => faction.factionId === openingFactionId) ?? openings.factions[0] ?? null;
+  }, [view, openings, openingRequest.key, openingFactionId]);
+
+  const openingBoard = selectedOpening?.board ?? null;
+  const mapOwners = openingBoard ? openingBoard.owners : owners;
+  const mapUnits = openingBoard ? openingBoard.units : startingUnits;
+  const mapTerritoryData = useMemo(() => {
+    if (!openingBoard) return territoryData;
+    const out: typeof territoryData = {};
+    for (const [tid, row] of Object.entries(territoryData)) {
+      const hp = openingBoard.strongholdHp[tid];
+      out[tid] = {
+        ...row,
+        owner: openingBoard.owners[tid] || undefined,
+        ...(hp != null && row.stronghold ? { stronghold_current_health: hp } : {}),
+      };
+    }
+    return out;
+  }, [territoryData, openingBoard]);
+  const mapGameState = useMemo(() => {
+    if (!selectedOpening) return gameState;
+    return { ...gameState, current_faction: selectedOpening.factionId };
+  }, [gameState, selectedOpening]);
+
   const infoText = (key: string) => {
     const def = shown[key];
+    const ownerId = mapOwners[key];
     const parts = [
       territoryLabel(key, def),
-      `Owner: ${owners[key] ? ownerLabel(owners[key]) : 'none'}`,
+      `Owner: ${ownerId ? ownerLabel(ownerId) : 'none'}`,
       `Power: ${territoryPower(def)}`,
     ];
-    if (def?.is_stronghold === true) parts.push(`Stronghold ${strongholdHp(def)} HP`);
+    if (def?.is_stronghold === true) {
+      const projectedHp = openingBoard?.strongholdHp[key];
+      parts.push(`Stronghold ${projectedHp != null ? projectedHp : strongholdHp(def)} HP`);
+    }
     if (hasSiteAt(cur.camps, key)) parts.push('Camp');
     if (hasSiteAt(cur.ports, key)) parts.push('Port');
-    const stacks = stacksForTerritory(startingUnits, key);
+    const stacks = stacksForTerritory(mapUnits, key);
     parts.push(`Starting units: ${stacks.map((s) => `${s.count}× ${unitLabel(s.unit_id)}`).join(', ') || 'none'}`);
     return parts.join(' · ');
   };
 
   const description =
     view === 'openings'
-      ? 'Opening attacks for the first faction. Each arrow runs from a territory with its units to a place those units can attack that already has defenders. The pill is the combat sim’s chance the attack wins.'
+      ? 'Opening attacks in turn order. The first faction starts from the setup. Each later faction is shown after earlier factions take the attacks they conquer at least 75% of the time, sending each stack on only its best such attack. The pill is the combat sim’s chance the attack wins.'
       : view === 'setup'
       ? editing
         ? 'Choose a territory from the list or the map, then set its owner, power, camp, port, stronghold, and starting units.'
@@ -1123,12 +1192,39 @@ export function MapViewPane({
             ) : null}
             {view !== 'graph' ? (
               <div className="admin-mapview__game">
+                {view === 'openings' && openings && openings.key === openingRequest.key && openings.factions.length ? (
+                  <div className="admin-openings__factions" role="tablist" aria-label="Opening faction">
+                    {openings.factions.map((faction) => {
+                      const art = factionData[faction.factionId];
+                      const selected = faction.factionId === selectedOpening?.factionId;
+                      return (
+                        <button
+                          key={faction.factionId}
+                          type="button"
+                          role="tab"
+                          aria-selected={selected}
+                          className={`admin-openings__faction${selected ? ' admin-openings__faction--selected' : ''}`}
+                          title={faction.factionName}
+                          onClick={() => setOpeningFactionId(faction.factionId)}
+                        >
+                          <span
+                            className="faction-seal"
+                            style={art?.color ? { borderColor: art.color } : undefined}
+                          >
+                            {art?.icon ? <img src={art.icon} alt="" /> : null}
+                          </span>
+                          <span className="admin-openings__faction-name">{faction.factionName}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
                 <GameMap
-                  gameState={gameState}
+                  gameState={mapGameState}
                   selectedTerritory={selectedKey}
                   selectedUnit={null}
-                  territoryData={territoryData}
-                  territoryUnits={startingUnits}
+                  territoryData={mapTerritoryData}
+                  territoryUnits={mapUnits}
                   rings={rings}
                   unitDefs={unitDefs}
                   unitStats={unitStats}
@@ -1147,9 +1243,7 @@ export function MapViewPane({
                   pendingMoveConfirm={null}
                   onSetPendingMove={NOOP}
                   pendingMoves={NO_MOVES}
-                  openingAttacks={
-                    view === 'openings' && openings?.key === openingRequest.key ? openings.arrows : []
-                  }
+                  openingAttacks={view === 'openings' && selectedOpening ? selectedOpening.arrows : []}
                 />
               </div>
             ) : (
@@ -1268,11 +1362,9 @@ export function MapViewPane({
           <p className="admin-graph__status">
             {openingError
               ? openingError
-              : !openings || openingLoading || openings.key !== openingRequest.key
+              : !selectedOpening || openingLoading
                 ? 'Simulating opening attacks…'
-                : openings.arrows.length
-                  ? `${openings.factionName}: ${openings.arrows.length} opening ${openings.arrows.length === 1 ? 'attack' : 'attacks'}. Hover a pill for the stacks.`
-                  : `${openings.factionName} has no opening attack into a territory with defenders.`}
+                : openingStatus(selectedOpening, openings?.factions ?? [], cur.territories)}
           </p>
         ) : null}
         {selectedKey && shown[selectedKey] ? (

@@ -1643,7 +1643,7 @@ export const api = {
       }),
     }),
 
-  /** Starting faction's opening attacks into territories that already have defenders. */
+  /** Each faction's opening attacks, after earlier factions' likely conquests. */
   openingAttacks: (body: {
     manifest?: Record<string, unknown>;
     units: Record<string, unknown>;
@@ -1655,17 +1655,26 @@ export const api = {
     n_trials?: number;
   }) =>
     fetchJson<{
-      faction_id: string;
-      faction_name: string;
       n_trials: number;
-      attacks: {
-        from_territory: string;
-        to_territory: string;
-        attacker_stacks: { unit_id: string; count: number }[];
-        defender_stacks: { unit_id: string; count: number }[];
-        p_attacker_win: number;
-        p_conquer: number;
-        is_sea_raid: boolean;
+      conquer_threshold: number;
+      factions: {
+        faction_id: string;
+        faction_name: string;
+        board: {
+          owners: Record<string, string | null>;
+          units: Record<string, { unit_id: string; count: number }[]>;
+          stronghold_hp: Record<string, number>;
+        };
+        attacks: {
+          from_territory: string;
+          to_territory: string;
+          attacker_stacks: { unit_id: string; count: number }[];
+          defender_stacks: { unit_id: string; count: number }[];
+          p_attacker_win: number;
+          p_conquer: number;
+          is_sea_raid: boolean;
+        }[];
+        assumed: { from_territory: string; to_territory: string; p_conquer: number }[];
       }[];
     }>('/admin/opening-attacks', {
       method: 'POST',

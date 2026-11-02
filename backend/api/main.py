@@ -2172,7 +2172,7 @@ def admin_opening_attacks(
     body: OpeningAttacksRequest,
     _admin: Player = Depends(get_current_admin),
 ):
-    """Win chances for the starting faction's opening attacks into defended territories."""
+    """Win chances for each faction's opening attacks, after earlier factions' likely conquests."""
     from backend.engine.openings import compute_opening_attacks
 
     snapshot = {
