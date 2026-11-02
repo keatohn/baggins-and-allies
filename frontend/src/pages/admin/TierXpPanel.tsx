@@ -171,6 +171,7 @@ export function TierXpPanel({
             onChange={(e) => onChange({ ...config, currency_label: e.target.value })}
           />
         </label>
+        <div className="admin-tier-grid">
         {config.tiers.map((tier) => (
           <div key={tier.id} className="admin-form__card admin-tier-card">
             <p className="admin-form__micro admin-tier-card__rank">Tier {rankById.get(tier.id) ?? ''}</p>
@@ -274,6 +275,7 @@ export function TierXpPanel({
             </button>
           </div>
         ))}
+        </div>
         <button
           type="button"
           className="admin-page__btn"
