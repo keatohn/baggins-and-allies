@@ -230,14 +230,16 @@ def test_stats_head_to_head_and_peer_filters(db_session, players, make_client):
     client = make_client(alice)
     r = client.get(f"/players/{alice.id}/stats")
     data = r.json()
-    h2h = {e["player_id"]: e for e in data["head_to_head"]}
-    assert h2h[bob.id]["kind"] == "against"
-    assert h2h[bob.id]["games"] == 2
-    assert h2h[bob.id]["wins"] == 1
-    assert h2h[bob.id]["username"] == "bob"
-    assert h2h[carol.id]["games"] == 2
-    # carol was with alice once and against once; kind collapses to "against"
-    assert h2h[carol.id]["kind"] == "against"
+    h2h = {(e["player_id"], e["kind"]): e for e in data["head_to_head"]}
+    assert h2h[(bob.id, "against")]["games"] == 2
+    assert h2h[(bob.id, "against")]["wins"] == 1
+    assert h2h[(bob.id, "against")]["username"] == "bob"
+    assert (bob.id, "with") not in h2h
+    # carol was with alice once and against once; those stay separate records
+    assert h2h[(carol.id, "with")]["games"] == 1
+    assert h2h[(carol.id, "with")]["wins"] == 1
+    assert h2h[(carol.id, "against")]["games"] == 1
+    assert h2h[(carol.id, "against")]["wins"] == 0
 
     # opponent=bob: both games
     r_opp = client.get(f"/players/{alice.id}/stats", params={"opponent": bob.id})

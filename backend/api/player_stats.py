@@ -273,10 +273,11 @@ def compute_player_stats(
 
     # Head-to-head vs/with each other human. One credit per alliance, so a player
     # who held both sides is not collapsed into a single win for the first faction.
+    # With and against stay separate rows: a mixed record is not labeled "vs".
     subject_by_game: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for g in games:
         subject_by_game[g["game_id"]].append(g)
-    h2h: dict[str, dict[str, Any]] = {}
+    h2h: dict[tuple[str, str], dict[str, Any]] = {}
     for peer in _aggregate_by_game(peer_rows):
         game_id = peer["game_id"]
         subject_entries = subject_by_game.get(game_id) or []
@@ -289,7 +290,8 @@ def compute_player_stats(
             if not subj_a:
                 continue
             kind = "with" if subj_a == other_a else "against"
-            bucket = h2h.get(other_id)
+            key = (other_id, kind)
+            bucket = h2h.get(key)
             if bucket is None:
                 bucket = {
                     "player_id": other_id,
@@ -297,29 +299,26 @@ def compute_player_stats(
                     "games": 0,
                     "wins": 0,
                 }
-                h2h[other_id] = bucket
-            elif bucket["kind"] != kind:
-                # Same peer across multiple games with different relations: prefer "against".
-                bucket["kind"] = "against"
+                h2h[key] = bucket
             bucket["games"] += 1
             if subj["won"]:
                 bucket["wins"] += 1
 
-    usernames = _usernames_for(db, list(h2h.keys()))
+    usernames = _usernames_for(db, [pid for pid, _kind in h2h.keys()])
     head_to_head = sorted(
         (
             {
-                "player_id": pid,
-                "username": usernames.get(pid),
+                "player_id": b["player_id"],
+                "username": usernames.get(b["player_id"]),
                 "kind": b["kind"],
                 "games": b["games"],
                 "wins": b["wins"],
                 "losses": b["games"] - b["wins"],
                 "win_pct": _win_pct(b["wins"], b["games"]),
             }
-            for pid, b in h2h.items()
+            for b in h2h.values()
         ),
-        key=lambda e: (-e["games"], e["username"] or e["player_id"]),
+        key=lambda e: (-e["games"], (e["username"] or e["player_id"]).lower(), e["kind"]),
     )
 
     faction_counts: dict[str, int] = defaultdict(int)
