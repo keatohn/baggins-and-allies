@@ -191,3 +191,75 @@ def test_end_phase_applies_when_pending_fills_all_capacity():
     assert state.pending_mobilizations == []
     assert state.faction_purchased_units["rohan"] == []
     assert state.current_faction != "rohan"
+
+
+def test_end_phase_valid_when_only_port_power_remains_for_pool_unit():
+    """
+    A pool land unit that fits no remaining camp/home slot must not be blocked by
+    port (naval) power. Regression: the parent-land destination check counted
+    port_territories power (Umbar's naval pool) as land capacity, so a fifth
+    haradrim_archer — with haradwaith's camp full and no other legal slot —
+    deadlocked mobilization (end_phase invalid, every mobilize invalid).
+    """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(
+        setup_id="motw_1.0"
+    )
+    state = initialize_game_state(
+        faction_defs,
+        territory_defs,
+        camp_defs=camp_defs,
+        starting_setup=load_starting_setup(setup_id="motw_1.0"),
+    )
+    state.current_faction = "harad"
+    state.phase = "mobilization"
+    state.faction_territories_at_turn_start["harad"] = [
+        t for t, ts in state.territories.items() if ts.owner == "harad"
+    ]
+    # Pool unit whose only legal destination is haradwaith's camp (khand/umbar
+    # have no camp and are not home for haradrim_archer).
+    state.faction_purchased_units["harad"] = [
+        UnitStack(unit_id="haradrim_archer", count=1),
+    ]
+    # Haradwaith camp (power 4) fully consumed by pending.
+    state.pending_mobilizations = [
+        PendingMobilization(
+            destination="haradwaith", units=[{"unit_id": "haradrim_archer", "count": 4}]
+        ),
+    ]
+
+    # No legal mobilize remains for the pool unit...
+    for tid in ("haradwaith", "khand", "umbar"):
+        vr = validate_action(
+            state,
+            mobilize_units("harad", tid, [{"unit_id": "haradrim_archer", "count": 1}]),
+            unit_defs,
+            territory_defs,
+            faction_defs,
+            camp_defs,
+            port_defs,
+        )
+        assert not vr.valid, f"expected no legal destination at {tid}"
+
+    # ...so ending the phase must be allowed (pool unit is dropped by design).
+    vr = validate_action(
+        state,
+        end_phase("harad"),
+        unit_defs,
+        territory_defs,
+        faction_defs,
+        camp_defs,
+        port_defs,
+    )
+    assert vr.valid, vr.error
+
+    state, _events = apply_action(
+        state,
+        end_phase("harad"),
+        unit_defs,
+        territory_defs,
+        faction_defs,
+        camp_defs,
+        port_defs,
+    )
+    assert state.faction_purchased_units["harad"] == []
+    assert state.current_faction != "harad"

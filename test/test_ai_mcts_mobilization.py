@@ -342,3 +342,61 @@ def test_decide_keeps_heuristic_when_mcts_disabled(monkeypatch):
     action = decide(ctx)
     assert action is not None
     assert action.type in ("mobilize_units", "queue_camp_placement", "end_phase")
+
+
+# ---------------------------------------------------------------------------
+# _fallback_mobilize: anti-stuck placement must respect pending capacity
+# ---------------------------------------------------------------------------
+
+
+def test_fallback_mobilize_skips_full_destination():
+    """The anti-stuck fallback must skip a destination already at pending capacity.
+
+    Regression: it read raw capacity (ignoring pending_mobilizations) and
+    returned the first destination even when full, so decide() emitted a
+    mobilize_units the reducer rejected ("already N pending, capacity is M").
+    """
+    from backend.ai.decide import _fallback_mobilize
+    from backend.engine.definitions import load_static_definitions, load_starting_setup
+    from backend.engine.state import PendingMobilization
+    from backend.engine.utils import initialize_game_state
+    from test.test_ai_mcts_selfplay import _available_actions
+
+    ud, td, fd, cd, port_d = load_static_definitions(setup_id="wotr_1.1")
+    state = initialize_game_state(
+        faction_defs=fd,
+        territory_defs=td,
+        camp_defs=cd,
+        starting_setup=load_starting_setup(setup_id="wotr_1.1"),
+    )
+    fid = "rohan"
+    state.current_faction = fid
+    state.phase = "mobilization"
+    state.faction_territories_at_turn_start[fid] = [
+        tid for tid, terr in state.territories.items() if terr.owner == fid
+    ]
+    state.faction_purchased_units[fid] = [
+        UnitStack(unit_id="rohirrim_soldier", count=1),
+    ]
+    # Edoras camp (power 5) fully consumed by pending; dunharrow (power 3) free.
+    state.pending_mobilizations = [
+        PendingMobilization(
+            destination="edoras", units=[{"unit_id": "rohirrim_soldier", "count": 5}]
+        ),
+    ]
+    ctx = AIContext(
+        state=state,
+        unit_defs=ud,
+        territory_defs=td,
+        faction_defs=fd,
+        camp_defs=cd,
+        port_defs=port_d,
+        available_actions=_available_actions(state, fid, "mobilization", ud, td, fd, cd, port_d),
+    )
+
+    action = _fallback_mobilize(ctx)
+    assert action is not None, "fallback found no placement while capacity remains"
+    assert action.type == "mobilize_units"
+    v = validate_action(state, action, ud, td, fd, cd, port_d)
+    assert v.valid, v.error
+    assert action.payload["destination"] != "edoras"

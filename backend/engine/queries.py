@@ -1939,14 +1939,24 @@ def _purchased_units_have_a_destination(
     )
     parent_power: dict[str, int] = {}
     parent_home: dict[tuple[str, str], int] = {}
-    for bucket in (capacity.get("territories") or [], capacity.get("port_territories") or []):
-        for row in bucket:
-            tid = row.get("territory_id")
-            if not tid:
-                continue
-            parent_power[tid] = int(row.get("power", 0) or 0)
-            for uid, n in (row.get("home_unit_capacity") or {}).items():
-                parent_home[(tid, uid)] = int(n or 0)
+    # Land capacity comes from camp/home rows only. Port rows are a naval pool
+    # (get_mobilization_capacity: "Ports only mobilize naval to sea zones"), so
+    # their power is not a legal land destination — counting it deadlocked
+    # end_phase when a pool unit fit no remaining camp/home slot. Port home
+    # slots (e.g. Corsair -> Umbar) still count.
+    for row in capacity.get("territories") or []:
+        tid = row.get("territory_id")
+        if not tid:
+            continue
+        parent_power[tid] = int(row.get("power", 0) or 0)
+        for uid, n in (row.get("home_unit_capacity") or {}).items():
+            parent_home[(tid, uid)] = int(n or 0)
+    for row in capacity.get("port_territories") or []:
+        tid = row.get("territory_id")
+        if not tid:
+            continue
+        for uid, n in (row.get("home_unit_capacity") or {}).items():
+            parent_home[(tid, uid)] = int(n or 0)
     for row in capacity.get("sea_zones") or []:
         parent_power[row.get("sea_zone_id")] = int(row.get("power", 0) or 0)
     for row in capacity.get("river_zones") or []:
