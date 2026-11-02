@@ -1,6 +1,8 @@
-import type { AdminSetupBundle, ApiFactionStats, CatalogSpecial, FactionStatEntry } from '../../services/api';
+import type { AdminSetupBundle, ApiFactionStats, CatalogSpecial, Definitions, FactionStatEntry } from '../../services/api';
 import type { StatsFactionData, StatsRingMark, UnitForStats } from '../../components/StatsModals';
+import { boostingRingsFromRules, type RingView } from '../../ringsDisplay';
 import { compareUnitsForStats } from '../../unitStatsOrder';
+import { startingUnitsOf } from './territoryGraph';
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -305,4 +307,95 @@ export function previewStatsFromBundle(
   }
 
   return { factionData, turnOrder, unitsByFaction, factionStats, ringsByFaction, ringsMode: ringsRule.mode };
+}
+
+export interface AdminCombatSimData {
+  definitions: Definitions;
+  territoryUnits: Record<string, { unit_id: string; count: number }[]>;
+  territoryData: Record<string, { owner?: string; terrain?: string }>;
+  factionData: Record<string, { alliance?: string; icon?: string; color?: string }>;
+  unitDefs: Record<string, { name: string; icon: string; faction?: string }>;
+  scenarioRings: RingView[];
+}
+
+/** Opening positions and unit defs for the combat sim, from the selected setup (including unsaved edits to stacks and owners). */
+export function combatSimFromBundle(
+  bundle: AdminSetupBundle | null,
+  options: { rings?: boolean; specials?: CatalogSpecial[] } = {},
+): AdminCombatSimData | null {
+  if (!bundle) return null;
+  const units = asRecord(bundle.units);
+  const territories = asRecord(bundle.territories);
+  const factions = asRecord(bundle.factions);
+  const starting = asRecord(bundle.starting_setup);
+  const owners = asRecord(starting.territory_owners);
+  const specials = Object.fromEntries(
+    (options.specials ?? []).map((s) => [s.id, { name: s.name, description: s.description, display_code: s.display_code }]),
+  );
+
+  const definitions: Definitions = {
+    units: bundle.units as Definitions['units'],
+    territories: bundle.territories as Definitions['territories'],
+    factions: bundle.factions as Definitions['factions'],
+    camps: bundle.camps as Definitions['camps'],
+    ports: bundle.ports as Definitions['ports'],
+    specials,
+    specials_order: (options.specials ?? []).map((s) => s.id),
+  };
+
+  const unitDefs: AdminCombatSimData['unitDefs'] = {};
+  for (const [id, raw] of Object.entries(units)) {
+    const u = asRecord(raw);
+    const iconFile = asString(u.icon) || `${id}.png`;
+    const faction = asString(u.faction);
+    unitDefs[id] = {
+      name: asString(u.display_name) || id,
+      icon: `/assets/units/${iconFile}`,
+      ...(faction ? { faction } : {}),
+    };
+  }
+
+  const factionData: AdminCombatSimData['factionData'] = {};
+  for (const [id, raw] of Object.entries(factions)) {
+    const f = asRecord(raw);
+    const iconFile = asString(f.icon) || `${id}.png`;
+    const color = asString(f.color) || '#888888';
+    const alliance = asString(f.alliance);
+    factionData[id] = { alliance, icon: `/assets/factions/${iconFile}`, color };
+    const subs = Array.isArray(f.subfactions) ? f.subfactions : [];
+    for (const rawSub of subs) {
+      const sub = asRecord(rawSub);
+      const sid = asString(sub.id);
+      if (!sid) continue;
+      const subIcon = asString(sub.icon);
+      factionData[sid] = {
+        alliance,
+        icon: subIcon ? `/assets/factions/${subIcon}` : `/assets/factions/${iconFile}`,
+        color: asString(sub.color) || color,
+      };
+    }
+  }
+
+  const territoryData: AdminCombatSimData['territoryData'] = {};
+  for (const [id, raw] of Object.entries(territories)) {
+    const t = asRecord(raw);
+    const owner = asString(owners[id]);
+    const terrain = asString(t.terrain_type).toLowerCase();
+    territoryData[id] = {
+      ...(owner ? { owner } : {}),
+      ...(terrain ? { terrain } : {}),
+    };
+  }
+
+  const includeRings = options.rings !== false;
+  const scenarioRings = includeRings ? boostingRingsFromRules(bundle.manifest.special_rules) : [];
+
+  return {
+    definitions,
+    territoryUnits: startingUnitsOf(starting),
+    territoryData,
+    factionData,
+    unitDefs,
+    scenarioRings,
+  };
 }

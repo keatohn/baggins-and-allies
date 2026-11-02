@@ -28,11 +28,12 @@ import { AiPanel } from './admin/AiPanel';
 import { SimsPanel } from './admin/SimsPanel';
 import { QueryPanel } from './admin/QueryPanel';
 import { UsersReportModal } from './admin/UsersReportModal';
-import { previewStatsFromBundle } from './admin/previewStats';
 import { completeTerritoryAsymmetries } from './admin/territoryGraph';
 import { MapViewPane, type MapSetupDraft } from './admin/MapViewPane';
 import { MapOverridesPane } from './admin/MapOverridesPane';
 import { GameStatsModal, UnitStatsModal, type UnitStatsExtraColumn } from '../components/StatsModals';
+import CombatSimulatorPanel from '../components/CombatSimulatorPanel';
+import { previewStatsFromBundle, combatSimFromBundle } from './admin/previewStats';
 import './Admin.css';
 
 const TAB_KEYS = [
@@ -368,6 +369,7 @@ export default function Admin() {
   const globalOpen = audioOpen || signalsOpen || catalogOpen || formulasOpen || aiOpen;
   const [unitStatsOpen, setUnitStatsOpen] = useState(false);
   const [gameStatsOpen, setGameStatsOpen] = useState(false);
+  const [combatSimOpen, setCombatSimOpen] = useState(false);
   const [balanceOpen, setBalanceOpen] = useState(false);
   const [gamesOpen, setGamesOpen] = useState(false);
   const [unitsOpen, setUnitsOpen] = useState(false);
@@ -378,6 +380,10 @@ export default function Admin() {
   const [statsWithRings, setStatsWithRings] = useState(true);
   const statsPreview = useMemo(
     () => previewStatsFromBundle(bundle, { rings: statsWithRings, specials: catalog.specials }),
+    [bundle, statsWithRings, catalog.specials],
+  );
+  const combatSim = useMemo(
+    () => combatSimFromBundle(bundle, { rings: statsWithRings, specials: catalog.specials }),
     [bundle, statsWithRings, catalog.specials],
   );
   const formulaColumns = useMemo((): UnitStatsExtraColumn[] => {
@@ -1130,6 +1136,14 @@ export default function Admin() {
             <button
               type="button"
               className="admin-page__tab"
+              disabled={!combatSim}
+              onClick={() => setCombatSimOpen(true)}
+            >
+              Combat Sim
+            </button>
+            <button
+              type="button"
+              className="admin-page__tab"
               disabled={!bundle || !statsPreview}
               onClick={() => setBalanceOpen(true)}
             >
@@ -1311,6 +1325,38 @@ export default function Admin() {
           toolbar={ringsToggle}
           onClose={() => setGameStatsOpen(false)}
         />
+      )}
+      {combatSimOpen && combatSim && bundle && (
+        <div className="combat-sim-modal-overlay" onClick={() => setCombatSimOpen(false)}>
+          <div
+            className="combat-sim-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-combat-sim-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="combat-sim-modal-header">
+              <h2 id="admin-combat-sim-title">Combat Simulator</h2>
+              <button type="button" className="close-btn" onClick={() => setCombatSimOpen(false)} aria-label="Close">
+                ×
+              </button>
+            </div>
+            <div className="combat-sim-modal-body">
+              <CombatSimulatorPanel
+                key={bundle.id}
+                embedded
+                definitions={combatSim.definitions}
+                territoryUnits={combatSim.territoryUnits}
+                unitDefs={combatSim.unitDefs}
+                territoryData={combatSim.territoryData}
+                factionData={combatSim.factionData}
+                setupId={bundle.id}
+                heroesEnabled
+                scenarioRings={combatSim.scenarioRings}
+              />
+            </div>
+          </div>
+        </div>
       )}
       {balanceOpen && bundle && statsPreview && (
         <BalanceModal
