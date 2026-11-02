@@ -453,14 +453,18 @@ function specialRuleMeta(manifest: Record<string, unknown>, type: string): RuleM
   return { name: '', description: '', is_optional: false };
 }
 
+function putRuleText(rule: Record<string, unknown>, key: 'name' | 'description', value: string) {
+  // Keep spaces while typing. A value that is only whitespace is omitted.
+  if (value.trim()) rule[key] = value;
+  else delete rule[key];
+}
+
 function withRuleMeta(
   rule: Record<string, unknown>,
   meta: RuleMeta,
 ): Record<string, unknown> {
-  const name = meta.name.trim();
-  if (name) rule.name = name;
-  const description = meta.description.trim();
-  if (description) rule.description = description;
+  putRuleText(rule, 'name', meta.name);
+  putRuleText(rule, 'description', meta.description);
   rule.is_optional = meta.is_optional;
   return rule;
 }
@@ -482,6 +486,10 @@ function RuleOptionFields({
           placeholder="Shown as Special Mode"
           value={meta.name}
           onChange={(e) => onChange({ ...meta, name: e.target.value })}
+          onBlur={() => {
+            const name = meta.name.trim();
+            if (name !== meta.name) onChange({ ...meta, name });
+          }}
         />,
       )}
       {fieldRow(
@@ -489,9 +497,13 @@ function RuleOptionFields({
         <textarea
           className="admin-form__input"
           rows={3}
-          placeholder="Shown when players tap ? in create game. Blank uses the catalog description."
+          placeholder="Shown in the in-game Help modal and when players tap ? in create game. Blank uses the catalog description."
           value={meta.description}
           onChange={(e) => onChange({ ...meta, description: e.target.value })}
+          onBlur={() => {
+            const description = meta.description.trim();
+            if (description !== meta.description) onChange({ ...meta, description });
+          }}
         />,
       )}
       {fieldRow(
