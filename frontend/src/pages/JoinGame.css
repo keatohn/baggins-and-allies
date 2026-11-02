@@ -26,10 +26,6 @@
     max-width: 280px;
     align-self: center;
   }
-
-  .join-game-page__menu-anchor {
-    align-self: center;
-  }
 }
 
 .join-game-page__title {
@@ -78,7 +74,11 @@
 }
 
 .join-game-page__menu-anchor {
-  margin-top: 4.5rem;
+  position: fixed;
+  z-index: 40;
+  top: max(0.75rem, calc(env(safe-area-inset-top, 0px) + 0.5rem));
+  left: calc(var(--scroll-roll-w, 40px) + 0.75rem);
+  margin: 0;
 }
 
 /* Clear decorative scroll-end rolls (menu overlay). Desktop + landscape: pads
@@ -92,7 +92,12 @@
 
 @media (max-width: 767px) and (orientation: portrait) {
   .join-game-page {
-    padding-top: max(1.5rem, calc(var(--scroll-roll-w, 24px) + 0.75rem));
+    padding-top: calc(var(--scroll-roll-w, 24px) + 4.5rem);
     padding-bottom: max(1.5rem, calc(var(--scroll-roll-w, 24px) + 0.75rem));
+  }
+
+  .join-game-page__menu-anchor {
+    top: calc(var(--scroll-roll-w, 24px) + 0.55rem);
+    left: max(0.75rem, env(safe-area-inset-left, 0px));
   }
 }

@@ -86,7 +86,7 @@
   align-items: center;
   justify-content: center;
   gap: 0.65rem;
-  width: min(520px, 86vw);
+  width: min(440px, 78vw);
   margin-top: 1.35rem;
 }
 
@@ -128,6 +128,11 @@
   background: transparent;
   border: none;
   box-shadow: none;
+  color: #b08d3a;
+}
+
+.main-menu__panel:hover:not(:disabled) .main-menu__recent-name,
+.main-menu__panel:hover:not(:disabled) .main-menu__recent-faction {
   color: #b08d3a;
 }
 
@@ -179,6 +184,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: color 0.15s ease;
 }
 
 .main-menu__recent-faction {
@@ -195,6 +201,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: color 0.15s ease;
 }
 
 .main-menu__recent-faction-icon {
@@ -255,7 +262,7 @@
   .main-menu__actions,
   .main-menu__actions--three,
   .main-menu__actions--guest {
-    width: min(440px, 100%);
+    width: min(380px, 92%);
   }
 
 }
