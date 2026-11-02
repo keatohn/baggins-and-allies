@@ -1,3 +1,13 @@
+/* Length, not an untyped token. Mobile Safari will not interpolate a transform
+   calc() that contains an unregistered variable: the close holds, then snaps
+   shut when the 300ms transition ends. The open still runs because it starts
+   from translate(0). */
+@property --scroll-roll-w {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 40px;
+}
+
 /* Decorative parchment scroll ends framing menu pages (issue #44).
    Rolls are the sheet wound on itself: darker tan cylinder, curl on the face
    side, charred spiral end-caps (scroll-roll-end.svg).
