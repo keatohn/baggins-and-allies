@@ -6,17 +6,26 @@ interface ModalShellProps {
   children: ReactNode;
   /** Extra class on the dialog panel (e.g. width tuning per modal). */
   className?: string;
+  /** When false, Escape leaves this dialog open (a dialog stacked on top handles it). */
+  closeOnEscape?: boolean;
 }
 
 /** Shared overlay/dialog chrome for the account modals (profile, settings, friends). */
-export default function ModalShell({ title, onClose, children, className = '' }: ModalShellProps) {
+export default function ModalShell({
+  title,
+  onClose,
+  children,
+  className = '',
+  closeOnEscape = true,
+}: ModalShellProps) {
   useEffect(() => {
+    if (!closeOnEscape) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, closeOnEscape]);
 
   return (
     <div className="account-modal-overlay" role="presentation" onClick={onClose}>

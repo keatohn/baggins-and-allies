@@ -307,7 +307,9 @@ def test_profile_endpoint_public_card(db_session, players, make_client):
     assert data["username"] == "alice"
     assert data["headline"]["games"] == 1
     assert data["headline"]["wins"] == 1
-    assert data["tier"] is None
+    assert data["avatar"]["image"] == "hobbit.png"
+    assert data["tier"]["name"]
+    assert isinstance(data["xp"], int)
     assert data["achievements"] == []
 
     r404 = client.get(f"/players/{uuid.uuid4()}/profile")

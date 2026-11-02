@@ -1,7 +1,56 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../services/api';
-import type { FriendRequestItem, FriendUser } from '../../services/api';
+import type { AuthPlayer, FriendRequestItem, FriendUser, PlayerAvatarSettings, PlayerProfileCard } from '../../services/api';
 import ModalShell from './ModalShell';
+import ProfileModal from './ProfileModal';
+
+const FALLBACK_AVATAR: PlayerAvatarSettings = { image: 'hobbit.png', color: '#2d5a27' };
+
+function profileToPlayer(card: PlayerProfileCard): AuthPlayer {
+  return {
+    id: card.id,
+    email: '',
+    username: card.username,
+    avatar: card.avatar,
+    xp: card.xp,
+    tier: card.tier,
+    next_tier: card.next_tier ?? null,
+    tier_floor_xp: card.tier_floor_xp,
+    next_tier_xp: card.next_tier_xp,
+  };
+}
+
+function PersonIdentity({
+  username,
+  avatar,
+  onOpen,
+}: {
+  username: string;
+  avatar?: PlayerAvatarSettings;
+  onOpen?: () => void;
+}) {
+  const face = avatar ?? FALLBACK_AVATAR;
+  const picture = (
+    <span className="friends-list__avatar" style={{ backgroundColor: face.color }} aria-hidden>
+      <img src={`/assets/units/${face.image}`} alt="" />
+    </span>
+  );
+  const name = <span className="friends-list__name">{username}</span>;
+  if (!onOpen) {
+    return (
+      <span className="friends-list__person">
+        {picture}
+        {name}
+      </span>
+    );
+  }
+  return (
+    <button type="button" className="friends-list__person" onClick={onOpen} aria-label={`View ${username}'s profile`}>
+      {picture}
+      {name}
+    </button>
+  );
+}
 
 interface FriendsModalProps {
   onClose: () => void;
@@ -26,6 +75,8 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
   const [playedWith, setPlayedWith] = useState<FriendUser[] | null>(null);
   const [playedLoading, setPlayedLoading] = useState(false);
   const [playedError, setPlayedError] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<AuthPlayer | null>(null);
+  const [viewError, setViewError] = useState<string | null>(null);
 
   const loadLists = useCallback(async () => {
     try {
@@ -115,8 +166,26 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
     void runAction(() => api.declineFriendRequest(id)).finally(() => setBusyId(null));
   };
 
+  const listedBelow = (user: FriendUser) =>
+    user.relation === 'friend' || user.relation === 'pending_out' || user.relation === 'pending_in';
+  const othersPlayedWith = (playedWith ?? []).filter((user) => !listedBelow(user));
+
+  const openFriend = (user: FriendUser) => {
+    setViewError(null);
+    void api
+      .getPlayerProfile(user.id)
+      .then((card) => setViewing(profileToPlayer(card)))
+      .catch((err) => setViewError(err instanceof Error ? err.message : 'Could not open profile'));
+  };
+
   return (
-    <ModalShell title="Friends" onClose={onClose} className="account-modal--friends">
+    <>
+    <ModalShell
+      title="Friends"
+      onClose={onClose}
+      className="account-modal--friends"
+      closeOnEscape={viewing == null}
+    >
       <section className="account-section" aria-label="Find friends">
         <h3 className="account-section__title">Find a friend</h3>
         <form className="friends-search" onSubmit={handleSearch}>
@@ -144,36 +213,30 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
           aria-expanded={playedOpen}
           onClick={togglePlayedWith}
         >
-          Who have I played with?
+          Who else have I played with?
         </button>
         {playedOpen && (
           <>
             {playedLoading && playedWith == null && <p className="account-subtle">Loading…</p>}
             {playedError && <p className="account-msg account-msg--error">{playedError}</p>}
             {playedWith && (
-              <ul className="friends-list" aria-label="Players you have played with">
+              <ul className="friends-list" aria-label="Other players you have played with">
                 {playedWith.length === 0 ? (
                   <li className="friends-list__empty">You have not played with anyone yet.</li>
+                ) : othersPlayedWith.length === 0 ? (
+                  <li className="friends-list__empty">Everyone you have played with is already listed below.</li>
                 ) : (
-                  playedWith.map((u) => (
+                  othersPlayedWith.map((u) => (
                     <li key={u.id} className="friends-list__row">
-                      <span className="friends-list__name">{u.username}</span>
-                      {u.relation === 'friend' ? (
-                        <span className="friends-list__tag">Friends</span>
-                      ) : u.relation === 'pending_out' ? (
-                        <span className="friends-list__tag">Request sent</span>
-                      ) : u.relation === 'pending_in' ? (
-                        <span className="friends-list__tag">Wants to be friends</span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="account-btn account-btn--small"
-                          onClick={() => sendRequest(u.username)}
-                          disabled={busyId === `send:${u.username}`}
-                        >
-                          {busyId === `send:${u.username}` ? 'Sending…' : 'Send Friend Request'}
-                        </button>
-                      )}
+                      <PersonIdentity username={u.username} avatar={u.avatar} />
+                      <button
+                        type="button"
+                        className="account-btn account-btn--small"
+                        onClick={() => sendRequest(u.username)}
+                        disabled={busyId === `send:${u.username}`}
+                      >
+                        {busyId === `send:${u.username}` ? 'Sending…' : 'Send Friend Request'}
+                      </button>
                     </li>
                   ))
                 )}
@@ -188,7 +251,11 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
             ) : (
               results.map((u) => (
                 <li key={u.id} className="friends-list__row">
-                  <span className="friends-list__name">{u.username}</span>
+                  <PersonIdentity
+                    username={u.username}
+                    avatar={u.avatar}
+                    onOpen={u.relation === 'friend' ? () => openFriend(u) : undefined}
+                  />
                   {u.relation === 'friend' ? (
                     <span className="friends-list__tag">Friends</span>
                   ) : u.relation === 'pending_out' ? (
@@ -212,7 +279,26 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
         )}
       </section>
 
-      <section className="account-section" aria-label="Friend requests">
+      <section className="account-section" aria-label="Friends">
+        <h3 className="account-section__title">Friends</h3>
+        {listLoading ? (
+          <p className="account-subtle">Loading…</p>
+        ) : friends.length === 0 ? (
+          <p className="account-subtle">No friends yet.</p>
+        ) : (
+          <ul className="friends-list" aria-label="Friends list">
+            {friends.map((f) => (
+              <li key={f.id} className="friends-list__row">
+                <PersonIdentity username={f.username} avatar={f.avatar} onOpen={() => openFriend(f)} />
+                <span className="friends-list__tag">Friend</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {viewError && <p className="account-msg account-msg--error">{viewError}</p>}
+      </section>
+
+      <section className="account-section account-section--last" aria-label="Friend requests">
         <h3 className="account-section__title">Requests</h3>
         {listLoading && <p className="account-subtle">Loading…</p>}
         {!listLoading && incoming.length === 0 && outgoing.length === 0 && (
@@ -222,7 +308,7 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
           <ul className="friends-list" aria-label="Incoming requests">
             {incoming.map((r) => (
               <li key={r.id} className="friends-list__row">
-                <span className="friends-list__name">{r.username}</span>
+                <PersonIdentity username={r.username} avatar={r.avatar} />
                 <span className="friends-list__actions">
                   <button
                     type="button"
@@ -249,7 +335,7 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
           <ul className="friends-list" aria-label="Outgoing requests">
             {outgoing.map((r) => (
               <li key={r.id} className="friends-list__row">
-                <span className="friends-list__name">{r.username}</span>
+                <PersonIdentity username={r.username} avatar={r.avatar} />
                 <span className="friends-list__tag">Pending</span>
               </li>
             ))}
@@ -258,24 +344,10 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
         {listError && <p className="account-msg account-msg--error">{listError}</p>}
         {actionError && <p className="account-msg account-msg--error">{actionError}</p>}
       </section>
-
-      <section className="account-section account-section--last" aria-label="Your friends">
-        <h3 className="account-section__title">Your friends</h3>
-        {listLoading ? (
-          <p className="account-subtle">Loading…</p>
-        ) : friends.length === 0 ? (
-          <p className="account-subtle">No friends yet.</p>
-        ) : (
-          <ul className="friends-list" aria-label="Friends list">
-            {friends.map((f) => (
-              <li key={f.id} className="friends-list__row">
-                <span className="friends-list__name">{f.username}</span>
-                <span className="friends-list__tag">Friend</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
     </ModalShell>
+    {viewing && (
+      <ProfileModal player={viewing} readOnly onClose={() => setViewing(null)} />
+    )}
+    </>
   );
 }

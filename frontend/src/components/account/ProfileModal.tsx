@@ -7,24 +7,26 @@ import { tierRingProps } from './tierRing';
 
 interface ProfileModalProps {
   player: AuthPlayer;
-  onPlayerChange: (player: AuthPlayer) => void;
+  onPlayerChange?: (player: AuthPlayer) => void;
   onClose: () => void;
+  /** Another player's card: same layout, without avatar, username, or logout controls. */
+  readOnly?: boolean;
 }
 
-/** Discrete background colors, dark rows first and light rows after, including white. */
-const COLOR_PALETTE = [
-  '#1c3d18', '#2d5a27', '#3f7a34', '#5c8a3a', '#1e4d3a', '#2f6b4f',
-  '#16324f', '#1a3a63', '#24507f', '#2f6b6b', '#3d7a8c', '#1f4d5c',
-  '#3d2415', '#6b3a1f', '#8a4b24', '#a85a32', '#6b2e1a', '#4a3020',
-  '#4a1c1c', '#6b2d2d', '#8a3d3d', '#a85a4a', '#7a3030', '#5c2424',
-  '#2a1a40', '#4a2d6b', '#5b3a8a', '#6b4c9a', '#3d3058', '#5c4068',
-  '#1f1f1f', '#3a342c', '#5c5346', '#8a6b1f', '#b89a4a', '#6b5a3e',
-  '#c5d6b0', '#dce8c8', '#e7f0d8', '#b7d4c4', '#d4ebe4', '#f2f7ea',
-  '#c5d4e8', '#d6e4f2', '#e8f1f8', '#c9e4ea', '#d8e8f4', '#f4f8fc',
-  '#e6d3b0', '#f0e2c8', '#f7efe0', '#f0d0c0', '#f6e0d4', '#fff6ea',
-  '#e8c8c4', '#f3dcd8', '#f8ecea', '#e4d0ea', '#f0e6f4', '#faf6fc',
-  '#d9d3c8', '#e8e2d6', '#f3efe6', '#f7f4ee', '#fbf9f6', '#ffffff',
+/**
+ * Background colors, row by row.
+ * Columns left to right: red, orange, brown, yellow, green, blue, indigo, violet, gray.
+ * Rows top to bottom: light to dark.
+ */
+const COLOR_ROWS = [
+  ['#f9d3d2', '#fce3cf', '#e3d6c9', '#f7f1d4', '#d6f5da', '#d3e3f8', '#e2d6f5', '#f2d4f7', '#f0f0f0'],
+  ['#f29592', '#f8bb8c', '#d0b295', '#f4e390', '#9ce8a6', '#96bcee', '#ba9ce8', '#e098eb', '#c7c7c7'],
+  ['#ea5853', '#f39349', '#c08f5d', '#eed34f', '#62da72', '#5895e4', '#9262da', '#ce5ce0', '#9e9e9e'],
+  ['#da211b', '#e66c0f', '#9f6b38', '#dfbd16', '#2fc643', '#226fd3', '#6b2fc6', '#b727ce', '#757575'],
+  ['#9a1813', '#a34d0a', '#6d4c2c', '#9e8610', '#218c2f', '#184e95', '#4c218c', '#821c92', '#4c4c4c'],
+  ['#5b0e0b', '#602d06', '#3e2e1d', '#5d4f09', '#13531c', '#0e2e58', '#2d1353', '#4c1056', '#242424'],
 ];
+const COLOR_PALETTE = COLOR_ROWS.flat();
 
 function formatPct(pct: number | null | undefined): string {
   if (pct == null) return '—';
@@ -58,7 +60,7 @@ function RecordLine({
   );
 }
 
-export default function ProfileModal({ player, onPlayerChange, onClose }: ProfileModalProps) {
+export default function ProfileModal({ player, onPlayerChange, onClose, readOnly = false }: ProfileModalProps) {
   const navigate = useNavigate();
   const [usernameEditing, setUsernameEditing] = useState(false);
   const [usernameDraft, setUsernameDraft] = useState(player.username);
@@ -145,7 +147,7 @@ export default function ProfileModal({ player, onPlayerChange, onClose }: Profil
     setSavingAvatar(true);
     try {
       const updated = await api.updateMyProfile({ avatar: { image: avatarImage, color: avatarColor } });
-      onPlayerChange(updated);
+      onPlayerChange?.(updated);
       setAvatarSuccess(true);
       setEditingAvatar(false);
       setColorOpen(false);
@@ -180,7 +182,7 @@ export default function ProfileModal({ player, onPlayerChange, onClose }: Profil
     setSavingUsername(true);
     try {
       const updated = await api.updateMyProfile({ username: trimmed });
-      onPlayerChange(updated);
+      onPlayerChange?.(updated);
       setUsernameEditing(false);
       setUsernameSuccess(true);
     } catch (e) {
@@ -218,25 +220,27 @@ export default function ProfileModal({ player, onPlayerChange, onClose }: Profil
             >
               <img className="profile-avatar-preview__img" src={`/assets/units/${avatarImage}`} alt="" />
             </div>
-            <button
-              type="button"
-              className={`profile-avatar-pencil${editingAvatar ? ' profile-avatar-pencil--open' : ''}`}
-              aria-label={editingAvatar ? 'Close avatar editor' : 'Edit avatar'}
-              aria-pressed={editingAvatar}
-              onClick={() => (editingAvatar ? closeAvatarEdit() : setEditingAvatar(true))}
-            >
-              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden>
-                <path
-                  fill="currentColor"
-                  d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"
-                />
-              </svg>
-            </button>
+            {!readOnly && (
+              <button
+                type="button"
+                className={`profile-avatar-pencil${editingAvatar ? ' profile-avatar-pencil--open' : ''}`}
+                aria-label={editingAvatar ? 'Close avatar editor' : 'Edit avatar'}
+                aria-pressed={editingAvatar}
+                onClick={() => (editingAvatar ? closeAvatarEdit() : setEditingAvatar(true))}
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden>
+                  <path
+                    fill="currentColor"
+                    d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"
+                  />
+                </svg>
+              </button>
+            )}
           </div>
           {player.tier?.name && <p className="profile-avatar-tier">{player.tier.name}</p>}
         </div>
 
-        {editingAvatar && (
+        {!readOnly && editingAvatar && (
           <div className="profile-avatar-editor">
             <p className="account-subtle">Choose a unit icon and background color.</p>
             {iconsError && (
@@ -317,7 +321,7 @@ export default function ProfileModal({ player, onPlayerChange, onClose }: Profil
             )}
           </div>
         )}
-        {avatarSuccess && !editingAvatar && <p className="account-msg account-msg--success">Avatar saved.</p>}
+        {!readOnly && avatarSuccess && !editingAvatar && <p className="account-msg account-msg--success">Avatar saved.</p>}
       </section>
 
       <section className="account-section" aria-label="Tier and XP">
@@ -462,9 +466,11 @@ export default function ProfileModal({ player, onPlayerChange, onClose }: Profil
         )}
       </section>
 
-      <section className="account-section">
+      <section className={`account-section${readOnly ? ' account-section--last' : ''}`}>
         <h3 className="account-section__title">Username</h3>
-        {usernameEditing ? (
+        {readOnly ? (
+          <p className="profile-username-display">{player.username}</p>
+        ) : usernameEditing ? (
           <div className="profile-username-form">
             <input
               className="account-input"
@@ -501,6 +507,7 @@ export default function ProfileModal({ player, onPlayerChange, onClose }: Profil
         {usernameSuccess && <p className="account-msg account-msg--success">Username updated.</p>}
       </section>
 
+      {!readOnly && (
       <section className="account-section account-section--last">
         {logoutConfirm ? (
           <div className="profile-logout-confirm">
@@ -520,6 +527,7 @@ export default function ProfileModal({ player, onPlayerChange, onClose }: Profil
           </button>
         )}
       </section>
+      )}
     </ModalShell>
   );
 }

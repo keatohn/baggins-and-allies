@@ -575,7 +575,7 @@
 
 .profile-color-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1.85rem);
+  grid-template-columns: repeat(9, 1.85rem);
   gap: 0.4rem;
   padding: 0.55rem;
   background: var(--parchment-light);
@@ -921,12 +921,59 @@
   border-radius: 6px;
 }
 
+.friends-list__person,
+.friends-list__person:hover:not(:disabled) {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+  color: inherit;
+  font-family: var(--font-parchment);
+  font-size: inherit;
+  font-weight: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+  text-align: left;
+}
+
+button.friends-list__person {
+  cursor: pointer;
+}
+
+.friends-list__avatar {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 2px solid var(--ink-faded);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.friends-list__avatar img {
+  width: 78%;
+  height: 78%;
+  object-fit: contain;
+}
+
 .friends-list__name {
   font-size: 0.95rem;
   color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+button.friends-list__person .friends-list__name {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .friends-list__tag {

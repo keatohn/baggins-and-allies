@@ -1643,6 +1643,7 @@ def _friend_user_payload(db: Session, viewer_id: str, other: Player) -> dict[str
         "id": other.id,
         "username": other.username,
         "relation": _friend_relation(db, viewer_id, other),
+        "avatar": _player_avatar_response(other, db),
     }
 
 
@@ -1777,6 +1778,7 @@ def friends_list_requests(
                     {
                         "id": row.id,
                         "username": other.username,
+                        "avatar": _player_avatar_response(other, db),
                         "created_at": row.created_at.isoformat() if row.created_at else None,
                     }
                 )
@@ -1787,6 +1789,7 @@ def friends_list_requests(
                     {
                         "id": row.id,
                         "username": other.username,
+                        "avatar": _player_avatar_response(other, db),
                         "created_at": row.created_at.isoformat() if row.created_at else None,
                     }
                 )
@@ -1868,7 +1871,7 @@ def friends_list(
         return {"friends": []}
     others = {p.id: p for p in db.query(Player).filter(Player.id.in_(other_ids)).all()}
     friends = [
-        {"id": pid, "username": others[pid].username}
+        _friend_user_payload(db, player.id, others[pid])
         for pid in other_ids
         if pid in others
     ]
@@ -1940,13 +1943,15 @@ def get_player_profile(
         print(f"[achievements] profile read failed for {target.id}: {e}", flush=True)
         achievements = []
     headline = player_headline_record(db, str(target.id))
-    return {
+    body = {
         "id": str(target.id),
         "username": target.username,
         "headline": headline,
-        "tier": None,
+        "avatar": _player_avatar_response(target, db),
         "achievements": achievements,
     }
+    body.update(player_progression_view(target, db))
+    return body
 
 
 # ----- Games (create, list, join) -----

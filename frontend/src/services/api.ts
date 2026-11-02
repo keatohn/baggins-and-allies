@@ -695,12 +695,14 @@ export interface FriendUser {
   username: string;
   /** none | friend | pending_out (viewer sent) | pending_in (viewer must act). */
   relation?: 'none' | 'friend' | 'pending_out' | 'pending_in';
+  avatar?: PlayerAvatarSettings;
 }
 
 /** A pending friend request row (incoming = act on it; outgoing = awaiting reply). */
 export interface FriendRequestItem {
   id: string;
   username: string;
+  avatar?: PlayerAvatarSettings;
   created_at?: string | null;
 }
 
@@ -1038,7 +1040,12 @@ export interface PlayerProfileCard {
   id: string;
   username: string;
   headline: PlayerStatsOverall;
-  tier: string | null;
+  avatar?: PlayerAvatarSettings;
+  xp?: number;
+  tier: ProgressionTier | null;
+  next_tier?: ProgressionTier | null;
+  tier_floor_xp?: number;
+  next_tier_xp?: number | null;
   achievements: unknown[];
 }
 

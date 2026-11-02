@@ -101,6 +101,8 @@ def test_search_prefix_and_self_excluded(make_client, players):
     assert r.status_code == 200
     users = r.json()["users"]
     assert [u["username"] for u in users] == ["buddyone"]
+    assert users[0]["avatar"]["image"] == "hobbit.png"
+    assert users[0]["avatar"]["color"].startswith("#")
     assert users[0]["id"] == buddy.id
     assert users[0]["relation"] == "none"
 
