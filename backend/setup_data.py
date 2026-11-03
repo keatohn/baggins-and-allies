@@ -476,6 +476,69 @@ def list_all_unit_icons(db: Session | None) -> list[str]:
     return sorted(icons)
 
 
+def _unit_icon_filename(unit_id: Any, unit: dict[str, Any]) -> str | None:
+    icon = unit.get("icon")
+    if isinstance(icon, str) and icon.strip():
+        return icon.strip()
+    if isinstance(unit_id, str) and unit_id:
+        return f"{unit_id}.png"
+    return None
+
+
+def _iter_setup_units_and_factions(db: Session | None):
+    """Units and factions for every setup, from the DB when that is the source, else from files."""
+    if db is not None and not is_files_setup_source() and db_has_any_setup(db):
+        for row in db.query(Setup).all():
+            try:
+                units = json.loads(row.units_json)
+                factions = json.loads(row.factions_json)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            yield units, factions
+        return
+    if not SETUPS_DIR.is_dir():
+        return
+    for folder in sorted(SETUPS_DIR.iterdir()):
+        if not folder.is_dir():
+            continue
+        try:
+            yield _read_json_file(folder / "units.json"), _read_json_file(folder / "factions.json")
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+
+
+def icon_faction_hits(db: Session | None) -> dict[str, list[tuple[str, str, str]]]:
+    """Each unit that uses an icon, as (faction id, display name, alliance).
+
+    One entry per unit in each setup. The same icon in several setups is counted again.
+    """
+    hits: dict[str, list[tuple[str, str, str]]] = {}
+    for units, factions in _iter_setup_units_and_factions(db):
+        if not isinstance(units, dict):
+            continue
+        faction_map = factions if isinstance(factions, dict) else {}
+        for unit_id, unit in units.items():
+            if not isinstance(unit, dict):
+                continue
+            icon = _unit_icon_filename(unit_id, unit)
+            faction_id = unit.get("faction")
+            if not icon or not isinstance(faction_id, str) or not faction_id.strip():
+                continue
+            faction_id = faction_id.strip()
+            raw = faction_map.get(faction_id)
+            display = faction_id
+            alliance = ""
+            if isinstance(raw, dict):
+                name = raw.get("display_name")
+                if isinstance(name, str) and name.strip():
+                    display = name.strip()
+                side = raw.get("alliance")
+                if isinstance(side, str) and side.strip():
+                    alliance = side.strip().lower()
+            hits.setdefault(icon, []).append((faction_id, display, alliance))
+    return hits
+
+
 # ----- Optional DB: helpers used from definitions.py (no Session in tests) -----
 
 def db_has_any_setup(db: Session) -> bool:

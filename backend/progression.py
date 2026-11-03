@@ -507,9 +507,11 @@ def profile_avatar_choices(player: Any, db: Session | None) -> list[dict[str, An
     """Unit icons this player may use, with a flag for ones that unlock at their current tier.
 
     An icon with no saved tier uses the highest tier. The flag stays off for the lowest tier,
-    since those icons are available from the start.
+    since those icons are available from the start. Order is tier (lowest first), then the
+    alliance of the icon's most common faction (good, evil, neutral, then anything else),
+    then that faction's name, then the filename. Icons with no faction come last in the tier.
     """
-    from backend.setup_data import list_all_unit_icons
+    from backend.setup_data import icon_faction_hits, list_all_unit_icons
 
     cfg = load_progression(db)
     tiers = cfg["tiers"]
@@ -522,17 +524,78 @@ def profile_avatar_choices(player: Any, db: Session | None) -> list[dict[str, An
     current = tier_for_xp(int(getattr(player, "xp", 0) or 0), tiers)
     player_rank = int(current["rank"]) if current else 0
     unlocks = cfg.get("icon_min_tier") or {}
-    choices: list[dict[str, Any]] = []
+    factions = {
+        icon: primary_icon_faction(hits)
+        for icon, hits in icon_faction_hits(db).items()
+    }
+    choices: list[tuple[tuple, dict[str, Any]]] = []
     for name in list_all_unit_icons(db):
         min_id = str(unlocks.get(name) or highest_id)
         min_rank = ranks.get(min_id, highest_rank)
         if min_rank > player_rank:
             continue
-        choices.append({
-            "name": name,
-            "new": min_rank == player_rank and min_rank > lowest_rank,
-        })
-    return choices
+        choices.append((
+            _avatar_icon_sort_key(min_rank, name, factions.get(name)),
+            {
+                "name": name,
+                "new": min_rank == player_rank and min_rank > lowest_rank,
+            },
+        ))
+    choices.sort(key=lambda row: row[0])
+    return [row[1] for row in choices]
+
+
+# good, then evil, then neutral. Any other alliance follows; no faction sorts last.
+_ALLIANCE_ORDER = {"good": 0, "evil": 1, "neutral": 2}
+
+
+def _alliance_sort_rank(alliance: str) -> int:
+    if not alliance:
+        return 4
+    return _ALLIANCE_ORDER.get(alliance, 3)
+
+
+def primary_icon_faction(hits: list[tuple[str, str, str]]) -> tuple[str, str] | None:
+    """Most common faction for one icon: (display name, alliance).
+
+    Ties go to the faction that would sort first (alliance, then name, then id).
+    """
+    if not hits:
+        return None
+    grouped: dict[str, list[tuple[str, str]]] = {}
+    for faction_id, display_name, alliance in hits:
+        grouped.setdefault(faction_id, []).append((display_name, alliance))
+
+    def label_for(faction_id: str) -> tuple[str, str]:
+        counts: dict[tuple[str, str], int] = {}
+        for pair in grouped[faction_id]:
+            counts[pair] = counts.get(pair, 0) + 1
+        return min(
+            counts,
+            key=lambda pair: (-counts[pair], _alliance_sort_rank(pair[1]), pair[0].casefold()),
+        )
+
+    def faction_key(faction_id: str) -> tuple:
+        display_name, alliance = label_for(faction_id)
+        return (
+            -len(grouped[faction_id]),
+            _alliance_sort_rank(alliance),
+            display_name.casefold(),
+            faction_id,
+        )
+
+    winner = min(grouped, key=faction_key)
+    display_name, alliance = label_for(winner)
+    return display_name, alliance
+
+
+def _avatar_icon_sort_key(
+    min_rank: int,
+    name: str,
+    faction: tuple[str, str] | None,
+) -> tuple:
+    display_name, alliance = faction if faction else ("", "")
+    return (min_rank, _alliance_sort_rank(alliance), display_name.casefold(), name.casefold())
 
 
 def player_progression_view(player: Any, db: Session | None) -> dict[str, Any]:

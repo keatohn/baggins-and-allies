@@ -18,11 +18,13 @@ from backend.api.models import Game, Player, XpLedger
 from backend.engine.state import GameState
 from backend.progression import (
     ProgressionError,
+    _avatar_icon_sort_key,
+    default_progression,
     fold_events,
     normalize_progression,
+    primary_icon_faction,
     save_progression,
     score_player,
-    default_progression,
 )
 
 
@@ -630,7 +632,11 @@ def test_avatar_icons_follow_tier(db_session, players, make_client):
     assert listed.json()["icons"] == []
 
     cfg = default_progression()
-    cfg["icon_min_tier"] = {"hobbit.png": "hobbit", "gondor_soldier.png": "ranger"}
+    cfg["icon_min_tier"] = {
+        "hobbit.png": "hobbit",
+        "frodo.png": "ranger",
+        "gondor_soldier.png": "ranger",
+    }
     saved = make_client(admin).put("/admin/progression", json=cfg)
     assert saved.status_code == 200, saved.text
     stored = saved.json()["progression"]["icon_min_tier"]
@@ -651,7 +657,13 @@ def test_avatar_icons_follow_tier(db_session, players, make_client):
     user.xp = 750
     db_session.commit()
     unlocked = client.get("/profile/avatar-icons")
-    row = next(item for item in unlocked.json()["icons"] if item["name"] == "gondor_soldier.png")
+    unlocked_icons = unlocked.json()["icons"]
+    assert [item["name"] for item in unlocked_icons] == [
+        "hobbit.png",
+        "gondor_soldier.png",
+        "frodo.png",
+    ]
+    row = next(item for item in unlocked_icons if item["name"] == "gondor_soldier.png")
     assert row["new"] is True
     assert client.patch("/auth/me", json={"avatar": {"image": "gondor_soldier.png"}}).status_code == 200
 
@@ -670,3 +682,36 @@ def test_avatar_icons_follow_tier(db_session, players, make_client):
     bad["icon_min_tier"] = {"hobbit.png": "no-such-tier"}
     assert make_client(admin).put("/admin/progression", json=bad).status_code == 400
     make_client(user)
+
+
+def test_avatar_icons_sort_by_alliance_then_faction_then_name():
+    assert primary_icon_faction([
+        ("gondor", "Gondor", "good"),
+        ("gondor", "Gondor", "good"),
+        ("mordor", "Mordor", "evil"),
+    ]) == ("Gondor", "good")
+    assert primary_icon_faction([
+        ("mordor", "Mordor", "evil"),
+        ("rohan", "Rohan", "good"),
+    ]) == ("Rohan", "good")
+    assert primary_icon_faction([
+        ("rohan", "Rohan", "good"),
+        ("gondor", "Gondor", "good"),
+    ]) == ("Gondor", "good")
+
+    keys = {
+        "hobbit": _avatar_icon_sort_key(1, "hobbit.png", ("Free Peoples", "good")),
+        "soldier": _avatar_icon_sort_key(3, "gondor_soldier.png", ("Gondor", "good")),
+        "orc": _avatar_icon_sort_key(3, "orc.png", ("Mordor", "evil")),
+        "spider": _avatar_icon_sort_key(3, "spider.png", ("Neutral", "neutral")),
+        "frodo": _avatar_icon_sort_key(3, "frodo.png", None),
+        "archer": _avatar_icon_sort_key(3, "gondor_archer.png", ("Gondor", "good")),
+    }
+    assert sorted(keys, key=lambda name: keys[name]) == [
+        "hobbit",
+        "archer",
+        "soldier",
+        "orc",
+        "spider",
+        "frodo",
+    ]
