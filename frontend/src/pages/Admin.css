@@ -671,11 +671,29 @@
   word-break: break-word;
 }
 
-.units-across__table td.units-across__scenario,
-.units-across__table th.units-across__scenario {
-  font-size: 0.68rem;
+.units-across.unit-stats-modal .units-across__table td.units-across__scenario,
+.units-across.unit-stats-modal .units-across__table th.units-across__scenario {
+  font-size: 0.82rem;
   line-height: 1.25;
   word-break: break-word;
+}
+
+.units-across.unit-stats-modal .units-across__table {
+  width: 100%;
+  min-width: 100%;
+}
+
+.units-across.unit-stats-modal .units-across__table.header-stats-table--units col.stats-units-col-num {
+  width: 3.25rem;
+}
+
+.units-across.unit-stats-modal .units-across__table.header-stats-table--units col.stats-units-col-specials {
+  width: auto;
+}
+
+.units-across.unit-stats-modal .unit-stats-unit-row td.stats-col-num:not(.stats-col-specials),
+.units-across.unit-stats-modal .units-across__table thead th.stats-col-num:not(.stats-col-specials) {
+  font-size: 0.92rem;
 }
 
 .units-across__filters {
@@ -764,12 +782,31 @@
 
 .units-across.unit-stats-modal .units-across__table tbody tr:nth-child(n) td.units-across__icon {
   background: var(--parchment-light, #f7f1e4);
-  border: 2px solid rgba(62, 48, 32, 0.78);
-  box-shadow: inset 0 0 0 1px rgba(62, 48, 32, 0.28);
+  border-left: 2px solid rgba(62, 48, 32, 0.85);
+  border-right: 2px solid rgba(62, 48, 32, 0.85);
+  border-top: 2px solid rgba(62, 48, 32, 0.85);
+  border-bottom: 2px solid rgba(62, 48, 32, 0.85);
 }
 
-.units-across.unit-stats-modal .unit-stats-unit-row td.units-across__off {
-  color: #9d2b24;
+.units-across.unit-stats-modal .units-across__table tbody tr.units-across__icon-start > td {
+  border-top: 2px solid rgba(62, 48, 32, 0.85);
+}
+
+.units-across.unit-stats-modal .units-across__table tbody tr.units-across__scenario-end > td,
+.units-across.unit-stats-modal .units-across__table td.units-across__edge-scenario {
+  border-bottom: 1px solid rgba(92, 74, 50, 0.45);
+}
+
+.units-across.unit-stats-modal .units-across__table tbody tr.units-across__icon-end > td,
+.units-across.unit-stats-modal .units-across__table td.units-across__edge-icon,
+.units-across.unit-stats-modal .units-across__table td.units-across__icon {
+  border-bottom: 2px solid rgba(62, 48, 32, 0.85);
+}
+
+.units-across.unit-stats-modal .header-stats-table.header-stats-table--units tbody tr td.stats-col-num.units-across__off {
+  color: #fffef8;
+  background-color: #b42318;
+  font-weight: 700;
 }
 
 .units-across .header-stats-table.header-stats-table--units thead th:nth-child(7),

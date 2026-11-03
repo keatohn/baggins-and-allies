@@ -47,10 +47,20 @@ type UnitSource = {
   specialKeys: string[];
 };
 
-type UnitRow = UnitSource & { iconSpan: number; scenarioSpan: number; scenarioBand: boolean };
+type UnitRow = UnitSource & {
+  iconSpan: number;
+  scenarioSpan: number;
+  scenarioBand: boolean;
+  iconStart: boolean;
+  iconEnd: boolean;
+  scenarioEnd: boolean;
+  /** The scenario cell closes an icon group, so its rule matches the thicker icon line. */
+  scenarioClosesIcon: boolean;
+};
 
-/** A value is the mode only when it appears strictly most often, and at least three times. */
+/** One sample is the mode. Otherwise a value must appear strictly most often, and at least three times. */
 function outrightMode(values: number[]): number | null {
+  if (values.length === 1) return values[0];
   const counts = new Map<number, number>();
   for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
   let bestValue = 0;
@@ -117,7 +127,10 @@ function withSpans(rows: UnitSource[]): UnitRow[] {
         scenarioSpan += 1;
       }
     }
-    return { ...row, iconSpan, scenarioSpan, scenarioBand };
+    const iconEnd = index + 1 === rows.length || rows[index + 1].icon !== row.icon;
+    const scenarioEnd = iconEnd || rows[index + 1].setupId !== row.setupId;
+    const scenarioClosesIcon = scenarioStart && (index + scenarioSpan === rows.length || rows[index + scenarioSpan].icon !== row.icon);
+    return { ...row, iconSpan, scenarioSpan, scenarioBand, iconStart, iconEnd, scenarioEnd, scenarioClosesIcon };
   });
 }
 
@@ -395,7 +408,7 @@ export function UnitsReportModal({ setups, specials, onClose }: Props) {
                 {rows.map((row) => (
                   <tr
                     key={`${row.icon}|${row.setupId}|${row.unitId}`}
-                    className={`unit-stats-unit-row${row.scenarioBand ? ' units-across__band' : ''}`}
+                    className={`unit-stats-unit-row${row.scenarioBand ? ' units-across__band' : ''}${row.iconStart ? ' units-across__icon-start' : ''}${row.iconEnd ? ' units-across__icon-end' : ''}${row.scenarioEnd ? ' units-across__scenario-end' : ''}`}
                   >
                     {row.iconSpan > 0 ? (
                       <td className="units-across__icon" rowSpan={row.iconSpan}>
@@ -403,7 +416,10 @@ export function UnitsReportModal({ setups, specials, onClose }: Props) {
                       </td>
                     ) : null}
                     {row.scenarioSpan > 0 ? (
-                      <td className="units-across__scenario" rowSpan={row.scenarioSpan}>
+                      <td
+                        className={`units-across__scenario${row.scenarioClosesIcon ? ' units-across__edge-icon' : ' units-across__edge-scenario'}`}
+                        rowSpan={row.scenarioSpan}
+                      >
                         {row.scenario}
                       </td>
                     ) : null}
