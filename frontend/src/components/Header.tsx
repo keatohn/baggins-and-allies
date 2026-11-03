@@ -5,6 +5,7 @@ import type { ApiFactionStats, ApiSubfactionRule, SpecialDefinition } from '../s
 import StrongholdAllianceBar from './StrongholdAllianceBar';
 import AccountMenu from './AccountMenu';
 import SeatPlayerModal, { type SeatPortrait } from './account/SeatPlayerModal';
+import { tierRingProps } from './account/tierRing';
 import { useMenuScroll } from './MenuScrollContext';
 import { GameStatsModal, RingsOfPowerModal, UnitStatsModal, type RingsOfPowerData, type StatsRingMark, type UnitForStats } from './StatsModals';
 import './Header.css';
@@ -387,6 +388,7 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
                     : baseName;
                 const band = !isCurrent && fd?.color ? { borderColor: fd.color } : undefined;
                 const face = seat?.avatar ?? { image: 'hobbit.png', color: '#2d5a27' };
+                const ring = tierRingProps(seat?.tier);
                 return (
                   <div
                     key={fid}
@@ -421,8 +423,8 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
                       seat ? (
                         <button
                           type="button"
-                          className="header-turn-ticker-portrait"
-                          style={{ backgroundColor: face.color }}
+                          className={`header-turn-ticker-portrait${ring.className}`}
+                          style={{ backgroundColor: face.color, ...ring.style }}
                           aria-label={`View ${seat.username}'s profile`}
                           title={seat.username}
                           onClick={() => setOpenSeat(seat)}

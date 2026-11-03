@@ -1030,6 +1030,7 @@ export interface AuthResponse {
 export interface GamePlayerPortrait {
   username: string;
   avatar?: PlayerAvatarSettings;
+  tier?: ProgressionTier | null;
   relation: 'self' | 'friend' | 'pending_out' | 'pending_in' | 'none';
   request_id?: string | null;
 }

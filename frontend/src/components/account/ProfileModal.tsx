@@ -234,6 +234,7 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
   return (
     <ModalShell title="Profile" onClose={onClose} className="account-modal--profile">
       <section className="account-section profile-avatar">
+        <p className="profile-modal__username">{player.username}</p>
         <div className="profile-avatar-preview-wrap">
           <div className="profile-avatar-stage">
             <div

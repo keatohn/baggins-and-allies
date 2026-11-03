@@ -82,20 +82,27 @@
 /* Tier ring. Color comes from --tier-ring, set by the player's current tier. */
 .account-menu__btn--avatar.tier-ring,
 .profile-avatar-preview.tier-ring,
-.friends-list__avatar.tier-ring {
+.friends-list__avatar.tier-ring,
+.header-turn-ticker-portrait.tier-ring {
   border-color: var(--tier-ring);
   border-width: 3px;
 }
 
+.profile-avatar-preview.tier-ring {
+  border-width: 6px;
+}
+
 .account-menu__btn--avatar.tier-ring--soft,
 .profile-avatar-preview.tier-ring--soft,
-.friends-list__avatar.tier-ring--soft {
+.friends-list__avatar.tier-ring--soft,
+.header-turn-ticker-portrait.tier-ring--soft {
   box-shadow: 0 0 8px var(--tier-ring);
 }
 
 .account-menu__btn--avatar.tier-ring--pulse,
 .profile-avatar-preview.tier-ring--pulse,
-.friends-list__avatar.tier-ring--pulse {
+.friends-list__avatar.tier-ring--pulse,
+.header-turn-ticker-portrait.tier-ring--pulse {
   animation: tier-ring-pulse 2s ease-in-out infinite;
 }
 
@@ -120,7 +127,8 @@
 @media (prefers-reduced-motion: reduce) {
   .account-menu__btn--avatar.tier-ring--pulse,
   .profile-avatar-preview.tier-ring--pulse,
-  .friends-list__avatar.tier-ring--pulse {
+  .friends-list__avatar.tier-ring--pulse,
+  .header-turn-ticker-portrait.tier-ring--pulse {
     animation: none;
     box-shadow: 0 0 8px var(--tier-ring);
   }
@@ -505,11 +513,20 @@
   box-shadow: none;
 }
 
+.profile-modal__username {
+  margin: 0 0 0.65rem;
+  text-align: center;
+  font-family: 'Cinzel', serif;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
 .profile-avatar-preview {
   width: 96px;
   height: 96px;
   border-radius: 50%;
-  border: 3px solid var(--ink-faded);
+  border: 6px solid var(--ink-faded);
   display: flex;
   align-items: center;
   justify-content: center;

@@ -796,6 +796,7 @@ function DroppableTerritory({
   isValidDrop,
   highlightMuted = false,
   shadowed = false,
+  keyStronghold = false,
   conquestFadeColor,
   onClick,
 }: {
@@ -811,6 +812,8 @@ function DroppableTerritory({
   /** Weaker outline — other valid mobilization zones while a destination is pending confirm. */
   highlightMuted?: boolean;
   shadowed?: boolean;
+  /** Map key is open and this territory is a stronghold or capital. */
+  keyStronghold?: boolean;
   /** Conquest: old owner color rendered over the fill and faded out (cross-fade to new owner). */
   conquestFadeColor?: string;
   onClick: (e: React.MouseEvent) => void;
@@ -821,7 +824,7 @@ function DroppableTerritory({
     data: { territoryId: tid },
   });
   const showStrongHighlight = (isHighlighted || isValidDrop) && !highlightMuted;
-  const pathClass = `territory-path ${isSeaZone ? 'territory-path--sea' : 'territory-path--svg-glow'} ${isSelected ? 'selected' : ''} ${showStrongHighlight ? 'highlight' : ''} ${highlightMuted ? 'highlight-muted' : ''} ${isOver && isValidDrop ? 'drop-target' : ''}`;
+  const pathClass = `territory-path ${isSeaZone ? 'territory-path--sea' : 'territory-path--svg-glow'} ${isSelected ? 'selected' : ''} ${keyStronghold ? 'key-stronghold' : ''} ${showStrongHighlight ? 'highlight' : ''} ${highlightMuted ? 'highlight-muted' : ''} ${isOver && isValidDrop ? 'drop-target' : ''}`;
   const safeColor = color || '#d4c4a8';
   const glowVars = territoryGlowFromHex(safeColor);
   const glowFilterId = isSeaZone ? undefined : `territory-glow-${safeColor.replace(/^#/, '')}`;
@@ -869,22 +872,40 @@ function DroppableTerritory({
             className="territory-path-shadow"
           />
         ) : null}
+        {keyStronghold ? (
+          <path
+            d={pathData.d}
+            transform={pathData.transform}
+            fill="#ffe9a0"
+            stroke="none"
+            pointerEvents="none"
+            className="territory-key-wash"
+          />
+        ) : null}
         <path
           d={pathData.d}
           transform={pathData.transform}
           fill="none"
           style={pathStyle}
           className={`${pathClass} territory-path-stroke`}
-          filter={isSelected && !isSeaZone ? 'url(#territory-glow-gold)' : glowFilterId ? `url(#${glowFilterId})` : undefined}
+          filter={
+            keyStronghold
+              ? 'url(#territory-glow-stronghold)'
+              : isSelected && !isSeaZone
+                ? 'url(#territory-glow-gold)'
+                : glowFilterId
+                  ? `url(#${glowFilterId})`
+                  : undefined
+          }
           pointerEvents="none"
         />
-        {isSelected ? (
+        {isSelected || keyStronghold ? (
           <path
             d={pathData.d}
             transform={pathData.transform}
             fill="none"
             pointerEvents="none"
-            className="territory-path-pulse"
+            className={`territory-path-pulse${keyStronghold ? ' key-stronghold' : ''}`}
           />
         ) : null}
       </g>
@@ -4145,14 +4166,7 @@ function GameMap({
                   <img src="/ford.png" alt="" className="map-key-img" aria-hidden />
                   Ford
                 </span>
-                <span className="map-key-item">
-                  <span className="map-key-stronghold" aria-hidden />
-                  Stronghold
-                </span>
-                <span className="map-key-item">
-                  <span className="map-key-stronghold map-key-stronghold--capital" aria-hidden />
-                  Capital
-                </span>
+                <span className="map-key-item">Strongholds show the faction banner, or its logo when none is set (capitals larger) (strongholds highlighted on the map now)</span>
               </div>
             )}
             <div className="map-main">
@@ -4293,6 +4307,11 @@ function GameMap({
                           const isTapMoveTarget =
                             (tapSelectedUnit != null || tapBulkAllFromTerritory != null || tapMobilizationAll) &&
                             territoryMatchesValidDrop(territoryId);
+                          const isKeyStronghold = mapKeyOpen && (
+                            territory?.stronghold === true ||
+                            territory?.isCapital === true ||
+                            Object.values(factionData).some((f) => f.capital === territoryId || f.capital === stateKey)
+                          );
                           return (
                             <DroppableTerritory
                               key={territoryId}
@@ -4306,6 +4325,7 @@ function GameMap({
                               isValidDrop={isValidDrop || mobilizationStrong || isExternallyHighlighted}
                               highlightMuted={mobilizationMuted}
                               shadowed={shadowedTerritories?.has(territoryId) === true}
+                              keyStronghold={isKeyStronghold}
                               conquestFadeColor={conquestFadeByTerritory.get(territoryId)}
                               onClick={(e) => handleTerritoryClick(territoryId, e)}
                             />
@@ -4334,6 +4354,19 @@ function GameMap({
                           );
                         })}
                         {/* Gold halo for selected land territories (native filter so Safari shows it) */}
+                        <filter id="territory-glow-stronghold" x="-80%" y="-80%" width="260%" height="260%">
+                          <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blurCore" />
+                          <feGaussianBlur in="SourceGraphic" stdDeviation="16" result="blurWide" />
+                          <feFlood floodColor="rgba(255,229,106,1)" result="floodCore" />
+                          <feComposite in2="blurCore" in="floodCore" operator="in" result="coloredCore" />
+                          <feFlood floodColor="rgba(255,170,40,0.85)" result="floodWide" />
+                          <feComposite in2="blurWide" in="floodWide" operator="in" result="coloredWide" />
+                          <feMerge>
+                            <feMergeNode in="coloredWide" />
+                            <feMergeNode in="coloredCore" />
+                            <feMergeNode in="SourceGraphic" />
+                          </feMerge>
+                        </filter>
                         <filter id="territory-glow-gold" x="-50%" y="-50%" width="200%" height="200%">
                           <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blurCore" />
                           <feGaussianBlur in="SourceGraphic" stdDeviation="9" result="blurWide" />

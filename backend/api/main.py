@@ -4145,6 +4145,7 @@ def get_game_meta(
             card = {
                 "username": p_row.username,
                 "avatar": _player_avatar_response(p_row, db),
+                "tier": player_progression_view(p_row, db)["tier"],
                 "relation": relation,
             }
             if request_id:
