@@ -132,6 +132,11 @@
       "id": "shadow_of_war",
       "name": "Shadow of War",
       "description": "Fog of war. You see units only in your alliance's territories and the territories one step away. Battles and moves elsewhere stay hidden."
+    },
+    {
+      "id": "marching_orders",
+      "name": "Marching Orders",
+      "description": "Units that do not move during the combat move phase get one extra movement during the non-combat move phase."
     }
   ],
   "terrain_types": [

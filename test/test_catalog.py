@@ -52,7 +52,7 @@ def test_old_specials_shape_and_missing_rule_types_are_filled_in():
     assert [e["id"] for e in catalog["specials"]] == ["terror", "archer"]
     assert catalog["specials"][0]["display_code"] == "T"
     assert [e["id"] for e in catalog["special_rules"]] == ["rings_of_power", "evolving_territory"]
-    assert [e["id"] for e in catalog["game_options"]] == ["shadow_of_war"]
+    assert [e["id"] for e in catalog["game_options"]] == ["shadow_of_war", "marching_orders"]
     assert catalog["terrain_types"] == ["plains", "sea"]
 
 
@@ -83,7 +83,10 @@ def test_removing_an_entry_a_setup_uses_is_refused(tmp_path, monkeypatch):
     base = {
         "specials": [{"id": "terror", "name": "Terror"}],
         "special_rules": [{"id": "rings_of_power", "name": "Rings"}, {"id": "evolving_territory", "name": "Evolving"}],
-        "game_options": [{"id": "shadow_of_war", "name": "Shadow of War", "description": "Fog."}],
+        "game_options": [
+            {"id": "shadow_of_war", "name": "Shadow of War", "description": "Fog."},
+            {"id": "marching_orders", "name": "Marching Orders", "description": "Extra NCM move."},
+        ],
         "terrain_types": ["forest", "sea"],
         "archetypes": ["infantry"],
     }
@@ -110,4 +113,4 @@ def test_a_game_sees_only_the_specials_its_units_have_in_catalog_order():
 
 def test_rule_descriptions_cover_rules_and_game_options():
     descriptions = rule_descriptions(load_catalog(None))
-    assert {"rings_of_power", "evolving_territory", "shadow_of_war"} <= set(descriptions)
+    assert {"rings_of_power", "evolving_territory", "shadow_of_war", "marching_orders"} <= set(descriptions)
