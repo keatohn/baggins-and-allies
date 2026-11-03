@@ -23,41 +23,39 @@
 
 .game-over-banner {
   position: relative;
-  box-sizing: border-box;
-  width: min(34rem, 90vw);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
+  width: min(28rem, 88vw);
   background: transparent;
 }
 
-.game-over-banner--gondor {
-  aspect-ratio: 857 / 267;
-  padding: 22% 14% 12%;
-}
-
-.game-over-banner--sauron {
-  aspect-ratio: 900 / 300;
-  padding: 26% 15% 14%;
-}
-
-.game-over-banner__frame {
+/* Same parchment film as the home-menu plaques, masked to the frame's open center. */
+.game-over-banner::before {
+  content: '';
   position: absolute;
+  z-index: 0;
   inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: fill;
+  background: rgba(236, 224, 196, 0.4);
+  -webkit-mask-image: var(--frame-interior);
+  mask-image: var(--frame-interior);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
   pointer-events: none;
 }
 
 .game-over-banner__text {
-  position: relative;
-  z-index: 1;
+  position: absolute;
+  z-index: 2;
+  top: var(--plaque-pad-top);
+  right: var(--plaque-pad-x);
+  bottom: var(--plaque-pad-bottom);
+  left: var(--plaque-pad-x);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.25rem;
+  justify-content: center;
+  gap: 0.1rem;
+  transform: translateY(0.45rem);
   text-align: center;
   text-shadow: 0 1px 1px rgba(244, 236, 214, 0.85), 0 0 8px rgba(244, 236, 214, 0.7);
 }
@@ -72,7 +70,7 @@
 
 .game-over-title {
   font-family: 'Cinzel', serif;
-  font-size: 0.95rem;
+  font-size: 0.78rem;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -80,7 +78,7 @@
 
 .game-over-winner {
   font-family: 'Cinzel', serif;
-  font-size: clamp(1.35rem, 3vw, 1.85rem);
+  font-size: clamp(1.05rem, 2.4vw, 1.45rem);
   font-weight: 700;
 }
 

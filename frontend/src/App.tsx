@@ -3,6 +3,7 @@ import type { GameState, GamePhase, FactionId, GameEvent, SelectedUnit, Declared
 import { normalizeMapOverrides } from './types/game';
 import { boostingRingsFromRules, highestPowerHeroUnitId, ringHoldingFactionId, ringsOnUnit } from './ringsDisplay';
 import Header from './components/Header';
+import PlaqueFrame, { plaqueFrameVars } from './components/PlaqueFrame';
 import type { RingsOfPowerData, UnitForStats } from './components/StatsModals';
 import { compareUnitsForStats } from './unitStatsOrder';
 import GameMap, { DEFAULT_MAP_BASE, type PendingMoveConfirm, type MapAnimCue } from './components/GameMap';
@@ -4464,8 +4465,11 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           role="alert"
           aria-live="assertive"
         >
-          <div className={`game-over-banner game-over-banner--${gameOverDisplay.frame}`}>
-            <img className="game-over-banner__frame" src={`/frames/${gameOverDisplay.frame}_frame.png`} alt="" />
+          <div
+            className={`game-over-banner game-over-banner--${gameOverDisplay.frame}`}
+            style={plaqueFrameVars(gameOverDisplay.frame)}
+          >
+            <PlaqueFrame variant={gameOverDisplay.frame} />
             <div className="game-over-banner__text">
               <span className="game-over-title">Game Over</span>
               <span className="game-over-winner">{gameOverDisplay.label} wins!</span>
