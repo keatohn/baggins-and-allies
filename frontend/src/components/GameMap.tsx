@@ -594,6 +594,23 @@ function wheelZoomScaleMultiplier(e: WheelEvent): number {
   return Math.max(minM, Math.min(maxM, raw));
 }
 
+/**
+ * Distinguish a physical mouse wheel notch from trackpad two-finger scroll.
+ * Both arrive as plain `wheel` events (pinch sets ctrlKey and is handled separately),
+ * and no standard API reports the device — so this is a conservative heuristic:
+ * anything ambiguous keeps panning so trackpad scroll is never hijacked.
+ * - Firefox wheel notches report line mode; trackpads always report pixel mode.
+ * - Trackpad deltas are fractional high-res pixels, often with horizontal drift.
+ * - Mouse notches are large integer vertical steps (~±100px/detent in Chrome/Safari).
+ */
+function isLikelyMouseWheel(e: WheelEvent): boolean {
+  if (e.deltaMode !== WheelEvent.DOM_DELTA_PIXEL) return true;
+  const { deltaX, deltaY } = e;
+  if (!Number.isInteger(deltaX) || !Number.isInteger(deltaY)) return false;
+  if (deltaX !== 0) return false;
+  return Math.abs(deltaY) >= 40;
+}
+
 const EMPTY_ELIGIBLE_SEA_ZONES_FOR_TRAY = new Set<string>();
 
 /**
@@ -3896,7 +3913,7 @@ function GameMap({
 
   // Non-passive wheel listener.
   // Trackpad: two-finger scroll pans; pinch (ctrlKey) zooms toward cursor.
-  // Mouse: plain wheel pans; Ctrl+wheel zooms.
+  // Mouse: plain wheel zooms toward cursor; Ctrl+wheel zooms too.
   useEffect(() => {
     const el = wrapperRef.current;
     if (!el) return;
@@ -3914,8 +3931,8 @@ function GameMap({
       const maxX = Math.max(0, wrapper.clientWidth - scaledW);
       const maxY = Math.max(0, wrapper.clientHeight - scaledH);
 
-      if (e.ctrlKey) {
-        // Zoom toward cursor for pinch gestures and Ctrl+wheel.
+      if (e.ctrlKey || isLikelyMouseWheel(e)) {
+        // Zoom toward cursor for pinch gestures, Ctrl+wheel, and mouse wheel notches.
         const rect = wrapper.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
@@ -3935,7 +3952,7 @@ function GameMap({
         newY = Math.max(newMinY, Math.min(newMaxY, newY));
         setTransform({ x: newX, y: newY, scale: newScale });
       } else {
-        // Pan with two-finger scroll (and plain mouse wheel).
+        // Pan with trackpad two-finger scroll.
         const newX = Math.max(minX, Math.min(maxX, t.x + e.deltaX));
         const newY = Math.max(minY, Math.min(maxY, t.y + e.deltaY));
         setTransform({ ...t, x: newX, y: newY });
