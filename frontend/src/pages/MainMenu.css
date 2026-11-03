@@ -169,7 +169,7 @@
   flex-direction: column;
   justify-content: space-between;
   align-items: center;
-  gap: 0.05rem;
+  padding-top: clamp(0px, (100cqi - 340px) * 0.07, 0.55rem);
   text-align: center;
   overflow: hidden;
 }
