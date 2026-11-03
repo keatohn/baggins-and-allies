@@ -3,6 +3,7 @@ import { api } from '../../services/api';
 import type { AuthPlayer, GamePlayerPortrait, PlayerProfileCard } from '../../services/api';
 import ModalShell from './ModalShell';
 import ProfileModal from './ProfileModal';
+import { tierRingProps } from './tierRing';
 import '../AccountMenu.css';
 
 export interface SeatPortrait extends GamePlayerPortrait {
@@ -78,6 +79,7 @@ export default function SeatPlayerModal({ seat, onClose, onSeatChange }: SeatPla
   }
 
   const face = seat.avatar ?? FALLBACK_AVATAR;
+  const ring = tierRingProps(seat.tier);
 
   const send = () => {
     setBusy(true);
@@ -116,7 +118,11 @@ export default function SeatPlayerModal({ seat, onClose, onSeatChange }: SeatPla
   return (
     <ModalShell title={seat.username} onClose={onClose} className="account-modal--seat">
       <div className="seat-card">
-        <span className="seat-card__avatar" style={{ backgroundColor: face.color }} aria-hidden>
+        <span
+          className={`seat-card__avatar${ring.className}`}
+          style={{ background: face.color, ...ring.style }}
+          aria-hidden
+        >
           <img src={`/assets/units/${face.image}`} alt="" />
         </span>
         <p className="seat-card__name">{seat.username}</p>

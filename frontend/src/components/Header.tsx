@@ -45,6 +45,8 @@ interface HeaderProps {
   catalogRules?: { id: string; name: string; description: string }[];
   /** Human seat under each turn-order faction. Omitted for single-player. */
   seatPortraits?: Record<string, SeatPortrait>;
+  /** Computer factions in the turn order. `dots` is the difficulty rank, easiest = 1. */
+  computerSeats?: Record<string, { dots: number; difficulty: string }>;
   /** Logged-in player, so their own portrait opens the editable profile. */
   viewerId?: string | null;
 }
@@ -162,7 +164,7 @@ function subfactionRuleLines(
   return lines;
 }
 
-function Header({ gameState, turnOrderForTicker, factionData, factionStats, ringsByFaction, ringsOfPower = null, unitsByFaction = {}, gameName = null, setupDisplayName = null, specials = {}, specialsOrder: _specialsOrder = [], unitsBySpecial = {}, onOpenCombatSim, subfactionRules = {}, unitNames = {}, specialRules = [], catalogRules = [], seatPortraits, viewerId = null }: HeaderProps) {
+function Header({ gameState, turnOrderForTicker, factionData, factionStats, ringsByFaction, ringsOfPower = null, unitsByFaction = {}, gameName = null, setupDisplayName = null, specials = {}, specialsOrder: _specialsOrder = [], unitsBySpecial = {}, onOpenCombatSim, subfactionRules = {}, unitNames = {}, specialRules = [], catalogRules = [], seatPortraits, computerSeats, viewerId = null }: HeaderProps) {
   const { navigateWithScroll } = useMenuScroll();
   const [statsOpen, setStatsOpen] = useState(false);
   const [ringsOpen, setRingsOpen] = useState(false);
@@ -179,7 +181,10 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
   const allianceOrder = ['good', 'evil'].filter(a => a in alliances);
   const turnOrder = (turnOrderForTicker?.length ? turnOrderForTicker : gameState.turn_order) ?? [];
   const showSeatToggle = Boolean(
-    seatPortraits && Object.values(seatPortraits).some((seat) => seat.playerId !== viewerId),
+    seatPortraits && (
+      Object.values(seatPortraits).some((seat) => seat.playerId !== viewerId)
+      || (computerSeats && Object.keys(computerSeats).length > 0)
+    ),
   );
   const facesOn = portraitsOn && showSeatToggle;
   const seatFor = (factionId: string): SeatPortrait | undefined => {
@@ -189,6 +194,10 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
     const edited = seatEdits[raw.playerId];
     if (!edited || edited.relation === raw.relation) return raw;
     return edited;
+  };
+  const computerFor = (factionId: string) => {
+    const parentId = factionData[factionId]?.parent;
+    return computerSeats?.[factionId] ?? (parentId ? computerSeats?.[parentId] : undefined);
   };
   const helpSubfactions = useMemo((): HelpSubfaction[] => {
     const entries = Object.entries(factionData).filter(([, fd]) => fd.parent);
@@ -389,6 +398,7 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
                 const band = !isCurrent && fd?.color ? { borderColor: fd.color } : undefined;
                 const face = seat?.avatar ?? { image: 'hobbit.png', color: '#2d5a27' };
                 const ring = tierRingProps(seat?.tier);
+                const computer = seat ? undefined : computerFor(fid);
                 return (
                   <div
                     key={fid}
@@ -424,13 +434,33 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
                         <button
                           type="button"
                           className={`header-turn-ticker-portrait${ring.className}`}
-                          style={{ backgroundColor: face.color, ...ring.style }}
+                          style={{ background: face.color, ...ring.style }}
                           aria-label={`View ${seat.username}'s profile`}
                           title={seat.username}
                           onClick={() => setOpenSeat(seat)}
                         >
                           <img src={`/assets/units/${face.image}`} alt="" />
                         </button>
+                      ) : computer ? (
+                        <span
+                          className="header-turn-ticker-portrait header-turn-ticker-portrait--computer"
+                          title={`Computer · ${computer.difficulty}`}
+                          aria-label={`Computer, ${computer.difficulty}, difficulty ${computer.dots}`}
+                        >
+                          <svg className="header-turn-ticker-robot" viewBox="0 0 24 24" aria-hidden="true">
+                            <rect x="10.25" y="1.2" width="3.5" height="2.4" rx="1" fill="currentColor" />
+                            <circle cx="12" cy="1.5" r="1.15" fill="currentColor" />
+                            <rect x="3.5" y="5.2" width="17" height="13.2" rx="3.2" fill="currentColor" />
+                            <circle cx="8.7" cy="10.6" r="1.7" fill="#2a3138" />
+                            <circle cx="15.3" cy="10.6" r="1.7" fill="#2a3138" />
+                            <rect x="8.2" y="14.1" width="7.6" height="1.5" rx="0.75" fill="#2a3138" />
+                          </svg>
+                          <span className="header-turn-ticker-robot-dots" aria-hidden="true">
+                            {Array.from({ length: computer.dots }, (_, index) => (
+                              <span key={index} />
+                            ))}
+                          </span>
+                        </span>
                       ) : (
                         <span className="header-turn-ticker-portrait header-turn-ticker-portrait--empty" aria-hidden />
                       )

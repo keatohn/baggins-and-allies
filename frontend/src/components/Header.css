@@ -1382,6 +1382,57 @@
   line-height: 0;
   flex: 0 0 auto;
   align-self: center;
+  /* The global button rule paints a parchment gradient. Inline `background` replaces it. */
+  background-image: none;
+}
+
+.header-turn-ticker-portrait:hover:not(:disabled) {
+  background-image: none;
+}
+
+.header-turn-ticker-portrait:hover:not(:disabled):not(.tier-ring--soft):not(.tier-ring--pulse) {
+  box-shadow: none;
+}
+
+.header-turn-ticker-portrait.tier-ring:hover:not(:disabled) {
+  border-color: var(--tier-ring);
+}
+
+.header-turn-ticker-portrait.tier-ring--soft:hover:not(:disabled) {
+  box-shadow: 0 0 8px var(--tier-ring);
+}
+
+.header-turn-ticker-portrait--computer {
+  position: relative;
+  background: #343b44;
+  cursor: default;
+  color: #f3efe6;
+}
+
+.header-turn-ticker-robot {
+  width: 78%;
+  height: 78%;
+  display: block;
+}
+
+.header-turn-ticker-robot-dots {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 24%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1px;
+  pointer-events: none;
+}
+
+.header-turn-ticker-robot-dots span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #f2c14e;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.45);
 }
 
 .header-turn-ticker-portrait img {

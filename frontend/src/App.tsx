@@ -1894,6 +1894,23 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     for (const [factionId, playerId] of Object.entries(gameMeta.lobby_claims ?? {})) assign(factionId, playerId);
     return out;
   }, [gameMeta]);
+  const computerSeats = useMemo(() => {
+    const factions = gameMeta?.ai_factions ?? [];
+    if (!factions.length) return undefined;
+    const levels = gameMeta?.ai_levels ?? [];
+    const order = levels.length ? levels.map((level) => level.id) : ['easy', 'normal', 'hard'];
+    const out: Record<string, { dots: number; difficulty: string }> = {};
+    for (const factionId of factions) {
+      const difficulty = gameMeta?.ai_faction_settings?.[factionId]?.difficulty
+        || gameMeta?.ai_difficulty
+        || 'normal';
+      const index = order.indexOf(difficulty);
+      const rank = index >= 0 ? index : Math.max(0, order.indexOf('normal'));
+      const name = levels.find((level) => level.id === difficulty)?.name ?? difficulty;
+      out[factionId] = { dots: rank + 1, difficulty: name };
+    }
+    return out;
+  }, [gameMeta]);
   const pollIntervalMs = spectatingBattle ? 1000 : GAME_POLL_INTERVAL_MS;
   useEffect(() => {
     if (!GAME_ID || !isMultiplayer) return;
@@ -4511,6 +4528,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         specialRules={helpSpecialRules}
         catalogRules={catalogRules}
         seatPortraits={seatPortraits}
+        computerSeats={computerSeats}
         viewerId={currentPlayerId}
       />
 

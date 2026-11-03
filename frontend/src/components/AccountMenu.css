@@ -83,26 +83,30 @@
 .account-menu__btn--avatar.tier-ring,
 .profile-avatar-preview.tier-ring,
 .friends-list__avatar.tier-ring,
-.header-turn-ticker-portrait.tier-ring {
+.header-turn-ticker-portrait.tier-ring,
+.seat-card__avatar.tier-ring {
   border-color: var(--tier-ring);
   border-width: 3px;
 }
 
-.profile-avatar-preview.tier-ring {
+.profile-avatar-preview.tier-ring,
+.seat-card__avatar.tier-ring {
   border-width: 6px;
 }
 
 .account-menu__btn--avatar.tier-ring--soft,
 .profile-avatar-preview.tier-ring--soft,
 .friends-list__avatar.tier-ring--soft,
-.header-turn-ticker-portrait.tier-ring--soft {
+.header-turn-ticker-portrait.tier-ring--soft,
+.seat-card__avatar.tier-ring--soft {
   box-shadow: 0 0 8px var(--tier-ring);
 }
 
 .account-menu__btn--avatar.tier-ring--pulse,
 .profile-avatar-preview.tier-ring--pulse,
 .friends-list__avatar.tier-ring--pulse,
-.header-turn-ticker-portrait.tier-ring--pulse {
+.header-turn-ticker-portrait.tier-ring--pulse,
+.seat-card__avatar.tier-ring--pulse {
   animation: tier-ring-pulse 2s ease-in-out infinite;
 }
 
@@ -128,7 +132,8 @@
   .account-menu__btn--avatar.tier-ring--pulse,
   .profile-avatar-preview.tier-ring--pulse,
   .friends-list__avatar.tier-ring--pulse,
-  .header-turn-ticker-portrait.tier-ring--pulse {
+  .header-turn-ticker-portrait.tier-ring--pulse,
+  .seat-card__avatar.tier-ring--pulse {
     animation: none;
     box-shadow: 0 0 8px var(--tier-ring);
   }
@@ -238,14 +243,18 @@
   height: 5.5rem;
   border-radius: 50%;
   overflow: hidden;
-  border: 2px solid var(--ink-faded);
+  border: 6px solid var(--ink-faded);
   box-shadow: 0 1px 4px var(--shadow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
 }
 
 .seat-card__avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  width: 78%;
+  height: 78%;
+  object-fit: contain;
   display: block;
 }
 
