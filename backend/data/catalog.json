@@ -136,7 +136,7 @@
     {
       "id": "marching_orders",
       "name": "Marching Orders",
-      "description": "Units that do not move during the combat move phase get one extra movement during the non-combat move phase."
+      "description": "Any unit that does not move during the combat move phase gets one extra movement point for the non-combat move phase. A unit with 1 movement that held back has 2 to spend there, a unit with 4 has 5."
     }
   ],
   "terrain_types": [
