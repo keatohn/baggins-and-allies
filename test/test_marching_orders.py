@@ -1,4 +1,4 @@
-"""Marching Orders: optional rule flag plumbing (serialization, catalog, create-game)."""
+"""Marching Orders: flag plumbing (serialization, catalog, create-game) and the engine rule."""
 
 import json
 import uuid
@@ -13,7 +13,12 @@ from backend.api.auth import get_current_player
 from backend.api.database import Base, get_db
 from backend.api.main import app
 from backend.api.models import Game, Player
+from backend.engine.actions import cancel_move, end_phase, move_units
+from backend.engine.definitions import load_static_definitions, load_starting_setup
+from backend.engine.queries import validate_action
+from backend.engine.reducer import apply_action
 from backend.engine.state import GameState
+from backend.engine.utils import initialize_game_state
 
 
 def _empty_state(**overrides) -> GameState:
@@ -117,3 +122,202 @@ def test_create_game_defaults_marching_orders_off(client, db_session):
     row = db_session.query(Game).filter(Game.id == game_id).first()
     stored = json.loads(row.game_state)
     assert stored["marching_orders"] is False
+
+
+# --- Engine rule: +1 movement during non-combat move for combat-move non-movers ---
+
+
+def _game(setup_id: str, marching_orders: bool, faction: str):
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(
+        setup_id=setup_id
+    )
+    starting = load_starting_setup(setup_id=setup_id)
+    state = initialize_game_state(
+        faction_defs,
+        territory_defs,
+        unit_defs,
+        starting_setup=starting,
+        camp_defs=camp_defs,
+        marching_orders=marching_orders,
+    )
+    state.current_faction = faction
+    state.phase = "combat_move"
+    defs = (unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    return state, defs
+
+
+def _act(state, action, defs):
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = defs
+    validation = validate_action(
+        state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs
+    )
+    assert validation.valid, validation.error
+    new_state, _events = apply_action(
+        state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs
+    )
+    return new_state
+
+
+def _unit(state, instance_id):
+    for territory in state.territories.values():
+        for unit in territory.units:
+            if unit.instance_id == instance_id:
+                return unit
+    return None
+
+
+def _unit_in(state, territory_id: str, unit_id: str, index: int = 0):
+    matches = [u for u in state.territories[territory_id].units if u.unit_id == unit_id]
+    assert len(matches) > index, f"need {unit_id} #{index} in {territory_id}"
+    return matches[index]
+
+
+def _to_non_combat_move(state, faction: str, defs):
+    state = _act(state, end_phase(faction), defs)  # combat_move -> combat
+    state = _act(state, end_phase(faction), defs)  # combat -> non_combat_move
+    return state
+
+
+def _gondor_board(marching_orders: bool):
+    """Ranger pair in north_ithilien (one moves, one holds) plus distant units.
+
+    Returns instance ids and base movement up front: apply_action deep-copies the
+    state, so live unit references must be re-fetched from the current state.
+    """
+    state, defs = _game("wotr_1.1", marching_orders, "gondor")
+    picked = {
+        "mover": _unit_in(state, "north_ithilien", "ithilien_ranger", 0),
+        "holder": _unit_in(state, "north_ithilien", "ithilien_ranger", 1),
+        "knight": _unit_in(state, "minas_tirith", "gondor_knight"),
+        "enemy": _unit_in(state, "minas_morgul", "orc_warrior"),
+    }
+    ids = {name: unit.instance_id for name, unit in picked.items()}
+    bases = {name: unit.base_movement for name, unit in picked.items()}
+    return state, defs, ids, bases
+
+
+def test_rule_off_grants_no_extra_movement():
+    state, defs, ids, bases = _gondor_board(False)
+
+    state = _act(
+        state,
+        move_units("gondor", "north_ithilien", "dagorlad", [ids["mover"]]),
+        defs,
+    )
+    state = _act(state, end_phase("gondor"), defs)  # combat_move -> combat
+    assert state.combat_move_moved_ids == []
+    paid = _unit(state, ids["mover"]).remaining_movement
+    assert paid < bases["mover"]
+
+    state = _act(state, end_phase("gondor"), defs)  # combat -> non_combat_move
+    assert state.combat_move_moved_ids == []
+    assert _unit(state, ids["mover"]).remaining_movement == paid
+    for name in ("holder", "knight", "enemy"):
+        assert _unit(state, ids[name]).remaining_movement == bases[name], (
+            f"{name} must keep base movement when the rule is off"
+        )
+
+
+def test_rule_on_grants_one_extra_movement_to_non_movers():
+    state, defs, ids, bases = _gondor_board(True)
+
+    state = _act(
+        state,
+        move_units("gondor", "north_ithilien", "dagorlad", [ids["mover"]]),
+        defs,
+    )
+    state = _act(state, end_phase("gondor"), defs)  # combat_move -> combat
+    assert state.combat_move_moved_ids == [ids["mover"]]
+    paid = _unit(state, ids["mover"]).remaining_movement  # movement consumed by the move
+    assert paid < bases["mover"]
+
+    state = _act(state, end_phase("gondor"), defs)  # combat -> non_combat_move
+    assert state.combat_move_moved_ids == [], "snapshot is consumed at NCM entry"
+    assert _unit(state, ids["holder"]).remaining_movement == bases["holder"] + 1
+    assert _unit(state, ids["knight"]).remaining_movement == bases["knight"] + 1
+    assert _unit(state, ids["mover"]).remaining_movement == paid, "combat-move mover gets no bonus"
+    assert _unit(state, ids["enemy"]).remaining_movement == bases["enemy"], "enemies never benefit"
+
+
+def test_cancelled_combat_move_counts_as_a_non_mover():
+    state, defs = _game("wotr_1.1", True, "gondor")
+    ranger_id = _unit_in(state, "north_ithilien", "ithilien_ranger", 0).instance_id
+    base = _unit(state, ranger_id).base_movement
+
+    state = _act(state, move_units("gondor", "north_ithilien", "dagorlad", [ranger_id]), defs)
+    state = _act(state, cancel_move("gondor", 0), defs)
+    assert state.pending_moves == []
+
+    state = _to_non_combat_move(state, "gondor", defs)
+    assert _unit(state, ranger_id).remaining_movement == base + 1
+
+
+def test_bonus_is_cleared_when_non_combat_move_ends():
+    state, defs, ids, bases = _gondor_board(True)
+
+    state = _to_non_combat_move(state, "gondor", defs)
+    assert _unit(state, ids["holder"]).remaining_movement == bases["holder"] + 1
+
+    state = _act(state, end_phase("gondor"), defs)  # non_combat_move -> mobilization
+    assert state.phase == "mobilization"
+    assert _unit(state, ids["holder"]).remaining_movement == bases["holder"], (
+        "end-of-NCM reset wipes the bonus"
+    )
+
+
+def test_units_destroyed_before_the_grant_do_not_break_it():
+    state, defs, ids, _bases = _gondor_board(True)
+    archer_id = _unit_in(state, "minas_tirith", "gondor_archer").instance_id
+
+    state = _act(
+        state,
+        move_units("gondor", "north_ithilien", "dagorlad", [ids["mover"]]),
+        defs,
+    )
+    state = _act(state, end_phase("gondor"), defs)  # combat_move -> combat
+    # Casualties mid-turn: the snapshot mover and a would-be beneficiary both die.
+    for territory_id, dead_id in (("dagorlad", ids["mover"]), ("north_ithilien", ids["holder"])):
+        state.territories[territory_id].units = [
+            u for u in state.territories[territory_id].units if u.instance_id != dead_id
+        ]
+
+    state = _act(state, end_phase("gondor"), defs)  # combat -> non_combat_move
+    assert _unit(state, ids["mover"]) is None
+    assert _unit(state, ids["holder"]) is None
+    archer = _unit(state, archer_id)
+    assert archer.remaining_movement == archer.base_movement + 1
+    assert state.combat_move_moved_ids == []
+
+
+def test_zero_cost_load_counts_as_a_move_and_gets_no_bonus():
+    state, defs = _game("wotr_exp_1.0", True, "harad")
+    loader_id = _unit_in(state, "umbar", "corsair_of_umbar", 0).instance_id
+    holder_id = _unit_in(state, "umbar", "corsair_of_umbar", 1).instance_id
+    ship_id = _unit_in(state, "sea_zone_11", "black_ship").instance_id
+    holder_base = _unit(state, holder_id).base_movement
+
+    # A load costs 0 movement but still counts as moving during combat move.
+    state = _act(
+        state,
+        move_units("harad", "umbar", "sea_zone_11", [loader_id], move_type="load"),
+        defs,
+    )
+    # The sea raid names the boat so the must-attack requirement clears; the engine
+    # expands the payload to the pending-loaded passenger, which offloads for 1 movement.
+    state = _act(
+        state,
+        move_units("harad", "sea_zone_11", "harondor", [ship_id], move_type="offload"),
+        defs,
+    )
+
+    state = _act(state, end_phase("harad"), defs)  # combat_move -> combat
+    assert loader_id in state.combat_move_moved_ids
+    assert ship_id in state.combat_move_moved_ids
+    assert _unit(state, loader_id).remaining_movement == 0, (
+        "load was free; only the offload cost 1"
+    )
+
+    state = _act(state, end_phase("harad"), defs)  # combat -> non_combat_move
+    assert state.combat_move_moved_ids == []
+    assert _unit(state, loader_id).remaining_movement == 0, "loader is a mover: no +1 bonus"
+    assert _unit(state, holder_id).remaining_movement == holder_base + 1
