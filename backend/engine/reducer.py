@@ -4819,6 +4819,15 @@ def _handle_end_phase(
                 "A ladder cannot attack alone: add at least one other unit type to the attack (or cancel the ladder's "
                 f"move) before ending combat move. Ladders without an attack partner: {ladder_only!s}."
             )
+        # Marching Orders: snapshot which units moved this combat move before the
+        # pending moves are consumed (loads cost 0 movement, so ids are the only signal).
+        if getattr(state, "marching_orders", False):
+            state.combat_move_moved_ids = [
+                instance_id
+                for pm in state.pending_moves
+                if pm.phase == "combat_move"
+                for instance_id in (pm.unit_instance_ids or [])
+            ]
         state, move_events = _apply_pending_moves(
             state, "combat_move", unit_defs, territory_defs, faction_defs
         )
@@ -4981,10 +4990,36 @@ def _handle_end_phase(
         state.combat_move_naval_idle_sail_instance_ids = []
         state.avoided_forced_naval_combat_instance_ids = []
 
+    # Marching Orders: entering non-combat move, +1 movement for this faction's units
+    # that did not move during combat move. The bonus is wiped by the end-of-NCM reset,
+    # so it lasts exactly one non-combat move phase.
+    if (
+        state.phase == "non_combat_move"
+        and old_phase == "combat"
+        and getattr(state, "marching_orders", False)
+    ):
+        moved_ids = set(getattr(state, "combat_move_moved_ids", None) or [])
+        for territory in state.territories.values():
+            for unit in territory.units:
+                if unit.instance_id in moved_ids:
+                    continue
+                unit_faction = get_unit_faction(unit, unit_defs)
+                if (
+                    unit_faction is None
+                    and state.current_faction
+                    and unit.instance_id.startswith(state.current_faction + "_")
+                ):
+                    unit_faction = state.current_faction
+                if not faction_acts_as(faction_defs, unit_faction, state.current_faction):
+                    continue
+                unit.remaining_movement = int(getattr(unit, "remaining_movement", 0) or 0) + 1
+        state.combat_move_moved_ids = []
+
     # When entering combat_move, ensure all current-faction units have full movement
     # (including units in neutral/unownable territories like Dagorlad that may have
     # been missed by the end-of-non_combat_move reset in edge cases or loaded state).
     if state.phase == "combat_move":
+        state.combat_move_moved_ids = []
         _reset_unit_stats_for_faction(state, state.current_faction, unit_defs, faction_defs)
 
     if state.phase == "mobilization":
