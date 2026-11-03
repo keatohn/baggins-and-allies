@@ -441,6 +441,8 @@ class CreateGameRequest(BaseModel):
     heroes_enabled: bool = True
     """When True, each alliance sees armies only on its land and one territory beyond. Default off."""
     shadow_of_war: bool = False
+    """Marching Orders: units that did not move during combat move get +1 movement in non-combat move. Default off."""
+    marching_orders: bool = False
     """Legacy rings switch, used only when optional_rules is omitted. Default off."""
     rings_of_power: bool = False
     """Optional special rules chosen in create game, keyed by rule type. Missing types default on."""
@@ -2978,6 +2980,7 @@ def create_game(
         prefire_penalty=parse_prefire_penalty_from_manifest(setup.get("prefire_penalty")),
         heroes_enabled=bool(request.heroes_enabled) or rings_on,
         shadow_of_war=bool(request.shadow_of_war),
+        marching_orders=bool(request.marching_orders),
         rings_of_power=rings_on,
         special_rules=chosen_rules,
         subfaction_rules=setup.get("subfaction_rules"),

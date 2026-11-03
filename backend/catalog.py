@@ -22,7 +22,7 @@ from backend.engine.definitions import DATA_DIR, SETUPS_DIR
 CATALOG_PATH = DATA_DIR / "catalog.json"
 CATALOG_SETTING_KEY = "catalog"
 SPECIAL_RULE_IDS = ("rings_of_power", "evolving_territory")
-GAME_OPTION_IDS = ("shadow_of_war",)
+GAME_OPTION_IDS = ("shadow_of_war", "marching_orders")
 REQUIRED_TERRAIN_TYPES = ("sea",)
 ENTRY_SECTIONS = ("specials", "special_rules", "game_options")
 LIST_SECTIONS = ("terrain_types", "archetypes")

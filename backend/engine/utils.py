@@ -228,6 +228,7 @@ def initialize_game_state(
     heroes_enabled: bool | None = None,
     special_rules: list | None = None,
     shadow_of_war: bool | None = None,
+    marching_orders: bool | None = None,
     subfaction_rules: dict | None = None,
     rings_of_power: bool | None = None,
 ) -> GameState:
@@ -392,6 +393,7 @@ def initialize_game_state(
         prefire_penalty=prefire_penalty_val,
         heroes_enabled=heroes_enabled_val,
         shadow_of_war=bool(shadow_of_war),
+        marching_orders=bool(marching_orders),
         rings_of_power=bool(rings_of_power) and heroes_enabled_val,
         special_rules=parsed_special_rules,
         subfaction_rules=parsed_subfaction_rules,

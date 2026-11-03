@@ -761,6 +761,10 @@ class GameState:
     heroes_enabled: bool = True
     # When True, each alliance sees armies only in its land and one territory beyond.
     shadow_of_war: bool = False
+    # Optional rule "Marching Orders": units that did not move in combat_move get +1 remaining_movement on NCM entry.
+    marching_orders: bool = False
+    # Unit instance ids that moved during the combat move phase; captured at combat_move end, consumed at NCM entry.
+    combat_move_moved_ids: list[str] = field(default_factory=list)
     # Create-game switch. The ring catalog lives in special_rules; this turns it on for the game.
     rings_of_power: bool = False
     rings: list["Ring"] = field(default_factory=list)
@@ -852,6 +856,8 @@ class GameState:
             "prefire_penalty": getattr(self, "prefire_penalty", True),
             "heroes_enabled": getattr(self, "heroes_enabled", True),
             "shadow_of_war": bool(getattr(self, "shadow_of_war", False)),
+            "marching_orders": bool(getattr(self, "marching_orders", False)),
+            "combat_move_moved_ids": list(getattr(self, "combat_move_moved_ids", None) or []),
             "rings_of_power": bool(getattr(self, "rings_of_power", False)),
             "rings": [ring.to_dict() for ring in (getattr(self, "rings", None) or [])],
             "special_rules": list(getattr(self, "special_rules", None) or []),
@@ -973,6 +979,8 @@ class GameState:
             prefire_penalty=parse_prefire_penalty_from_manifest(data.get("prefire_penalty")),
             heroes_enabled=parse_prefire_penalty_from_manifest(data.get("heroes_enabled")),
             shadow_of_war=bool(data.get("shadow_of_war")),
+            marching_orders=bool(data.get("marching_orders")),
+            combat_move_moved_ids=_ensure_str_list(data.get("combat_move_moved_ids")),
             rings_of_power=bool(data.get("rings_of_power")),
             rings=[Ring.from_dict(row) for row in (data.get("rings") or []) if isinstance(row, dict)],
             special_rules=parse_special_rules(data.get("special_rules")),
