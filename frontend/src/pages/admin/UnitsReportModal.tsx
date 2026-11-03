@@ -47,7 +47,27 @@ type UnitSource = {
   specialKeys: string[];
 };
 
-type UnitRow = UnitSource & { iconSpan: number; scenarioSpan: number };
+type UnitRow = UnitSource & { iconSpan: number; scenarioSpan: number; scenarioBand: boolean };
+
+/** A value is the mode only when it appears strictly most often, and at least three times. */
+function outrightMode(values: number[]): number | null {
+  const counts = new Map<number, number>();
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+  let bestValue = 0;
+  let bestCount = 0;
+  let tied = false;
+  for (const [value, count] of counts) {
+    if (count > bestCount) {
+      bestValue = value;
+      bestCount = count;
+      tied = false;
+    } else if (count === bestCount) {
+      tied = true;
+    }
+  }
+  if (tied || bestCount < 3) return null;
+  return bestValue;
+}
 
 function isListedScenario(setup: AdminSetupListItem): boolean {
   return setup.is_active === true || setup.is_active === 'admin';
@@ -76,6 +96,7 @@ function inRange(value: number | null, range: Range): boolean {
 }
 
 function withSpans(rows: UnitSource[]): UnitRow[] {
+  let scenarioBand = false;
   return rows.map((row, index) => {
     const iconStart = index === 0 || rows[index - 1].icon !== row.icon;
     let iconSpan = 0;
@@ -86,6 +107,7 @@ function withSpans(rows: UnitSource[]): UnitRow[] {
     const scenarioStart = iconStart || rows[index - 1].setupId !== row.setupId;
     let scenarioSpan = 0;
     if (scenarioStart) {
+      scenarioBand = !scenarioBand;
       scenarioSpan = 1;
       while (
         index + scenarioSpan < rows.length
@@ -95,7 +117,7 @@ function withSpans(rows: UnitSource[]): UnitRow[] {
         scenarioSpan += 1;
       }
     }
-    return { ...row, iconSpan, scenarioSpan };
+    return { ...row, iconSpan, scenarioSpan, scenarioBand };
   });
 }
 
@@ -196,15 +218,34 @@ export function UnitsReportModal({ setups, specials, onClose }: Props) {
   }, [sources, query, ranges, selectedSpecials]);
 
   const rows = useMemo(() => withSpans(filtered), [filtered]);
+  const modes = useMemo(() => {
+    const byIcon = new Map<string, UnitSource[]>();
+    for (const row of sources) {
+      const list = byIcon.get(row.icon);
+      if (list) list.push(row);
+      else byIcon.set(row.icon, [row]);
+    }
+    const out = new Map<string, Record<StatKey, number | null>>();
+    for (const [icon, list] of byIcon) {
+      const record = {} as Record<StatKey, number | null>;
+      for (const stat of STATS) {
+        const values = list
+          .filter((row) => stat.key !== 'cost' || row.purchasable)
+          .map((row) => row[stat.key]);
+        record[stat.key] = outrightMode(values);
+      }
+      out.set(icon, record);
+    }
+    return out;
+  }, [sources]);
+  const statOffMode = (row: UnitRow, key: StatKey) => {
+    if (key === 'cost' && !row.purchasable) return false;
+    const mode = modes.get(row.icon)?.[key];
+    return mode == null || row[key] !== mode;
+  };
   const filtersActive = query.trim() !== ''
     || selectedSpecials.length > 0
     || STATS.some((stat) => ranges[stat.key].min.trim() !== '' || ranges[stat.key].max.trim() !== '');
-
-  const specialsLabel = selectedSpecials.length === 0
-    ? 'All specials'
-    : selectedSpecials.length === 1
-      ? selectedSpecials[0]
-      : `${selectedSpecials.length} specials`;
 
   const setRange = (key: StatKey, edge: keyof Range, value: string) => {
     setRanges((current) => ({ ...current, [key]: { ...current[key], [edge]: value } }));
@@ -257,7 +298,7 @@ export function UnitsReportModal({ setups, specials, onClose }: Props) {
               onChange={(e) => setQuery(e.target.value)}
             />
           </label>
-          <div className="games-report__dropdown" ref={specialsMenuRef}>
+          <div className={`games-report__dropdown${specialsOpen ? ' games-report__dropdown--open' : ''}`} ref={specialsMenuRef}>
             <button
               type="button"
               className={`games-report__filter${selectedSpecials.length > 0 ? ' games-report__filter--active' : ''}`}
@@ -265,7 +306,7 @@ export function UnitsReportModal({ setups, specials, onClose }: Props) {
               aria-expanded={specialsOpen}
               onClick={() => setSpecialsOpen((open) => !open)}
             >
-              {specialsLabel} ▾
+              Specials ▾
             </button>
             {specialsOpen ? (
               <div className="games-report__dropdown-menu" role="listbox" aria-multiselectable="true">
@@ -352,7 +393,10 @@ export function UnitsReportModal({ setups, specials, onClose }: Props) {
               </thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={`${row.icon}|${row.setupId}|${row.unitId}`} className="unit-stats-unit-row">
+                  <tr
+                    key={`${row.icon}|${row.setupId}|${row.unitId}`}
+                    className={`unit-stats-unit-row${row.scenarioBand ? ' units-across__band' : ''}`}
+                  >
                     {row.iconSpan > 0 ? (
                       <td className="units-across__icon" rowSpan={row.iconSpan}>
                         <img src={row.icon} alt="" className="unit-stats-unit-icon" aria-hidden />
@@ -364,12 +408,12 @@ export function UnitsReportModal({ setups, specials, onClose }: Props) {
                       </td>
                     ) : null}
                     <td className="units-across__id">{row.unitId}</td>
-                    <td className="stats-col-num">{row.purchasable ? row.cost : '–'}</td>
-                    <td className="stats-col-num">{row.attack}</td>
-                    <td className="stats-col-num">{row.defense}</td>
-                    <td className="stats-col-num">{row.dice}</td>
-                    <td className="stats-col-num">{row.movement}</td>
-                    <td className="stats-col-num">{row.health}</td>
+                    <td className={`stats-col-num${statOffMode(row, 'cost') ? ' units-across__off' : ''}`}>{row.purchasable ? row.cost : '–'}</td>
+                    <td className={`stats-col-num${statOffMode(row, 'attack') ? ' units-across__off' : ''}`}>{row.attack}</td>
+                    <td className={`stats-col-num${statOffMode(row, 'defense') ? ' units-across__off' : ''}`}>{row.defense}</td>
+                    <td className={`stats-col-num${statOffMode(row, 'dice') ? ' units-across__off' : ''}`}>{row.dice}</td>
+                    <td className={`stats-col-num${statOffMode(row, 'movement') ? ' units-across__off' : ''}`}>{row.movement}</td>
+                    <td className={`stats-col-num${statOffMode(row, 'health') ? ' units-across__off' : ''}`}>{row.health}</td>
                     <td className="stats-col-num stats-col-specials">{row.specials}</td>
                   </tr>
                 ))}
@@ -378,7 +422,7 @@ export function UnitsReportModal({ setups, specials, onClose }: Props) {
           ) : null}
         </div>
         <p className="unit-stats-modal-key">
-          P = Power cost | A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points | SP = Specials
+          P = Power cost | A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points | SP = Specials. A red number is not that icon’s usual value.
         </p>
       </div>
     </div>
