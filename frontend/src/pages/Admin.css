@@ -564,6 +564,14 @@
   padding: max(1rem, env(safe-area-inset-top, 0px)) 1rem max(1rem, env(safe-area-inset-bottom, 0px));
   background: rgba(40, 32, 24, 0.45);
   box-sizing: border-box;
+  overscroll-behavior: none;
+}
+
+html:has(.admin-modal-overlay),
+body:has(.admin-modal-overlay),
+html:has(.combat-sim-modal-overlay),
+body:has(.combat-sim-modal-overlay) {
+  overflow: hidden;
 }
 
 .admin-modal {
@@ -617,29 +625,26 @@
   white-space: nowrap;
 }
 
-.admin-modal--games {
-  width: min(100%, 76rem);
-  height: min(92vh, 54rem);
-  max-height: min(92vh, 54rem);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
+.admin-modal--games,
 .admin-modal--units {
   width: min(100%, 76rem);
-  height: min(92vh, 54rem);
-  max-height: min(92vh, 54rem);
+  height: min(92dvh, 54rem);
+  max-height: min(92dvh, 54rem);
+  min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
-.admin-modal--units .unit-stats-modal {
+.admin-modal--units .unit-stats-modal,
+.admin-modal--games .games-report__table-scroll,
+.admin-modal--units .games-report__table-scroll {
   max-width: none;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .units-across__table .units-across__icon,
@@ -3209,6 +3214,16 @@
     font-size: 0.82rem;
   }
 
+  .admin-page__tabs-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    row-gap: 0.55rem;
+  }
+
+  .admin-page__tab-previews {
+    justify-content: flex-start;
+  }
+
   .admin-page__actions {
     flex-direction: column;
     align-items: stretch;
@@ -3224,13 +3239,29 @@
     padding: 0.55rem 0.65rem;
   }
 
-  .admin-modal {
+  .admin-modal:not(.admin-modal--units):not(.admin-modal--games):not(.admin-modal--balance):not(.admin-modal--graph):not(.admin-modal--icons) {
     width: min(100% - 1rem, 26rem);
     max-height: min(88dvh, 32rem);
     padding-left: max(1rem, env(safe-area-inset-left, 0px));
     padding-right: max(1rem, env(safe-area-inset-right, 0px));
     padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
     box-sizing: border-box;
+  }
+
+  .admin-modal.admin-modal--units,
+  .admin-modal.admin-modal--games,
+  .admin-modal.admin-modal--balance {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    min-height: 0;
+  }
+
+  .admin-modal-overlay:has(.admin-modal--units),
+  .admin-modal-overlay:has(.admin-modal--games),
+  .admin-modal-overlay:has(.admin-modal--balance) {
+    align-items: stretch;
+    padding: max(0.35rem, env(safe-area-inset-top, 0px)) 0.35rem max(0.35rem, env(safe-area-inset-bottom, 0px));
   }
 
   .admin-modal--icons .admin-icon-group {
