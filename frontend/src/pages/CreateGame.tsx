@@ -60,6 +60,7 @@ export default function CreateGame() {
   const [player, setPlayer] = useState<AuthPlayer | null>(null);
   const [heroesEnabled, setHeroesEnabled] = useState(true);
   const [shadowOfWar, setShadowOfWar] = useState(false);
+  const [marchingOrders, setMarchingOrders] = useState(false);
   const [optionalRules, setOptionalRules] = useState<Record<string, boolean>>({});
   const [setups, setSetups] = useState<SetupInfo[]>([]);
   const [ruleDescriptions, setRuleDescriptions] = useState<Record<string, string>>({});
@@ -144,6 +145,7 @@ export default function CreateGame() {
         selectedSetupId ?? undefined,
         heroesEnabled,
         shadowOfWar,
+        marchingOrders,
         Boolean(selectedScenario?.rings_of_power) || optionalRules.rings_of_power === true,
         optionalRules,
         mode === 'computer',
@@ -287,6 +289,25 @@ export default function CreateGame() {
               </div>
             );
           })}
+          <div className="create-game-form__field">
+            <RuleLabel name="Marching Orders" description={ruleDescriptions.marching_orders} />
+            <div className="create-game-form__picker" role="group" aria-label="Marching Orders on or off">
+              <button
+                type="button"
+                className={`create-game-form__picker-option ${marchingOrders ? 'create-game-form__picker-option--active' : ''}`}
+                onClick={() => setMarchingOrders(true)}
+              >
+                On
+              </button>
+              <button
+                type="button"
+                className={`create-game-form__picker-option ${!marchingOrders ? 'create-game-form__picker-option--active' : ''}`}
+                onClick={() => setMarchingOrders(false)}
+              >
+                Off
+              </button>
+            </div>
+          </div>
           <div className="create-game-form__field">
             <RuleLabel name="Shadow of War" description={ruleDescriptions.shadow_of_war} />
             <div className="create-game-form__picker" role="group" aria-label="Shadow of War on or off">

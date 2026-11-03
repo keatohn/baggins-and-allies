@@ -156,6 +156,8 @@ export interface ApiGameState {
   heroes_enabled?: boolean;
   /** Create-game option. Missing or false leaves the board fully visible. */
   shadow_of_war?: boolean;
+  /** Create-game option. Missing or false means units get no extra non-combat movement. */
+  marching_orders?: boolean;
   /** Create-game option. Missing or false means this game has no rings. */
   rings_of_power?: boolean;
   rings?: ApiRing[];
@@ -1531,6 +1533,7 @@ export const api = {
     setupId?: string,
     heroesEnabled: boolean = true,
     shadowOfWar: boolean = false,
+    marchingOrders: boolean = false,
     ringsOfPower: boolean = false,
     optionalRules?: Record<string, boolean>,
     computerOnly: boolean = false,
@@ -1543,6 +1546,7 @@ export const api = {
         computer_only: computerOnly,
         heroes_enabled: heroesEnabled,
         shadow_of_war: shadowOfWar,
+        marching_orders: marchingOrders,
         rings_of_power: ringsOfPower,
         ...(optionalRules != null && { optional_rules: optionalRules }),
         ...(setupId != null && { setup_id: setupId }),
