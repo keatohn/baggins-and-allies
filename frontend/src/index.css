@@ -69,7 +69,7 @@ body {
   color: var(--ink);
   min-height: 100vh;
   min-height: 100dvh;
-  cursor: url('/assets/cursor/ring_cursor.svg') 16 16, auto;
+  cursor: url('/assets/cursor/ring_cursor.png') 8 7, auto;
 }
 
 h1,
@@ -114,7 +114,7 @@ summary,
 [style*='cursor:pointer'],
 [style*='cursor: pointer'],
 [data-sfx-click='true'] {
-  cursor: url('/assets/cursor/sting_pointer.svg') 4 4, pointer !important;
+  cursor: url('/assets/cursor/sting_pointer.png') 30 26, pointer !important;
 }
 
 button:hover:not(:disabled) {
