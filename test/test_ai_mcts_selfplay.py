@@ -21,8 +21,6 @@ import random
 import sys
 import time
 
-import pytest
-
 from backend.engine.actions import end_phase
 from backend.engine.movement import _is_water_zone, water_transport_relation
 from backend.engine.queries import (
@@ -923,6 +921,8 @@ def test_resolve_weight_env_maps_short_and_raw_names():
         "AI_MCTS_W_CAPITAL": "1.5"
     }
     assert resolve_weight_env(None) == {}
+    import pytest
+
     with pytest.raises(ValueError, match="unknown weight override"):
         resolve_weight_env({"materiel": "2.0"})
 
@@ -941,6 +941,8 @@ def test_format_weight_label():
 
 def test_run_matchup_rejects_unknown_weight_keys():
     """A typo'd override fails fast (before any turn is driven)."""
+    import pytest
+
     state, ud, td, fd, cd, port_d = _load_setup()
     with pytest.raises(ValueError, match="unknown weight override"):
         run_matchup(
