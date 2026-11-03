@@ -4,6 +4,7 @@ import type { GameState } from '../types/game';
 import type { ApiFactionStats, ApiSubfactionRule, SpecialDefinition } from '../services/api';
 import StrongholdAllianceBar from './StrongholdAllianceBar';
 import AccountMenu from './AccountMenu';
+import SeatPlayerModal, { type SeatPortrait } from './account/SeatPlayerModal';
 import { useMenuScroll } from './MenuScrollContext';
 import { GameStatsModal, RingsOfPowerModal, UnitStatsModal, type RingsOfPowerData, type StatsRingMark, type UnitForStats } from './StatsModals';
 import './Header.css';
@@ -41,6 +42,10 @@ interface HeaderProps {
   specialRules?: { type?: string; name?: string; description?: string }[];
   /** Catalog names and descriptions, used when a scenario leaves the description blank. */
   catalogRules?: { id: string; name: string; description: string }[];
+  /** Human seat under each turn-order faction. Omitted for single-player. */
+  seatPortraits?: Record<string, SeatPortrait>;
+  /** Logged-in player, so their own portrait opens the editable profile. */
+  viewerId?: string | null;
 }
 
 type FactionMark = { id: string; name: string; icon: string; color: string };
@@ -156,19 +161,34 @@ function subfactionRuleLines(
   return lines;
 }
 
-function Header({ gameState, turnOrderForTicker, factionData, factionStats, ringsByFaction, ringsOfPower = null, unitsByFaction = {}, gameName = null, setupDisplayName = null, specials = {}, specialsOrder: _specialsOrder = [], unitsBySpecial = {}, onOpenCombatSim, subfactionRules = {}, unitNames = {}, specialRules = [], catalogRules = [] }: HeaderProps) {
+function Header({ gameState, turnOrderForTicker, factionData, factionStats, ringsByFaction, ringsOfPower = null, unitsByFaction = {}, gameName = null, setupDisplayName = null, specials = {}, specialsOrder: _specialsOrder = [], unitsBySpecial = {}, onOpenCombatSim, subfactionRules = {}, unitNames = {}, specialRules = [], catalogRules = [], seatPortraits, viewerId = null }: HeaderProps) {
   const { navigateWithScroll } = useMenuScroll();
   const [statsOpen, setStatsOpen] = useState(false);
   const [ringsOpen, setRingsOpen] = useState(false);
   const [specialsOpen, setSpecialsOpen] = useState(false);
   const [unitStatsOpen, setUnitStatsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [portraitsOn, setPortraitsOn] = useState(false);
+  const [openSeat, setOpenSeat] = useState<SeatPortrait | null>(null);
+  const [seatEdits, setSeatEdits] = useState<Record<string, SeatPortrait>>({});
   const faction = factionData[gameState.current_faction];
   const factionColor = faction?.color;
 
   const alliances = factionStats?.alliances ?? {};
   const allianceOrder = ['good', 'evil'].filter(a => a in alliances);
   const turnOrder = (turnOrderForTicker?.length ? turnOrderForTicker : gameState.turn_order) ?? [];
+  const showSeatToggle = Boolean(
+    seatPortraits && Object.values(seatPortraits).some((seat) => seat.playerId !== viewerId),
+  );
+  const facesOn = portraitsOn && showSeatToggle;
+  const seatFor = (factionId: string): SeatPortrait | undefined => {
+    const parentId = factionData[factionId]?.parent;
+    const raw = seatPortraits?.[factionId] ?? (parentId ? seatPortraits?.[parentId] : undefined);
+    if (!raw) return undefined;
+    const edited = seatEdits[raw.playerId];
+    if (!edited || edited.relation === raw.relation) return raw;
+    return edited;
+  };
   const helpSubfactions = useMemo((): HelpSubfaction[] => {
     const entries = Object.entries(factionData).filter(([, fd]) => fd.parent);
     if (entries.length === 0) return [];
@@ -326,64 +346,115 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
         <div className="header-spacer" />
 
         {/* Turn order ticker: faction logos in turn order (from setup or turnOrderForTicker), gold ring around current */}
-        <div className="header-turn-ticker" aria-label="Turn order" style={factionColor ? { borderColor: factionColor } : undefined}>
-          {(() => {
-            const displayOrder = turnOrder.filter((f) => factionData[f]);
-            const order = displayOrder.length > 0
-              ? displayOrder
-              : Object.keys(factionData).filter((fid) => !factionData[fid]?.parent).sort();
-            return order.map((fid) => {
-              const fd = factionData[fid];
-              const isCurrent = fid === gameState.current_faction;
-              const marks = subfactionMarks(fid, factionData);
-              const badgeMode = marks.length === 2 ? 'two' : marks.length >= 3 ? 'row' : 'one';
-              const baseName = fd?.name ?? fid;
-              const markNames = marks.map((mark) => mark.name).filter(Boolean).join(', ');
-              const title = markNames
-                ? `${baseName}${isCurrent ? ' (current turn)' : ''} — ${markNames}`
-                : isCurrent
-                  ? `${baseName} (current turn)`
-                  : baseName;
-              return (
-                <div
-                  key={fid}
-                  className={`header-turn-ticker-slot ${isCurrent ? 'header-turn-ticker-slot--current' : ''}`}
-                  title={title}
-                  /* Non-current: band matches the faction color. Current uses border:none + gold ring (CSS). */
-                  style={!isCurrent && fd?.color ? { borderColor: fd.color } : undefined}
-                >
-                  <div className="header-turn-ticker-logo">
-                    {fd?.icon && (
-                      <img src={fd.icon} alt="" className="header-turn-ticker-icon" aria-hidden />
-                    )}
-                    {marks.length > 0 && (
-                      <div
-                        className={`header-turn-ticker-badges header-turn-ticker-badges--${badgeMode}`}
-                        style={badgeMode === 'row' ? { ['--sub-count' as string]: String(marks.length) } : undefined}
-                        aria-hidden
-                      >
-                        {marks.map((mark) => (
-                          <span
-                            key={mark.id}
-                            className="header-turn-ticker-badge"
-                            style={{ background: mark.color }}
-                          >
-                            <img src={mark.icon} alt="" />
-                          </span>
-                        ))}
-                      </div>
+        <div className="header-turn-cluster">
+          {showSeatToggle && (
+            <button
+              type="button"
+              className={`header-seats-btn${facesOn ? ' header-seats-btn--on' : ''}`}
+              aria-pressed={facesOn}
+              aria-label={facesOn ? 'Hide player portraits' : 'Show player portraits'}
+              title={facesOn ? 'Hide player portraits' : 'Show player portraits'}
+              onClick={() => setPortraitsOn((on) => !on)}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="8" r="3.2" fill="currentColor" />
+                <path d="M5.2 19.4c.9-3.4 3.4-5 6.8-5s5.9 1.6 6.8 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
+          <div
+            className={`header-turn-ticker${facesOn ? ' header-turn-ticker--seats' : ''}`}
+            aria-label="Turn order"
+            style={factionColor ? { borderColor: factionColor } : undefined}
+          >
+            {(() => {
+              const displayOrder = turnOrder.filter((f) => factionData[f]);
+              const order = displayOrder.length > 0
+                ? displayOrder
+                : Object.keys(factionData).filter((fid) => !factionData[fid]?.parent).sort();
+              return order.map((fid) => {
+                const fd = factionData[fid];
+                const isCurrent = fid === gameState.current_faction;
+                const marks = subfactionMarks(fid, factionData);
+                const badgeMode = marks.length === 2 ? 'two' : marks.length >= 3 ? 'row' : 'one';
+                const baseName = fd?.name ?? fid;
+                const markNames = marks.map((mark) => mark.name).filter(Boolean).join(', ');
+                const seat = seatFor(fid);
+                const title = markNames
+                  ? `${baseName}${isCurrent ? ' (current turn)' : ''} — ${markNames}`
+                  : isCurrent
+                    ? `${baseName} (current turn)`
+                    : baseName;
+                const band = !isCurrent && fd?.color ? { borderColor: fd.color } : undefined;
+                const face = seat?.avatar ?? { image: 'hobbit.png', color: '#2d5a27' };
+                return (
+                  <div
+                    key={fid}
+                    className={`header-turn-ticker-slot ${isCurrent ? 'header-turn-ticker-slot--current' : ''}`}
+                    title={title}
+                    /* Non-current: band matches the faction color. Current uses border:none + gold ring (CSS). */
+                    style={facesOn ? undefined : band}
+                  >
+                    <div className="header-turn-ticker-logo" style={facesOn ? band : undefined}>
+                      {fd?.icon && (
+                        <img src={fd.icon} alt="" className="header-turn-ticker-icon" aria-hidden />
+                      )}
+                      {marks.length > 0 && (
+                        <div
+                          className={`header-turn-ticker-badges header-turn-ticker-badges--${badgeMode}`}
+                          style={badgeMode === 'row' ? { ['--sub-count' as string]: String(marks.length) } : undefined}
+                          aria-hidden
+                        >
+                          {marks.map((mark) => (
+                            <span
+                              key={mark.id}
+                              className="header-turn-ticker-badge"
+                              style={{ background: mark.color }}
+                            >
+                              <img src={mark.icon} alt="" />
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {facesOn && (
+                      seat ? (
+                        <button
+                          type="button"
+                          className="header-turn-ticker-portrait"
+                          style={{ backgroundColor: face.color }}
+                          aria-label={`View ${seat.username}'s profile`}
+                          title={seat.username}
+                          onClick={() => setOpenSeat(seat)}
+                        >
+                          <img src={`/assets/units/${face.image}`} alt="" />
+                        </button>
+                      ) : (
+                        <span className="header-turn-ticker-portrait header-turn-ticker-portrait--empty" aria-hidden />
+                      )
                     )}
                   </div>
-                </div>
-              );
-            });
-          })()}
+                );
+              });
+            })()}
+          </div>
         </div>
 
         <div className="faction-header" style={factionColor ? { borderColor: factionColor } : undefined}>
           <span className="faction-title">{faction?.name}</span>
         </div>
       </header>
+
+      {openSeat && (
+        <SeatPlayerModal
+          seat={openSeat}
+          onClose={() => setOpenSeat(null)}
+          onSeatChange={(next) => {
+            setSeatEdits((prev) => ({ ...prev, [next.playerId]: next }));
+            setOpenSeat(next);
+          }}
+        />
+      )}
 
       {statsOpen && (
         <GameStatsModal

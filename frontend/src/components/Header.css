@@ -122,8 +122,44 @@
   margin-right: clamp(0.15rem, 0.75vw, 0.48rem);
 }
 
-.header-turn-ticker {
+.header-turn-cluster {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.28rem;
   margin-left: clamp(0.12rem, 0.65vw, 0.38rem);
+}
+
+.header-seats-btn {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--parchment-dark);
+  border: 2px solid var(--ink-faded);
+  border-radius: 4px;
+  color: var(--ink);
+  cursor: pointer;
+  line-height: 0;
+}
+
+.header-seats-btn:hover {
+  border-color: var(--ink);
+  background: var(--parchment);
+}
+
+.header-seats-btn--on {
+  border-color: #d4a017;
+  box-shadow: 0 0 0 1px #b8860b;
+}
+
+.header-seats-btn svg {
+  width: 16px;
+  height: 16px;
+  display: block;
 }
 
 .faction-header {
@@ -1258,6 +1294,98 @@
   flex: 0 0 auto;
 }
 
+/* Portraits sit under the seal. Subfaction badges move to the top rim so they stay on the logo. */
+.header-turn-ticker.header-turn-ticker--seats {
+  height: auto;
+  min-height: 0;
+  align-items: flex-start;
+  padding-top: 0.4rem;
+  padding-bottom: 0.28rem;
+}
+
+.header-turn-ticker--seats .header-turn-ticker-slot {
+  height: auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 2px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+.header-turn-ticker--seats .header-turn-ticker-slot--current {
+  border: none;
+  box-shadow: none;
+  animation: none;
+}
+
+.header-turn-ticker--seats .header-turn-ticker-logo {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 2px solid var(--ink-faded);
+  box-sizing: border-box;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  background: transparent;
+}
+
+.header-turn-ticker--seats .header-turn-ticker-slot--current .header-turn-ticker-logo {
+  border: none;
+  box-shadow:
+    0 0 0 3px #d4a017,
+    0 0 0 4px #b8860b,
+    0 0 14px 3px rgba(232, 126, 34, 0.75),
+    0 0 24px 6px rgba(230, 126, 34, 0.5);
+  animation: turn-ticker-ring-glow 2s ease-in-out infinite;
+}
+
+.header-turn-ticker--seats .header-turn-ticker-badges--one .header-turn-ticker-badge,
+.header-turn-ticker--seats .header-turn-ticker-badges--two .header-turn-ticker-badge {
+  top: 16%;
+}
+
+.header-turn-ticker--seats .header-turn-ticker-badges--row {
+  bottom: auto;
+  top: 0;
+  align-items: flex-start;
+}
+
+.header-turn-ticker-portrait {
+  width: 72%;
+  aspect-ratio: 1;
+  margin-top: 1px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid #1c140c;
+  overflow: hidden;
+  display: block;
+  cursor: pointer;
+  line-height: 0;
+  flex-shrink: 0;
+}
+
+.header-turn-ticker-portrait img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.header-turn-ticker-portrait--empty {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .header-turn-ticker--seats .header-turn-ticker-slot--current .header-turn-ticker-logo {
+    animation: none;
+  }
+}
+
 @media (max-width: 1440px) {
   .header-turn-ticker {
     height: clamp(38px, 5vw, 44px);
@@ -1439,9 +1567,12 @@
     font-size: clamp(0.65rem, 2.4vw, 0.8rem);
   }
 
+  .header-turn-cluster {
+    margin-left: 0.18rem;
+  }
+
   .header-turn-ticker {
     flex: 0 0 auto;
-    margin-left: 0.18rem;
     height: 36px;
     min-height: 36px;
     padding: 0 0.3rem;

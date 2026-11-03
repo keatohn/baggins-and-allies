@@ -796,6 +796,42 @@
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 
+/* While the map key is open, every stronghold gets a ring and every capital a crown. */
+.map-content--key .territory-marker.faction-marker {
+  position: relative;
+  box-shadow:
+    0 0 0 3px #f6e7b2,
+    0 0 0 5px #6b4e2e;
+}
+
+.map-content--key .territory-marker.neutral-stronghold-marker {
+  position: relative;
+  box-shadow:
+    0 0 0 3px #f6e7b2,
+    0 0 0 6px #6b4e2e,
+    0 0 8px 2px rgba(232, 126, 34, 0.5);
+}
+
+.map-content--key .faction-marker--capital::before,
+.map-content--key .neutral-stronghold-marker--capital::before {
+  content: '♔';
+  position: absolute;
+  top: -0.72em;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 18px;
+  line-height: 1;
+  color: #f6e27a;
+  text-shadow:
+    0 0 1px #3a2a12,
+    0 1px 1px #3a2a12,
+    0 0 2px #3a2a12;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 1;
+  visibility: visible;
+}
+
 .territory-marker.faction-marker img {
   display: block;
   border-radius: 50%;
@@ -1344,6 +1380,29 @@
 .map-key-badge--sea {
   min-width: 1.45em;
   border-radius: 1px;
+}
+
+.map-key-stronghold {
+  position: relative;
+  width: 0.85em;
+  height: 0.85em;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 2px #f6e7b2,
+    0 0 0 3px #6b4e2e;
+  flex-shrink: 0;
+}
+
+.map-key-stronghold--capital::after {
+  content: '♔';
+  position: absolute;
+  top: -0.72em;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.85em;
+  line-height: 1;
+  color: #8a6410;
+  text-shadow: 0 0 1px #3a2a12;
 }
 
 .movement-hint {

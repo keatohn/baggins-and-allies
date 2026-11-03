@@ -4121,7 +4121,7 @@ function GameMap({
         collisionDetection={mapCollisionDetection}
       >
         <div className={`map-container ${mobilizationTray || navalTray ? 'map-container--with-tray' : ''}`}>
-          <div className="map-content">
+            <div className={`map-content${mapKeyOpen ? ' map-content--key' : ''}`}>
             {mapKeyOpen && (
               <div className="map-key-strip" role="region" aria-label="Map key">
                 <span className="map-key-item">
@@ -4145,7 +4145,14 @@ function GameMap({
                   <img src="/ford.png" alt="" className="map-key-img" aria-hidden />
                   Ford
                 </span>
-                <span className="map-key-item"><span className="map-key-icon" aria-hidden></span> Strongholds show the faction banner, or its logo when none is set (capitals larger)</span>
+                <span className="map-key-item">
+                  <span className="map-key-stronghold" aria-hidden />
+                  Stronghold
+                </span>
+                <span className="map-key-item">
+                  <span className="map-key-stronghold map-key-stronghold--capital" aria-hidden />
+                  Capital
+                </span>
               </div>
             )}
             <div className="map-main">
@@ -4668,8 +4675,8 @@ function GameMap({
                                     )}
                                     {showNeutralStronghold && (
                                       <div
-                                        className="territory-marker neutral-stronghold-marker map-tip"
-                                        data-tip={territory.name + ' (Neutral stronghold)'}
+                                        className={`territory-marker neutral-stronghold-marker map-tip${isCapital ? ' neutral-stronghold-marker--capital' : ''}`}
+                                        data-tip={territory.name + (isCapital ? ' (Neutral capital)' : ' (Neutral stronghold)')}
                                         aria-hidden
                                       />
                                     )}
@@ -4765,8 +4772,8 @@ function GameMap({
                                     )}
                                     {showNeutralStronghold && (
                                       <div
-                                        className="territory-marker neutral-stronghold-marker map-tip"
-                                        data-tip={territory.name + ' (Neutral stronghold)'}
+                                        className={`territory-marker neutral-stronghold-marker map-tip${isCapital ? ' neutral-stronghold-marker--capital' : ''}`}
+                                        data-tip={territory.name + (isCapital ? ' (Neutral capital)' : ' (Neutral stronghold)')}
                                         aria-hidden
                                       />
                                     )}
@@ -4845,8 +4852,8 @@ function GameMap({
                                       )}
                                       {showNeutralStronghold && (
                                         <div
-                                          className="territory-marker neutral-stronghold-marker map-tip"
-                                          data-tip={territory.name + ' (Neutral stronghold)'}
+                                          className={`territory-marker neutral-stronghold-marker map-tip${isCapital ? ' neutral-stronghold-marker--capital' : ''}`}
+                                          data-tip={territory.name + (isCapital ? ' (Neutral capital)' : ' (Neutral stronghold)')}
                                           aria-hidden
                                         />
                                       )}
@@ -4961,8 +4968,8 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                                 )}
                                 {showNeutralStronghold && (
                                   <div
-                                    className="territory-marker neutral-stronghold-marker map-tip"
-                                    data-tip={territory.name + ' (Neutral stronghold)'}
+                                    className={`territory-marker neutral-stronghold-marker map-tip${isCapital ? ' neutral-stronghold-marker--capital' : ''}`}
+                                    data-tip={territory.name + (isCapital ? ' (Neutral capital)' : ' (Neutral stronghold)')}
                                     aria-hidden
                                   />
                                 )}
@@ -5098,8 +5105,8 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                                       )}
                                       {showNeutralStronghold && !h?.logo && (
                                         <div
-                                          className="territory-marker neutral-stronghold-marker map-tip"
-                                          data-tip={territory.name + ' (Neutral stronghold)'}
+                                          className={`territory-marker neutral-stronghold-marker map-tip${isCapital ? ' neutral-stronghold-marker--capital' : ''}`}
+                                          data-tip={territory.name + (isCapital ? ' (Neutral capital)' : ' (Neutral stronghold)')}
                                           aria-hidden
                                         />
                                       )}
@@ -5180,8 +5187,8 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                                       )}
                                       {showNeutralStronghold && !h?.logo && (
                                         <div
-                                          className="territory-marker neutral-stronghold-marker map-tip"
-                                          data-tip={territory.name + ' (Neutral stronghold)'}
+                                          className={`territory-marker neutral-stronghold-marker map-tip${isCapital ? ' neutral-stronghold-marker--capital' : ''}`}
+                                          data-tip={territory.name + (isCapital ? ' (Neutral capital)' : ' (Neutral stronghold)')}
                                           aria-hidden
                                         />
                                       )}

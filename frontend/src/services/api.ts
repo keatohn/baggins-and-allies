@@ -1027,6 +1027,13 @@ export interface AuthResponse {
   player: AuthPlayer;
 }
 
+export interface GamePlayerPortrait {
+  username: string;
+  avatar?: PlayerAvatarSettings;
+  relation: 'self' | 'friend' | 'pending_out' | 'pending_in' | 'none';
+  request_id?: string | null;
+}
+
 export interface GameMeta {
   id: string;
   name: string;
@@ -1042,6 +1049,8 @@ export interface GameMeta {
   lobby_claims?: Record<string, string>;
   /** Lobby: player_id -> username for display. */
   player_usernames?: Record<string, string>;
+  /** Human seats: avatar and this viewer's friend relation. Computer ids are omitted. */
+  player_portraits?: Record<string, GamePlayerPortrait>;
   /** Lobby: scenario chosen at create (display_name + context from manifest). */
   scenario?: {
     display_name: string;

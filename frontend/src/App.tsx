@@ -1880,6 +1880,20 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
 
   // Poll game state only in multiplayer (2s default; 1s while spectating a battle for faster combat sync)
   const isMultiplayer = gameMeta?.is_multiplayer ?? Boolean(gameMeta?.game_code);
+  const seatPortraits = useMemo(() => {
+    const cards = gameMeta?.player_portraits;
+    if (!gameMeta?.is_multiplayer || !cards) return undefined;
+    const out: Record<string, { playerId: string } & NonNullable<typeof cards>[string]> = {};
+    const assign = (factionId: string | null | undefined, playerId: string | null | undefined) => {
+      if (!factionId || !playerId || playerId === '__computer__') return;
+      const card = cards[playerId];
+      if (!card) return;
+      out[factionId] = { playerId, ...card };
+    };
+    for (const row of gameMeta.players ?? []) assign(row.faction_id, row.player_id);
+    for (const [factionId, playerId] of Object.entries(gameMeta.lobby_claims ?? {})) assign(factionId, playerId);
+    return out;
+  }, [gameMeta]);
   const pollIntervalMs = spectatingBattle ? 1000 : GAME_POLL_INTERVAL_MS;
   useEffect(() => {
     if (!GAME_ID || !isMultiplayer) return;
@@ -4496,6 +4510,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         unitNames={unitNames}
         specialRules={helpSpecialRules}
         catalogRules={catalogRules}
+        seatPortraits={seatPortraits}
+        viewerId={currentPlayerId}
       />
 
       {/* Combat Simulator modal: always mounted so form state persists when closed */}

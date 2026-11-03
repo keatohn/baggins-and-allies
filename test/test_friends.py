@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from backend.api.auth import get_current_admin, get_current_player, hash_password
+from backend.api.auth import get_current_admin, get_current_player, get_current_player_optional, hash_password
 from backend.api.database import Base, get_db
 from backend.api.main import app
 from backend.api.models import FriendRequest, Game, GameResult, Player
@@ -350,3 +350,40 @@ def test_lobby_invite_badge_accept_and_decline(make_client, players, db_session)
     host = make_client(user)
     r = host.post(f"/games/{game.id}/invites", json={"player_ids": [_admin.id]})
     assert r.status_code == 400
+
+
+def test_game_meta_portraits_include_avatar_and_relation(make_client, players, db_session):
+    _admin, user, buddy = players
+    request = FriendRequest(
+        id=str(uuid.uuid4()),
+        requester_id=user.id,
+        addressee_id=buddy.id,
+        status="pending",
+    )
+    game = Game(
+        id=str(uuid.uuid4()),
+        name="Seats",
+        status="active",
+        game_code="AB12",
+        game_state="{}",
+        players=json.dumps(
+            [
+                {"player_id": user.id, "faction_id": "gondor"},
+                {"player_id": buddy.id, "faction_id": "rohan"},
+                {"player_id": "__computer__", "faction_id": "mordor"},
+            ]
+        ),
+    )
+    db_session.add_all([request, game])
+    db_session.commit()
+
+    app.dependency_overrides[get_current_player_optional] = lambda: user
+    client = make_client(user)
+    body = client.get(f"/games/{game.id}/meta").json()
+    portraits = body["player_portraits"]
+    assert "__computer__" not in portraits
+    assert portraits[user.id]["relation"] == "self"
+    assert portraits[user.id]["avatar"]["image"]
+    assert portraits[buddy.id]["username"] == buddy.username
+    assert portraits[buddy.id]["relation"] == "pending_out"
+    assert portraits[buddy.id]["request_id"] == request.id

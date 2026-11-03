@@ -4126,9 +4126,30 @@ def get_game_meta(
     for pid in forfeited_player_ids:
         player_ids.add(str(pid))
     players_by_id = {}
+    player_portraits = {}
+    viewer_id = str(player.id) if player is not None else None
     if player_ids:
         for p_row in db.query(Player).filter(Player.id.in_(list(player_ids))).all():
-            players_by_id[str(p_row.id)] = p_row.username
+            pid = str(p_row.id)
+            players_by_id[pid] = p_row.username
+            relation = "none"
+            request_id = None
+            if viewer_id == pid:
+                relation = "self"
+            elif viewer_id:
+                relation = _friend_relation(db, viewer_id, p_row)
+                if relation in ("pending_out", "pending_in"):
+                    pending = _pending_request_between(db, viewer_id, p_row.id)
+                    if pending is not None:
+                        request_id = str(pending.id)
+            card = {
+                "username": p_row.username,
+                "avatar": _player_avatar_response(p_row, db),
+                "relation": relation,
+            }
+            if request_id:
+                card["request_id"] = request_id
+            player_portraits[pid] = card
     scenario = _get_scenario_from_config(row, db)
     ai_factions = _get_ai_factions_from_config(row)
     is_host = None
@@ -4147,6 +4168,7 @@ def get_game_meta(
         "players": players_list,
         "lobby_claims": lobby_claims,
         "player_usernames": players_by_id,
+        "player_portraits": player_portraits,
         "scenario": scenario,
         "ai_factions": ai_factions,
         "ai_difficulty": _ai_setting_from_config(row, "ai_difficulty", "normal"),
