@@ -58,9 +58,8 @@ type UnitRow = UnitSource & {
   scenarioClosesIcon: boolean;
 };
 
-/** One sample is the mode. Otherwise a value must appear strictly most often, and at least three times. */
+/** The unique most common value. A tie for that count is not an outright mode. */
 function outrightMode(values: number[]): number | null {
-  if (values.length === 1) return values[0];
   const counts = new Map<number, number>();
   for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
   let bestValue = 0;
@@ -75,7 +74,7 @@ function outrightMode(values: number[]): number | null {
       tied = true;
     }
   }
-  if (tied || bestCount < 3) return null;
+  if (tied || bestCount < 1) return null;
   return bestValue;
 }
 

@@ -809,14 +809,11 @@
   font-weight: 700;
 }
 
-.units-across .header-stats-table.header-stats-table--units thead th:nth-child(7),
-.units-across .header-stats-table.header-stats-table--units tbody td:nth-child(7) {
+/* Rowspan drops icon/scenario cells, so nth-child padding would shove HP on some rows. */
+.units-across.unit-stats-modal .header-stats-table.header-stats-table--units thead th.stats-col-num:nth-child(n),
+.units-across.unit-stats-modal .header-stats-table.header-stats-table--units tbody td.stats-col-num:nth-child(n) {
+  padding-left: 0.35rem;
   padding-right: 0.35rem;
-}
-
-.units-across .header-stats-table.header-stats-table--units thead th:nth-child(9),
-.units-across .header-stats-table.header-stats-table--units tbody td:nth-child(9) {
-  padding-right: 0.9rem;
 }
 
 .games-report__header {
