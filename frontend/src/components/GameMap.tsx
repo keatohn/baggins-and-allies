@@ -18,6 +18,7 @@ import { ringHostUnitId, ringIconSrc, ringsOnUnit, type RingView } from '../ring
 import './GameMap.css';
 import './MapTooltip.css';
 import { sortSeaZoneIdsByNumericSuffix, seaZonesReachableBySailFrom } from '../seaZoneSort';
+import { createWheelNavIntentResolver, wheelZoomScaleMultiplier } from '../utils/wheelNavIntent';
 import {
   directFordOnlyLandPair,
   fordEscortOdMultiplier,
@@ -574,42 +575,6 @@ interface GameMapProps {
 }
 
 const MAX_SCALE = 3;
-
-/**
- * Per wheel event: scale multiplier from deltaY (gentler than a fixed ±10% step).
- * Normalizes DOM_DELTA_LINE / PAGE so different devices feel similar; caps max change per event.
- * Ctrl+wheel (browser pinch signal) uses tiny deltas — boost so pinch feels responsive.
- */
-function wheelZoomScaleMultiplier(e: WheelEvent): number {
-  let dy = e.deltaY;
-  if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) {
-    dy *= 24;
-  } else if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
-    dy *= 320;
-  }
-  if (e.ctrlKey) dy *= 75;
-  const k = 0.00028;
-  const raw = Math.exp(-dy * k);
-  const [minM, maxM] = e.ctrlKey ? [0.965, 1.035] : [0.978, 1.022];
-  return Math.max(minM, Math.min(maxM, raw));
-}
-
-/**
- * Distinguish a physical mouse wheel notch from trackpad two-finger scroll.
- * Both arrive as plain `wheel` events (pinch sets ctrlKey and is handled separately),
- * and no standard API reports the device — so this is a conservative heuristic:
- * anything ambiguous keeps panning so trackpad scroll is never hijacked.
- * - Firefox wheel notches report line mode; trackpads always report pixel mode.
- * - Trackpad deltas are fractional high-res pixels, often with horizontal drift.
- * - Mouse notches are large integer vertical steps (~±100px/detent in Chrome/Safari).
- */
-function isLikelyMouseWheel(e: WheelEvent): boolean {
-  if (e.deltaMode !== WheelEvent.DOM_DELTA_PIXEL) return true;
-  const { deltaX, deltaY } = e;
-  if (!Number.isInteger(deltaX) || !Number.isInteger(deltaY)) return false;
-  if (deltaX !== 0) return false;
-  return Math.abs(deltaY) >= 40;
-}
 
 const EMPTY_ELIGIBLE_SEA_ZONES_FOR_TRAY = new Set<string>();
 
@@ -3930,6 +3895,7 @@ function GameMap({
   useEffect(() => {
     const el = wrapperRef.current;
     if (!el) return;
+    const resolveIntent = createWheelNavIntentResolver();
     const handler = (e: WheelEvent) => {
       e.preventDefault();
       if (!wrapperRef.current) return;
@@ -3944,7 +3910,7 @@ function GameMap({
       const maxX = Math.max(0, wrapper.clientWidth - scaledW);
       const maxY = Math.max(0, wrapper.clientHeight - scaledH);
 
-      if (e.ctrlKey || isLikelyMouseWheel(e)) {
+      if (resolveIntent(e) === 'zoom') {
         // Zoom toward cursor for pinch gestures, Ctrl+wheel, and mouse wheel notches.
         const rect = wrapper.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
