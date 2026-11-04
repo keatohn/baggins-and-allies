@@ -189,6 +189,62 @@ def test_naval_combat_ended_lists_embarked_attacker_casualties(wotr_defs):
     assert har_land.instance_id in att_cas
 
 
+def test_naval_victory_keeps_embarked_passengers_of_surviving_boats(wotr_defs):
+    """Pure naval win: passengers are off the roster but must stay embarked on a boat that survived.
+
+    The combat-end kept-filter previously dropped any attacker-side unit not in
+    surviving_attacker_ids, which deleted embarked land units on naval victory.
+    """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    sea = state.territories["sea_zone_11"]
+    sea.units.clear()
+    har_ship = _make_unit(state, "harad", "black_ship", unit_defs)
+    har_land = _make_unit(state, "harad", "corsair_of_umbar", unit_defs)
+    har_land.loaded_onto = har_ship.instance_id
+    g_ship = _make_unit(state, "gondor", "gondor_ship", unit_defs)
+    sea.units.extend([har_ship, har_land, g_ship])
+
+    state.current_faction = "harad"
+    state.phase = "combat"
+
+    # Attacker hits (roll 1 <= attack 3), defender misses (roll 10 > defense 3).
+    action = initiate_combat(
+        "harad",
+        "sea_zone_11",
+        dice_rolls={"attacker": [1], "defender": [10]},
+    )
+    vr = validate_action(
+        state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    assert vr.valid, vr.error
+    state, events = apply_action(
+        state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+
+    ended = [e for e in events if e.type == "combat_ended"]
+    assert len(ended) == 1
+    payload = ended[0].payload
+    assert payload.get("winner") == "attacker"
+    assert payload.get("outcome") in ("victory", "conquer")
+    assert payload.get("surviving_attacker_ids") == [har_ship.instance_id]
+
+    # Assert against the returned state — apply_action copies, so pre-apply refs go stale.
+    sea_after = state.territories["sea_zone_11"]
+    ids_on_board = {u.instance_id: u for u in sea_after.units}
+    assert g_ship.instance_id not in ids_on_board, "dead defender must be removed"
+    assert har_ship.instance_id in ids_on_board, "surviving attacker boat must remain"
+    assert har_land.instance_id in ids_on_board, (
+        "embarked passenger of a surviving boat must not be deleted on naval victory"
+    )
+    assert ids_on_board[har_land.instance_id].loaded_onto == har_ship.instance_id
+
+
 def test_sea_raid_empty_land_conquer(state_with_sea_units):
     """Sea raid on empty land: land units move to territory, ships stay in sea."""
     state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs = state_with_sea_units
