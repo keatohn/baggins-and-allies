@@ -360,6 +360,58 @@ def river_mobilization_capacity_total(
     return total
 
 
+def _river_bank_ids(
+    state: GameState,
+    faction_id: str,
+    territory_defs: dict[str, TerritoryDefinition],
+) -> set[str]:
+    ids: set[str] = set()
+    for zone_id, zdef in territory_defs.items():
+        if _is_river_zone(zdef):
+            ids.update(river_banks_for_zone(state, faction_id, zone_id, territory_defs))
+    return ids
+
+
+def _max_additional_river_pool(
+    state: GameState,
+    faction_id: str,
+    territory_defs: dict[str, TerritoryDefinition],
+    unit_defs: dict[str, UnitDefinition],
+    *,
+    land_id: str | None = None,
+    river_id: str | None = None,
+) -> int:
+    """
+    How many more units still fit in the shared turn-start bank pool.
+    Land on a bank and boats in adjacent rivers draw from the same power.
+    """
+    if land_id:
+        bdef = territory_defs.get(land_id)
+        upper = territory_current_power(state, land_id, bdef) if bdef else 0
+    else:
+        upper = 0
+        for bank_id in river_banks_for_zone(state, faction_id, river_id or "", territory_defs):
+            bdef = territory_defs.get(bank_id)
+            if bdef:
+                upper += territory_current_power(state, bank_id, bdef)
+    lo, hi = 0, max(0, upper)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        ok, _err = river_mobilization_fits(
+            state,
+            faction_id,
+            territory_defs,
+            unit_defs,
+            extra_land={land_id: mid} if land_id else None,
+            extra_river={river_id: mid} if river_id else None,
+        )
+        if ok:
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
+
+
 # Action type string for defender casualty order (use constant so we never typo)
 SET_TERRITORY_DEFENDER_CASUALTY_ORDER = "set_territory_defender_casualty_order"
 
@@ -2469,6 +2521,8 @@ def get_mobilization_capacity(
         - territories: list of {territory_id, power[, home_unit_capacity]} for camp-only and home-only territories
         - port_territories: list of {territory_id, power, sea_zone_ids[, home_unit_capacity]} — naval pool only for sea zones; optional home_unit_capacity for land units whose home is this port (e.g. Corsair at Umbar)
         - sea_zones: list of {sea_zone_id, power} for port-adjacent sea zones (naval mobilization)
+        - river_zones: list of {river_zone_id, power} where power is boats that still fit on the
+          turn-start banks, plus boats already queued in that zone. Land queued on a bank spends the same pool.
     Home-only territories have power 0 and home_unit_capacity: { unit_id: 1 } (max 1 unit of that type per phase).
     """
     camp_defs = camp_defs or {}
@@ -2478,6 +2532,10 @@ def get_mobilization_capacity(
     port_territories = []
     total = 0
     seen = set()
+    # Clients subtract units already queued at a destination from `power`.
+    # River banks share that power with boats, so publish (still fits + already queued here).
+    land_pending, river_pending = _pending_mobilization_counts_by_kind(state, unit_defs)
+    river_bank_ids = _river_bank_ids(state, faction_id, territory_defs)
     for territory_id, territory in state.territories.items():
         if territory.owner != faction_id or territory_id in seen:
             continue
@@ -2495,6 +2553,11 @@ def get_mobilization_capacity(
                     home_at_camp[uid] = 1
             owned_at_start = getattr(state, "faction_territories_at_turn_start", {}).get(faction_id, []) or []
             camp_power = power if territory_id in owned_at_start else 0
+            if territory_id in river_bank_ids and camp_power > 0:
+                still_fits = _max_additional_river_pool(
+                    state, faction_id, territory_defs, unit_defs, land_id=territory_id,
+                )
+                camp_power = still_fits + land_pending.get(territory_id, 0)
             camp_row: dict[str, Any] = {"territory_id": territory_id, "power": camp_power}
             if home_at_camp:
                 camp_row["home_unit_capacity"] = home_at_camp
@@ -2555,11 +2618,12 @@ def get_mobilization_capacity(
         banks = river_banks_for_zone(state, faction_id, tid, territory_defs)
         if not banks:
             continue
-        power = 0
-        for bank_id in banks:
-            bdef = territory_defs.get(bank_id)
-            if bdef:
-                power += territory_current_power(state, bank_id, bdef)
+        still_fits = _max_additional_river_pool(
+            state, faction_id, territory_defs, unit_defs, river_id=tid,
+        )
+        # Gross bank power can still be left on the zone while land queued on a bank has spent it.
+        # Publish only what another boat can still use, plus boats already queued in this zone.
+        power = still_fits + river_pending.get(tid, 0)
         if power > 0:
             river_zones.append({"river_zone_id": tid, "power": power})
 
