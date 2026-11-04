@@ -4976,7 +4976,7 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                     "destinations": targets,
                     "charge_routes": charge_routes,
                 })
-            limit_embark_destinations_to_capacity(
+            actions["load_slots_remaining"] = limit_embark_destinations_to_capacity(
                 actions["moveable_units"], slot_check_state, faction, ud, td, fd, phase,
             )
             if phase == "combat_move":

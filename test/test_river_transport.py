@@ -23,7 +23,7 @@ from backend.engine.queries import (
     validate_action,
 )
 from backend.engine.reducer import _apply_pending_mobilizations, apply_action
-from backend.engine.state import GameState, PendingMobilization, TerritoryState, Unit, UnitStack
+from backend.engine.state import GameState, PendingMobilization, PendingMove, TerritoryState, Unit, UnitStack
 from backend.signals import classify_territory_for_signal
 
 
@@ -384,8 +384,10 @@ def test_river_raid_initiate_accepts_river_zone():
     assert all(u.instance_id != "boat_1" for u in state.territories["far_bank"].units)
 
 
-def test_embark_destinations_stop_at_rowboat_capacity():
-    """Seven capacity-1 rowboats can take 7 of 12 warriors, not the whole stack."""
+def test_embark_destinations_stay_open_while_slots_remain():
+    """Every adjacent transportable unit is offered the boat until a load is declared.
+    Declaring more passengers than capacity is still rejected. A full zone is not offered.
+    """
     state, unit_defs, territory_defs, faction_defs, camps, ports = _board()
     unit_defs = dict(unit_defs)
     unit_defs["skiff"] = _unit_def("skiff", "gondor", "river", transport=1)
@@ -413,14 +415,15 @@ def test_embark_destinations_stop_at_rowboat_capacity():
         if row["unit"]["unit_id"] == "infantry" and "river_anduin" in row["destinations"]
     )
     assert offered_before == 12
-    limit_embark_destinations_to_capacity(
+    slots = limit_embark_destinations_to_capacity(
         rows, state, "gondor", unit_defs, territory_defs, faction_defs, state.phase,
     )
     offered_after = sum(
         1 for row in rows
         if row["unit"]["unit_id"] == "infantry" and "river_anduin" in row["destinations"]
     )
-    assert offered_after == 7
+    assert offered_after == 12
+    assert slots.get("river_anduin") == 7
 
     def load(ids: list[str]):
         return validate_action(
@@ -437,6 +440,49 @@ def test_embark_destinations_stop_at_rowboat_capacity():
     too_many = load(infantry_ids[:8])
     assert not too_many.valid
     assert "transport capacity" in (too_many.error or "")
+
+
+def test_embark_offer_is_shared_across_shores():
+    """A pending land move and an earlier unit must not reserve the boat from another shore."""
+    state, unit_defs, territory_defs, faction_defs, _camps, _ports = _board()
+    state.phase = "combat_move"
+    state.current_faction = "gondor"
+    state.territories["river_anduin"].units.append(_piece("boat_1", "boat"))
+    state.territories["bank"].units.extend([_piece("inf_pending", "infantry"), _piece("inf_here", "infantry")])
+    state.territories["bank_b"].units.append(_piece("inf_there", "infantry"))
+    state.pending_moves.append(
+        PendingMove(
+            from_territory="bank",
+            to_territory="minas",
+            unit_instance_ids=["inf_pending"],
+            phase="combat_move",
+            move_type="land",
+            primary_unit_id="infantry",
+        )
+    )
+    rows = []
+    for info in get_movable_units(state, "gondor", unit_defs, faction_defs):
+        if info["instance_id"] not in {"inf_pending", "inf_here", "inf_there"}:
+            continue
+        targets, routes = get_unit_move_targets(
+            state, info["instance_id"], unit_defs, territory_defs, faction_defs,
+        )
+        rows.append({
+            "territory": info["territory_id"],
+            "unit": info,
+            "destinations": targets,
+            "charge_routes": routes,
+        })
+    slots = limit_embark_destinations_to_capacity(
+        rows, state, "gondor", unit_defs, territory_defs, faction_defs, state.phase,
+    )
+    assert slots.get("river_anduin") == 2
+    offered = {
+        row["unit"]["instance_id"]
+        for row in rows
+        if "river_anduin" in row["destinations"]
+    }
+    assert offered == {"inf_pending", "inf_here", "inf_there"}
 
 
 def test_river_is_not_a_signal_target():

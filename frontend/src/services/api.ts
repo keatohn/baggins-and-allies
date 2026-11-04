@@ -301,6 +301,8 @@ export interface AvailableActionsResponse {
   /** Power cost per HP to repair a stronghold (0 = repair not available). */
   stronghold_repair_cost?: number;
   moveable_units?: ApiMoveableUnit[];
+  /** Passenger slots still open in a water zone (aboard + loads already declared). Not a per-unit reservation. */
+  load_slots_remaining?: Record<string, number>;
   /** Aerial units in enemy territory that must move to friendly before ending non-combat move phase. */
   aerial_units_must_move?: { territory_id: string; unit_id: string; instance_id: string }[];
   /** Boat instance IDs that received a load this combat move and must attack before ending phase (per boat, not per sea zone). */

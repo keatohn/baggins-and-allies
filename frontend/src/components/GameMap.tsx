@@ -116,6 +116,17 @@ function territoryGlowFromHex(hex: string): { stroke: string; glowRgba: string; 
   };
 }
 
+function loadSlotsForSea(slots: Record<string, number> | undefined, seaId: string): number | undefined {
+  if (!slots) return undefined;
+  if (Object.prototype.hasOwnProperty.call(slots, seaId)) return slots[seaId];
+  const canon = canonicalSeaZoneId(seaId);
+  if (Object.prototype.hasOwnProperty.call(slots, canon)) return slots[canon];
+  for (const [key, value] of Object.entries(slots)) {
+    if (key === seaId || canonicalSeaZoneId(key) === canon) return value;
+  }
+  return undefined;
+}
+
 /** Normalize sea zone id to canonical form sea_zone_n (e.g. sea_zone_9). Accepts sea_zone9 or sea_zone_9. */
 function canonicalSeaZoneId(tid: string): string {
   if (!tid || typeof tid !== 'string') return tid || '';
@@ -517,6 +528,8 @@ interface GameMapProps {
   pendingMoves: PendingMove[];
   highlightedTerritories?: string[];
   availableMoveTargets?: MoveableUnit[];
+  /** Water zone -> passenger slots still open. Caps a load confirm; does not pick who may board. */
+  loadSlotsRemaining?: Record<string, number>;
   /** Land territory_id -> sea zone IDs that can conduct a sea raid to it (from backend sea_raid_targets). When dropping naval on land, use this so user can pick which sea zone. */
   /** Aerial units that must move to friendly territory (from backend). Show caution icon on these. */
   aerialUnitsMustMove?: { territory_id: string; unit_id: string; instance_id: string }[];
@@ -1054,6 +1067,7 @@ function GameMap({
   validCampTerritories = [],
   territoriesWithPendingCampPlacement = [],
   availableMoveTargets,
+  loadSlotsRemaining,
   aerialUnitsMustMove = [],
   loadedNavalMustAttackInstanceIds = [],
   combatMoveNavalIdleSailInstanceIds = [],
@@ -3488,18 +3502,20 @@ function GameMap({
             territoryData,
             factionData,
           );
+          const serverSlots = loadSlotsForSea(loadSlotsRemaining, storeTarget);
+          const capForLoad = serverSlots != null ? serverSlots : seaCap;
           const backendReachLand =
             availableLandInstanceIds !== null && availableLandInstanceIds.length > 0;
-          if (seaCap <= 0 && !backendReachLand) {
+          if (capForLoad <= 0 && !backendReachLand) {
             setActiveUnit(null);
             setActiveDragId(null);
             setValidDropTargets(new Set());
             return;
           }
-          // Boats already in the zone: seaCap is onboard capacity minus pending loads.
-          // seaCap 0 with backend reach means boats arrive via a pending sail; those destinations
-          // are already limited to remaining slots, so do not raise the count to the whole stack.
-          const effectiveSeaCap = seaCap > 0 ? seaCap : availableLandInstanceIds!.length;
+          // Boats already in the zone: cap is onboard capacity minus pending loads.
+          // cap 0 with backend reach means boats arrive via a pending sail and the client
+          // cannot see them yet; fall back to how many units the server still lists.
+          const effectiveSeaCap = capForLoad > 0 ? capForLoad : availableLandInstanceIds!.length;
           moveMaxCount = Math.min(moveMaxCount, effectiveSeaCap);
           if (instanceIdsToUse && instanceIdsToUse.length > moveMaxCount) {
             instanceIdsToUse = instanceIdsToUse.slice(0, moveMaxCount);
@@ -3620,7 +3636,7 @@ function GameMap({
     setActiveUnit(null);
     setActiveDragId(null);
     setValidDropTargets(new Set());
-  }, [activeUnit, validDropTargets, territoryUnits, territoryUnitsFull, pendingMoves, availableMoveTargets, navalUnitIds, onSetPendingMove, _onDropDestination, onBulkMoveDrop, onMobilizationDrop, onMobilizationAllDrop, onCampDrop, remainingMobilizationCapacity, remainingHomeSlots, mobilizeUnitDestinations, gameState.phase, gameState.current_faction, factionData, unitDefs, territoryData, resolveTerritoryDropId, canAct, loadAllocation, onLoadAllocationChange, navalTray]);
+  }, [activeUnit, validDropTargets, territoryUnits, territoryUnitsFull, pendingMoves, availableMoveTargets, loadSlotsRemaining, navalUnitIds, onSetPendingMove, _onDropDestination, onBulkMoveDrop, onMobilizationDrop, onMobilizationAllDrop, onCampDrop, remainingMobilizationCapacity, remainingHomeSlots, mobilizeUnitDestinations, gameState.phase, gameState.current_faction, factionData, unitDefs, territoryData, resolveTerritoryDropId, canAct, loadAllocation, onLoadAllocationChange, navalTray]);
 
   const handleDragCancel = useCallback(() => {
     lastMapDragPointerRef.current = null;

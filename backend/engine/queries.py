@@ -2258,12 +2258,13 @@ def limit_embark_destinations_to_capacity(
     territory_defs: dict[str, TerritoryDefinition],
     faction_defs: dict[str, FactionDefinition],
     phase: str,
-) -> None:
+) -> dict[str, int]:
     """
-    Keep a water zone as a load destination for at most the remaining passenger slots.
+    Hide a water zone only when no passenger slots remain (already aboard or declared this phase).
 
-    Pathfinding marks the zone for every transportable unit once any slot exists. The move
-    confirm treats that list as how many may board, so consume one slot per unit.
+    While any slot is open, every transportable unit who can reach the zone keeps it. Do not
+    reserve slots for particular units before a load is declared. Returns sea zone -> slots still
+    open so the client can cap a confirm without hiding the zone from everyone else.
     """
     slots_left: dict[str, int] = {}
     for row in moveable_rows:
@@ -2297,8 +2298,7 @@ def limit_embark_destinations_to_capacity(
                 destinations.pop(dest_id, None)
                 if isinstance(charge_routes, dict):
                     charge_routes.pop(dest_id, None)
-            else:
-                slots_left[dest_id] -= 1
+    return slots_left
 
 
 def filter_unit_instances_that_can_reach(

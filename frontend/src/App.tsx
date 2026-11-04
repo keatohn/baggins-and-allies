@@ -3396,7 +3396,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       }
 
       const moveables = availableActions.moveable_units ?? [];
-      const stacks = buildBulkMoveStacks(
+      let stacks = buildBulkMoveStacks(
         backendState,
         moveables,
         gameState.phase,
@@ -3404,6 +3404,22 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         toTerritory,
         definitions,
       );
+      const toTrim = toTerritory.trim();
+      if (!isWaterTerritoryId(fromKey, currentTerritoryData) && isWaterTerritoryId(toTrim, currentTerritoryData)) {
+        const slotsMap = availableActions.load_slots_remaining;
+        const canon = canonicalSeaZoneId(toTrim);
+        const slotCap = slotsMap?.[toTrim] ?? slotsMap?.[canon];
+        if (typeof slotCap === 'number') {
+          let left = Math.max(0, slotCap);
+          stacks = stacks.flatMap((stack) => {
+            if (left <= 0) return [];
+            const ids = stack.instanceIds.slice(0, left);
+            left -= ids.length;
+            if (ids.length === 0) return [];
+            return [{ ...stack, instanceIds: ids, count: ids.length }];
+          });
+        }
+      }
       if (stacks.length === 0) {
         addLogEntry('No stacks can move to that destination from here.', 'error');
         return;
@@ -3416,7 +3432,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         stacks,
       });
     },
-    [backendState, availableActions, gameState.phase, definitions, addLogEntry, setPendingMoveConfirm],
+    [backendState, availableActions, gameState.phase, definitions, currentTerritoryData, addLogEntry, setPendingMoveConfirm],
   );
 
   const handleCancelBulkMove = useCallback(() => {
@@ -4661,6 +4677,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
                 );
               })()}
               highlightedTerritories={highlightedTerritories}
+              loadSlotsRemaining={availableActions?.load_slots_remaining}
               availableMoveTargets={availableActions?.moveable_units?.map(m => ({
                 territory: m.territory,
                 unit: m.unit,
