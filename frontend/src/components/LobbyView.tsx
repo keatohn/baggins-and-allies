@@ -26,6 +26,38 @@ const FALLBACK_LEVELS: AiLevelChoice[] = [
   { id: 'hard', name: 'Hard' },
 ];
 
+function DifficultyPills({
+  levels,
+  selected,
+  disabled,
+  label,
+  onSelect,
+}: {
+  levels: AiLevelChoice[] | undefined;
+  selected: string | null | undefined;
+  disabled: boolean;
+  label: string;
+  onSelect: (id: string) => void;
+}) {
+  const choices = levels && levels.length > 0 ? levels : FALLBACK_LEVELS;
+  return (
+    <div className="lobby-view__difficulty-pills" role="group" aria-label={label}>
+      {choices.map((level) => (
+        <button
+          key={level.id}
+          type="button"
+          className={`lobby-view__pill lobby-view__pill--difficulty${selected === level.id ? ' lobby-view__pill--selected' : ''}`}
+          onClick={() => onSelect(level.id)}
+          disabled={disabled}
+          aria-pressed={selected === level.id}
+        >
+          {level.name}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function FactionSearchSettings({
   setting,
   levels,
@@ -142,7 +174,6 @@ export default function LobbyView({
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteSending, setInviteSending] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
-  const [inviteSent, setInviteSent] = useState(false);
 
   useEffect(() => {
     api.authMe().then(setPlayer).catch(() => setPlayer(null));
@@ -365,7 +396,6 @@ export default function LobbyView({
   const openInvites = () => {
     setInviteOpen((open) => !open);
     setInviteError(null);
-    setInviteSent(false);
     setInviteSelected([]);
     if (inviteFriends != null) return;
     setInviteLoading(true);
@@ -379,7 +409,6 @@ export default function LobbyView({
   };
 
   const toggleInvite = (id: string) => {
-    setInviteSent(false);
     setInviteSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
@@ -391,7 +420,6 @@ export default function LobbyView({
       await api.sendGameInvites(gameId, inviteSelected);
       setInvitedIds((prev) => [...new Set([...prev, ...inviteSelected])]);
       setInviteSelected([]);
-      setInviteSent(true);
     } catch (err) {
       setInviteError(err instanceof Error ? err.message : 'Could not send invites');
     } finally {
@@ -438,40 +466,43 @@ export default function LobbyView({
                 <p className="lobby-view__invite-note">You have no friends to invite yet.</p>
               )}
               {inviteFriends && inviteFriends.length > 0 && (
-                <ul className="lobby-view__invite-list" aria-label="Friends to invite">
-                  {inviteFriends.map((friend) => {
-                    const inLobby = memberIds.has(friend.id);
-                    const already = invitedIds.includes(friend.id);
-                    const selected = inviteSelected.includes(friend.id);
-                    return (
-                      <li key={friend.id}>
-                        <button
-                          type="button"
-                          className={`lobby-view__invite-friend${selected ? ' lobby-view__invite-friend--selected' : ''}`}
-                          aria-pressed={selected}
-                          disabled={inLobby || already || inviteSending}
-                          onClick={() => toggleInvite(friend.id)}
-                        >
-                          <span>{friend.username}</span>
-                          {inLobby ? <span className="lobby-view__invite-tag">In lobby</span> : null}
-                          {!inLobby && already ? <span className="lobby-view__invite-tag">Invited</span> : null}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
+                <div className="lobby-view__invite-body">
+                  <ul className="lobby-view__invite-list" aria-label="Friends to invite">
+                    {inviteFriends.map((friend) => {
+                      const inLobby = memberIds.has(friend.id);
+                      const already = invitedIds.includes(friend.id);
+                      const selected = inviteSelected.includes(friend.id);
+                      const locked = inLobby || already;
+                      return (
+                        <li key={friend.id}>
+                          <label className={`lobby-view__invite-friend${locked ? ' lobby-view__invite-friend--locked' : ''}`}>
+                            <input
+                              type="checkbox"
+                              className="lobby-view__invite-check"
+                              checked={selected || already}
+                              disabled={locked || inviteSending}
+                              onChange={() => toggleInvite(friend.id)}
+                            />
+                            <span className="lobby-view__invite-name">{friend.username}</span>
+                            {inLobby ? <span className="lobby-view__invite-tag">In lobby</span> : null}
+                            {!inLobby && already ? <span className="lobby-view__invite-tag">Invited</span> : null}
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {inviteSelected.length > 0 && (
+                    <button
+                      type="button"
+                      className="lobby-view__invite-send primary"
+                      disabled={inviteSending}
+                      onClick={() => void sendInvites()}
+                    >
+                      {inviteSending ? 'Sending…' : 'Send'}
+                    </button>
+                  )}
+                </div>
               )}
-              {inviteFriends && inviteFriends.length > 0 && (
-                <button
-                  type="button"
-                  className="lobby-view__invite-send primary"
-                  disabled={inviteSelected.length === 0 || inviteSending}
-                  onClick={() => void sendInvites()}
-                >
-                  {inviteSending ? 'Sending…' : 'Send'}
-                </button>
-              )}
-              {inviteSent && <p className="lobby-view__invite-note">Invites sent.</p>}
             </div>
           )}
         </header>
@@ -606,61 +637,61 @@ export default function LobbyView({
                             {loading && !isClaimedByMe ? '…' : 'Computer'}
                           </button>
                         </div>
-                        {!isClaimedByMe && meta.ai_algorithm === 'mcts' && (meta.ai_levels?.length ?? 0) > 0 && (
-                          <div
-                            className="lobby-view__difficulty-pills"
-                            role="group"
-                            aria-label={`${displayName} difficulty`}
-                          >
-                            {meta.ai_levels!.map((level) => (
-                              <button
-                                key={level.id}
-                                type="button"
-                                className={`lobby-view__pill lobby-view__pill--difficulty${meta.ai_difficulty === level.id ? ' lobby-view__pill--selected' : ''}`}
-                                onClick={() => handleDifficulty(level.id)}
-                                disabled={!isHost || savingDifficulty}
-                                aria-pressed={meta.ai_difficulty === level.id}
-                              >
-                                {level.name}
-                              </button>
-                            ))}
-                          </div>
+                        {!isClaimedByMe && (
+                          <DifficultyPills
+                            levels={meta.ai_levels}
+                            selected={meta.ai_difficulty}
+                            disabled={!isHost || savingDifficulty}
+                            label={`${displayName} difficulty`}
+                            onSelect={(id) => void handleDifficulty(id)}
+                          />
                         )}
                       </div>
                     ) : (
-                      <div className="lobby-view__multiplayer-actions">
-                        {isHost && (!claimantId || isClaimedByComputer) && (
-                          <button
-                            type="button"
-                            className={`lobby-view__pill lobby-view__pill--computer lobby-view__pill--compact${isClaimedByComputer ? ' lobby-view__pill--computer-selected' : ''}`}
-                            onClick={() => handleLobbyComputer(fid, !isClaimedByComputer)}
-                            disabled={loading}
-                            aria-pressed={isClaimedByComputer}
-                          >
-                            {loading ? '…' : 'Computer'}
-                          </button>
+                      <div className="lobby-view__single-choice">
+                        <div className="lobby-view__multiplayer-actions">
+                          {isHost && (!claimantId || isClaimedByComputer) && (
+                            <button
+                              type="button"
+                              className={`lobby-view__pill lobby-view__pill--computer lobby-view__pill--compact${isClaimedByComputer ? ' lobby-view__pill--computer-selected' : ''}`}
+                              onClick={() => handleLobbyComputer(fid, !isClaimedByComputer)}
+                              disabled={loading}
+                              aria-pressed={isClaimedByComputer}
+                            >
+                              {loading ? '…' : 'Computer'}
+                            </button>
+                          )}
+                          {isClaimedByMe ? (
+                            <button
+                              type="button"
+                              className="lobby-view__pill lobby-view__pill--claimed lobby-view__pill--compact"
+                              onClick={() => handleClaim(fid, false)}
+                              disabled={loading}
+                            >
+                              {loading ? '…' : 'Unclaim'}
+                            </button>
+                          ) : blockedByOtherHuman ? (
+                            <span className="lobby-view__pill lobby-view__pill--taken lobby-view__pill--compact">Claimed</span>
+                          ) : canClaimHuman ? (
+                            <button
+                              type="button"
+                              className="lobby-view__pill lobby-view__pill--claim lobby-view__pill--compact"
+                              onClick={() => handleClaim(fid, true)}
+                              disabled={loading}
+                            >
+                              {loading ? '…' : 'Claim'}
+                            </button>
+                          ) : null}
+                        </div>
+                        {isClaimedByComputer && (
+                          <DifficultyPills
+                            levels={meta.ai_levels}
+                            selected={meta.ai_difficulty}
+                            disabled={!isHost || savingDifficulty}
+                            label={`${displayName} difficulty`}
+                            onSelect={(id) => void handleDifficulty(id)}
+                          />
                         )}
-                        {isClaimedByMe ? (
-                          <button
-                            type="button"
-                            className="lobby-view__pill lobby-view__pill--claimed lobby-view__pill--compact"
-                            onClick={() => handleClaim(fid, false)}
-                            disabled={loading}
-                          >
-                            {loading ? '…' : 'Unclaim'}
-                          </button>
-                        ) : blockedByOtherHuman ? (
-                          <span className="lobby-view__pill lobby-view__pill--taken lobby-view__pill--compact">Claimed</span>
-                        ) : canClaimHuman ? (
-                          <button
-                            type="button"
-                            className="lobby-view__pill lobby-view__pill--claim lobby-view__pill--compact"
-                            onClick={() => handleClaim(fid, true)}
-                            disabled={loading}
-                          >
-                            {loading ? '…' : 'Claim'}
-                          </button>
-                        ) : null}
                       </div>
                     )}
                   </div>
