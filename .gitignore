@@ -31,5 +31,9 @@ frontend/.env.production
 # Local SQLite (dev API; recreated on startup / migrations)
 backend/api/game.db
 
+# Local production copies (emails and password hashes) and the pull script.
+backups/
+scripts/backup-prod-db.sh
+
 # Node (if frontend uses it)
 node_modules/
