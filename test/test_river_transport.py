@@ -233,62 +233,48 @@ def test_river_mobilization_uses_turn_start_banks_and_shared_power():
     assert mobilize("river_anduin", "boat", 3).valid
     assert not mobilize("river_anduin", "boat", 4).valid
 
+    # Camp placement on a bank does not spend the river budget.
     state.pending_mobilizations.append(
         PendingMobilization(destination="bank", units=[{"unit_id": "infantry", "count": 2}])
     )
-    one_left = mobilize("river_anduin", "boat", 1)
-    two_left = mobilize("river_anduin", "boat", 2)
-    assert one_left.valid
-    assert not two_left.valid
+    assert mobilize("river_anduin", "boat", 3).valid
+    assert not mobilize("river_anduin", "boat", 4).valid
 
 
-def test_land_on_a_river_bank_shrinks_boat_room_and_does_not_trap_the_turn():
-    """Boats and land share a bank. Full banks must not stay advertised, or the phase cannot end."""
+def test_camp_budget_stays_whole_when_boats_use_the_same_territory():
+    """A camp keeps its own power. Boats spend the bordering territories again, as a separate pool."""
     state, unit_defs, territory_defs, faction_defs, camps, ports = _board()
     state.phase = "mobilization"
     state.current_faction = "gondor"
-    # far_bank is the only other river bank; drop it so Anduin is the whole pool (bank 2 + bank_b 1).
-    state.faction_territories_at_turn_start["gondor"] = ["minas", "bank", "bank_b", "coast"]
-    state.faction_purchased_units["gondor"] = [UnitStack(unit_id="boat", count=1)]
+    state.faction_purchased_units["gondor"] = [
+        UnitStack(unit_id="boat", count=3),
+        UnitStack(unit_id="infantry", count=2),
+    ]
     state.pending_mobilizations.append(
-        PendingMobilization(destination="bank", units=[{"unit_id": "infantry", "count": 2}])
+        PendingMobilization(destination="river_anduin", units=[{"unit_id": "boat", "count": 3}])
     )
 
     cap = get_mobilization_capacity(
         state, "gondor", territory_defs, camps, ports, unit_defs, faction_defs,
     )
-    river = {z["river_zone_id"]: z["power"] for z in cap["river_zones"]}
-    assert river.get("river_anduin") == 1
     bank_row = next(t for t in cap["territories"] if t["territory_id"] == "bank")
     assert bank_row["power"] == 2
-
-    blocked = mobilization_block_reason(
-        state, "gondor", unit_defs, territory_defs, camps, ports, faction_defs,
-    )
-    assert blocked
-
-    state.pending_mobilizations.append(
-        PendingMobilization(destination="river_anduin", units=[{"unit_id": "boat", "count": 1}])
-    )
-    state.faction_purchased_units["gondor"] = [UnitStack(unit_id="boat", count=1)]
-    cap = get_mobilization_capacity(
-        state, "gondor", territory_defs, camps, ports, unit_defs, faction_defs,
-    )
     river = {z["river_zone_id"]: z["power"] for z in cap["river_zones"]}
-    assert "river_anduin" not in river or river["river_anduin"] - 1 <= 0
-    open_slot = validate_action(
+    assert river.get("river_anduin") == 3
+
+    land = validate_action(
         state,
-        mobilize_units("gondor", "river_anduin", [{"unit_id": "boat", "count": 1}]),
+        mobilize_units("gondor", "bank", [{"unit_id": "infantry", "count": 2}]),
         unit_defs,
         territory_defs,
         faction_defs,
         camps,
         ports,
     )
-    assert not open_slot.valid
+    assert land.valid
     assert mobilization_block_reason(
         state, "gondor", unit_defs, territory_defs, camps, ports, faction_defs,
-    ) is None
+    )
 
 
 def test_river_purchases_do_not_spend_land_or_sea_capacity():

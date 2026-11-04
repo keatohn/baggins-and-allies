@@ -381,7 +381,7 @@ export interface ApiMobilizeOptions {
       home_unit_capacity?: Record<string, number>;
     }[];
     sea_zones?: { sea_zone_id: string; power: number }[];
-    /** power is boats that still fit plus boats already queued in that zone. Land on a bordering bank spends the same pool. */
+    /** power is boats that still fit plus boats already queued in that zone. Camp placement on a bordering territory does not spend this. */
     river_zones?: { river_zone_id: string; power: number }[];
   };
   /** Per subfaction unit type: where that unit may mobilize. Parent units use the lists above. */

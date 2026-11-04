@@ -2466,18 +2466,6 @@ def _handle_mobilize_units(
                     f"At most 1 {unit_id} can be mobilized to home territory {destination_id} per phase (already {already_pending} pending)"
                 )
 
-    if sub_mobilization is None and batch_kind == "land":
-        total_land = sum(u.get("count", 0) for u in units_to_mobilize)
-        fits, err = river_mobilization_fits(
-            state,
-            faction_id,
-            territory_defs,
-            unit_defs,
-            extra_land={destination_id: total_land},
-        )
-        if not fits:
-            raise ValueError(err)
-
     purchased_units = state.faction_purchased_units.get(faction_id, [])
 
     # Deduct from purchased pool and append to pending_mobilizations
