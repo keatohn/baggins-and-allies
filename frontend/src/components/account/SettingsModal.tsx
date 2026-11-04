@@ -5,7 +5,7 @@ import {
   setMenuMusicVolume,
 } from '../../audio/gameAudio';
 import { api } from '../../services/api';
-import type { AuthPlayer } from '../../services/api';
+import type { AiLevelChoice, AuthPlayer } from '../../services/api';
 import ModalShell from './ModalShell';
 
 const DEFAULT_MENU_MUSIC_PCT = 0;
@@ -18,7 +18,7 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
-/** Audio preferences (lifted from the old Profile page) + read-only account email. */
+/** Audio preferences, this player's default computer difficulty, and the account email. */
 export default function SettingsModal({ player, onPlayerChange, onClose }: SettingsModalProps) {
   const [menuMusicVolumePct, setMenuMusicVolumePct] = useState(DEFAULT_MENU_MUSIC_PCT);
   const [gameMusicVolumePct, setGameMusicVolumePct] = useState(DEFAULT_GAME_MUSIC_PCT);
@@ -26,6 +26,12 @@ export default function SettingsModal({ player, onPlayerChange, onClose }: Setti
   const [muted, setMuted] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [audioSaving, setAudioSaving] = useState(false);
+  const [levels, setLevels] = useState<AiLevelChoice[]>(player.ai_levels ?? []);
+  const [adminDefault, setAdminDefault] = useState(player.ai_difficulty_default ?? '');
+  const [difficulty, setDifficulty] = useState(player.ai_difficulty ?? '');
+  const [savedDifficulty, setSavedDifficulty] = useState(player.ai_difficulty ?? '');
+  const [difficultyError, setDifficultyError] = useState<string | null>(null);
+  const [difficultySaving, setDifficultySaving] = useState(false);
   const isMountedRef = useRef(true);
   const audioSavedSnapshotRef = useRef({
     menuMusic: DEFAULT_MENU_MUSIC_PCT,
@@ -81,6 +87,25 @@ export default function SettingsModal({ player, onPlayerChange, onClose }: Setti
       isMountedRef.current = false;
     };
   }, [player, applyPlayerAudio]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .authMe()
+      .then((me) => {
+        if (cancelled) return;
+        const id = me.ai_difficulty ?? '';
+        setLevels(me.ai_levels ?? []);
+        setAdminDefault(me.ai_difficulty_default ?? '');
+        setDifficulty(id);
+        setSavedDifficulty(id);
+        onPlayerChange(me);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [onPlayerChange]);
 
   const flushAudioSave = useCallback(
     async (menuMusicPct: number, gameMusicPct: number, sfxPct: number, mute: boolean) => {
@@ -141,7 +166,7 @@ export default function SettingsModal({ player, onPlayerChange, onClose }: Setti
         </p>
       </section>
 
-      <section className="account-section account-section--last" aria-labelledby="settings-audio-heading">
+      <section className="account-section" aria-labelledby="settings-audio-heading">
         <h3 id="settings-audio-heading" className="account-section__title">
           Audio
         </h3>
@@ -247,6 +272,74 @@ export default function SettingsModal({ player, onPlayerChange, onClose }: Setti
         </div>
         {audioSaving && <p className="account-msg account-msg--subtle">Saving…</p>}
         {audioError && <p className="account-msg account-msg--error">{audioError}</p>}
+      </section>
+
+      <section className="account-section account-section--last" aria-labelledby="settings-difficulty-heading">
+        <h3 id="settings-difficulty-heading" className="account-section__title">
+          Computer
+        </h3>
+        <label className="settings-audio-label" htmlFor="settings-ai-difficulty">
+          Default difficulty
+        </label>
+        <select
+          id="settings-ai-difficulty"
+          className="settings-difficulty-select"
+          value={difficulty}
+          disabled={difficultySaving}
+          onChange={(e) => {
+            setDifficulty(e.target.value);
+            setDifficultyError(null);
+          }}
+        >
+          <option value="">
+            App default
+            {adminDefault
+              ? ` (${levels.find((level) => level.id === adminDefault)?.name ?? adminDefault})`
+              : ''}
+          </option>
+          {levels.map((level) => (
+            <option key={level.id} value={level.id}>
+              {level.name}
+            </option>
+          ))}
+        </select>
+        <p className="account-subtle">Used when you create a game. App default follows the site setting.</p>
+        {difficulty !== savedDifficulty && (
+          <div className="settings-audio-actions">
+            <button
+              type="button"
+              className="account-btn"
+              data-no-ui-click-sfx
+              onClick={() => {
+                setDifficultySaving(true);
+                setDifficultyError(null);
+                const next = difficulty || null;
+                api
+                  .updateMyProfile({ ai_difficulty: next })
+                  .then((updated) => {
+                    if (!isMountedRef.current) return;
+                    const id = updated.ai_difficulty ?? '';
+                    setDifficulty(id);
+                    setSavedDifficulty(id);
+                    setLevels(updated.ai_levels ?? []);
+                    setAdminDefault(updated.ai_difficulty_default ?? '');
+                    onPlayerChange(updated);
+                  })
+                  .catch((err: unknown) => {
+                    if (!isMountedRef.current) return;
+                    setDifficultyError(err instanceof Error ? err.message : 'Could not save difficulty');
+                  })
+                  .finally(() => {
+                    if (isMountedRef.current) setDifficultySaving(false);
+                  });
+              }}
+              disabled={difficultySaving}
+            >
+              {difficultySaving ? 'Saving…' : 'Save difficulty'}
+            </button>
+          </div>
+        )}
+        {difficultyError && <p className="account-msg account-msg--error">{difficultyError}</p>}
       </section>
     </ModalShell>
   );

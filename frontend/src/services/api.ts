@@ -711,6 +711,12 @@ export interface AuthPlayer {
   next_tier?: ProgressionTier | null;
   tier_floor_xp?: number;
   next_tier_xp?: number | null;
+  /** Saved default for new games. Null or omitted follows the admin default. */
+  ai_difficulty?: string | null;
+  /** Admin default level id, used when this player has not chosen one. */
+  ai_difficulty_default?: string;
+  /** Current level names. Search weights stay on the admin route. */
+  ai_levels?: AiLevelChoice[];
 }
 
 /** Search result / friend-list row with the viewer's relation to that user. */
@@ -1022,6 +1028,8 @@ export interface PatchProfileBody {
     /** #rrggbb background color. */
     color?: string;
   };
+  /** Level id, or null to follow the admin default again. */
+  ai_difficulty?: string | null;
 }
 
 export interface AuthResponse {

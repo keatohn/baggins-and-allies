@@ -422,6 +422,8 @@ class PatchProfileRequest(BaseModel):
     username: str | None = None
     audio: AudioSettingsPatch | None = None
     avatar: AvatarSettingsPatch | None = None
+    # Level id, or null to follow the admin default. Omitted leaves the saved choice alone.
+    ai_difficulty: str | None = None
 
 
 class CreateGameRequest(BaseModel):
@@ -433,7 +435,7 @@ class CreateGameRequest(BaseModel):
     map_asset: str | None = None
     """Faction IDs controlled by AI (single-player or fill slots). Omitted = no AI factions."""
     ai_factions: list[str] | None = None
-    """easy|normal|hard. Omitted = the admin default, which is stored on the game."""
+    """Level id. Omitted = this player's saved default, or the admin default."""
     ai_difficulty: str | None = None
     """heuristic|mcts. Omitted = the admin default, which is stored on the game."""
     ai_algorithm: str | None = None
@@ -1394,7 +1396,34 @@ def _player_avatar_response(player: Player, db: Session) -> dict[str, Any]:
     return {"image": image, "color": color}
 
 
+def _ai_level_catalog(db: Session) -> tuple[list[dict[str, str]], str]:
+    """Public level names plus the admin default id. Weights stay on the admin route."""
+    from backend.ai.settings import load_ai_defaults
+
+    defaults = load_ai_defaults(db)
+    levels = [
+        {"id": str(level["id"]), "name": str(level.get("name") or level["id"])}
+        for level in defaults["levels"]
+        if isinstance(level, dict) and level.get("id")
+    ]
+    ids = {row["id"] for row in levels}
+    default_id = defaults["difficulty"] if defaults["difficulty"] in ids else (levels[0]["id"] if levels else "normal")
+    return levels, default_id
+
+
+def _player_ai_difficulty_choice(player: Player, level_ids: set[str]) -> str | None:
+    """Saved default, when it still names a current level. Otherwise follow the admin default."""
+    from backend.ai.settings import stored_difficulty
+
+    raw = _player_prefs_dict(player).get("ai_difficulty")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    text = stored_difficulty(raw, "")
+    return text if text in level_ids else None
+
+
 def _profile_response(player: Player, db: Session) -> dict[str, Any]:
+    levels, default_id = _ai_level_catalog(db)
     body = {
         "id": player.id,
         "email": player.email,
@@ -1402,6 +1431,9 @@ def _profile_response(player: Player, db: Session) -> dict[str, Any]:
         "is_admin": bool(getattr(player, "is_admin", False)),
         "audio": _player_audio_response(player),
         "avatar": _player_avatar_response(player, db),
+        "ai_difficulty": _player_ai_difficulty_choice(player, {row["id"] for row in levels}),
+        "ai_difficulty_default": default_id,
+        "ai_levels": levels,
     }
     body.update(player_progression_view(player, db))
     return body
@@ -1514,8 +1546,9 @@ def update_profile(
     player: Player = Depends(get_current_player),
     db: Session = Depends(get_db),
 ):
-    """Update username and/or audio/avatar preferences (merged into stored JSON)."""
-    if request.username is None and request.audio is None and request.avatar is None:
+    """Update username and/or audio/avatar/difficulty preferences (merged into stored JSON)."""
+    difficulty_set = "ai_difficulty" in request.model_fields_set
+    if request.username is None and request.audio is None and request.avatar is None and not difficulty_set:
         raise HTTPException(status_code=400, detail="No fields to update")
 
     prefs = _player_prefs_dict(player)
@@ -1562,6 +1595,20 @@ def update_profile(
                 raise HTTPException(status_code=400, detail="Color must be a #rrggbb hex value")
             avatar["color"] = color
         prefs["avatar"] = avatar
+        prefs_dirty = True
+
+    if difficulty_set:
+        from backend.ai.settings import stored_difficulty
+
+        raw = request.ai_difficulty
+        if raw is None or not str(raw).strip():
+            prefs.pop("ai_difficulty", None)
+        else:
+            text = stored_difficulty(raw, "")
+            levels, _default_id = _ai_level_catalog(db)
+            if not text or text not in {row["id"] for row in levels}:
+                raise HTTPException(status_code=400, detail="Unknown difficulty")
+            prefs["ai_difficulty"] = text
         prefs_dirty = True
 
     if prefs_dirty:
@@ -3030,7 +3077,16 @@ def create_game(
     )
 
     ai_defaults = load_ai_defaults(db)
-    ai_difficulty = normalize_difficulty(request.ai_difficulty or ai_defaults["difficulty"], ai_defaults["levels"])
+    level_ids = {
+        str(level["id"])
+        for level in ai_defaults["levels"]
+        if isinstance(level, dict) and level.get("id")
+    }
+    if request.ai_difficulty:
+        chosen_difficulty = request.ai_difficulty
+    else:
+        chosen_difficulty = _player_ai_difficulty_choice(player, level_ids) or ai_defaults["difficulty"]
+    ai_difficulty = normalize_difficulty(chosen_difficulty, ai_defaults["levels"])
     ai_algorithm = normalize_algorithm(request.ai_algorithm or ai_defaults["algorithm"])
     stamp_ai_on_state(state, ai_difficulty, ai_algorithm, ai_defaults["levels"])
     config_snapshot["ai_difficulty"] = state.ai_difficulty

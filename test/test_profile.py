@@ -195,3 +195,63 @@ def test_avatar_icons_endpoint_lists_hobbit(make_client, players):
     assert isinstance(icons, list)
     # Unassigned icons fall back to the highest tier, so a new player does not receive them.
     assert icons == []
+
+
+def test_player_difficulty_overrides_admin_default_when_creating_a_game(make_client, players):
+    admin, user = players
+    admin_client = make_client(admin)
+    saved = admin_client.put(
+        "/admin/ai",
+        json={
+            "difficulty": "hard",
+            "algorithm": "mcts",
+            "levels": [
+                {"id": "easy", "name": "Easy", "iterations": 10, "seconds": 0.1},
+                {"id": "normal", "name": "Normal", "iterations": 20, "seconds": 0.2},
+                {"id": "hard", "name": "Hard", "iterations": 30, "seconds": 0.3},
+            ],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    client = make_client(user)
+    me = client.get("/auth/me")
+    assert me.status_code == 200
+    body = me.json()
+    assert body["ai_difficulty"] is None
+    assert body["ai_difficulty_default"] == "hard"
+    assert [level["id"] for level in body["ai_levels"]] == ["easy", "normal", "hard"]
+
+    def difficulty_of(name: str) -> str:
+        created = client.post("/games/create", json={"name": name, "setup_id": "wotr_exp_1.0"})
+        assert created.status_code == 200, created.text
+        meta = client.get(f"/games/{created.json()['game_id']}/meta")
+        assert meta.status_code == 200
+        return meta.json()["ai_difficulty"]
+
+    assert difficulty_of("Follows admin") == "hard"
+
+    chosen = client.patch("/auth/me", json={"ai_difficulty": "easy"})
+    assert chosen.status_code == 200
+    assert chosen.json()["ai_difficulty"] == "easy"
+    assert difficulty_of("Player default") == "easy"
+
+    explicit = client.post(
+        "/games/create",
+        json={"name": "Explicit", "setup_id": "wotr_exp_1.0", "ai_difficulty": "normal"},
+    )
+    assert explicit.status_code == 200, explicit.text
+    explicit_meta = client.get(f"/games/{explicit.json()['game_id']}/meta")
+    assert explicit_meta.json()["ai_difficulty"] == "normal"
+
+    audio = client.patch("/auth/me", json={"audio": {"muted": True}})
+    assert audio.status_code == 200
+    assert audio.json()["ai_difficulty"] == "easy"
+
+    unknown = client.patch("/auth/me", json={"ai_difficulty": "nope"})
+    assert unknown.status_code == 400
+
+    cleared = client.patch("/auth/me", json={"ai_difficulty": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["ai_difficulty"] is None
+    assert difficulty_of("Back to admin") == "hard"

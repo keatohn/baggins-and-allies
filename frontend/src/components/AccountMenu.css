@@ -929,6 +929,20 @@
   cursor: pointer;
 }
 
+.settings-difficulty-select {
+  display: block;
+  width: 100%;
+  max-width: 16rem;
+  margin-top: 0.35rem;
+  font-family: var(--font-parchment);
+  font-size: 0.95rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--parchment);
+  border: 1px solid var(--ink-faded);
+  border-radius: 4px;
+  color: var(--ink);
+}
+
 .settings-audio-actions {
   display: flex;
   align-items: center;
