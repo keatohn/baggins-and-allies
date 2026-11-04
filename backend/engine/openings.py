@@ -1,20 +1,33 @@
-"""Opening attacks for each faction on turn 1.
+"""Opening moves for each faction on turn 1.
 
-Each arrow is one combat move: every unit that faction commands in a territory,
-and that can reach a destination, against the hostile units already there.
-Empty conquests are omitted. Win chance comes from the combat simulator.
+Each faction's combat moves are chosen by the MCTS combat-move search, the
+same decision the AI uses. Battles are then fought with the MCTS combat
+policy, so the next faction sees the board that search actually left behind.
+The pill on each arrow is a combat-sim chance for that move. It is not what
+picks the move.
 
-Later factions are projected from one likely line. After a faction's arrows are
-recorded, attacks that conquer at least 75% of the time are applied, best chance
-first, and a stack is sent on only one of them. Sea-raid ships stay in their sea
-zone. Purchases and non-combat moves are left for the real game.
+Results are cached for the process so reopening the admin tab does not
+search again.
 """
 
 from __future__ import annotations
 
-from collections import Counter
+import copy
+import hashlib
+import json
+import random
+import zlib
+from collections import Counter, OrderedDict
+from dataclasses import asdict, is_dataclass
 from typing import Any
 
+from backend.ai.context import AIContext
+from backend.ai.mcts.budget import SearchBudget, budget_catalog_scope, get_phase_budget
+from backend.ai.combat import decide_mcts_combat_policy
+from backend.ai.mcts.combat_move import apply_bundled_moves, decide_combat_move_mcts
+from backend.ai.mcts.dice import sample_dice_for_continue, sample_dice_for_initiate
+from backend.ai.mcts import tree_cache
+from backend.engine.actions import end_phase
 from backend.engine.combat_sim import SimOptions, apply_sim_ring_boosts, run_simulation
 from backend.engine.definitions import (
     CampDefinition,
@@ -25,23 +38,30 @@ from backend.engine.definitions import (
     controlling_faction_id,
 )
 from backend.engine.movement import (
+    _craft_can_enter,
     _is_water_craft,
     _is_water_zone,
-    get_reachable_territories_for_unit,
 )
+from backend.engine.queries import participates_in_sea_hex_naval_combat
+from backend.engine.reducer import apply_action
 from backend.engine.rings import combat_boosts
 from backend.engine.special_rules import select_special_rules
-from backend.engine.subfaction_rules import capture_owner_for_units
 from backend.engine.utils import (
     can_conquer_territory_as_attacker,
-    effective_original_owner,
     get_unit_faction,
     initialize_game_state,
-    is_land_unit,
+    is_aerial_unit,
 )
 
-# A prior faction is assumed to take an attack only when conquest is this likely.
-LIKELY_CONQUER = 0.75
+_OPENING_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
+_OPENING_CACHE_MAX = 4
+_MAX_COMBAT_MOVE_ACTIONS = 16
+_MAX_COMBAT_ACTIONS = 200
+
+
+def clear_opening_cache() -> None:
+    """Drop cached opening plans. Tests use this to force a fresh search."""
+    _OPENING_CACHE.clear()
 
 
 def _alliance_of(faction_defs: dict[str, FactionDefinition], faction_id: str | None) -> str | None:
@@ -71,6 +91,22 @@ def _is_hostile(
     return True
 
 
+def _owner_is_enemy(
+    owner: str | None,
+    acting_faction: str,
+    faction_defs: dict[str, FactionDefinition],
+) -> bool:
+    if not owner:
+        return True
+    if faction_acts_as(faction_defs, owner, acting_faction):
+        return False
+    acting_alliance = _alliance_of(faction_defs, acting_faction)
+    owner_alliance = _alliance_of(faction_defs, owner)
+    if acting_alliance and owner_alliance and acting_alliance == owner_alliance:
+        return False
+    return True
+
+
 def _stacks(units) -> list[dict[str, Any]]:
     counts = Counter(unit.unit_id for unit in units)
     return [{"unit_id": uid, "count": counts[uid]} for uid in sorted(counts)]
@@ -95,6 +131,67 @@ def _boost_rows(boosts: dict, units) -> list[dict[str, Any]]:
     return [row for row in rows.values() if row["attack"] or row["defense"] or row["dice"] or row["hp"]]
 
 
+def _fight_role(unit, origin_def, dest_def, unit_defs: dict[str, UnitDefinition]) -> str | None:
+    """How this unit may fight at dest. None when the move would break a domain rule."""
+    unit_def = unit_defs.get(unit.unit_id)
+    if unit_def is None or dest_def is None:
+        return None
+    if _is_water_zone(dest_def):
+        if is_aerial_unit(unit_def):
+            return "naval"
+        if (
+            _is_water_craft(unit_def)
+            and _craft_can_enter(unit_def, dest_def)
+            and participates_in_sea_hex_naval_combat(unit, unit_def)
+        ):
+            return "naval"
+        return None
+    if _is_water_craft(unit_def):
+        return None
+    if _is_water_zone(origin_def):
+        return "sea_raid"
+    return "land"
+
+
+def _freeze(value: Any) -> Any:
+    if is_dataclass(value):
+        return _freeze(asdict(value))
+    if isinstance(value, dict):
+        return {str(key): _freeze(item) for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))}
+    if isinstance(value, (list, tuple)):
+        return [_freeze(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def _opening_cache_key(
+    unit_defs: dict[str, UnitDefinition],
+    territory_defs: dict[str, TerritoryDefinition],
+    faction_defs: dict[str, FactionDefinition],
+    camp_defs: dict[str, CampDefinition] | None,
+    starting_setup: dict,
+    manifest: dict,
+    trials: int,
+    seed: int,
+    budget: SearchBudget,
+) -> str:
+    payload = {
+        "units": _freeze(unit_defs),
+        "territories": _freeze(territory_defs),
+        "factions": _freeze(faction_defs),
+        "camps": _freeze(camp_defs or {}),
+        "starting_setup": _freeze(starting_setup),
+        "manifest": _freeze(manifest),
+        "n_trials": trials,
+        "seed": seed,
+        "mcts_iterations": budget.max_iterations,
+        "mcts_seconds": budget.max_time_seconds,
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
 def compute_opening_attacks(
     unit_defs: dict[str, UnitDefinition],
     territory_defs: dict[str, TerritoryDefinition],
@@ -105,10 +202,65 @@ def compute_opening_attacks(
     manifest: dict | None = None,
     n_trials: int = 2000,
     seed: int = 8,
+    mcts_iterations: int | None = None,
+    mcts_seconds: float | None = None,
 ) -> dict[str, Any]:
-    """Simulate each turn-order faction's opening attacks, projecting likely conquests forward."""
+    """Search each turn-order faction's opening, then leave that board for the next one."""
     manifest = manifest or {}
     trials = max(1, min(int(n_trials), 20_000))
+    if mcts_iterations is None and mcts_seconds is None:
+        budget = get_phase_budget("combat_move", "normal")
+    else:
+        budget = SearchBudget(
+            max(1, int(mcts_iterations or 1)),
+            max(0.05, float(mcts_seconds or 0.4)),
+        )
+    key = _opening_cache_key(
+        unit_defs,
+        territory_defs,
+        faction_defs,
+        camp_defs,
+        starting_setup,
+        manifest,
+        trials,
+        seed,
+        budget,
+    )
+    cached = _OPENING_CACHE.get(key)
+    if cached is not None:
+        _OPENING_CACHE.move_to_end(key)
+        return copy.deepcopy(cached)
+
+    result = _compute_opening_attacks(
+        unit_defs,
+        territory_defs,
+        faction_defs,
+        camp_defs,
+        starting_setup,
+        manifest=manifest,
+        n_trials=trials,
+        seed=seed,
+        budget=budget,
+    )
+    _OPENING_CACHE[key] = result
+    _OPENING_CACHE.move_to_end(key)
+    while len(_OPENING_CACHE) > _OPENING_CACHE_MAX:
+        _OPENING_CACHE.popitem(last=False)
+    return copy.deepcopy(result)
+
+
+def _compute_opening_attacks(
+    unit_defs: dict[str, UnitDefinition],
+    territory_defs: dict[str, TerritoryDefinition],
+    faction_defs: dict[str, FactionDefinition],
+    camp_defs: dict[str, CampDefinition] | None,
+    starting_setup: dict,
+    *,
+    manifest: dict,
+    n_trials: int,
+    seed: int,
+    budget: SearchBudget,
+) -> dict[str, Any]:
     rules, rings_on = select_special_rules(manifest.get("special_rules"))
     heroes_raw = manifest.get("heroes_enabled")
     heroes_enabled = True if heroes_raw is None else bool(heroes_raw)
@@ -128,185 +280,371 @@ def compute_opening_attacks(
         subfaction_rules=manifest.get("subfaction_rules") if isinstance(manifest.get("subfaction_rules"), dict) else None,
         rings_of_power=rings_on,
     )
-    state.phase = "combat_move"
+    state.ai_algorithm = "mcts"
+    state.ai_difficulty = "normal"
     order = [fid for fid in state.turn_order if fid in faction_defs]
     if not order and state.current_faction:
         order = [state.current_faction]
 
+    levels = [{
+        "id": "normal",
+        "iterations": budget.max_iterations,
+        "seconds": budget.max_time_seconds,
+    }]
+    tree_cache.clear()
     factions_out: list[dict[str, Any]] = []
-    for faction_index, faction_id in enumerate(order):
-        state.current_faction = faction_id
-        attacks, rows = _attacks_for_faction(
-            state,
-            faction_id,
-            unit_defs,
-            territory_defs,
-            faction_defs,
-            n_trials=trials,
-            seed=seed + faction_index * 1009,
-        )
-        faction_def = faction_defs.get(faction_id)
-        factions_out.append(
-            {
-                "faction_id": faction_id,
-                "faction_name": getattr(faction_def, "display_name", None) or faction_id,
-                "board": _board_snapshot(state),
-                "attacks": attacks,
-                "assumed": _apply_likely_conquests(
-                    state, faction_id, rows, unit_defs, territory_defs, faction_defs
-                ),
-            }
-        )
+    with budget_catalog_scope(levels):
+        for faction_index, faction_id in enumerate(order):
+            state.current_faction = faction_id
+            state.phase = "combat_move"
+            _refresh_movement(state, faction_id, unit_defs, faction_defs)
+            rng = random.Random(seed + faction_index * 1009)
+            faction_def = faction_defs.get(faction_id)
+            board = _board_snapshot(state)
+            attacks, assumed = _play_faction(
+                state,
+                faction_id,
+                unit_defs,
+                territory_defs,
+                faction_defs,
+                camp_defs,
+                rng,
+                n_trials=n_trials,
+                seed=seed + faction_index * 1009,
+            )
+            factions_out.append(
+                {
+                    "faction_id": faction_id,
+                    "faction_name": getattr(faction_def, "display_name", None) or faction_id,
+                    "board": board,
+                    "attacks": attacks,
+                    "assumed": assumed,
+                }
+            )
 
     return {
-        "n_trials": trials,
-        "conquer_threshold": LIKELY_CONQUER,
+        "n_trials": n_trials,
+        "mcts_iterations": budget.max_iterations,
+        "mcts_seconds": budget.max_time_seconds,
         "factions": factions_out,
     }
 
 
-def _attacks_for_faction(
+def _refresh_movement(state, faction_id: str, unit_defs, faction_defs) -> None:
+    for territory in state.territories.values():
+        for unit in territory.units:
+            if faction_acts_as(faction_defs, get_unit_faction(unit, unit_defs), faction_id):
+                unit.remaining_movement = unit.base_movement
+
+
+def _play_faction(
     state,
     faction_id: str,
-    unit_defs: dict[str, UnitDefinition],
-    territory_defs: dict[str, TerritoryDefinition],
-    faction_defs: dict[str, FactionDefinition],
+    unit_defs,
+    territory_defs,
+    faction_defs,
+    camp_defs,
+    rng: random.Random,
     *,
     n_trials: int,
     seed: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Defended opening attacks for one faction, plus the rows used to project the next board."""
-    pending: list[dict[str, Any]] = []
-    for origin in sorted(state.territories):
-        territory = state.territories[origin]
-        commanded = [
-            unit
-            for unit in territory.units
-            if faction_acts_as(faction_defs, get_unit_faction(unit, unit_defs), faction_id)
-        ]
-        if not commanded:
-            continue
-        reach_cache: dict[tuple[str, int], dict[str, int]] = {}
-        by_dest: dict[str, list] = {}
-        for unit in commanded:
+    """Search this faction's combat moves, fight the battles, and keep the caller's state current."""
+    original = state
+    ports: dict = {}
+    camps = camp_defs or {}
+    ctx = AIContext(
+        state=state,
+        unit_defs=unit_defs,
+        territory_defs=territory_defs,
+        faction_defs=faction_defs,
+        camp_defs=camps,
+        port_defs=ports,
+        available_actions={"can_end_phase": True},
+    )
+    legs: list[dict[str, Any]] = []
+    for _step in range(_MAX_COMBAT_MOVE_ACTIONS):
+        if state.phase != "combat_move" or state.winner:
+            break
+        ctx.state = state
+        action = decide_combat_move_mcts(ctx, rng)
+        if action is None or action.type == "end_phase":
+            break
+        if action.type != "move_units":
             try:
-                movement = int(unit.remaining_movement or 0)
-            except (TypeError, ValueError):
-                movement = 0
-            cache_key = (unit.unit_id, movement)
-            reachable = reach_cache.get(cache_key)
-            if reachable is None:
-                reachable, _routes = get_reachable_territories_for_unit(
-                    unit,
-                    origin,
-                    state,
-                    unit_defs,
-                    territory_defs,
-                    faction_defs,
-                    "combat_move",
-                    acting_faction_id=faction_id,
-                )
-                reach_cache[cache_key] = reachable
-            for dest in reachable:
-                if dest == origin:
-                    continue
-                by_dest.setdefault(dest, []).append(unit)
-        for dest, attackers in by_dest.items():
-            dest_state = state.territories.get(dest)
-            if dest_state is None:
+                state, _events = apply_action(state, action, unit_defs, territory_defs, faction_defs, camps, ports)
+            except ValueError:
+                break
+            continue
+        legs.extend(_move_legs(action))
+        try:
+            state, _events = apply_bundled_moves(state, action, unit_defs, territory_defs, faction_defs, camps, ports)
+        except ValueError:
+            break
+    attacks = _arrows_for_legs(
+        state,
+        faction_id,
+        legs,
+        unit_defs,
+        territory_defs,
+        faction_defs,
+        n_trials=n_trials,
+        seed=seed,
+    )
+    if state.phase == "combat_move" and not state.winner:
+        try:
+            state, _events = apply_action(
+                state, end_phase(faction_id), unit_defs, territory_defs, faction_defs, camps, ports
+            )
+        except ValueError:
+            pass
+    state = _resolve_combat(state, faction_id, unit_defs, territory_defs, faction_defs, camps, ports, rng)
+    _adopt(original, state)
+    assumed = _taken(original, faction_id, faction_defs, attacks)
+    return attacks, assumed
+
+
+def _adopt(target, source) -> None:
+    """Point the caller's state at the played board when apply_action copied it."""
+    if target is source:
+        return
+    target.__dict__.update(source.__dict__)
+
+
+def _resolve_combat(state, faction_id, unit_defs, territory_defs, faction_defs, camps, ports, rng):
+    ctx = AIContext(
+        state=state,
+        unit_defs=unit_defs,
+        territory_defs=territory_defs,
+        faction_defs=faction_defs,
+        camp_defs=camps,
+        port_defs=ports,
+        available_actions={},
+    )
+    for _step in range(_MAX_COMBAT_ACTIONS):
+        if state.phase != "combat" or state.winner:
+            return state
+        ctx.state = state
+        action = decide_mcts_combat_policy(ctx, rng)
+        if action is None:
+            return state
+        if action.type == "initiate_combat":
+            payload = action.payload
+            payload["dice_rolls"] = sample_dice_for_initiate(
+                state,
+                payload.get("territory_id"),
+                payload.get("sea_zone_id"),
+                faction_id,
+                unit_defs,
+                territory_defs,
+                faction_defs,
+                rng=rng,
+            )
+        elif action.type == "continue_combat":
+            action.payload["dice_rolls"] = sample_dice_for_continue(
+                state, unit_defs, territory_defs, faction_defs, rng=rng
+            )
+        try:
+            state, _events = apply_action(state, action, unit_defs, territory_defs, faction_defs, camps, ports)
+        except ValueError:
+            return state
+    return state
+
+
+def _move_legs(action) -> list[dict[str, Any]]:
+    payload = action.payload or {}
+    legs = [{
+        "from": payload.get("from"),
+        "to": payload.get("to"),
+        "ids": list(payload.get("unit_instance_ids") or []),
+    }]
+    for extra in payload.get("bundle_rest") or []:
+        if not isinstance(extra, dict):
+            continue
+        legs.append({
+            "from": extra.get("from"),
+            "to": extra.get("to"),
+            "ids": list(extra.get("unit_instance_ids") or []),
+        })
+    return [leg for leg in legs if leg["from"] and leg["to"] and leg["ids"]]
+
+
+def _units_by_id(state) -> dict[str, Any]:
+    found = {}
+    for territory in state.territories.values():
+        for unit in territory.units:
+            found[unit.instance_id] = unit
+    return found
+
+
+def _arrows_for_legs(
+    state,
+    faction_id: str,
+    legs: list[dict[str, Any]],
+    unit_defs,
+    territory_defs,
+    faction_defs,
+    *,
+    n_trials: int,
+    seed: int,
+) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for leg in legs:
+        key = (leg["from"], leg["to"])
+        bucket = grouped.setdefault(key, [])
+        for instance_id in leg["ids"]:
+            if instance_id not in bucket:
+                bucket.append(instance_id)
+    by_id = _units_by_id(state)
+    arrows: list[dict[str, Any]] = []
+    for (origin, dest), instance_ids in grouped.items():
+        origin_def = territory_defs.get(origin)
+        dest_def = territory_defs.get(dest)
+        dest_state = state.territories.get(dest)
+        if dest_def is None or dest_state is None:
+            continue
+        fighters = []
+        for instance_id in instance_ids:
+            unit = by_id.get(instance_id)
+            if unit is None:
                 continue
+            if _fight_role(unit, origin_def, dest_def, unit_defs) is None:
+                continue
+            fighters.append(unit)
+        if not fighters:
+            continue
+        hostile = [
+            unit
+            for unit in dest_state.units
+            if _is_hostile(get_unit_faction(unit, unit_defs), faction_id, faction_defs)
+        ]
+        water = _is_water_zone(dest_def)
+        if water:
             defenders = [
                 unit
-                for unit in dest_state.units
-                if _is_hostile(get_unit_faction(unit, unit_defs), faction_id, faction_defs)
+                for unit in hostile
+                if participates_in_sea_hex_naval_combat(unit, unit_defs.get(unit.unit_id))
             ]
+            empty = False
             if not defenders:
                 continue
-            dest_def = territory_defs.get(dest)
-            water = _is_water_zone(dest_def)
-            sea_raid = (not water) and all(
-                _is_water_craft(unit_defs.get(unit.unit_id)) for unit in attackers
-            )
-            stronghold_hp = None
-            if (
-                not water
-                and dest_def is not None
-                and getattr(dest_def, "is_stronghold", False)
-            ):
-                current_hp = getattr(dest_state, "stronghold_current_health", None)
-                if current_hp is not None:
-                    try:
-                        current_hp = int(current_hp)
-                    except (TypeError, ValueError):
-                        current_hp = None
-                if current_hp is not None:
-                    if current_hp > 0:
-                        stronghold_hp = current_hp
-                else:
-                    base_hp = int(getattr(dest_def, "stronghold_base_health", 0) or 0)
-                    if base_hp > 0:
-                        stronghold_hp = base_hp
-            pending.append(
-                {
-                    "from_territory": origin,
-                    "to_territory": dest,
-                    "attackers": attackers,
-                    "defenders": defenders,
-                    "is_sea_raid": sea_raid,
-                    "stronghold_initial_hp": stronghold_hp,
-                }
-            )
-
-    pending.sort(key=lambda row: (row["from_territory"], row["to_territory"]))
-    attacks: list[dict[str, Any]] = []
-    for index, row in enumerate(pending):
-        attacker_stacks = _stacks(row["attackers"])
-        defender_stacks = _stacks(row["defenders"])
-        boosts = _boost_rows(
-            combat_boosts(
+        elif hostile:
+            defenders = hostile
+            empty = False
+        elif (
+            not dest_state.units
+            and getattr(dest_def, "ownable", True)
+            and not water
+            and _owner_is_enemy(dest_state.owner, faction_id, faction_defs)
+            and any(can_conquer_territory_as_attacker(unit_defs.get(unit.unit_id)) for unit in fighters)
+        ):
+            defenders = []
+            empty = True
+        else:
+            continue
+        sea_raid = bool(origin_def is not None and _is_water_zone(origin_def) and not water)
+        if empty:
+            p_win = 1.0
+            p_conquer = 1.0
+        else:
+            p_win, p_conquer = _sim_chance(
                 state,
-                row["attackers"],
+                origin,
+                dest,
+                fighters,
+                defenders,
                 unit_defs,
-                row["from_territory"],
-                {unit.instance_id for unit in row["attackers"]},
-            ),
-            row["attackers"],
-        ) + _boost_rows(
-            combat_boosts(state, row["defenders"], unit_defs, row["to_territory"]),
-            row["defenders"],
-        )
-        sim_units = apply_sim_ring_boosts(unit_defs, boosts)
-        result = run_simulation(
-            attacker_stacks,
-            defender_stacks,
-            row["to_territory"],
-            sim_units,
-            territory_defs,
-            n_trials=n_trials,
-            options=SimOptions(
-                casualty_order_attacker="best_unit",
-                casualty_order_defender="best_unit",
-                must_conquer=False,
-                is_sea_raid=bool(row["is_sea_raid"]),
-                stronghold_initial_hp=row["stronghold_initial_hp"],
-                prefire_penalty=bool(getattr(state, "prefire_penalty", True)),
-            ),
-            seed=seed + index,
-        )
-        row["p_conquer"] = result.p_conquer
-        attacks.append(
+                territory_defs,
+                sea_raid=sea_raid,
+                n_trials=n_trials,
+                seed=seed + (zlib.adler32(f"{origin}|{dest}".encode()) % 100_000),
+            )
+        arrows.append(
             {
-                "from_territory": row["from_territory"],
-                "to_territory": row["to_territory"],
-                "attacker_stacks": attacker_stacks,
-                "defender_stacks": defender_stacks,
-                "p_attacker_win": round(result.p_attacker_win, 4),
-                "p_conquer": round(result.p_conquer, 4),
-                "is_sea_raid": bool(row["is_sea_raid"]),
+                "from_territory": origin,
+                "to_territory": dest,
+                "attacker_stacks": _stacks(fighters),
+                "defender_stacks": _stacks(defenders),
+                "p_attacker_win": round(p_win, 4),
+                "p_conquer": round(p_conquer, 4),
+                "is_sea_raid": sea_raid,
+                "empty": empty,
             }
         )
+    return arrows
 
-    return attacks, pending
+
+def _sim_chance(
+    state,
+    origin: str,
+    dest: str,
+    attackers,
+    defenders,
+    unit_defs,
+    territory_defs,
+    *,
+    sea_raid: bool,
+    n_trials: int,
+    seed: int,
+) -> tuple[float, float]:
+    dest_def = territory_defs.get(dest)
+    dest_state = state.territories.get(dest)
+    stronghold_hp = None
+    if dest_def is not None and getattr(dest_def, "is_stronghold", False) and not _is_water_zone(dest_def):
+        current_hp = getattr(dest_state, "stronghold_current_health", None) if dest_state is not None else None
+        try:
+            current_hp = int(current_hp) if current_hp is not None else None
+        except (TypeError, ValueError):
+            current_hp = None
+        if current_hp is not None and current_hp > 0:
+            stronghold_hp = current_hp
+        elif current_hp is None:
+            base_hp = int(getattr(dest_def, "stronghold_base_health", 0) or 0)
+            if base_hp > 0:
+                stronghold_hp = base_hp
+    boosts = _boost_rows(
+        combat_boosts(state, attackers, unit_defs, origin, {unit.instance_id for unit in attackers}),
+        attackers,
+    ) + _boost_rows(combat_boosts(state, defenders, unit_defs, dest), defenders)
+    result = run_simulation(
+        _stacks(attackers),
+        _stacks(defenders),
+        dest,
+        apply_sim_ring_boosts(unit_defs, boosts),
+        territory_defs,
+        n_trials=n_trials,
+        options=SimOptions(
+            casualty_order_attacker="best_attack" if stronghold_hp else "best_unit",
+            casualty_order_defender="best_unit",
+            must_conquer=bool(stronghold_hp),
+            is_sea_raid=sea_raid,
+            stronghold_initial_hp=stronghold_hp,
+            prefire_penalty=bool(getattr(state, "prefire_penalty", True)),
+        ),
+        seed=seed,
+    )
+    return float(result.p_attacker_win), float(result.p_conquer)
+
+
+def _taken(state, faction_id: str, faction_defs, attacks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    assumed = []
+    for attack in attacks:
+        dest = state.territories.get(attack["to_territory"])
+        if dest is None:
+            continue
+        if _owner_is_enemy(dest.owner, faction_id, faction_defs):
+            continue
+        if not dest.owner:
+            continue
+        assumed.append(
+            {
+                "from_territory": attack["from_territory"],
+                "to_territory": attack["to_territory"],
+                "p_conquer": attack["p_conquer"],
+            }
+        )
+    assumed.sort(key=lambda row: (row["from_territory"], row["to_territory"]))
+    return assumed
 
 
 def _board_snapshot(state) -> dict[str, Any]:
@@ -323,98 +661,3 @@ def _board_snapshot(state) -> dict[str, Any]:
         if current is not None:
             stronghold_hp[tid] = int(current)
     return {"owners": owners, "units": units, "stronghold_hp": stronghold_hp}
-
-
-def _conquering_units(units, unit_defs: dict[str, UnitDefinition], *, sea_raid: bool) -> list:
-    """Units that would occupy the territory after this attack conquers."""
-    if sea_raid:
-        return [
-            unit
-            for unit in units
-            if can_conquer_territory_as_attacker(unit_defs.get(unit.unit_id)) and is_land_unit(unit_defs.get(unit.unit_id))
-        ]
-    return [unit for unit in units if can_conquer_territory_as_attacker(unit_defs.get(unit.unit_id))]
-
-
-def _apply_likely_conquests(
-    state,
-    faction_id: str,
-    rows: list[dict[str, Any]],
-    unit_defs: dict[str, UnitDefinition],
-    territory_defs: dict[str, TerritoryDefinition],
-    faction_defs: dict[str, FactionDefinition],
-) -> list[dict[str, Any]]:
-    """Move the likely, non-overlapping conquests onto the board for the next faction."""
-    ranked = sorted(
-        rows,
-        key=lambda row: (-float(row.get("p_conquer") or 0), row["from_territory"], row["to_territory"]),
-    )
-    used: set[str] = set()
-    assumed: list[dict[str, Any]] = []
-    for row in ranked:
-        chance = float(row.get("p_conquer") or 0)
-        if chance < LIKELY_CONQUER:
-            continue
-        sea_raid = bool(row["is_sea_raid"])
-        occupiers = _conquering_units(row["attackers"], unit_defs, sea_raid=sea_raid)
-        if not occupiers:
-            continue
-        attacker_ids = {unit.instance_id for unit in row["attackers"]}
-        if attacker_ids & used:
-            continue
-        # Ships stay in the sea zone. Everyone else on a land attack moves in with the stack.
-        movers = occupiers if sea_raid else list(row["attackers"])
-        if not _commit_conquest(state, faction_id, row, movers, occupiers, unit_defs, territory_defs, faction_defs):
-            continue
-        used |= attacker_ids
-        assumed.append(
-            {
-                "from_territory": row["from_territory"],
-                "to_territory": row["to_territory"],
-                "p_conquer": round(chance, 4),
-            }
-        )
-    assumed.sort(key=lambda row: (row["from_territory"], row["to_territory"]))
-    return assumed
-
-
-def _commit_conquest(
-    state,
-    faction_id: str,
-    row: dict[str, Any],
-    movers: list,
-    occupiers: list,
-    unit_defs: dict[str, UnitDefinition],
-    territory_defs: dict[str, TerritoryDefinition],
-    faction_defs: dict[str, FactionDefinition],
-) -> bool:
-    dest_id = row["to_territory"]
-    dest = state.territories.get(dest_id)
-    if dest is None:
-        return False
-    dest_def = territory_defs.get(dest_id)
-    if dest_def is None or not getattr(dest_def, "ownable", True):
-        return False
-    defender_ids = {unit.instance_id for unit in row["defenders"]}
-    dest.units = [unit for unit in dest.units if unit.instance_id not in defender_ids]
-    for unit in movers:
-        for territory in state.territories.values():
-            if unit in territory.units:
-                territory.units.remove(unit)
-                break
-        unit.loaded_onto = None
-        dest.units.append(unit)
-    capturer = capture_owner_for_units(state, occupiers, faction_id, unit_defs, faction_defs)
-    original = effective_original_owner(dest_id, dest, state)
-    new_owner = capturer
-    if original and original != capturer:
-        capturer_def = faction_defs.get(capturer)
-        original_def = faction_defs.get(original)
-        capturer_alliance = getattr(capturer_def, "alliance", None) if capturer_def is not None else None
-        original_alliance = getattr(original_def, "alliance", None) if original_def is not None else None
-        if capturer_alliance and capturer_alliance == original_alliance:
-            new_owner = original
-    dest.owner = new_owner
-    if getattr(dest_def, "is_stronghold", False):
-        dest.stronghold_current_health = 0
-    return True

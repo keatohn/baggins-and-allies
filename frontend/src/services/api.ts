@@ -1662,7 +1662,7 @@ export const api = {
       }),
     }),
 
-  /** Each faction's opening attacks, after earlier factions' likely conquests. */
+  /** Each faction's opening moves, after earlier factions' chosen attacks and empty takes. */
   openingAttacks: (body: {
     manifest?: Record<string, unknown>;
     units: Record<string, unknown>;
@@ -1675,7 +1675,6 @@ export const api = {
   }) =>
     fetchJson<{
       n_trials: number;
-      conquer_threshold: number;
       factions: {
         faction_id: string;
         faction_name: string;
@@ -1692,6 +1691,7 @@ export const api = {
           p_attacker_win: number;
           p_conquer: number;
           is_sea_raid: boolean;
+          empty: boolean;
         }[];
         assumed: { from_territory: string; to_territory: string; p_conquer: number }[];
       }[];

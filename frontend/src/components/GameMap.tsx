@@ -560,8 +560,8 @@ interface GameMapProps {
    * their calculated position.
    */
   mapOverrides?: MapOverridesData | null;
-  /** Admin map: opening-attack arrows with the combat-sim win chance beside each one. */
-  openingAttacks?: { from: string; to: string; pAttackerWin: number; title: string }[];
+  /** Admin map: opening arrows. The pill is the win chance, or `label` for an empty take. */
+  openingAttacks?: { from: string; to: string; pAttackerWin: number; title: string; label?: string }[];
   /**
    * Reports the calculated spot anchors (pre-override, viewBox coords) whenever they recompute.
    * Used by the admin Maps editor as a hidden "oracle" so its dots match the game exactly.
@@ -2125,6 +2125,7 @@ function GameMap({
         length,
         pAttackerWin: attack.pAttackerWin,
         title: attack.title,
+        label: attack.label,
       }];
     });
   }, [openingAttacks, territoryCentroids]);
@@ -5710,7 +5711,7 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                               onPointerDown={(e) => e.stopPropagation()}
                               onClick={(e) => e.stopPropagation()}
                             >
-                              {win}%
+                              {arrow.label || `${win}%`}
                             </div>
                           );
                         })}

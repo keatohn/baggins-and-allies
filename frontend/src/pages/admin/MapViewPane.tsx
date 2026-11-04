@@ -82,6 +82,35 @@ const EDGE_TYPES: { field: TerritoryEdgeField; label: string; kind: 'land' | 'ae
 const NOOP = () => {};
 const NO_MOVES: PendingMove[] = [];
 
+type OpeningView = {
+  key: string;
+  factions: {
+    factionId: string;
+    factionName: string;
+    arrows: { from: string; to: string; pAttackerWin: number; title: string; label?: string }[];
+    assumed: { from: string; to: string; pConquer: number }[];
+    board: {
+      owners: Record<string, string | null>;
+      units: Record<string, { unit_id: string; count: number }[]>;
+      strongholdHp: Record<string, number>;
+    };
+  }[];
+};
+
+/** Survives closing the map view, so the same setup does not simulate again. */
+const openingCache = new Map<string, OpeningView>();
+const OPENING_CACHE_MAX = 6;
+
+function rememberOpenings(result: OpeningView) {
+  openingCache.delete(result.key);
+  openingCache.set(result.key, result);
+  while (openingCache.size > OPENING_CACHE_MAX) {
+    const oldest = openingCache.keys().next().value;
+    if (oldest === undefined) break;
+    openingCache.delete(oldest);
+  }
+}
+
 function ownNeighborIds(territories: Dict, selectedKey: string, field: TerritoryEdgeField): string[] {
   const raw = territories[selectedKey]?.[field];
   if (!Array.isArray(raw)) return [];
@@ -104,8 +133,8 @@ function openingStatus(
 ): string {
   const count = selected.arrows.length;
   const head = count
-    ? `${selected.factionName}: ${count} opening ${count === 1 ? 'attack' : 'attacks'}. Hover a pill for the stacks.`
-    : `${selected.factionName} has no opening attack into a territory with defenders.`;
+    ? `${selected.factionName}: ${count} opening ${count === 1 ? 'move' : 'moves'}. Hover a pill for the stacks.`
+    : `${selected.factionName} has no opening move worth taking.`;
   const index = factions.findIndex((faction) => faction.factionId === selected.factionId);
   const prior = factions.slice(0, Math.max(index, 0)).flatMap((faction) =>
     faction.assumed.map((attack) => `${faction.factionName} took ${territoryLabel(attack.to, territories[attack.to])}`),
@@ -202,20 +231,7 @@ export function MapViewPane({
   const [discardOpen, setDiscardOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [openings, setOpenings] = useState<{
-    key: string;
-    factions: {
-      factionId: string;
-      factionName: string;
-      arrows: { from: string; to: string; pAttackerWin: number; title: string }[];
-      assumed: { from: string; to: string; pConquer: number }[];
-      board: {
-        owners: Record<string, string | null>;
-        units: Record<string, { unit_id: string; count: number }[]>;
-        strongholdHp: Record<string, number>;
-      };
-    }[];
-  } | null>(null);
+  const [openings, setOpenings] = useState<OpeningView | null>(null);
   const [openingFactionId, setOpeningFactionId] = useState<string | null>(null);
   const [openingLoading, setOpeningLoading] = useState(false);
   const [openingError, setOpeningError] = useState<string | null>(null);
@@ -441,6 +457,13 @@ export function MapViewPane({
   useEffect(() => {
     if (view !== 'openings') return;
     if (openings?.key === openingRequest.key) return;
+    const cached = openingCache.get(openingRequest.key);
+    if (cached) {
+      setOpenings(cached);
+      setOpeningLoading(false);
+      setOpeningError(null);
+      return;
+    }
     let cancelled = false;
     setOpeningLoading(true);
     setOpeningError(null);
@@ -453,7 +476,7 @@ export function MapViewPane({
           const nameOf = (table: Dict, id: string) => territoryLabel(id, table[id]);
           const stacksOf = (stacks: { unit_id: string; count: number }[]) =>
             stacks.map((stack) => `${stack.count}× ${nameOf(units, stack.unit_id)}`).join(', ');
-          setOpenings({
+          const next: OpeningView = {
             key: openingRequest.key,
             factions: res.factions.map((faction) => ({
               factionId: faction.faction_id,
@@ -471,17 +494,28 @@ export function MapViewPane({
               arrows: faction.attacks.map((attack) => {
                 const from = nameOf(cur.territories, attack.from_territory);
                 const to = nameOf(cur.territories, attack.to_territory);
-                const wins = Math.round(attack.p_attacker_win * 100);
-                const conquers = Math.round(attack.p_conquer * 100);
+                const dest = cur.territories[attack.to_territory];
+                const worth = [
+                  dest?.is_stronghold === true ? 'stronghold' : '',
+                  `${territoryPower(dest)} power`,
+                ]
+                  .filter(Boolean)
+                  .join(', ');
+                const detail = attack.empty
+                  ? `Takes the empty territory (${worth}). ${stacksOf(attack.attacker_stacks)}`
+                  : `Attack wins ${Math.round(attack.p_attacker_win * 100)}%. Conquers ${Math.round(attack.p_conquer * 100)}%. ${worth}. ${stacksOf(attack.attacker_stacks)} vs ${stacksOf(attack.defender_stacks)}`;
                 return {
                   from: attack.from_territory,
                   to: attack.to_territory,
                   pAttackerWin: attack.p_attacker_win,
-                  title: `${from} → ${to}. Attack wins ${wins}%. Conquers ${conquers}%. ${stacksOf(attack.attacker_stacks)} vs ${stacksOf(attack.defender_stacks)}${attack.is_sea_raid ? '. Sea raid.' : ''}`,
+                  label: attack.empty ? 'Take' : undefined,
+                  title: `${from} → ${to}. ${detail}${attack.is_sea_raid ? '. Sea raid.' : ''}`,
                 };
               }),
             })),
-          });
+          };
+          rememberOpenings(next);
+          setOpenings(next);
           setOpeningLoading(false);
         })
         .catch((e: unknown) => {
@@ -886,7 +920,7 @@ export function MapViewPane({
 
   const description =
     view === 'openings'
-      ? 'Opening attacks in turn order. The first faction starts from the setup. Each later faction is shown after earlier factions take the attacks they conquer at least 75% of the time, sending each stack on only its best such attack. The pill is the combat sim’s chance the attack wins.'
+      ? 'Opening moves in turn order, chosen by the same MCTS search the AI uses. Each later faction is shown after the earlier factions have fought those battles. A pill is the combat sim’s chance the attack wins; Take is an empty territory.'
       : view === 'setup'
       ? editing
         ? 'Choose a territory from the list or the map, then set its owner, power, camp, port, stronghold, and starting units.'
