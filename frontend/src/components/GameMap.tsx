@@ -2703,6 +2703,15 @@ function GameMap({
       tapStartRef.current = null;
       if (distanceSq >= 100) return; // 10px threshold
       if (activeDragIdRef.current !== null) return; // Was a drag
+      // A tray stack covers small territories. That tap is the destination, not a sidebar selection or a move.
+      if (
+        canAct &&
+        gameState.phase === 'mobilize' &&
+        (mobilizationTray?.selectedUnitId != null || mobilizationTray?.selectedCampIndex != null)
+      ) {
+        onTerritorySelect(start.territoryId);
+        return;
+      }
       if (onSeaZoneStackClick && navalUnitIds.has(start.unitId)) {
         const tid = start.territoryId;
         const full = territoryUnitsFull?.[tid];
@@ -2774,6 +2783,9 @@ function GameMap({
     gameState.current_faction,
     pendingMoves,
     computeBulkAllMoveData,
+    mobilizationTray?.selectedUnitId,
+    mobilizationTray?.selectedCampIndex,
+    onTerritorySelect,
     canAct,
     onSeaZoneStackClick,
     seaZoneIdsEligibleForNavalTrayStackClick,

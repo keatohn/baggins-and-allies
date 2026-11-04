@@ -53,6 +53,7 @@ def test_old_specials_shape_and_missing_rule_types_are_filled_in():
     assert catalog["specials"][0]["display_code"] == "T"
     assert [e["id"] for e in catalog["special_rules"]] == ["rings_of_power", "evolving_territory"]
     assert [e["id"] for e in catalog["game_options"]] == ["shadow_of_war", "marching_orders"]
+    assert "extra movement point" in catalog["game_options"][-1]["description"]
     assert catalog["terrain_types"] == ["plains", "sea"]
 
 

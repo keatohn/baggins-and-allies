@@ -1,11 +1,8 @@
 .header {
   --header-faction-accent: var(--ink-faded);
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: nowrap;
   min-width: 0;
+  max-width: 100%;
   padding: clamp(0.45rem, 0.85vw, 0.72rem) clamp(0.45rem, 1.15vw, 1.05rem);
   background-color: var(--parchment);
   background-image:
@@ -14,7 +11,16 @@
   border-bottom: 2px solid var(--ink-faded);
   box-shadow: 0 2px 8px var(--shadow);
   z-index: 100;
+}
+
+.header-scroll {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: nowrap;
   gap: clamp(0.22rem, 0.55vw, 0.55rem);
+  min-width: 0;
+  width: 100%;
 }
 
 /* Current faction’s turn: one solid accent line (no stacked inset bands) */
@@ -1503,38 +1509,44 @@
  */
 @media (max-width: 900px) and (orientation: portrait) {
   .header {
-    flex-wrap: nowrap;
-    justify-content: flex-start;
-    align-items: center;
-    gap: 0.26rem;
     /* Top safe-area: with viewport-fit=cover the iOS status bar / Dynamic Island
        sits over the header and blurs it; push content below the inset. */
     padding: max(0.38rem, env(safe-area-inset-top, 0px)) max(0.42rem, env(safe-area-inset-right, 0px)) 0.38rem max(0.42rem, env(safe-area-inset-left, 0px));
+  }
+
+  .header-scroll {
+    justify-content: flex-start;
+    gap: 0.26rem;
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-x: contain;
+    touch-action: pan-x;
     scrollbar-width: thin;
     scrollbar-color: rgba(139, 115, 85, 0.95) rgba(61, 41, 20, 0.1);
   }
 
+  .header-scroll > * {
+    flex-shrink: 0;
+  }
+
   /* Horizontal scrollbar slightly visible (Firefox + Chrome; iOS may still overlay until drag) */
-  .header::-webkit-scrollbar {
+  .header-scroll::-webkit-scrollbar {
     height: 5px;
   }
 
-  .header::-webkit-scrollbar-track {
+  .header-scroll::-webkit-scrollbar-track {
     background: rgba(61, 41, 20, 0.1);
     border-radius: 999px;
     margin: 0 0.25rem;
   }
 
-  .header::-webkit-scrollbar-thumb {
+  .header-scroll::-webkit-scrollbar-thumb {
     background: rgba(139, 115, 85, 0.75);
     border-radius: 999px;
   }
 
-  .header::-webkit-scrollbar-thumb:hover {
+  .header-scroll::-webkit-scrollbar-thumb:hover {
     background: var(--ink-faded);
   }
 
@@ -1883,7 +1895,20 @@
   .header {
     /* Safe-area top+left: landscape notch / status bar can clip the header row */
     padding: max(0.42rem, env(safe-area-inset-top, 0px)) 0.55rem 0.42rem max(0.55rem, env(safe-area-inset-left, 0px));
+  }
+
+  .header-scroll {
+    justify-content: flex-start;
     gap: 0.3rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
+  }
+
+  .header-scroll > * {
+    flex-shrink: 0;
   }
 
   .header-menu-btn,

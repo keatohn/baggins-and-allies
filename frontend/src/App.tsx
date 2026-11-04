@@ -2610,12 +2610,32 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   // --- Action Handlers ---
 
   const handleTerritorySelect = useCallback((territoryId: string | null) => {
-    // Camp placement: click a valid territory → set pending (confirm/cancel in sidebar, like units)
-    if (gameState.phase === 'mobilize' && selectedCampIndex !== null && territoryId && validCampTerritories.includes(territoryId)) {
-      setPendingCampPlacement({ campIndex: selectedCampIndex, territoryId });
+    const matchListed = (id: string, list: string[]): string | null => {
+      if (list.includes(id)) return id;
+      const canon = canonicalSeaZoneId(id);
+      const lower = id.toLowerCase();
+      return list.find((item) => item.toLowerCase() === lower || canonicalSeaZoneId(item) === canon) ?? null;
+    };
+    const resolveTerritory = (id: string): string => {
+      if (currentTerritoryData[id]) return id;
+      const lower = id.toLowerCase();
+      const hit = Object.keys(currentTerritoryData).find((key) => key.toLowerCase() === lower);
+      if (hit) return hit;
+      const sea = canonicalSeaZoneId(id);
+      if (currentTerritoryData[sea]) return sea;
+      return id;
+    };
+    // A selected tray stack or camp is choosing a destination. That tap must not open the sidebar.
+    const placingCamp = gameState.phase === 'mobilize' && selectedCampIndex !== null && territoryId;
+    const placingUnit = gameState.phase === 'mobilize' && Boolean(selectedMobilizationUnit) && Boolean(territoryId);
+    if (placingCamp && territoryId) {
+      const resolved = resolveTerritory(territoryId);
+      const dest = matchListed(resolved, validCampTerritories) ?? matchListed(territoryId, validCampTerritories);
+      if (dest) setPendingCampPlacement({ campIndex: selectedCampIndex, territoryId: dest });
       return;
     }
-    if (gameState.phase === 'mobilize' && selectedMobilizationUnit && territoryId) {
+    if (placingUnit && territoryId && selectedMobilizationUnit) {
+      const resolved = resolveTerritory(territoryId);
       const spec = mobilizeUnitDestinations[selectedMobilizationUnit];
       const validDestinations = spec
         ? (riverUnitIds.has(selectedMobilizationUnit)
@@ -2628,36 +2648,40 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           : navalUnitIds.has(selectedMobilizationUnit)
             ? validMobilizeSeaZones
             : validMobilizeTerritories;
-      if (validDestinations.includes(territoryId)) {
+      const dest = matchListed(resolved, validDestinations) ?? matchListed(territoryId, validDestinations);
+      if (dest) {
         const purchase = mobilizablePurchases.find(p => p.unitId === selectedMobilizationUnit);
         if (purchase) {
-          const campRemaining = remainingMobilizationCapacity[territoryId] ?? 0;
-          const homeRemaining = remainingHomeSlots[territoryId]?.[selectedMobilizationUnit] ?? 0;
+          const campRemaining = remainingMobilizationCapacity[dest] ?? remainingMobilizationCapacity[territoryId] ?? 0;
+          const homeRemaining = remainingHomeSlots[dest]?.[selectedMobilizationUnit]
+            ?? remainingHomeSlots[territoryId]?.[selectedMobilizationUnit]
+            ?? 0;
           const maxCount = spec
-            ? Math.min(purchase.count, spec.room[territoryId] ?? 0)
+            ? Math.min(purchase.count, spec.room[dest] ?? spec.room[territoryId] ?? 0)
             : campRemaining > 0
               ? Math.min(purchase.count, campRemaining)
               : homeRemaining > 0
                 ? Math.min(purchase.count, 1)
                 : 0;
-          if (maxCount <= 0) return;
-          setPendingMobilization({
-            unitId: selectedMobilizationUnit,
-            unitName: purchase.name,
-            unitIcon: purchase.icon,
-            toTerritory: territoryId,
-            maxCount,
-            count: Math.min(purchase.count, maxCount),
-          });
-          setSelectedMobilizationUnit(null);
-          return;
+          if (maxCount > 0) {
+            setPendingMobilization({
+              unitId: selectedMobilizationUnit,
+              unitName: purchase.name,
+              unitIcon: purchase.icon,
+              toTerritory: dest,
+              maxCount,
+              count: Math.min(purchase.count, maxCount),
+            });
+            setSelectedMobilizationUnit(null);
+          }
         }
       }
+      return;
     }
     setSelectedTerritory(territoryId);
     // Naval tray opens only when boat stack is clicked (via onSeaZoneStackClick), not on territory click
     setSelectedSeaZoneForNavalTray(null);
-  }, [gameState.phase, selectedCampIndex, validCampTerritories, selectedMobilizationUnit, mobilizablePurchases, validMobilizeTerritories, validMobilizeSeaZones, validMobilizeRiverZones, navalUnitIds, riverUnitIds, remainingMobilizationCapacity, remainingHomeSlots, mobilizeUnitDestinations, addLogEntry, refreshState]);
+  }, [gameState.phase, selectedCampIndex, validCampTerritories, selectedMobilizationUnit, mobilizablePurchases, validMobilizeTerritories, validMobilizeSeaZones, validMobilizeRiverZones, navalUnitIds, riverUnitIds, remainingMobilizationCapacity, remainingHomeSlots, mobilizeUnitDestinations, currentTerritoryData, addLogEntry, refreshState]);
 
   /** Click on boat stack in a sea zone (movement phases): open naval tray for that sea zone. */
   const handleSeaZoneStackClick = useCallback((territoryId: string) => {

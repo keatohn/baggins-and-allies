@@ -23,6 +23,9 @@ CATALOG_PATH = DATA_DIR / "catalog.json"
 CATALOG_SETTING_KEY = "catalog"
 SPECIAL_RULE_IDS = ("rings_of_power", "evolving_territory")
 GAME_OPTION_IDS = ("shadow_of_war", "marching_orders")
+MARCHING_ORDERS_DESCRIPTION = (
+    "Any unit that does not move during the combat move phase gets one extra movement point for the non-combat move phase. A unit with 1 movement that held back has 2 to spend there, a unit with 4 has 5."
+)
 REQUIRED_TERRAIN_TYPES = ("sea",)
 ENTRY_SECTIONS = ("specials", "special_rules", "game_options")
 LIST_SECTIONS = ("terrain_types", "archetypes")
@@ -97,7 +100,11 @@ def _ids(raw: Any) -> list[str]:
 
 def _with_required(entries: list[dict[str, str]], required: Iterable[str]) -> list[dict[str, str]]:
     have = {e["id"] for e in entries}
-    return entries + [{"id": rid, "name": _readable(rid), "description": ""} for rid in required if rid not in have]
+    filled = entries + [{"id": rid, "name": _readable(rid), "description": ""} for rid in required if rid not in have]
+    for entry in filled:
+        if entry["id"] == "marching_orders" and not entry.get("description"):
+            entry["description"] = MARCHING_ORDERS_DESCRIPTION
+    return filled
 
 
 def normalize_catalog(raw: Any) -> dict[str, Any]:

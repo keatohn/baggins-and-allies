@@ -226,6 +226,7 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
           factionColor ? { ['--header-faction-accent' as string]: factionColor } : undefined
         }
       >
+        <div className="header-scroll">
         <Link
           to="/"
           className="header-menu-btn"
@@ -474,6 +475,7 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
 
         <div className="faction-header" style={factionColor ? { borderColor: factionColor } : undefined}>
           <span className="faction-title">{faction?.name}</span>
+        </div>
         </div>
       </header>
 
