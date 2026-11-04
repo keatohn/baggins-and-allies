@@ -27,9 +27,7 @@ export default function SettingsModal({ player, onPlayerChange, onClose }: Setti
   const [audioError, setAudioError] = useState<string | null>(null);
   const [audioSaving, setAudioSaving] = useState(false);
   const [levels, setLevels] = useState<AiLevelChoice[]>(player.ai_levels ?? []);
-  const [adminDefault, setAdminDefault] = useState(player.ai_difficulty_default ?? '');
   const [difficulty, setDifficulty] = useState(player.ai_difficulty ?? '');
-  const [savedDifficulty, setSavedDifficulty] = useState(player.ai_difficulty ?? '');
   const [difficultyError, setDifficultyError] = useState<string | null>(null);
   const [difficultySaving, setDifficultySaving] = useState(false);
   const isMountedRef = useRef(true);
@@ -94,11 +92,8 @@ export default function SettingsModal({ player, onPlayerChange, onClose }: Setti
       .authMe()
       .then((me) => {
         if (cancelled) return;
-        const id = me.ai_difficulty ?? '';
         setLevels(me.ai_levels ?? []);
-        setAdminDefault(me.ai_difficulty_default ?? '');
-        setDifficulty(id);
-        setSavedDifficulty(id);
+        setDifficulty(me.ai_difficulty ?? '');
         onPlayerChange(me);
       })
       .catch(() => {});
@@ -278,67 +273,45 @@ export default function SettingsModal({ player, onPlayerChange, onClose }: Setti
         <h3 id="settings-difficulty-heading" className="account-section__title">
           Computer
         </h3>
-        <label className="settings-audio-label" htmlFor="settings-ai-difficulty">
+        <p id="settings-difficulty-label" className="settings-audio-label">
           Default difficulty
-        </label>
-        <select
-          id="settings-ai-difficulty"
-          className="settings-difficulty-select"
-          value={difficulty}
-          disabled={difficultySaving}
-          onChange={(e) => {
-            setDifficulty(e.target.value);
-            setDifficultyError(null);
-          }}
-        >
-          <option value="">
-            App default
-            {adminDefault
-              ? ` (${levels.find((level) => level.id === adminDefault)?.name ?? adminDefault})`
-              : ''}
-          </option>
+        </p>
+        <div className="settings-difficulty-pills" role="group" aria-labelledby="settings-difficulty-label">
           {levels.map((level) => (
-            <option key={level.id} value={level.id}>
-              {level.name}
-            </option>
-          ))}
-        </select>
-        <p className="account-subtle">Used when you create a game. App default follows the site setting.</p>
-        {difficulty !== savedDifficulty && (
-          <div className="settings-audio-actions">
             <button
+              key={level.id}
               type="button"
-              className="account-btn"
-              data-no-ui-click-sfx
+              className={`settings-difficulty-pill${difficulty === level.id ? ' settings-difficulty-pill--selected' : ''}`}
+              aria-pressed={difficulty === level.id}
+              disabled={difficultySaving}
               onClick={() => {
-                setDifficultySaving(true);
+                if (level.id === difficulty || difficultySaving) return;
+                const previous = difficulty;
+                setDifficulty(level.id);
                 setDifficultyError(null);
-                const next = difficulty || null;
+                setDifficultySaving(true);
                 api
-                  .updateMyProfile({ ai_difficulty: next })
+                  .updateMyProfile({ ai_difficulty: level.id })
                   .then((updated) => {
                     if (!isMountedRef.current) return;
-                    const id = updated.ai_difficulty ?? '';
-                    setDifficulty(id);
-                    setSavedDifficulty(id);
+                    setDifficulty(updated.ai_difficulty ?? level.id);
                     setLevels(updated.ai_levels ?? []);
-                    setAdminDefault(updated.ai_difficulty_default ?? '');
                     onPlayerChange(updated);
                   })
                   .catch((err: unknown) => {
                     if (!isMountedRef.current) return;
+                    setDifficulty(previous);
                     setDifficultyError(err instanceof Error ? err.message : 'Could not save difficulty');
                   })
                   .finally(() => {
                     if (isMountedRef.current) setDifficultySaving(false);
                   });
               }}
-              disabled={difficultySaving}
             >
-              {difficultySaving ? 'Saving…' : 'Save difficulty'}
+              {level.name}
             </button>
-          </div>
-        )}
+          ))}
+        </div>
         {difficultyError && <p className="account-msg account-msg--error">{difficultyError}</p>}
       </section>
     </ModalShell>

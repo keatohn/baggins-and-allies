@@ -218,7 +218,7 @@ def test_player_difficulty_overrides_admin_default_when_creating_a_game(make_cli
     me = client.get("/auth/me")
     assert me.status_code == 200
     body = me.json()
-    assert body["ai_difficulty"] is None
+    assert body["ai_difficulty"] == "hard"
     assert body["ai_difficulty_default"] == "hard"
     assert [level["id"] for level in body["ai_levels"]] == ["easy", "normal", "hard"]
 
@@ -252,6 +252,5 @@ def test_player_difficulty_overrides_admin_default_when_creating_a_game(make_cli
     assert unknown.status_code == 400
 
     cleared = client.patch("/auth/me", json={"ai_difficulty": None})
-    assert cleared.status_code == 200
-    assert cleared.json()["ai_difficulty"] is None
-    assert difficulty_of("Back to admin") == "hard"
+    assert cleared.status_code == 400
+    assert difficulty_of("Keeps player default") == "easy"

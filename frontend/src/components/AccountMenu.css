@@ -929,18 +929,45 @@
   cursor: pointer;
 }
 
-.settings-difficulty-select {
-  display: block;
-  width: 100%;
-  max-width: 16rem;
-  margin-top: 0.35rem;
+.settings-difficulty-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+}
+
+.account-modal button.settings-difficulty-pill {
+  border: 2px solid var(--gold-dark, #8b7355);
+  border-radius: 999px;
+  padding: 0.2rem 0.75rem;
   font-family: var(--font-parchment);
-  font-size: 0.95rem;
-  padding: 0.35rem 0.5rem;
-  background: var(--parchment);
-  border: 1px solid var(--ink-faded);
-  border-radius: 4px;
-  color: var(--ink);
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  background: transparent;
+  color: var(--ink-faded);
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.account-modal button.settings-difficulty-pill:hover:not(:disabled) {
+  background: rgba(139, 115, 85, 0.12);
+  border-color: var(--gold-dark, #8b7355);
+  box-shadow: none;
+}
+
+.account-modal button.settings-difficulty-pill--selected,
+.account-modal button.settings-difficulty-pill--selected:hover:not(:disabled) {
+  background: var(--gold-dark, #8b7355);
+  border-color: var(--gold-dark, #8b7355);
+  color: #fff;
+  font-weight: 600;
+}
+
+.account-modal button.settings-difficulty-pill:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .settings-audio-actions {

@@ -711,9 +711,9 @@ export interface AuthPlayer {
   next_tier?: ProgressionTier | null;
   tier_floor_xp?: number;
   next_tier_xp?: number | null;
-  /** Saved default for new games. Null or omitted follows the admin default. */
+  /** Saved default for new games. Always a level id; new players start on the admin default. */
   ai_difficulty?: string | null;
-  /** Admin default level id, used when this player has not chosen one. */
+  /** Admin default level id. New players are stored with this until they pick another. */
   ai_difficulty_default?: string;
   /** Current level names. Search weights stay on the admin route. */
   ai_levels?: AiLevelChoice[];
@@ -1028,7 +1028,7 @@ export interface PatchProfileBody {
     /** #rrggbb background color. */
     color?: string;
   };
-  /** Level id, or null to follow the admin default again. */
+  /** Level id for this player's default computer difficulty. */
   ai_difficulty?: string | null;
 }
 
