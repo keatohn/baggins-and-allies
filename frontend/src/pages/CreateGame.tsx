@@ -57,6 +57,7 @@ export default function CreateGame() {
   const { navigateWithScroll, holdScroll, revealScroll, withScrollTransition } = useMenuScroll();
   const [name, setName] = useState('');
   const [mode, setMode] = useState<'single' | 'multi' | 'computer'>('single');
+  const [testMode, setTestMode] = useState(false);
   const [player, setPlayer] = useState<AuthPlayer | null>(null);
   const [heroesEnabled, setHeroesEnabled] = useState(true);
   const [shadowOfWar, setShadowOfWar] = useState(false);
@@ -149,6 +150,7 @@ export default function CreateGame() {
         Boolean(selectedScenario?.rings_of_power) || optionalRules.rings_of_power === true,
         optionalRules,
         mode === 'computer',
+        Boolean(player?.is_admin) && testMode,
       );
       const initialState = res.state != null
         ? { ...res.state, turn_order: res.turn_order ?? res.state.turn_order }
@@ -327,6 +329,30 @@ export default function CreateGame() {
               </button>
             </div>
           </div>
+          {player?.is_admin && (
+            <div className="create-game-form__field">
+              <RuleLabel
+                name="Test Mode"
+                description="This game will not count toward XP or player profile stats."
+              />
+              <div className="create-game-form__picker" role="group" aria-label="Test Mode on or off">
+                <button
+                  type="button"
+                  className={`create-game-form__picker-option ${testMode ? 'create-game-form__picker-option--active' : ''}`}
+                  onClick={() => setTestMode(true)}
+                >
+                  On
+                </button>
+                <button
+                  type="button"
+                  className={`create-game-form__picker-option ${!testMode ? 'create-game-form__picker-option--active' : ''}`}
+                  onClick={() => setTestMode(false)}
+                >
+                  Off
+                </button>
+              </div>
+            </div>
+          )}
           <div className="create-game-form__actions">
             <button type="button" className="page-menu-btn" onClick={() => withScrollTransition(() => setStep('scenario'))}>
               Back

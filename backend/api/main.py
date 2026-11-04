@@ -65,6 +65,7 @@ from backend.progression import (
     accumulate_xp_stats,
     adjust_player_xp,
     award_game_xp,
+    revoke_game_xp,
     record_forfeit_progress,
     backfill_finished_games,
     load_progression,
@@ -451,6 +452,8 @@ class CreateGameRequest(BaseModel):
     optional_rules: dict[str, bool] | None = None
     """Admin only. Every faction is the computer; the lobby sets difficulty and weights per faction."""
     computer_only: bool = False
+    """Admin only. Finished games do not award XP or write profile stats."""
+    test_mode: bool = False
 
 
 class JoinGameRequest(BaseModel):
@@ -2781,6 +2784,59 @@ def admin_end_game(
     return {"ok": True, "game_id": game_id, "winner": None if winner == "none" else winner, "status": "finished"}
 
 
+def _mark_config_test_mode(row: GameModel) -> None:
+    try:
+        config = json.loads(row.config) if isinstance(row.config, str) else row.config
+    except (TypeError, json.JSONDecodeError):
+        config = {}
+    if not isinstance(config, dict):
+        config = {}
+    config["test_mode"] = True
+    row.config = json.dumps(config)
+
+
+@app.post("/admin/games/{game_id}/test-mode")
+def admin_mark_test_mode(
+    game_id: str,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Mark a game as Test Mode and take its XP and profile stats back out.
+
+    The game itself is left in place. Later finishes and XP backfill skip it.
+    Achievements the players no longer qualify for are removed as well.
+    """
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Game not found")
+    _mark_config_test_mode(row)
+
+    from .achievement_eval import revoke_achievements_no_longer_earned
+    from .game_results import delete_results_for_game
+    from .models import XpLedger
+
+    affected = delete_results_for_game(db, game_id)
+    ledger_ids = {
+        str(pid)
+        for (pid,) in db.query(XpLedger.player_id).filter(XpLedger.game_id == str(game_id)).all()
+        if pid is not None
+    }
+    affected |= ledger_ids
+    xp_removed = revoke_game_xp(db, game_id)
+    db.flush()
+    achievements_removed = 0
+    for pid in affected:
+        achievements_removed += revoke_achievements_no_longer_earned(db, pid)
+    db.commit()
+    return {
+        "ok": True,
+        "game_id": game_id,
+        "test_mode": True,
+        "xp_removed": xp_removed,
+        "achievements_removed": achievements_removed,
+    }
+
+
 class AdminAchievementCreateBody(BaseModel):
     key: str
     name: str
@@ -2996,6 +3052,8 @@ def create_game(
             raise HTTPException(status_code=400, detail="Computer Only is a single-player game")
         if not bool(getattr(player, "is_admin", False)):
             raise HTTPException(status_code=403, detail="Computer Only is available to admins")
+    if request.test_mode and not bool(getattr(player, "is_admin", False)):
+        raise HTTPException(status_code=403, detail="Test Mode is available to admins")
     setup_id = request.setup_id if request.setup_id is not None else DEFAULT_SETUP_ID
     setup = try_load_setup(setup_id, db)
     if not setup:
@@ -3091,6 +3149,8 @@ def create_game(
     stamp_ai_on_state(state, ai_difficulty, ai_algorithm, ai_defaults["levels"])
     config_snapshot["ai_difficulty"] = state.ai_difficulty
     config_snapshot["ai_algorithm"] = state.ai_algorithm
+    if request.test_mode:
+        config_snapshot["test_mode"] = True
     if request.computer_only:
         config_snapshot["computer_only"] = True
         config_snapshot["ai_faction_settings"] = faction_settings_for(
@@ -3132,6 +3192,15 @@ DEFAULT_FACTION_STATS = {
     },
     "neutral_strongholds": 0,
 }
+
+
+def _config_is_test_mode(row) -> bool:
+    raw = getattr(row, "config", None)
+    try:
+        config = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, json.JSONDecodeError):
+        return False
+    return isinstance(config, dict) and config.get("test_mode") is True
 
 
 def _get_forfeited_player_ids(row) -> list[str]:
@@ -3405,6 +3474,7 @@ def _build_games_list(
             "scenario": scenario,
             "players": players_out,
             "winner": winner,
+            "test_mode": _config_is_test_mode(r),
             "ai_difficulty": _ai_setting_from_config(r, "ai_difficulty", "normal"),
             "ai_algorithm": _ai_setting_from_config(r, "ai_algorithm", "heuristic"),
         }

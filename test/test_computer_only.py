@@ -1,5 +1,6 @@
 """Admin Computer Only games: every faction is the computer, with its own knobs."""
 
+import json
 import uuid
 
 import pytest
@@ -11,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 from backend.api.auth import get_current_admin, get_current_player
 from backend.api.database import Base, get_db
 from backend.api.main import app
-from backend.api.models import Player
+from backend.api.models import Game, Player
 
 
 @pytest.fixture()
@@ -79,6 +80,24 @@ def make_client(db_session, players):
         yield _make
     finally:
         app.dependency_overrides.clear()
+
+
+def test_non_admin_cannot_create_test_mode(make_client, players):
+    _admin, user = players
+    client = make_client(user)
+    response = client.post("/games/create", json={"name": "Practice", "test_mode": True, "setup_id": "wotr_exp_1.0"})
+    assert response.status_code == 403
+
+
+def test_admin_test_mode_is_stored_on_the_game(make_client, players, db_session):
+    admin, _user = players
+    client = make_client(admin)
+    created = client.post("/games/create", json={"name": "Practice", "test_mode": True, "setup_id": "wotr_exp_1.0"})
+    assert created.status_code == 200, created.text
+    game_id = created.json()["game_id"]
+    saved = db_session.query(Game).filter(Game.id == game_id).one()
+    config = json.loads(saved.config)
+    assert config["test_mode"] is True
 
 
 def test_non_admin_cannot_create_computer_only(make_client, players):

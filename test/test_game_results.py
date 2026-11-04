@@ -446,6 +446,26 @@ def test_refresh_backfills_saved_totals_and_recounts_enemy_strongholds(db_sessio
     assert alice_row.units_destroyed == 5
 
 
+def test_test_mode_writes_no_rows(db_session, players):
+    alice, bob = players
+    state = GameState.from_dict({})
+    state.winner = "good"
+    game = _add_game(
+        db_session,
+        players_list=[
+            {"player_id": alice.id, "faction_id": "gondor"},
+            {"player_id": bob.id, "faction_id": "mordor"},
+        ],
+        state=state,
+        config=_config(test_mode=True),
+    )
+    _try_save_game(game.id, state, db_session)
+    db_session.refresh(game)
+    assert game.status == "finished"
+    assert _results_for(db_session, game.id) == []
+    assert ensure_game_results_for_row(db_session, game) == 0
+
+
 def test_active_game_no_rows(db_session, players):
     alice, bob = players
     state = GameState.from_dict({})

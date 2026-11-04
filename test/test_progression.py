@@ -363,6 +363,23 @@ def test_save_game_awards_once_and_keeps_stats_across_saves(db_session, players)
     assert db_session.query(XpLedger).count() == 1
 
 
+def test_test_mode_awards_no_xp(db_session, players):
+    _admin, user = players
+    row = _add_game(
+        db_session,
+        [{"player_id": user.id, "faction_id": "gondor"}],
+        config={**_definitions(), "test_mode": True},
+    )
+    _finish(db_session, row, [
+        {"type": "territory_captured", "payload": {"territory": "minas_tirith", "new_owner": "gondor"}},
+    ])
+    db_session.refresh(user)
+    db_session.refresh(row)
+    assert row.status == "finished"
+    assert user.xp == 0
+    assert db_session.query(XpLedger).count() == 0
+
+
 def test_forfeit_multiplier_scales_xp_and_opponent_gets_the_win(db_session, players):
     admin, user = players
     other = Player(

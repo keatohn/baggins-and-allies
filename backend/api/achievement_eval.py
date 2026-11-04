@@ -356,6 +356,47 @@ def evaluate_for_game(db: Session, game_id: str) -> list[dict[str, Any]]:
     return awards
 
 
+def revoke_achievements_no_longer_earned(db: Session, player_id: str) -> int:
+    """Drop awards this player no longer meets after a game left their record.
+
+    Stats-only awards are checked against current totals. Awards that also need a
+    specific game stay only when some remaining result still matches. A definition
+    that cannot be read is left in place.
+    """
+    player_id = str(player_id)
+    grants = (
+        db.query(PlayerAchievement, Achievement)
+        .join(Achievement, PlayerAchievement.achievement_id == Achievement.id)
+        .filter(PlayerAchievement.player_id == player_id)
+        .all()
+    )
+    if not grants:
+        return 0
+    stats = compute_achievement_stats(db, player_id)
+    game_rows = [
+        _game_row_from_result(row)
+        for row in db.query(GameResult).filter(GameResult.player_id == player_id).all()
+    ]
+    revoked = 0
+    for grant, ach in grants:
+        try:
+            criteria = json.loads(ach.criteria_json) if ach.criteria_json else None
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(criteria, dict):
+            continue
+        try:
+            still = evaluate_criteria(criteria, stats, None)
+            if not still and _criteria_has_game_context(criteria):
+                still = any(evaluate_criteria(criteria, stats, row) for row in game_rows)
+        except Exception:
+            continue
+        if not still:
+            db.delete(grant)
+            revoked += 1
+    return revoked
+
+
 def recompute_for_player(db: Session, player_id: str) -> list[Achievement]:
     """On-read hook: award any stats-only achievements the player now qualifies for.
 

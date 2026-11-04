@@ -497,3 +497,174 @@ def test_admin_end_game_neither_alias(make_client, players, db_session):
     assert r.json()["winner"] is None
     db_session.refresh(game)
     assert game.status == "finished"
+
+
+def _result(session, game, player_id, *, faction_id, alliance, won):
+    from backend.api.models import GameResult
+
+    row = GameResult(
+        id=str(uuid.uuid4()),
+        game_id=str(game.id),
+        player_id=str(player_id),
+        faction_id=faction_id,
+        alliance=alliance,
+        won=won,
+        participant_ids=json.dumps([str(player_id)]),
+        turn_count=8,
+    )
+    session.add(row)
+    return row
+
+
+def test_admin_test_mode_requires_admin(make_client, players):
+    _admin, user = players
+    client = make_client(user)
+    r = client.post("/admin/games/some-id/test-mode")
+    assert r.status_code == 403
+
+
+def test_admin_test_mode_unknown_game_404(make_client, players):
+    admin, _user = players
+    client = make_client(admin)
+    r = client.post("/admin/games/does-not-exist/test-mode")
+    assert r.status_code == 404
+
+
+def test_admin_test_mode_removes_xp_stats_and_unearned_achievements(make_client, players, db_session):
+    from backend.api.achievements import create_achievement
+    from backend.api.models import GameResult, PlayerAchievement, XpLedger
+    from backend.api.player_stats import compute_player_stats
+    from backend.progression import award_game_xp
+
+    admin, user = players
+    user.xp = 86
+    other = _add_game(
+        db_session,
+        name="Counted game",
+        status="finished",
+        players_list=[{"player_id": user.id, "faction_id": "gondor"}],
+        state={"winner": "good", "turn_number": 8},
+        completed_at=datetime(2026, 9, 1),
+    )
+    _result(db_session, other, user.id, faction_id="gondor", alliance="good", won=True)
+    game = _add_game(
+        db_session,
+        name="Practice",
+        status="finished",
+        players_list=[{"player_id": user.id, "faction_id": "gondor"}],
+        state={"winner": "good", "turn_number": 8, "current_faction": "gondor", "phase": "purchase"},
+        completed_at=datetime(2026, 10, 1),
+        config=_end_config(),
+    )
+    _result(db_session, game, user.id, faction_id="gondor", alliance="good", won=True)
+    db_session.add(XpLedger(
+        id=str(uuid.uuid4()),
+        player_id=user.id,
+        game_id=str(game.id),
+        source="game",
+        amount=86,
+    ))
+    ach = create_achievement(
+        db_session,
+        key="one_win",
+        name="One win",
+        criteria={"stat": "wins", "op": ">=", "value": 1},
+    )
+    db_session.add(PlayerAchievement(
+        id=str(uuid.uuid4()),
+        player_id=user.id,
+        achievement_id=ach.id,
+    ))
+    db_session.commit()
+
+    client = make_client(admin)
+    r = client.post(f"/admin/games/{game.id}/test-mode")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["test_mode"] is True
+    assert body["xp_removed"] == 86
+
+    db_session.refresh(user)
+    db_session.refresh(game)
+    assert user.xp == 0
+    assert json.loads(game.config)["test_mode"] is True
+    assert game.status == "finished"
+    assert db_session.query(GameResult).filter(GameResult.game_id == str(game.id)).count() == 0
+    assert db_session.query(GameResult).filter(GameResult.game_id == str(other.id)).count() == 1
+    assert db_session.query(XpLedger).filter(XpLedger.game_id == str(game.id)).count() == 0
+    assert compute_player_stats(db_session, user.id)["overall"]["games"] == 1
+    assert db_session.query(PlayerAchievement).filter(PlayerAchievement.player_id == user.id).count() == 1
+
+    again = client.post(f"/admin/games/{game.id}/test-mode")
+    assert again.status_code == 200
+    assert again.json()["xp_removed"] == 0
+    db_session.refresh(user)
+    assert user.xp == 0
+
+    state = GameState.from_dict(json.loads(game.game_state))
+    assert award_game_xp(db_session, game, state) == []
+    db_session.refresh(user)
+    assert user.xp == 0
+
+    listed = client.get("/admin/games")
+    match = next(g for g in listed.json()["games"] if g["id"] == game.id)
+    assert match["test_mode"] is True
+
+
+def test_admin_test_mode_drops_achievement_earned_only_by_that_game(make_client, players, db_session):
+    from backend.api.achievements import create_achievement
+    from backend.api.models import PlayerAchievement
+
+    admin, user = players
+    game = _add_game(
+        db_session,
+        name="Only win",
+        status="finished",
+        players_list=[{"player_id": user.id, "faction_id": "gondor"}],
+        state={"winner": "good", "turn_number": 4},
+        completed_at=datetime(2026, 10, 2),
+        config=_end_config(),
+    )
+    _result(db_session, game, user.id, faction_id="gondor", alliance="good", won=True)
+    ach = create_achievement(
+        db_session,
+        key="solo_win",
+        name="Solo win",
+        criteria={"stat": "wins", "op": ">=", "value": 1},
+    )
+    db_session.add(PlayerAchievement(
+        id=str(uuid.uuid4()),
+        player_id=user.id,
+        achievement_id=ach.id,
+    ))
+    db_session.commit()
+
+    client = make_client(admin)
+    r = client.post(f"/admin/games/{game.id}/test-mode")
+    assert r.status_code == 200
+    assert r.json()["achievements_removed"] == 1
+    assert db_session.query(PlayerAchievement).filter(PlayerAchievement.player_id == user.id).count() == 0
+
+
+def test_admin_test_mode_on_active_game_skips_later_stats(make_client, players, db_session):
+    from backend.api.game_results import ensure_game_results_for_row
+
+    admin, user = players
+    game = _active_game(
+        db_session,
+        players_list=[{"player_id": user.id, "faction_id": "gondor"}],
+    )
+    client = make_client(admin)
+    r = client.post(f"/admin/games/{game.id}/test-mode")
+    assert r.status_code == 200
+    assert r.json()["xp_removed"] == 0
+    db_session.refresh(game)
+    assert game.status == "active"
+    assert json.loads(game.config)["test_mode"] is True
+
+    game.status = "finished"
+    state = json.loads(game.game_state)
+    state["winner"] = "good"
+    game.game_state = json.dumps(state)
+    db_session.commit()
+    assert ensure_game_results_for_row(db_session, game) == 0

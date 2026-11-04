@@ -1217,6 +1217,8 @@ export interface GameListItem {
   players?: GameListPlayer[];
   /** Winning alliance ("good" | "evil") once the game is finished. */
   winner?: string | null;
+  /** Admin Test Mode: this game does not count toward XP or profile stats. */
+  test_mode?: boolean;
   /** Setup display name from manifest when game config has setup_id (same shape as lobby meta). */
   scenario?: {
     /** Setup/scenario id (e.g. "fellowship"); present since the admin games report needs it for filtering. */
@@ -1415,6 +1417,12 @@ export const api = {
         body: JSON.stringify({ amount, reason }),
       },
     ),
+  /** Admin: mark a game as Test Mode and remove its XP and profile stats. */
+  adminMarkTestMode: (gameId: string) =>
+    fetchJson<{ ok: boolean; game_id: string; test_mode: boolean; xp_removed: number; achievements_removed: number }>(
+      `/admin/games/${encodeURIComponent(gameId)}/test-mode`,
+      { method: 'POST' },
+    ),
   /** Admin: end an in-progress game now. winner: "good" | "evil" | "none" (void, no stats rows). */
   adminEndGame: (gameId: string, winner: 'good' | 'evil' | 'none') =>
     fetchJson<{ ok: boolean; game_id: string; winner: string | null; status: string }>(
@@ -1545,6 +1553,7 @@ export const api = {
     ringsOfPower: boolean = false,
     optionalRules?: Record<string, boolean>,
     computerOnly: boolean = false,
+    testMode: boolean = false,
   ) =>
     fetchJson<{ game_id: string; game_code: string | null; name: string; state?: ApiGameState; turn_order?: string[] }>('/games/create', {
       method: 'POST',
@@ -1552,6 +1561,7 @@ export const api = {
         name,
         is_multiplayer: isMultiplayer,
         computer_only: computerOnly,
+        test_mode: testMode,
         heroes_enabled: heroesEnabled,
         shadow_of_war: shadowOfWar,
         marching_orders: marchingOrders,

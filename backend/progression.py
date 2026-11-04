@@ -1207,6 +1207,8 @@ def award_game_xp(db: Session, row: Any, state: Any) -> list[dict[str, Any]]:
     from backend.api.models import Player
 
     config = _config_dict(row)
+    if config.get("test_mode") is True:
+        return []
     stats = _stats_for_award(row, config)
     by_faction = stats.get("by_faction") if isinstance(stats.get("by_faction"), dict) else {}
     cfg = load_progression(db)
@@ -1256,6 +1258,34 @@ def award_game_xp(db: Session, row: Any, state: Any) -> list[dict[str, Any]]:
         if _insert_game_award(db, player, str(row.id), amount, meta, when):
             awarded.append({"player_id": pid, "amount": amount, "xp": int(player.xp or 0)})
     return awarded
+
+
+def revoke_game_xp(db: Session, game_id: str) -> int:
+    """Remove this game's XP grants and subtract them from each player's total.
+
+    The total never goes below 0. Returns the XP actually taken off player totals.
+    Safe to call again: a second call finds no ledger rows.
+    """
+    from backend.api.models import Player, XpLedger
+
+    entries = (
+        db.query(XpLedger)
+        .filter(XpLedger.game_id == str(game_id), XpLedger.source == GAME_SOURCE)
+        .all()
+    )
+    taken = 0
+    for entry in entries:
+        amount = int(entry.amount or 0)
+        player = db.query(Player).filter(Player.id == entry.player_id).first()
+        if player is not None and amount != 0:
+            current = int(player.xp or 0)
+            updated = current - amount
+            if updated < 0:
+                updated = 0
+            taken += current - updated
+            player.xp = updated
+        db.delete(entry)
+    return taken
 
 
 def adjust_player_xp(db: Session, player: Any, amount: int, reason: str, admin_id: str) -> int:

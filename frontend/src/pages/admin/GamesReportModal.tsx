@@ -5,6 +5,7 @@ import type { GameListItem } from '../../services/api';
 type FilterKey = 'all' | 'lobby' | 'active' | 'finished';
 
 const END_CONFIRM_PHRASE = 'END GAME';
+const TEST_CONFIRM_PHRASE = 'TEST MODE';
 
 type EndWinner = 'good' | 'evil' | 'none';
 
@@ -101,6 +102,10 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
   const [endConfirm, setEndConfirm] = useState('');
   const [endBusy, setEndBusy] = useState(false);
   const [endError, setEndError] = useState<string | null>(null);
+  const [testTarget, setTestTarget] = useState<GameListItem | null>(null);
+  const [testConfirm, setTestConfirm] = useState('');
+  const [testBusy, setTestBusy] = useState(false);
+  const [testError, setTestError] = useState<string | null>(null);
 
   const refreshGames = () => {
     api
@@ -110,10 +115,41 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
   };
 
   const openEndGame = (game: GameListItem) => {
+    setTestTarget(null);
     setEndTarget(game);
     setEndWinner(null);
     setEndConfirm('');
     setEndError(null);
+  };
+
+  const openTestMode = (game: GameListItem) => {
+    setEndTarget(null);
+    setTestTarget(game);
+    setTestConfirm('');
+    setTestError(null);
+  };
+
+  const closeTestMode = () => {
+    if (testBusy) return;
+    setTestTarget(null);
+    setTestConfirm('');
+    setTestError(null);
+  };
+
+  const submitTestMode = async () => {
+    if (!testTarget || testConfirm !== TEST_CONFIRM_PHRASE || testBusy) return;
+    setTestBusy(true);
+    setTestError(null);
+    try {
+      await api.adminMarkTestMode(testTarget.id);
+      setTestTarget(null);
+      setTestConfirm('');
+      refreshGames();
+    } catch (e: unknown) {
+      setTestError(e instanceof Error ? e.message : 'Could not switch game to Test Mode');
+    } finally {
+      setTestBusy(false);
+    }
   };
 
   const closeEndGame = () => {
@@ -338,7 +374,7 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
                   <col className="games-report__col-winner" />
                   <col className="games-report__col-created" />
                   <col className="games-report__col-completed" />
-                  <col className="games-report__col-end" />
+                  <col className="games-report__col-actions" />
                 </colgroup>
                 <thead>
                   <tr>
@@ -370,16 +406,29 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
                       <td>{winnerLabel(g)}</td>
                       <td>{formatDate(g.created_at)}</td>
                       <td>{formatDate(g.completed_at)}</td>
-                      <td>
-                        {g.status === 'active' ? (
-                          <button
-                            type="button"
-                            className="games-report__end-btn"
-                            onClick={() => openEndGame(g)}
-                          >
-                            End
-                          </button>
-                        ) : null}
+                      <td className="games-report__actions">
+                        <span className="games-report__action-row">
+                          {g.status === 'active' ? (
+                            <button
+                              type="button"
+                              className="games-report__end-btn"
+                              onClick={() => openEndGame(g)}
+                            >
+                              End
+                            </button>
+                          ) : null}
+                          {g.test_mode ? (
+                            <span className="games-report__test-tag">Test</span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="games-report__end-btn"
+                              onClick={() => openTestMode(g)}
+                            >
+                              Test
+                            </button>
+                          )}
+                        </span>
                       </td>
                     </tr>
                   ))}
@@ -445,6 +494,51 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
                   disabled={!endWinner || endConfirm !== END_CONFIRM_PHRASE || endBusy}
                 >
                   {endBusy ? 'Ending…' : 'End game'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {testTarget ? (
+          <div
+            className="admin-modal-overlay games-report__end-overlay"
+            role="presentation"
+            onClick={closeTestMode}
+          >
+            <div
+              className="admin-modal games-report__end-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="admin-test-mode-title"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 id="admin-test-mode-title" className="admin-modal__title">
+                Switch to Test Mode?
+              </h2>
+              <p className="admin-form__micro games-report__end-text">
+                <strong>{testTarget.name}</strong> will no longer count toward XP or player profile stats.
+                Anything this game already added will be taken back out. Type <strong>{TEST_CONFIRM_PHRASE}</strong> to confirm.
+              </p>
+              <input
+                type="text"
+                className="games-report__end-input"
+                value={testConfirm}
+                onChange={(e) => setTestConfirm(e.target.value)}
+                placeholder={TEST_CONFIRM_PHRASE}
+                autoFocus
+              />
+              {testError ? <p className="admin-page__error games-report__end-error">{testError}</p> : null}
+              <div className="games-report__end-actions">
+                <button type="button" className="admin-page__btn" onClick={closeTestMode} disabled={testBusy}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="admin-page__btn games-report__end-confirm"
+                  onClick={submitTestMode}
+                  disabled={testConfirm !== TEST_CONFIRM_PHRASE || testBusy}
+                >
+                  {testBusy ? 'Switching…' : 'Switch to Test Mode'}
                 </button>
               </div>
             </div>

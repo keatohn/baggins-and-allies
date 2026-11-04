@@ -947,7 +947,7 @@ body:has(.combat-sim-modal-overlay) {
 }
 
 .games-report__col-players {
-  width: 22%;
+  width: 18%;
 }
 
 .games-report__col-scenario {
@@ -1071,8 +1071,27 @@ body:has(.combat-sim-modal-overlay) {
   border-color: var(--ink);
 }
 
-.games-report__col-end {
-  width: 5%;
+.games-report__col-actions {
+  width: 9%;
+}
+
+.games-report__table td.games-report__actions {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.games-report__action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.games-report__test-tag {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
 }
 
 .games-report__end-btn {

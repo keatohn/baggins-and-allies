@@ -175,6 +175,17 @@ def _human_roster(players_list: Any) -> list[dict]:
     return out
 
 
+def delete_results_for_game(db: Session, game_id: str) -> set[str]:
+    """Delete every result row for a game. Returns the human player ids that had one."""
+    rows = db.query(GameResult).filter(GameResult.game_id == str(game_id)).all()
+    player_ids: set[str] = set()
+    for row in rows:
+        if not row.is_ai:
+            player_ids.add(str(row.player_id))
+        db.delete(row)
+    return player_ids
+
+
 def game_results_exist(db: Session, game_id: str) -> bool:
     return (
         db.query(GameResult.id).filter(GameResult.game_id == str(game_id)).first()
@@ -185,8 +196,8 @@ def game_results_exist(db: Session, game_id: str) -> bool:
 def ensure_game_results_for_row(db: Session, row: GameModel) -> int:
     """Write game_results for a finished game if not already present.
 
-    Idempotent: no-ops when status is not finished or rows already exist for game_id.
-    Returns number of rows written.
+    Idempotent: no-ops when status is not finished, the game is in test mode,
+    or rows already exist for game_id. Returns number of rows written.
     """
     if not row or str(row.status) != "finished":
         return 0
@@ -200,6 +211,8 @@ def ensure_game_results_for_row(db: Session, row: GameModel) -> int:
     config = _parse_json(getattr(row, "config", None), {}) or {}
     if not isinstance(config, dict):
         config = {}
+    if config.get("test_mode") is True:
+        return 0
     players_list = _parse_json(getattr(row, "players", None), []) or []
 
     winner = state.get("winner")
