@@ -168,6 +168,39 @@ def test_hulls_stay_in_their_water_and_land_only_loads():
     assert "river_anduin" in _reach(state, infantry, "bank", unit_defs, territory_defs, faction_defs)
 
 
+def test_lake_uses_the_river_domain():
+    from backend.engine.movement import _is_river_zone, _is_sea_zone
+
+    state, unit_defs, territory_defs, faction_defs, _camps, _ports = _board()
+    territory_defs["river_anduin"] = _territory(
+        "river_anduin",
+        "lake",
+        ["bank", "bank_b", "river_upper", "sea_bay"],
+        ownable=False,
+    )
+    assert _is_river_zone(territory_defs["river_anduin"])
+    assert not _is_sea_zone(territory_defs["river_anduin"])
+
+    infantry = _piece("inf_1", "infantry")
+    boat = _piece("boat_1", "boat")
+    ship = _piece("ship_1", "ship")
+    state.territories["bank"].units.append(infantry)
+    state.territories["river_anduin"].units.append(boat)
+    state.territories["sea_bay"].units.append(ship)
+
+    assert "river_anduin" in _reach(state, infantry, "bank", unit_defs, territory_defs, faction_defs)
+    assert "sea_bay" not in _reach(state, boat, "river_anduin", unit_defs, territory_defs, faction_defs)
+    assert "river_anduin" not in _reach(state, ship, "sea_bay", unit_defs, territory_defs, faction_defs)
+    assert classify_territory_for_signal(
+        owner=None,
+        territory_id="river_anduin",
+        ownable=False,
+        terrain_type="lake",
+        my_alliance="good",
+        owner_alliance=None,
+    ) is None
+
+
 def test_ally_boat_does_not_carry_your_units():
     state, unit_defs, territory_defs, faction_defs, _camps, _ports = _board()
     infantry = _piece("inf_1", "infantry")

@@ -28,6 +28,7 @@ import api, {
 import LobbyView from './components/LobbyView';
 import { useMenuScroll } from './components/MenuScrollContext';
 import { sortSeaZoneIdsByNumericSuffix, canonicalSeaZoneId } from './seaZoneSort';
+import { isWaterTerrain } from './waterTerrain';
 import {
   fordShortcutRequiresEscortLead,
   isFordCrosser,
@@ -98,8 +99,7 @@ function isWaterTerritoryId(
   tid: string,
   territoryData: Record<string, { terrain?: string } | undefined>,
 ): boolean {
-  const terrain = territoryData[tid]?.terrain;
-  return terrain === 'sea' || terrain === 'river' || /^sea_zone_?\d+$/i.test(tid);
+  return isWaterTerrain(territoryData[tid]?.terrain, tid);
 }
 
 function unitIsWaterHull(
@@ -4104,7 +4104,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       };
       const combatTerrain = currentTerritoryData[effectiveCombat.territory]?.terrain;
       if (
-        (combatTerrain === 'sea' || combatTerrain === 'river')
+        isWaterTerrain(combatTerrain)
         && isNavalUnitId(unit.unit_id)
         && backendTerritory?.units?.length
       ) {

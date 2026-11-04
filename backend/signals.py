@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from backend.engine.definitions import DATA_DIR
+from backend.engine.movement import water_domain_name
 from backend.setup_data import is_files_setup_source
 
 SIGNALS_PATH = DATA_DIR / "signals.json"
@@ -243,7 +244,7 @@ def classify_territory_for_signal(
     land target (sea, unownable). ``any`` presets still match a None relation.
     """
     terrain = (terrain_type or "").strip().lower()
-    if not ownable or terrain in ("sea", "river") or _SEA_RE.match(territory_id or ""):
+    if not ownable or water_domain_name(terrain) is not None or _SEA_RE.match(territory_id or ""):
         return None
     owner_name = (owner or "").strip()
     if not owner_name or owner_name.lower() in ("neutral", "none"):

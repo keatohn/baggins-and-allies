@@ -3,6 +3,7 @@ import type { Definitions } from '../services/api';
 import api, { type SimulateCombatResponse } from '../services/api';
 import './CombatSimulatorPanel.css';
 import type { RingView } from '../ringsDisplay';
+import { isWaterTerrain, waterDomain } from '../waterTerrain';
 
 /** Per-territory list of stacks (unit_id + count). */
 type TerritoryUnitsMap = Record<string, { unit_id: string; count: number }[]>;
@@ -780,8 +781,8 @@ export default function CombatSimulatorPanel({
     const list = Object.entries(definitions.territories).map(([id, t]) => ({
       id,
       name: (t as { display_name?: string }).display_name ?? id,
-      isSea: (t as { terrain_type?: string }).terrain_type?.toLowerCase() === 'sea',
-      isRiver: (t as { terrain_type?: string }).terrain_type?.toLowerCase() === 'river',
+      isSea: waterDomain((t as { terrain_type?: string }).terrain_type) === 'sea',
+      isRiver: waterDomain((t as { terrain_type?: string }).terrain_type) === 'river',
     }));
     return list.sort((a, b) => a.name.localeCompare(b.name));
   }, [definitions?.territories]);
@@ -814,12 +815,12 @@ export default function CombatSimulatorPanel({
       const tt = (t as { terrain_type?: string }).terrain_type?.toLowerCase() ?? '';
       if (tt) types.add(tt);
     });
-    if (combatDomain === 'river') types.add('river');
     return Array.from(types)
       .filter((t) => {
-        if (combatDomain === 'sea') return t === 'sea';
-        if (combatDomain === 'river') return t === 'river';
-        return t !== 'sea' && t !== 'river';
+        const domain = waterDomain(t);
+        if (combatDomain === 'sea') return domain === 'sea';
+        if (combatDomain === 'river') return domain === 'river';
+        return domain == null;
       })
       .sort((a, b) => a.localeCompare(b))
       .map((t) => ({
@@ -930,8 +931,7 @@ export default function CombatSimulatorPanel({
     if (!attackerFaction) return [];
     const domainOf = (tid: string): CombatDomain => {
       const terrain = territoryData?.[tid]?.terrain ?? getTerrainTypeFromTerritoryId(definitions, tid);
-      if (terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid)) return 'sea';
-      if (terrain === 'river') return 'river';
+      if (isWaterTerrain(terrain, tid)) return waterDomain(terrain) ?? 'sea';
       return 'land';
     };
     const entries = Object.entries(territoryUnits ?? {});

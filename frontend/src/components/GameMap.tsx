@@ -18,6 +18,7 @@ import { ringHostUnitId, ringIconSrc, ringsOnUnit, type RingView } from '../ring
 import './GameMap.css';
 import './MapTooltip.css';
 import { sortSeaZoneIdsByNumericSuffix, seaZonesReachableBySailFrom } from '../seaZoneSort';
+import { isRiverTerrain, isWaterTerrain } from '../waterTerrain';
 import { createWheelNavIntentResolver, wheelZoomScaleMultiplier } from '../utils/wheelNavIntent';
 import {
   directFordOnlyLandPair,
@@ -144,9 +145,7 @@ function isSeaTerrainId(
   tid: string,
   territoryData: Record<string, { terrain?: string } | undefined>,
 ): boolean {
-  return territoryData[tid]?.terrain === 'sea'
-    || territoryData[tid]?.terrain === 'river'
-    || /^sea_zone_?\d+$/i.test(tid);
+  return isWaterTerrain(territoryData[tid]?.terrain, tid);
 }
 
 /** Match backend pending_move_is_same_phase_load_into_sea (move_type may be omitted on legacy JSON). */
@@ -192,7 +191,7 @@ function isNonCombatNavalOffloadLand(
   );
   const t = territoryData[landKey] ?? territoryData[rawLandId];
   if (!t) return false;
-  if (t.terrain === 'sea' || t.terrain === 'river' || /^sea_zone_?\d+$/i.test(landKey)) return false;
+  if (isWaterTerrain(t.terrain, landKey)) return false;
   const cfAlliance = factionData[currentFaction]?.alliance;
   const effO = t.owner;
   const isNeutral = effO == null || effO === '';
@@ -1478,7 +1477,7 @@ function GameMap({
       }
       return undefined;
     };
-    const isRiverZone = (id: string) => terrainForId(id) === 'river';
+    const isRiverZone = (id: string) => isRiverTerrain(terrainForId(id));
 
     const computeCentroidsAndPositions = (): { centroids: Record<string, { x: number; y: number }>; positions: Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number }; center?: { x: number; y: number } }> } => {
       const centroids: Record<string, { x: number; y: number }> = {};
@@ -4204,8 +4203,8 @@ function GameMap({
                         .sort(([idA], [idB]) => {
                           const defA = territoryData[idA] ?? territoryData[resolveTerritoryDropId(idA)];
                           const defB = territoryData[idB] ?? territoryData[resolveTerritoryDropId(idB)];
-                          const seaA = defA?.terrain === 'sea' || defA?.terrain === 'river' || /^sea_zone_?\d+$/i.test(String(idA));
-                          const seaB = defB?.terrain === 'sea' || defB?.terrain === 'river' || /^sea_zone_?\d+$/i.test(String(idB));
+                          const seaA = isWaterTerrain(defA?.terrain, String(idA));
+                          const seaB = isWaterTerrain(defB?.terrain, String(idB));
                           const selA = selectedTerritory === idA || selectedTerritory === resolveTerritoryDropId(idA);
                           const selB = selectedTerritory === idB || selectedTerritory === resolveTerritoryDropId(idB);
                           if (selA !== selB) return selA ? 1 : -1;
@@ -4226,8 +4225,8 @@ function GameMap({
                           const territory = territoryData[territoryId] ?? territoryData[stateKey];
                           const owner = territory?.owner;
                           const isNonOwnable = territory && (territory.ownable === false);
-                          const isRiverZone = territory?.terrain === 'river';
-                          const isSeaZone = territory?.terrain === 'sea' || isRiverZone || /^sea_zone_?\d+$/i.test(territoryId);
+                          const isRiverZone = isRiverTerrain(territory?.terrain);
+                          const isSeaZone = isWaterTerrain(territory?.terrain, territoryId);
                           // Definitions may load after game state (e.g. create-game nav + getGame without embedded defs);
                           // missing faction palette must not yield undefined — glow/filter code calls .replace on color.
                           const color = isRiverZone
@@ -5358,7 +5357,7 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                         const powerBadgeOffsetY = useSeparateUnitSpot ? 0 : (hasPowerBadge ? (hasStrongholdMarker ? 26 : 52) : (hasStrongholdMarker ? 0 : 6));
 
                         const NEUTRAL_UNIT_BORDER = '#888888';
-                        const isSeaZone = territory?.terrain === 'sea' || territory?.terrain === 'river' || /^sea_zone_?\d+$/i.test(territoryId);
+                        const isSeaZone = isWaterTerrain(territory?.terrain, territoryId);
                         const fullUnits = territoryUnitsFull?.[territoryId];
 
                         // Sea zone with full unit data: ships (+ passengers on those rows). Non-naval surface units (e.g. aerial after naval battle) render in a second row — do not return null when boats are gone.

@@ -7,6 +7,7 @@ import type { PendingMoveConfirm } from './GameMap';
 import { highestPowerHeroUnitId, ringCornerClass, ringIconSrc, ringsOnUnit, type RingView } from '../ringsDisplay';
 import type { BulkMoveConfirmState, PendingMobilization, BulkMobilizeConfirmState } from '../App';
 import PhaseStepper from './PhaseStepper';
+import { isRiverTerrain, isWaterTerrain } from '../waterTerrain';
 import './Sidebar.css';
 
 type UnitDefsSidebar = Record<string, {
@@ -319,8 +320,7 @@ function isWaterTid(
   tid: string,
   territoryData: Record<string, { terrain?: string } | undefined>,
 ): boolean {
-  const terrain = territoryData[tid]?.terrain;
-  return terrain === 'sea' || terrain === 'river' || /^sea_zone_?\d+$/i.test(tid);
+  return isWaterTerrain(territoryData[tid]?.terrain, tid);
 }
 
 /** Aerial land→sea in combat is always attacking enemy naval, never embark (transportable land units still "Load" in combat for sea raids). */
@@ -345,7 +345,7 @@ function plannedCombatMoveTypeLabel(
       const mtEarly = (move.move_type ?? '').trim();
       return mtEarly === 'aerial' ? 'Attack' : 'Move';
     }
-    return territoryData[move.from]?.terrain === 'river' ? 'Raid' : 'Sea Raid';
+    return isRiverTerrain(territoryData[move.from]?.terrain) ? 'Raid' : 'Sea Raid';
   }
   const mt = (move.move_type ?? '').trim();
   if (!mt) return null;
@@ -949,7 +949,7 @@ function Sidebar({
                             (!fromSea && toSea && isAerialUnit) ||
                             combatNavalAttack);
                         const isNavalMove = isLoad || isOffload || isSail;
-                        const raidLabel = territoryData[pendingMoveConfirm.fromTerritory]?.terrain === 'river' ? 'Raid' : 'Sea Raid';
+                        const raidLabel = isRiverTerrain(territoryData[pendingMoveConfirm.fromTerritory]?.terrain) ? 'Raid' : 'Sea Raid';
                         const buttonLabel = isLoad ? 'Load' : isOffload ? 'Offload' : isSail ? 'Sail' : isSeaRaid ? raidLabel : isAttack ? 'Attack' : 'Move';
                         const confirmBtnClass = isAttack
                           ? 'confirm-move-btn attack-btn'

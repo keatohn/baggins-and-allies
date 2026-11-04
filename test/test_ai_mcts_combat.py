@@ -8,6 +8,7 @@ import random
 import pytest
 
 from backend.engine.actions import end_phase, retreat
+from backend.engine.movement import _is_water_zone
 from backend.engine.queries import get_retreat_options, validate_action
 from backend.engine.reducer import apply_action
 from backend.engine.state import ActiveCombat, Unit
@@ -268,7 +269,7 @@ def test_apply_retreat_clears_active_combat():
     enemy_tid = None
     for t, terr_t in state.territories.items():
         tdef = td.get(t)
-        if not tdef or getattr(tdef, "terrain_type", "") in ("sea", "river"):
+        if not tdef or _is_water_zone(tdef):
             continue
         if terr_t.owner != "gondor":
             continue
@@ -278,7 +279,7 @@ def test_apply_retreat_clears_active_combat():
                 at
                 and at.owner == "mordor"
                 and td.get(adj)
-                and getattr(td[adj], "terrain_type", "") not in ("sea", "river")
+                and not _is_water_zone(td.get(adj))
             ):
                 friendly, enemy_tid = t, adj
                 break

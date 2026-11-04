@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from backend.engine.definitions import FactionDefinition, controlling_faction_id
+from backend.engine.movement import _is_river_zone, _is_sea_zone, _is_water_zone, _water_domain
 from backend.engine.special_rules import territory_current_power
 from backend.engine.state import GameState, UnitStack
 from backend.engine.utils import (
@@ -522,10 +523,6 @@ def _kind(unit_def: Any) -> str:
     return "land"
 
 
-def _terrain(tdef: Any) -> str:
-    return (getattr(tdef, "terrain_type", "") or "").lower()
-
-
 def _has_camp(state: GameState, territory_id: str, camp_defs: dict[str, Any] | None) -> bool:
     dynamic = getattr(state, "dynamic_camps", {}) or {}
     for camp_id in getattr(state, "camps_standing", []) or []:
@@ -566,7 +563,7 @@ def _any_home_land(state: GameState, sid: str, territory_defs: dict[str, Any]) -
     for tid, ts in state.territories.items():
         if getattr(ts, "owner", None) != sid:
             continue
-        if _terrain(territory_defs.get(tid)) in ("sea", "river"):
+        if _is_water_zone(territory_defs.get(tid)):
             continue
         out.append(tid)
     return out
@@ -581,12 +578,12 @@ def _adjacent_water(
     """Sea or river zones that touch land this subfaction currently owns. A port is not required."""
     out: list[str] = []
     for tid, tdef in territory_defs.items():
-        if _terrain(tdef) != kind:
+        if _water_domain(tdef) != kind:
             continue
         for adj in getattr(tdef, "adjacent", []) or []:
             ts = state.territories.get(adj)
             adj_def = territory_defs.get(adj)
-            if ts and getattr(ts, "owner", None) == sid and _terrain(adj_def) not in ("sea", "river"):
+            if ts and getattr(ts, "owner", None) == sid and not _is_water_zone(adj_def):
                 out.append(tid)
                 break
     return out
@@ -602,7 +599,7 @@ def _any_home_error(
     territory_defs: dict[str, Any],
 ) -> str:
     if kind == "land":
-        if _terrain(dest_def) in ("sea", "river") or getattr(dest, "owner", None) != sid:
+        if _is_water_zone(dest_def) or getattr(dest, "owner", None) != sid:
             return f"Subfaction units can only mobilize on land {sid} owns; {destination} is not valid"
         return ""
     wanted = "sea" if kind == "naval" else "river"
@@ -660,7 +657,7 @@ def _camps_error(
     owner = getattr(dest, "owner", None)
     if owner not in owners:
         return f"{destination} is not owned by {parent_id} or {sid}"
-    if _terrain(dest_def) in ("sea", "river"):
+    if _is_water_zone(dest_def):
         return f"Land units cannot mobilize to {destination}"
     has_camp = _has_camp(state, destination, camp_defs)
     owned_at_start = destination in _owned_at_start(state, owner, parent_id)
@@ -708,7 +705,7 @@ def _ports_touching(
     port_defs: dict[str, Any] | None,
 ) -> list[tuple[str, int]]:
     sea_def = territory_defs.get(sea_id)
-    if _terrain(sea_def) != "sea":
+    if not _is_sea_zone(sea_def):
         return []
     found: list[tuple[str, int]] = []
     for adj in getattr(sea_def, "adjacent", []) or []:
@@ -726,7 +723,7 @@ def _pending_port_pool(state: GameState, port_id: str, territory_defs: dict[str,
     dests = {port_id}
     port_def = territory_defs.get(port_id)
     for adj in getattr(port_def, "adjacent", []) or []:
-        if _terrain(territory_defs.get(adj)) == "sea":
+        if _is_sea_zone(territory_defs.get(adj)):
             dests.add(adj)
     total = 0
     for dest in dests:
@@ -742,7 +739,7 @@ def _river_banks(
     territory_defs: dict[str, Any],
 ) -> list[tuple[str, int]]:
     zdef = territory_defs.get(zone_id)
-    if _terrain(zdef) != "river":
+    if not _is_river_zone(zdef):
         return []
     banks: list[tuple[str, int]] = []
     for adj in getattr(zdef, "adjacent", []) or []:
@@ -754,7 +751,7 @@ def _river_banks(
             continue
         if adj not in _owned_at_start(state, owner, parent_id):
             continue
-        if _terrain(territory_defs.get(adj)) in ("sea", "river"):
+        if _is_water_zone(territory_defs.get(adj)):
             continue
         banks.append((adj, territory_current_power(state, adj, territory_defs.get(adj))))
     return banks
@@ -814,9 +811,9 @@ def _camps_river_capacity(
             tdef = territory_defs.get(tid)
             if not ts or getattr(ts, "owner", None) != child or tdef is None:
                 continue
-            if _terrain(tdef) in ("sea", "river"):
+            if _is_water_zone(tdef):
                 continue
-            if any(_terrain(territory_defs.get(adj)) == "river" for adj in (tdef.adjacent or [])):
+            if any(_is_river_zone(territory_defs.get(adj)) for adj in (tdef.adjacent or [])):
                 total += territory_current_power(state, tid, tdef)
     return total
 
@@ -837,7 +834,7 @@ def _camps_land_destinations(
             if getattr(ts, "owner", None) != owner:
                 continue
             tdef = territory_defs.get(tid)
-            if tdef is None or _terrain(tdef) in ("sea", "river"):
+            if tdef is None or _is_water_zone(tdef):
                 continue
             if _has_camp(state, tid, camp_defs) and tid in _owned_at_start(state, owner, parent_id):
                 if tid not in territories:
@@ -861,7 +858,7 @@ def _camps_sea_destinations(
     capacity: dict[str, int] = {}
     owners = {parent_id, sid}
     for tid, tdef in territory_defs.items():
-        if _terrain(tdef) != "sea":
+        if not _is_sea_zone(tdef):
             continue
         ports = _ports_touching(state, tid, owners, territory_defs, port_defs)
         if not ports:
@@ -880,7 +877,7 @@ def _camps_river_destinations(
     zones: list[str] = []
     capacity: dict[str, int] = {}
     for tid, tdef in territory_defs.items():
-        if _terrain(tdef) != "river":
+        if not _is_river_zone(tdef):
             continue
         banks = _river_banks(state, parent_id, sid, tid, territory_defs)
         if not banks:

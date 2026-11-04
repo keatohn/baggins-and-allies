@@ -1,3 +1,5 @@
+import { isWaterTerrain } from './waterTerrain';
+
 export type SignalAppliesTo = 'enemy' | 'allied' | 'neutral' | 'any';
 
 export interface SignalPreset {
@@ -20,8 +22,6 @@ export interface TerritorySignal {
 
 export type TerritorySignalMap = Record<string, TerritorySignal>;
 
-const SEA_ZONE_ID = /^sea_zone_?\d+$/i;
-
 export function territorySignalRelation(
   territoryId: string,
   territory: { owner?: string | null; ownable?: boolean; terrain?: string } | null | undefined,
@@ -29,8 +29,7 @@ export function territorySignalRelation(
   factionAlliance: (factionId: string) => string | undefined,
 ): Exclude<SignalAppliesTo, 'any'> | null {
   if (!myAlliance || !territory) return null;
-  const terrain = (territory.terrain || '').toLowerCase();
-  const isWater = terrain === 'sea' || terrain === 'river' || SEA_ZONE_ID.test(territoryId);
+  const isWater = isWaterTerrain(territory.terrain, territoryId);
   if (territory.ownable === false || isWater) return null;
   const owner = (territory.owner || '').trim();
   if (!owner || owner.toLowerCase() === 'neutral') return 'neutral';

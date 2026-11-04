@@ -18,14 +18,25 @@ from backend.engine.utils import (
 )
 
 
+# Lake is a river zone. The stored terrain stays "lake" so the label stays Lake.
+RIVER_TERRAINS = frozenset({"river", "lake"})
+
+
+def water_domain_name(terrain_type: str | None) -> str | None:
+    """'sea' or 'river' for water terrain. Lake uses the river domain. Otherwise None."""
+    tt = (terrain_type or "").strip().lower()
+    if tt == "sea":
+        return "sea"
+    if tt in RIVER_TERRAINS:
+        return "river"
+    return None
+
+
 def _water_domain(territory_def: TerritoryDefinition | None) -> str | None:
     """'sea' or 'river' for water territories land units cannot enter on their own. Otherwise None."""
     if not territory_def:
         return None
-    tt = (getattr(territory_def, "terrain_type", "") or "").lower()
-    if tt in ("sea", "river"):
-        return tt
-    return None
+    return water_domain_name(getattr(territory_def, "terrain_type", None))
 
 
 def _is_sea_zone(territory_def: TerritoryDefinition | None) -> bool:

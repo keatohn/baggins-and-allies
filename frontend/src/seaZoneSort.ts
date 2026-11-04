@@ -1,3 +1,5 @@
+import { waterDomain as terrainWaterDomain } from './waterTerrain';
+
 /**
  * Normalize sea zone id to sea_zone_n (matches backend / GameMap).
  */
@@ -11,9 +13,9 @@ function waterDomain(
   tid: string,
   territoryData: Record<string, { terrain?: string; adjacent?: string[] } | undefined>,
 ): 'sea' | 'river' | null {
-  const t = territoryData[tid];
-  if (t?.terrain === 'river') return 'river';
-  if (t?.terrain === 'sea' || /^sea_zone_?\d+$/i.test(tid)) return 'sea';
+  const fromTerrain = terrainWaterDomain(territoryData[tid]?.terrain);
+  if (fromTerrain) return fromTerrain;
+  if (/^sea_zone_?\d+$/i.test(tid)) return 'sea';
   return null;
 }
 

@@ -5,6 +5,7 @@
  */
 
 import { canonicalSeaZoneId } from './seaZoneSort';
+import { isWaterTerrain } from './waterTerrain';
 import type { PendingMove } from './types/game';
 
 export type TerritoryFordGraph = {
@@ -128,7 +129,7 @@ export function directFordOnlyLandPair(
   if (!ta || !tb) return false;
   const isSeaId = (id: string) => {
     const d = territoryData[resolveTerritoryGraphKey(id, territoryData)];
-    return Boolean(d?.terrain === 'sea' || d?.terrain === 'river' || /^sea_zone_?\d+$/i.test(id));
+    return isWaterTerrain(d?.terrain, id);
   };
   if (isSeaId(ak) || isSeaId(bk)) return false;
   const adjA = new Set(ta.adjacent || []);
