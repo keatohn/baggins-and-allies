@@ -4998,9 +4998,9 @@ def _handle_end_phase(
         state.combat_move_naval_idle_sail_instance_ids = []
         state.avoided_forced_naval_combat_instance_ids = []
 
-    # Marching Orders: entering non-combat move, +1 movement for this faction's units
-    # that did not move during combat move. The bonus is wiped by the end-of-NCM reset,
-    # so it lasts exactly one non-combat move phase.
+    # Marching Orders: entering non-combat move, +1 movement for this faction's land units
+    # that did not move during combat move. Sea and aerial units never benefit. The bonus
+    # is wiped by the end-of-NCM reset, so it lasts exactly one non-combat move phase.
     if (
         state.phase == "non_combat_move"
         and old_phase == "combat"
@@ -5010,6 +5010,9 @@ def _handle_end_phase(
         for territory in state.territories.values():
             for unit in territory.units:
                 if unit.instance_id in moved_ids:
+                    continue
+                unit_def = unit_defs.get(unit.unit_id)
+                if not is_land_unit(unit_def) or _is_water_craft(unit_def):
                     continue
                 unit_faction = get_unit_faction(unit, unit_defs)
                 if (

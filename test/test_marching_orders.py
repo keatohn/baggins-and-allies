@@ -321,3 +321,35 @@ def test_zero_cost_load_counts_as_a_move_and_gets_no_bonus():
     assert state.combat_move_moved_ids == []
     assert _unit(state, loader_id).remaining_movement == 0, "loader is a mover: no +1 bonus"
     assert _unit(state, holder_id).remaining_movement == holder_base + 1
+
+
+def test_sea_units_do_not_get_the_bonus():
+    state, defs = _game("wotr_exp_1.1", True, "gondor")
+    ship_id = _unit_in(state, "sea_zone_12", "gondor_ship").instance_id
+    ship_base = _unit(state, ship_id).base_movement
+    soldier_id = _unit_in(state, "minas_tirith", "gondor_soldier").instance_id
+    soldier_base = _unit(state, soldier_id).base_movement
+
+    state = _to_non_combat_move(state, "gondor", defs)
+
+    assert _unit(state, ship_id).remaining_movement == ship_base, "ships never benefit"
+    assert _unit(state, soldier_id).remaining_movement == soldier_base + 1, (
+        "land units still get the bonus in the same turn"
+    )
+
+
+def test_aerial_units_do_not_get_the_bonus():
+    state, defs = _game("wotr_1.1", True, "mordor")
+    nazgul_id = _unit_in(state, "minas_morgul", "nazgul").instance_id
+    nazgul_base = _unit(state, nazgul_id).base_movement
+    orc_id = _unit_in(state, "minas_morgul", "orc_warrior").instance_id
+    orc_base = _unit(state, orc_id).base_movement
+
+    state = _to_non_combat_move(state, "mordor", defs)
+
+    assert _unit(state, nazgul_id).remaining_movement == nazgul_base, (
+        "aerial units never benefit"
+    )
+    assert _unit(state, orc_id).remaining_movement == orc_base + 1, (
+        "land units still get the bonus in the same turn"
+    )
