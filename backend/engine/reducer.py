@@ -4713,18 +4713,23 @@ def _resolve_combat_end(
             # Land battle: keep surviving attackers (bombikazi/bomb removal is via round casualties only),
             # bystanders, and defender-roster survivors only. When all defenders are eliminated, purge any
             # stray defender-side units so allied garrison / roster drift cannot leave ghosts or wipe the wrong stack.
+            # Pure naval victory also runs here: embarked passengers are excluded from the naval roster
+            # (participates_in_sea_hex_naval_combat) but must stay with a boat that survived the battle.
             aa = getattr(faction_defs.get(attacker_faction), "alliance", None)
             surv_def_set = set(round_result.surviving_defender_ids or [])
             kept: list[Unit] = []
             for u in territory.units:
                 uid = u.instance_id
+                carrier = getattr(u, "loaded_onto", None)
                 side = _land_combat_unit_side(u, attacker_faction, aa, unit_defs, faction_defs)
                 if side == "defender":
-                    if uid in surv_def_set:
+                    if uid in surv_def_set or (carrier is not None and carrier in surv_def_set):
                         kept.append(u)
                     continue
                 if side == "attacker":
-                    if uid in surviving_attacker_ids_set:
+                    if uid in surviving_attacker_ids_set or (
+                        carrier is not None and carrier in surviving_attacker_ids_set
+                    ):
                         kept.append(u)
                     continue
                 kept.append(u)
