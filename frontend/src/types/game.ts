@@ -136,7 +136,7 @@ export interface MapOverrideTerritoryEntry {
 export type LandscapeLayer = 'interior' | 'border';
 
 export interface LandscapePlacement {
-  /** Category folder key, e.g. "forest" | "mountains" | "volcano" | "hills". */
+  /** Manifest category, e.g. "forest" | "mountains" | "volcano" | "hills" | "anywhere". */
   cat: string;
   /** PNG filename within the flat landscape asset folder, e.g. "forest_large.png". */
   img: string;

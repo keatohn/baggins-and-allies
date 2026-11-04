@@ -4188,11 +4188,11 @@ function GameMap({
                 <span className="map-key-item"><span className="map-key-icon" aria-hidden>⛰️</span> Mountains</span>
                 <span className="map-key-item"><span className="map-key-icon" aria-hidden>⚓</span> Port</span>
                 <span className="map-key-item">
-                  <img src="/bridge.png" alt="" className="map-key-img" aria-hidden />
+                  <img src="/assets/landscape/bridge.png" alt="" className="map-key-img" aria-hidden />
                   Bridge
                 </span>
                 <span className="map-key-item">
-                  <img src="/ford.png" alt="" className="map-key-img" aria-hidden />
+                  <img src="/assets/landscape/ford.png" alt="" className="map-key-img" aria-hidden />
                   Ford
                 </span>
                 <span className="map-key-item">Strongholds show the faction banner, or its logo when none is set (capitals larger) (strongholds highlighted on the map now)</span>

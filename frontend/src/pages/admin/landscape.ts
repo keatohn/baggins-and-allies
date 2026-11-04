@@ -2,6 +2,9 @@ import type { LandscapePlacement } from '../../types/game';
 
 export type LandscapeManifest = Record<string, string[]>;
 
+/** Manifest key for art that may be placed on any territory, independent of terrain. */
+export const LANDSCAPE_FREE_CATEGORY = 'anywhere';
+
 export const LANDSCAPE_ASSET_BASE = '/assets/landscape';
 
 export function landscapeSrc(placement: Pick<LandscapePlacement, 'img'>): string {
@@ -25,14 +28,28 @@ export async function loadLandscapeManifest(): Promise<LandscapeManifest> {
   }
 }
 
-/** Categories of landscape art that may be placed on a territory with this terrain type. */
+/**
+ * Categories of landscape art that may be placed on a territory with this terrain type.
+ * The free category (`anywhere`) is included unless `includeFree` is false — auto-generate
+ * skips it so bridges and fords stay hand-placed.
+ */
 export function landscapeCategoriesForTerrain(
   terrainType: string | undefined,
   manifest: LandscapeManifest,
+  opts?: { includeFree?: boolean },
 ): string[] {
   const t = (terrainType ?? '').toLowerCase();
-  if (manifest[t]) return [t];
-  return [];
+  const cats: string[] = [];
+  if (manifest[t]?.length) cats.push(t);
+  const includeFree = opts?.includeFree !== false;
+  if (
+    includeFree &&
+    manifest[LANDSCAPE_FREE_CATEGORY]?.length &&
+    !cats.includes(LANDSCAPE_FREE_CATEGORY)
+  ) {
+    cats.push(LANDSCAPE_FREE_CATEGORY);
+  }
+  return cats;
 }
 
 /** Interior placements of a category suppress that terrain type's emoji fallback on the map. */

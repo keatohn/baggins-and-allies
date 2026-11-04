@@ -562,7 +562,7 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
                   </li>
                   <li><span className="help-icon" aria-hidden>⛺</span> <strong>Camp</strong> — mobilize new land units here.</li>
                   <li><span className="help-icon" aria-hidden>⚓</span> <strong>Port</strong> — mobilize new ships in adjacent sea zones.</li>
-                  <li><span className="help-icon" aria-hidden><img src="/ford.png" alt="" width={18} height={18} style={{ verticalAlign: 'text-bottom' }} /></span> <strong>Ford</strong> — shallow river crossing for certain units, along with up to 2 transport passengers (see "Ford Crosser" in the Specials button).</li>
+                  <li><span className="help-icon" aria-hidden><img src="/assets/landscape/ford.png" alt="" width={18} height={18} style={{ verticalAlign: 'text-bottom' }} /></span> <strong>Ford</strong> — shallow river crossing for certain units, along with up to 2 transport passengers (see "Ford Crosser" in the Specials button).</li>
                   <li><span className="help-icon" aria-hidden>🏠</span> <strong>Home</strong> — deploy 1 of certain units to their home territory per turn without a camp (see "Home" in the Specials button).</li>
                   <li><span className="help-icon" aria-hidden>🌲</span><span className="help-icon" aria-hidden>⛰️</span> Terrain types: Forest and Mountains — certain units receive terrain bonuses during combat (see "Forest" and "Mountain" in the Specials button).</li>
                   <li>Strongholds show a faction logo. Capitals show a larger faction logo.</li>

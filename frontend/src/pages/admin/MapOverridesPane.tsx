@@ -955,7 +955,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
               : def && typeof def.terrain === 'string'
                 ? def.terrain
                 : '';
-          const cats = landscapeCategoriesForTerrain(terrain, manifest);
+          const cats = landscapeCategoriesForTerrain(terrain, manifest, { includeFree: false });
           if (!cats.length) continue;
           const pathEl = territoryPathEl(tid);
           if (!pathEl) continue;

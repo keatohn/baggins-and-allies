@@ -16,5 +16,6 @@
     "mountain_snow.png"
   ],
   "volcano": ["volcano.png"],
-  "hills": ["hills.png"]
+  "hills": ["hills.png"],
+  "anywhere": ["bridge.png", "ford.png"]
 }
