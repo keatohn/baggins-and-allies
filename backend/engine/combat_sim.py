@@ -291,6 +291,7 @@ def run_one_battle(
             dice.get("attacker", []),
             stat_modifiers_attacker_extra=attacker_mods,
             prefire_penalty_delta=pdelta,
+            casualty_order_defender=defender_casualty_order,
         )
         att_prefire_applicable = True
         att_prefire_hits = prefire_result.attacker_hits  # stealth: attackers roll; hits = attacker_hits

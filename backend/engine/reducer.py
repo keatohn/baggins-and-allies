@@ -2787,6 +2787,10 @@ def _handle_initiate_combat(
         )
     ring_def_dice = merge_ring_dice(None, defender_units, unit_defs, ring_def_boosts)
 
+    # Defender casualty order (territory-configured; default best_unit) — used by every
+    # defender hit application, including stealth prefire below.
+    defender_casualty_order = getattr(state, "territory_defender_casualty_order", {}).get(territory_id, "best_unit")
+
     # Stealth: if EVERY attacker has stealth, they prefire at attack-1 (hits to defenders) and cancel defender archer prefire
     all_attackers_have_stealth = (
         len(attacker_units) > 0
@@ -2831,6 +2835,7 @@ def _handle_initiate_combat(
             prefire_penalty_delta=pd_prefire,
             hp_shield=ring_hp_shield,
             attacker_effective_dice_override=merge_ring_dice(None, attacker_units, unit_defs, ring_att_boosts),
+            casualty_order_defender=defender_casualty_order,
         )
         attacker_dice_grouped_stealth = group_dice_by_stat(
             attacker_units, prefire_attacker_rolls, unit_defs, is_attacker=True,
@@ -2926,7 +2931,6 @@ def _handle_initiate_combat(
         u for u in defender_units
         if archer_prefire_eligible(unit_defs.get(u.unit_id))
     ]
-    defender_casualty_order = getattr(state, "territory_defender_casualty_order", {}).get(territory_id, "best_unit")
 
     # Dedicated siegeworks round first when applicable (independent of archer prefire; precedes it).
     defender_territory_is_stronghold_early = bool(territory_def and getattr(territory_def, "is_stronghold", False))
