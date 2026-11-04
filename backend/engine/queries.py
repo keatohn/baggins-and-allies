@@ -1684,9 +1684,6 @@ def _validate_retreat(
             "Cannot retreat until attackers have rolled (after archer or stealth prefire, continue combat first)",
         )
 
-    if getattr(state.active_combat, "sea_zone_id", None):
-        return ValidationResult(False, "Retreat is not allowed during a sea raid")
-
     destination = action.payload.get("retreat_to")
     if not destination:
         return ValidationResult(False, "No retreat destination specified")
@@ -2931,17 +2928,18 @@ def _get_retreat_adjacent_ids(
     combat_def = territory_defs.get(combat_territory_id)
     if not combat_def:
         return []
-    # Retreating units: for sea raid they are in the sea zone; otherwise in the combat territory
+    # Retreating units: normally in the combat territory; for a sea raid the roster can be split
+    # between the raided land hex (disembarked) and the staging sea (still-embarked passengers).
     sea_zone_id = getattr(combat, "sea_zone_id", None)
-    source_id = sea_zone_id if sea_zone_id else combat_territory_id
-    source = state.territories.get(source_id)
-    if not source:
+    source_ids = [sea_zone_id, combat_territory_id] if sea_zone_id else [combat_territory_id]
+    sources = [s for s in (state.territories.get(sid) for sid in source_ids) if s]
+    if not sources:
         return []
     surviving_ids = set(combat.attacker_instance_ids)
     # Embarked passengers of survivors retreat too, so they count as retreating units
     # (a land passenger must force ground-adjacent destinations, never aerial-only).
     retreating_units = [
-        u for u in source.units
+        u for source in sources for u in source.units
         if u.instance_id in surviving_ids
         or getattr(u, "loaded_onto", None) in surviving_ids
     ]
@@ -2970,9 +2968,6 @@ def get_retreat_options(
     combat_territory = state.active_combat.territory_id
     combat_def = territory_defs.get(combat_territory)
     if not combat_def:
-        return []
-
-    if getattr(state.active_combat, "sea_zone_id", None):
         return []
 
     attacker_faction = state.active_combat.attacker_faction

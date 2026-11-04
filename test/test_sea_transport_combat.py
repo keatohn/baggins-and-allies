@@ -1374,7 +1374,12 @@ def test_naval_loss_passengers_only_no_harad_contested_land(wotr_defs):
     assert not any(c.get("territory_id") == "harondor" for c in contested)
 
 
-def test_retreat_and_retreat_options_rejected_during_sea_raid(wotr_defs):
+def _sea_raid_retreat_state(wotr_defs, *, umbar_owner="harad"):
+    """
+    Harad sea raid on harondor (gondor) from sea_zone_11, round 1 rolled.
+    Disembarked corsair on the land hex (in the raid roster); black_ship stays in the sea.
+    umbar/haradwaith/near_harad ownership controls whether adjacent allied land exists.
+    """
     unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
     setup = load_starting_setup(setup_id="wotr_exp_1.0")
     state = initialize_game_state(
@@ -1382,26 +1387,99 @@ def test_retreat_and_retreat_options_rejected_during_sea_raid(wotr_defs):
         starting_setup=setup,
         camp_defs=camp_defs,
     )
-    state.phase = "combat"
+    har = state.territories["harondor"]
+    sea = state.territories["sea_zone_11"]
+    sea.units.clear()
+    har.units = []
+    har.owner = "gondor"
+    defender = _make_unit(state, "gondor", "gondor_soldier", unit_defs)
+    raider = _make_unit(state, "harad", "corsair_of_umbar", unit_defs)
+    har.units.extend([defender, raider])
+    ship = _make_unit(state, "harad", "black_ship", unit_defs)
+    sea.units.append(ship)
+    # Control adjacent coasts so only the lands under test are harad-allied.
+    state.territories["umbar"].owner = umbar_owner
+    if umbar_owner != "harad":
+        state.territories["haradwaith"].owner = None
+        state.territories["near_harad"].owner = None
+    state.territory_sea_raid_from["harondor"] = "sea_zone_11"
+    state.territory_sea_raid_faction["harondor"] = "harad"
     state.current_faction = "harad"
+    state.phase = "combat"
     state.active_combat = ActiveCombat(
         attacker_faction="harad",
         territory_id="harondor",
-        attacker_instance_ids=["harad_corsair_test"],
+        attacker_instance_ids=[raider.instance_id],
         round_number=1,
         sea_zone_id="sea_zone_11",
-        initial_attacker_instance_ids=["harad_corsair_test"],
-        initial_defender_instance_ids=["gondor_gondor_soldier_test"],
+        initial_attacker_instance_ids=[raider.instance_id],
+        initial_defender_instance_ids=[defender.instance_id],
     )
-    vr = validate_action(
-        state, retreat("harad", "umbar"),
+    return (
+        state, raider, ship, defender,
         unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
     )
-    assert not vr.valid, vr.error
-    assert "sea raid" in (vr.error or "").lower()
+
+
+def test_sea_raid_retreat_to_adjacent_allied_land(wotr_defs):
+    """
+    H3 P2: sea-raid raiders may retreat onto adjacent allied land (they cannot fall back
+    into the sea zone/boat). Disembarked passengers move with the retreat; boats stay in sea.
+    """
+    (state, raider, ship, _defender,
+     unit_defs, territory_defs, faction_defs, camp_defs, port_defs) = _sea_raid_retreat_state(wotr_defs)
 
     opts = get_retreat_options(state, territory_defs, faction_defs, unit_defs)
-    assert opts == []
+    assert "umbar" in opts, opts  # adjacent allied land exists
+
+    action = retreat("harad", "umbar")
+    vr = validate_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert vr.valid, vr.error
+    state, events = apply_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+
+    umbar_ids = {u.instance_id for u in state.territories["umbar"].units}
+    har_ids = {u.instance_id for u in state.territories["harondor"].units}
+    sea_ids = {u.instance_id for u in state.territories["sea_zone_11"].units}
+
+    assert raider.instance_id in umbar_ids, "raider must retreat onto adjacent allied land"
+    assert raider.instance_id not in har_ids
+    assert raider.instance_id not in sea_ids
+    assert ship.instance_id in sea_ids, "boat stays in the staging sea (not in the raid roster)"
+    assert ship.instance_id not in umbar_ids
+    assert state.territories["harondor"].owner == "gondor", "defender keeps the raided land"
+
+    retreated = next(e for e in events if e.type == "units_retreated")
+    assert raider.instance_id in (retreated.payload.get("unit_ids") or [])
+    assert state.active_combat is None
+    assert "harondor" not in (state.territory_sea_raid_from or {})
+
+
+def test_sea_raid_retreat_disabled_without_adjacent_allied_land(wotr_defs):
+    """
+    H3 P2 lock: with no adjacent allied land, sea-raid retreat is disabled — raiders cannot
+    fall back into the sea zone/boat, so get_retreat_options is empty and both validate_action
+    and apply_action reject the retreat.
+    """
+    (state, raider, ship, _defender,
+     unit_defs, territory_defs, faction_defs, camp_defs, port_defs) = _sea_raid_retreat_state(
+        wotr_defs, umbar_owner="gondor"
+    )
+    # harondor borders only enemy/neutral land and unowned seas: no allied retreat destination.
+    assert get_retreat_options(state, territory_defs, faction_defs, unit_defs) == []
+
+    action = retreat("harad", "umbar")
+    vr = validate_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert not vr.valid, vr.error
+
+    har_ids_before = {u.instance_id for u in state.territories["harondor"].units}
+    sea_ids_before = {u.instance_id for u in state.territories["sea_zone_11"].units}
+    with pytest.raises(ValueError, match="allied territory"):
+        apply_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert {u.instance_id for u in state.territories["harondor"].units} == har_ids_before
+    assert {u.instance_id for u in state.territories["sea_zone_11"].units} == sea_ids_before
+    assert state.active_combat is not None
+    assert raider.instance_id in har_ids_before
+    assert ship.instance_id in sea_ids_before
 
 
 def _naval_battle_state(wotr_defs, *, umbar_owner="harad"):

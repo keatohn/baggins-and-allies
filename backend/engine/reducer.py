@@ -4255,9 +4255,6 @@ def _handle_retreat(
     if not combat.attackers_have_rolled:
         raise ValueError("Cannot retreat until attackers have rolled (after archer or stealth prefire, click Continue first)")
 
-    if getattr(combat, "sea_zone_id", None):
-        raise ValueError("Retreat is not allowed during a sea raid")
-
     retreat_to = action.payload.get("retreat_to")
     if not retreat_to:
         raise ValueError("Must specify retreat_to territory")
@@ -4277,30 +4274,38 @@ def _handle_retreat(
         raise ValueError(
             f"Cannot retreat to {retreat_to} - not adjacent to {combat.territory_id}")
 
-    # Move surviving attackers from contested territory to retreat territory.
-    # Embarked passengers of surviving boats travel with them (they were never in the
-    # naval roster) and disembark on arrival: the retreat destination is land, and a
-    # boat-in-port still carrying cargo would dangle if the boat later sails alone.
+    # Move surviving attackers to the retreat territory.
+    # For a sea raid the roster can be split between the raided land hex (disembarked) and the
+    # staging sea (still-embarked passengers); both travel to the allied land and disembark on
+    # arrival (retreat destinations are land — never the sea zone/boat — and a boat-in-port still
+    # carrying cargo would dangle if the boat later sails alone). Boats are not in the roster and
+    # stay in the sea zone.
     combat_territory = state.territories[combat.territory_id]
+    sea_zone_id = getattr(combat, "sea_zone_id", None)
+    sources = [combat_territory]
+    if sea_zone_id and sea_zone_id in state.territories:
+        sources.append(state.territories[sea_zone_id])
     retreating_ids = set(surviving_ids)
-    for u in combat_territory.units:
-        if getattr(u, "loaded_onto", None) in surviving_ids:
-            retreating_ids.add(u.instance_id)
+    for source in sources:
+        for u in source.units:
+            if getattr(u, "loaded_onto", None) in surviving_ids:
+                retreating_ids.add(u.instance_id)
     units_to_move = [
-        u for u in combat_territory.units
+        u for source in sources for u in source.units
         if u.instance_id in retreating_ids
     ]
-    combat_territory.units = [
-        u for u in combat_territory.units
-        if u.instance_id not in retreating_ids
-    ]
+    for source in sources:
+        source.units = [
+            u for u in source.units
+            if u.instance_id not in retreating_ids
+        ]
     for u in units_to_move:
         if getattr(u, "loaded_onto", None) is not None:
             u.loaded_onto = None
     retreat_territory.units.extend(units_to_move)
     retreated_ids = [u.instance_id for u in units_to_move]
 
-    # Emit retreat event (for sea raid, retreat_to is not used for move but still required for API)
+    # Emit retreat event (combat.territory_id is the battle's territory — the raided land for a sea raid)
     events.append(units_retreated(
         combat.attacker_faction,
         combat.territory_id,
