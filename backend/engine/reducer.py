@@ -4277,15 +4277,25 @@ def _handle_retreat(
             f"Cannot retreat to {retreat_to} - not adjacent to {combat.territory_id}")
 
     # Move surviving attackers from contested territory to retreat territory.
+    # Embarked passengers of surviving boats travel with them (they were never in the
+    # naval roster) and disembark on arrival: the retreat destination is land, and a
+    # boat-in-port still carrying cargo would dangle if the boat later sails alone.
     combat_territory = state.territories[combat.territory_id]
+    retreating_ids = set(surviving_ids)
+    for u in combat_territory.units:
+        if getattr(u, "loaded_onto", None) in surviving_ids:
+            retreating_ids.add(u.instance_id)
     units_to_move = [
         u for u in combat_territory.units
-        if u.instance_id in surviving_ids
+        if u.instance_id in retreating_ids
     ]
     combat_territory.units = [
         u for u in combat_territory.units
-        if u.instance_id not in surviving_ids
+        if u.instance_id not in retreating_ids
     ]
+    for u in units_to_move:
+        if getattr(u, "loaded_onto", None) is not None:
+            u.loaded_onto = None
     retreat_territory.units.extend(units_to_move)
     retreated_ids = [u.instance_id for u in units_to_move]
 

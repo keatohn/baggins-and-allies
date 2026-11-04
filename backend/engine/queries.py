@@ -2938,7 +2938,13 @@ def _get_retreat_adjacent_ids(
     if not source:
         return []
     surviving_ids = set(combat.attacker_instance_ids)
-    retreating_units = [u for u in source.units if u.instance_id in surviving_ids]
+    # Embarked passengers of survivors retreat too, so they count as retreating units
+    # (a land passenger must force ground-adjacent destinations, never aerial-only).
+    retreating_units = [
+        u for u in source.units
+        if u.instance_id in surviving_ids
+        or getattr(u, "loaded_onto", None) in surviving_ids
+    ]
     any_land = any(is_land_unit(unit_defs.get(u.unit_id)) for u in retreating_units)
     if any_land:
         return list(combat_def.adjacent)

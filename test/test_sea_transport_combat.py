@@ -1404,6 +1404,105 @@ def test_retreat_and_retreat_options_rejected_during_sea_raid(wotr_defs):
     assert opts == []
 
 
+def _naval_battle_state(wotr_defs, *, umbar_owner="harad"):
+    """Harad black_ship (with embarked corsair) vs a Gondor ship in sea_zone_11, round 1 rolled."""
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    sea = state.territories["sea_zone_11"]
+    sea.units.clear()
+    ship = _make_unit(state, "harad", "black_ship", unit_defs)
+    corsair = _make_unit(state, "harad", "corsair_of_umbar", unit_defs)
+    corsair.loaded_onto = ship.instance_id
+    enemy_ship = _make_unit(state, "gondor", "gondor_ship", unit_defs)
+    sea.units.extend([ship, corsair, enemy_ship])
+    # Neutralise other coasts so the only candidate retreat destinations are the ones under test.
+    state.territories["harondor"].owner = None
+    state.territories["umbar"].owner = umbar_owner
+    state.current_faction = "harad"
+    state.phase = "combat"
+    # No hits (6 > attack/defense 3): combat continues, attackers_have_rolled = True.
+    state, _ = apply_action(
+        state,
+        initiate_combat("harad", "sea_zone_11", dice_rolls={"attacker": [6], "defender": [6]}),
+        unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    assert state.active_combat is not None
+    assert state.active_combat.attackers_have_rolled
+    assert corsair.instance_id not in state.active_combat.attacker_instance_ids, (
+        "embarked passengers must not be in the naval roster"
+    )
+    return (
+        state, ship, corsair, enemy_ship,
+        unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+
+
+def test_naval_retreat_carries_embarked_passengers_to_allied_land(wotr_defs):
+    """
+    H3 P1: a pure naval battle's roster excludes embarked passengers, so retreating only the
+    survivors used to strand them in the contested sea zone with a dangling loaded_onto.
+    Passengers must ride along with their boat onto the adjacent allied land and disembark.
+    """
+    (state, ship, corsair, _enemy,
+     unit_defs, territory_defs, faction_defs, camp_defs, port_defs) = _naval_battle_state(wotr_defs)
+
+    opts = get_retreat_options(state, territory_defs, faction_defs, unit_defs)
+    assert opts == ["umbar"], opts
+
+    action = retreat("harad", "umbar")
+    vr = validate_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert vr.valid, vr.error
+    state, events = apply_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+
+    umbar_units = {u.instance_id: u for u in state.territories["umbar"].units}
+    sea_ids = {u.instance_id for u in state.territories["sea_zone_11"].units}
+
+    assert ship.instance_id in umbar_units, "boat must retreat to the allied coast"
+    assert corsair.instance_id in umbar_units, "embarked passenger must not be left in the sea zone"
+    assert ship.instance_id not in sea_ids
+    assert corsair.instance_id not in sea_ids
+    assert getattr(umbar_units[corsair.instance_id], "loaded_onto", None) is None, (
+        "passenger must disembark on arrival (no dangling loaded_onto)"
+    )
+
+    retreated = next(e for e in events if e.type == "units_retreated")
+    assert corsair.instance_id in (retreated.payload.get("unit_ids") or []), (
+        "retreat event must list the carried passengers"
+    )
+    assert state.active_combat is None
+
+
+def test_naval_retreat_disabled_without_adjacent_allied_land(wotr_defs):
+    """
+    H3 P1 lock: with no adjacent allied land there is no valid retreat — a boat cannot fall
+    back into the sea zone it is fighting in, so get_retreat_options is empty and both
+    validate_action and apply_action reject the retreat.
+    """
+    (state, ship, corsair, _enemy,
+     unit_defs, territory_defs, faction_defs, camp_defs, port_defs) = _naval_battle_state(
+        wotr_defs, umbar_owner="gondor"
+    )
+    # harondor is unowned, umbar is enemy-owned: no friendly coast borders sea_zone_11.
+    assert get_retreat_options(state, territory_defs, faction_defs, unit_defs) == []
+
+    action = retreat("harad", "umbar")
+    vr = validate_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert not vr.valid, vr.error
+
+    sea_ids_before = {u.instance_id for u in state.territories["sea_zone_11"].units}
+    with pytest.raises(ValueError, match="allied territory"):
+        apply_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    # Rejected apply must leave the contested sea zone untouched.
+    assert {u.instance_id for u in state.territories["sea_zone_11"].units} == sea_ids_before
+    assert state.active_combat is not None
+    assert ship.instance_id in sea_ids_before and corsair.instance_id in sea_ids_before
+
+
 def test_contested_sea_zone_counts_aerial_vs_enemy_naval(wotr_defs):
     """Combat phase `combat_territories` must list sea hexes where aerial faces enemy ships (not naval-only filter)."""
     unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
