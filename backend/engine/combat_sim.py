@@ -483,6 +483,7 @@ def run_one_battle(
                 stat_modifiers_defender_extra=defender_mods,
                 territory_def=territory_def,
                 prefire_penalty_delta=pdelta,
+                casualty_order_attacker=casualty_order_attacker,
             )
             def_prefire_applicable = True
             def_prefire_hits = prefire_result.defender_hits

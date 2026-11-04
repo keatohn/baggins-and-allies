@@ -4001,6 +4001,7 @@ def _handle_continue_combat(
             prefire_penalty_delta=archer_prefire_penalty_c,
             hp_shield=ring_hp_shield,
             defender_effective_dice_override=ring_def_dice,
+            casualty_order_attacker=combat.casualty_order_attacker,
         )
         archer_stat_modifiers_c = prefire_stat_modifiers(
             defender_archer_units_continue, unit_defs, False, archer_prefire_penalty_c, defender_mods,
