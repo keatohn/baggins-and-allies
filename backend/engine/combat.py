@@ -1537,6 +1537,7 @@ def resolve_archer_prefire(
     prefire_penalty_delta: int = -1,
     hp_shield: dict[str, int] | None = None,
     defender_effective_dice_override: dict[str, int] | None = None,
+    casualty_order_attacker: str = "best_unit",
 ) -> RoundResult:
     """
     Resolve defender archer prefire: only units with the archer special roll at defense-1; hits to attackers only.
@@ -1544,6 +1545,7 @@ def resolve_archer_prefire(
     defender_archer_units are not modified (no defender casualties from prefire).
     stat_modifiers_defender_extra: optional instance_id -> extra modifier (e.g. terrain bonus), merged with prefire penalty.
     prefire_penalty_delta: -1 when setup manifest enables prefire penalty; 0 when disabled.
+    casualty_order_attacker: how victims among the *attackers* are chosen ("best_unit" or "best_attack").
     """
     stat_modifiers = prefire_stat_modifiers(
         defender_archer_units, unit_defs, False, prefire_penalty_delta, stat_modifiers_defender_extra,
@@ -1557,7 +1559,7 @@ def resolve_archer_prefire(
 
     attacker_casualties, attacker_wounded = _apply_hits(
         attacker_units, defender_hits, unit_defs, is_attacker=True,
-        casualty_order="best_unit",
+        casualty_order=casualty_order_attacker,
         must_conquer=False,
         hp_shield=hp_shield,
     )
