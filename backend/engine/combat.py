@@ -967,7 +967,7 @@ def _apply_hits(
         else:
             wounded_ids.add(target.instance_id)
 
-    return destroyed_ids, list(wounded_ids)
+    return destroyed_ids, sorted(wounded_ids)
 
 
 def calculate_required_dice(units: list[Unit], unit_defs: dict[str, UnitDefinition]) -> int:

@@ -3130,7 +3130,7 @@ def _handle_initiate_combat(
         bomb_pair_casualties_sw: list[str] = []
         if fuse_bomb:
             paired_bombikazi_sw, paired_bombs_sw = get_bombikazi_pairing(attacker_units, unit_defs)
-            bomb_pair_casualties_sw = list(paired_bombikazi_sw | paired_bombs_sw)
+            bomb_pair_casualties_sw = sorted(paired_bombikazi_sw | paired_bombs_sw)
         if bomb_pair_casualties_sw:
             attacker_units[:] = [u for u in attacker_units if u.instance_id not in bomb_pair_casualties_sw]
             passenger_att_bomb_sw = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, bomb_pair_casualties_sw, unit_defs, state)
@@ -3952,7 +3952,7 @@ def _handle_continue_combat(
         bomb_pair_casualties: list[str] = []
         if fuse_bomb:
             paired_bombikazi, paired_bombs = get_bombikazi_pairing(attacker_units, unit_defs)
-            bomb_pair_casualties = list(paired_bombikazi | paired_bombs)
+            bomb_pair_casualties = sorted(paired_bombikazi | paired_bombs)
         if bomb_pair_casualties:
             attacker_units[:] = [u for u in attacker_units if u.instance_id not in bomb_pair_casualties]
             passenger_att_bomb = _maybe_sea_raid_remove_attacker_casualties(sea_zone_id, sea_zone, territory, attacker_territory, bomb_pair_casualties, unit_defs, state)
@@ -4360,8 +4360,8 @@ def _handle_retreat(
     # Emit combat ended event (defender wins by default on retreat)
     territory = state.territories[combat.territory_id]
     defender_ids = [u.instance_id for u in territory.units]
-    att_cas = list(set(combat.initial_attacker_instance_ids or []) - set(combat.attacker_instance_ids))
-    def_cas = list(set(combat.initial_defender_instance_ids or []) - set(defender_ids))
+    att_cas = sorted(set(combat.initial_attacker_instance_ids or []) - set(combat.attacker_instance_ids))
+    def_cas = sorted(set(combat.initial_defender_instance_ids or []) - set(defender_ids))
     events.append(combat_ended(
         combat.territory_id,
         "defender",
