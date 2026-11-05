@@ -393,7 +393,7 @@ def run_one_battle(
             bomb_pair_casualties: list[str] = []
             if fuse_sim:
                 paired_bombikazi, paired_bombs = get_bombikazi_pairing(attacker_units, unit_defs)
-                bomb_pair_casualties = list(paired_bombikazi | paired_bombs)
+                bomb_pair_casualties = sorted(paired_bombikazi | paired_bombs)
             if bomb_pair_casualties:
                 attacker_units[:] = [u for u in attacker_units if u.instance_id not in bomb_pair_casualties]
                 for iid in bomb_pair_casualties:
@@ -972,15 +972,15 @@ def run_simulation(
         all_def_unit_ids.update(d.keys())
 
     att_mean: dict[str, float] = {}
-    for uid in all_att_unit_ids:
+    for uid in sorted(all_att_unit_ids):
         att_mean[uid] = sum(d.get(uid, 0) for d in att_casualties_by_trial) / n
     def_mean: dict[str, float] = {}
-    for uid in all_def_unit_ids:
+    for uid in sorted(all_def_unit_ids):
         def_mean[uid] = sum(d.get(uid, 0) for d in def_casualties_by_trial) / n
 
     def _p90_casualties(trials: list[dict[str, int]], unit_ids: set[str]) -> dict[str, float]:
         out: dict[str, float] = {}
-        for uid in unit_ids:
+        for uid in sorted(unit_ids):
             vals = sorted(d.get(uid, 0) for d in trials)
             out[uid] = vals[int(n * 0.9)] if n else 0.0
         return out

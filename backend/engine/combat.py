@@ -967,7 +967,7 @@ def _apply_hits(
         else:
             wounded_ids.add(target.instance_id)
 
-    return destroyed_ids, list(wounded_ids)
+    return destroyed_ids, sorted(wounded_ids)
 
 
 def calculate_required_dice(units: list[Unit], unit_defs: dict[str, UnitDefinition]) -> int:
@@ -1503,6 +1503,24 @@ def get_terror_reroll_targets(
     return flat_indices, len(flat_indices)
 
 
+def archer_prefire_penalty_delta(
+    prefire_penalty_delta: int,
+    territory_def: "TerritoryDefinition | None",
+) -> int:
+    """
+    Archer special: the -1 prefire defense penalty does not apply when the
+    defender's territory is a stronghold or fortress (catalog description).
+    Returns 0 for exempt territories, otherwise the manifest delta unchanged.
+    """
+    if territory_def is None:
+        return prefire_penalty_delta
+    if getattr(territory_def, "is_stronghold", False):
+        return 0
+    if (getattr(territory_def, "terrain_type", "") or "").lower() == "fortress":
+        return 0
+    return prefire_penalty_delta
+
+
 def prefire_stat_modifiers(
     units: list[Unit],
     unit_defs: dict[str, UnitDefinition],
@@ -1545,10 +1563,13 @@ def resolve_archer_prefire(
     defender_archer_units are not modified (no defender casualties from prefire).
     stat_modifiers_defender_extra: optional instance_id -> extra modifier (e.g. terrain bonus), merged with prefire penalty.
     prefire_penalty_delta: -1 when setup manifest enables prefire penalty; 0 when disabled.
+    territory_def: defender's territory; stronghold/fortress exempt the -1 penalty (archer special).
     casualty_order_attacker: how victims among the *attackers* are chosen ("best_unit" or "best_attack").
     """
     stat_modifiers = prefire_stat_modifiers(
-        defender_archer_units, unit_defs, False, prefire_penalty_delta, stat_modifiers_defender_extra,
+        defender_archer_units, unit_defs, False,
+        archer_prefire_penalty_delta(prefire_penalty_delta, territory_def),
+        stat_modifiers_defender_extra,
     )
     defender_hits = _count_hits(
         defender_archer_units, defender_rolls, unit_defs, is_attacker=False,
@@ -1603,6 +1624,8 @@ def resolve_siegeworks_round(
     - ladder: does not roll; transport_capacity per ladder = infantry (climbs_ladder) bypassing stronghold in round 1+.
     - Other siegework: normal hits to stronghold then overflow to defender units.
     Non-siegework attackers with ram also roll here vs stronghold only.
+    attacker_effective_dice_override / defender_effective_dice_override (e.g. ring bonus
+    dice) set per-unit dice counts for both roll consumption and hit counting.
     """
     attacker_siegework = [
         u for u in attacker_units if _is_siegework_unit(unit_defs.get(u.unit_id))]
@@ -1630,7 +1653,12 @@ def resolve_siegeworks_round(
     roll_idx = 0
     for u in rolling_attacker:
         ud = unit_defs.get(u.unit_id)
-        dice_count = getattr(ud, "dice", 1)
+        dice_count = (
+            attacker_effective_dice_override.get(
+                u.instance_id, getattr(ud, "dice", 1))
+            if attacker_effective_dice_override is not None
+            else getattr(ud, "dice", 1)
+        )
         rolls_for_unit: list[int] = []
         for _ in range(dice_count):
             if roll_idx < len(attacker_rolls):
@@ -1641,6 +1669,7 @@ def resolve_siegeworks_round(
                 ram_hits_total += _count_hits(
                     [u], rolls_for_unit, unit_defs, is_attacker=True,
                     stat_modifiers=stat_modifiers_attacker,
+                    effective_dice_override=attacker_effective_dice_override,
                 )
         else:
             other_attacker_units.append(u)
@@ -1649,6 +1678,7 @@ def resolve_siegeworks_round(
     normal_attacker_hits = _count_hits(
         other_attacker_units, other_attacker_rolls, unit_defs, is_attacker=True,
         stat_modifiers=stat_modifiers_attacker,
+        effective_dice_override=attacker_effective_dice_override,
     ) if other_attacker_units else 0
 
     # Ram hits apply to stronghold only, capped (no overflow to units)

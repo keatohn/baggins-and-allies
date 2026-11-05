@@ -2051,6 +2051,13 @@ def _validate_end_phase(
         sim = get_state_after_pending_moves(
             state, "combat_move", unit_defs, territory_defs, faction_defs
         )
+        must_attack = getattr(sim, "loaded_naval_must_attack_instance_ids", []) or []
+        if must_attack:
+            return ValidationResult(
+                False,
+                "Every boat that received a load this phase must attack before ending combat move: "
+                f"{must_attack!s}. Attack with those fleets (naval combat or sea raid) first.",
+            )
         idle = getattr(sim, "combat_move_naval_idle_sail_instance_ids", []) or []
         if idle:
             return ValidationResult(

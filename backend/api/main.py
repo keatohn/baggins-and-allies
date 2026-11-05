@@ -1286,10 +1286,10 @@ def shadow_viewer_alliance(game_id: str, player: Player | None, db: Session, sta
 
 def _shadow_defs(game_id: str, db: Session):
     try:
-        _, td, fd, _, _ = get_game_definitions(game_id, db)
+        ud, td, fd, _, _ = get_game_definitions(game_id, db)
     except Exception:
-        td, fd = {}, {}
-    return td, fd
+        ud, td, fd = {}, {}, {}
+    return ud, td, fd
 
 
 def state_for_viewer(state: GameState, game_id: str, db: Session, player: Player | None) -> dict[str, Any]:
@@ -1297,8 +1297,8 @@ def state_for_viewer(state: GameState, game_id: str, db: Session, player: Player
     alliance = shadow_viewer_alliance(game_id, player, db, state)
     if alliance is None:
         return out
-    td, fd = _shadow_defs(game_id, db)
-    apply_shadow_view(out, state, td, fd, alliance)
+    ud, td, fd = _shadow_defs(game_id, db)
+    apply_shadow_view(out, state, td, fd, alliance, ud)
     return out
 
 
@@ -1312,8 +1312,8 @@ def events_for_viewer(events: list, state: GameState, game_id: str, db: Session,
     alliance = shadow_viewer_alliance(game_id, player, db, state)
     if alliance is None:
         return dicts
-    td, fd = _shadow_defs(game_id, db)
-    visible = visible_territory_ids(state, td, alliance, fd)
+    ud, td, fd = _shadow_defs(game_id, db)
+    visible = visible_territory_ids(state, td, alliance, fd, ud)
     return filter_events_for_sight(dicts, visible)
 
 
@@ -4003,7 +4003,11 @@ def get_game_state(
         "camps": _safe_asdict_map(cd),
         "ports": _safe_asdict_map(port_d),
     }
-    definitions["specials"], definitions["specials_order"] = specials_for_units(load_catalog(db), ud.values())
+    definitions["specials"], definitions["specials_order"] = specials_for_units(
+        load_catalog(db),
+        ud.values(),
+        shadow_of_war=bool(getattr(state, "shadow_of_war", False)),
+    )
     row = db.query(GameModel).filter(GameModel.id == game_id).first()
     setup_id: str | None = None
     event_log: list = []
@@ -5174,8 +5178,8 @@ def get_available_actions(
     actions = _build_available_actions(state, game_id, db)
     alliance = shadow_viewer_alliance(game_id, player, db, state)
     if alliance is not None:
-        td, fd = _shadow_defs(game_id, db)
-        filter_charge_routes(actions, visible_territory_ids(state, td, alliance, fd))
+        ud, td, fd = _shadow_defs(game_id, db)
+        filter_charge_routes(actions, visible_territory_ids(state, td, alliance, fd, ud))
     return actions
 
 
