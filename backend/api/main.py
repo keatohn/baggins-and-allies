@@ -3985,7 +3985,11 @@ def get_game_state(
         "camps": _safe_asdict_map(cd),
         "ports": _safe_asdict_map(port_d),
     }
-    definitions["specials"], definitions["specials_order"] = specials_for_units(load_catalog(db), ud.values())
+    definitions["specials"], definitions["specials_order"] = specials_for_units(
+        load_catalog(db),
+        ud.values(),
+        shadow_of_war=bool(getattr(state, "shadow_of_war", False)),
+    )
     row = db.query(GameModel).filter(GameModel.id == game_id).first()
     setup_id: str | None = None
     event_log: list = []

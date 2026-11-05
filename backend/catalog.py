@@ -29,6 +29,10 @@ MARCHING_ORDERS_DESCRIPTION = (
 REQUIRED_TERRAIN_TYPES = ("sea",)
 ENTRY_SECTIONS = ("specials", "special_rules", "game_options")
 LIST_SECTIONS = ("terrain_types", "archetypes")
+# Specials whose rules only do anything in a Shadow of War game. They stay in the
+# catalog (admin, setup validation) but are left out of a game's definitions when
+# that game has the mode off, so the Specials and Unit Stats modals never show them.
+SHADOW_OF_WAR_ONLY_SPECIALS = frozenset({"foresight"})
 _ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
 
 _SECTION_LABELS = {
@@ -324,8 +328,14 @@ def seed_catalog_if_empty(db: Session) -> None:
     db.commit()
 
 
-def specials_for_units(catalog: dict[str, Any], units: Iterable[Any]) -> tuple[dict[str, dict[str, str]], list[str]]:
-    """Catalog specials that at least one of these units has, as (id -> name/description/display_code, order)."""
+def specials_for_units(
+    catalog: dict[str, Any], units: Iterable[Any], *, shadow_of_war: bool = True
+) -> tuple[dict[str, dict[str, str]], list[str]]:
+    """Catalog specials that at least one of these units has, as (id -> name/description/display_code, order).
+
+    Pass shadow_of_war=False for a game without that mode on to drop the specials
+    that only apply to Shadow of War games.
+    """
     used: set[str] = set()
     for unit in units:
         raw = unit.get("specials") if isinstance(unit, dict) else getattr(unit, "specials", None)
@@ -336,6 +346,8 @@ def specials_for_units(catalog: dict[str, Any], units: Iterable[Any]) -> tuple[d
     order: list[str] = []
     for entry in catalog.get("specials") or []:
         if entry["id"] not in used:
+            continue
+        if not shadow_of_war and entry["id"] in SHADOW_OF_WAR_ONLY_SPECIALS:
             continue
         definitions[entry["id"]] = {
             "name": entry["name"],
