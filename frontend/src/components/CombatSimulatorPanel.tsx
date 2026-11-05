@@ -1405,11 +1405,19 @@ export default function CombatSimulatorPanel({
    * Shown archer prefire threshold = shelf effective defense minus this delta (see "(ND Prefire)" in Specials).
    * Manifest `prefire_penalty: false`: delta 0 — the shelf value is the real hit target; "(2D Prefire)" is accurate.
    * Penalty on (true/omitted in API): delta 1 — matches engine −1 to defense for prefire rolls.
+   * Archer special exemption: delta 0 when defending a stronghold or fortress (no penalty there).
    */
-  const archerPrefireLabelThresholdDelta = useMemo(
-    () => (result?.prefire_penalty === false ? 0 : 1),
-    [result?.prefire_penalty],
-  );
+  const archerPrefireLabelThresholdDelta = useMemo(() => {
+    if (result?.prefire_penalty === false) return 0;
+    if (!territoryId) return 1;
+    const terrain = getTerrainTypeFromTerritoryId(definitions, territoryId);
+    if (terrain === 'fortress') return 0;
+    if (!territoryId.startsWith(TERRAIN_PREFIX)) {
+      const def = definitions?.territories?.[territoryId] as { is_stronghold?: boolean } | undefined;
+      if (def?.is_stronghold) return 0;
+    }
+    return 1;
+  }, [result?.prefire_penalty, territoryId, definitions]);
 
   const hasBattleContext = Boolean(result?.battle_context);
 

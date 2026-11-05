@@ -1503,6 +1503,24 @@ def get_terror_reroll_targets(
     return flat_indices, len(flat_indices)
 
 
+def archer_prefire_penalty_delta(
+    prefire_penalty_delta: int,
+    territory_def: "TerritoryDefinition | None",
+) -> int:
+    """
+    Archer special: the -1 prefire defense penalty does not apply when the
+    defender's territory is a stronghold or fortress (catalog description).
+    Returns 0 for exempt territories, otherwise the manifest delta unchanged.
+    """
+    if territory_def is None:
+        return prefire_penalty_delta
+    if getattr(territory_def, "is_stronghold", False):
+        return 0
+    if (getattr(territory_def, "terrain_type", "") or "").lower() == "fortress":
+        return 0
+    return prefire_penalty_delta
+
+
 def prefire_stat_modifiers(
     units: list[Unit],
     unit_defs: dict[str, UnitDefinition],
@@ -1545,10 +1563,13 @@ def resolve_archer_prefire(
     defender_archer_units are not modified (no defender casualties from prefire).
     stat_modifiers_defender_extra: optional instance_id -> extra modifier (e.g. terrain bonus), merged with prefire penalty.
     prefire_penalty_delta: -1 when setup manifest enables prefire penalty; 0 when disabled.
+    territory_def: defender's territory; stronghold/fortress exempt the -1 penalty (archer special).
     casualty_order_attacker: how victims among the *attackers* are chosen ("best_unit" or "best_attack").
     """
     stat_modifiers = prefire_stat_modifiers(
-        defender_archer_units, unit_defs, False, prefire_penalty_delta, stat_modifiers_defender_extra,
+        defender_archer_units, unit_defs, False,
+        archer_prefire_penalty_delta(prefire_penalty_delta, territory_def),
+        stat_modifiers_defender_extra,
     )
     defender_hits = _count_hits(
         defender_archer_units, defender_rolls, unit_defs, is_attacker=False,

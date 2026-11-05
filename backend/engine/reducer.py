@@ -40,6 +40,7 @@ from backend.engine.combat import (
     SIEGEWORK_SPECIAL_LADDER,
     resolve_combat_round,
     prefire_stat_modifiers,
+    archer_prefire_penalty_delta,
     resolve_archer_prefire,
     resolve_stealth_prefire,
     resolve_siegeworks_round,
@@ -3224,8 +3225,9 @@ def _handle_initiate_combat(
 
     # Defender archer prefire only when battle did not open with a siegeworks round (no combat_log_prefix).
     if defender_archer_units and not combat_log_prefix:
-        # Prefire: only defender archers roll at defense-1 (or defense+0 if manifest disables penalty); hits to attackers only
-        archer_prefire_penalty = _prefire_stat_delta(state)
+        # Prefire: only defender archers roll at defense-1 (or defense+0 if manifest disables penalty);
+        # stronghold/fortress territories also use +0 (archer special exemption).
+        archer_prefire_penalty = archer_prefire_penalty_delta(_prefire_stat_delta(state), territory_def)
         prefire_defender_rolls = dice_rolls.get("defender", [])
         round_result = resolve_archer_prefire(
             attacker_units, defender_archer_units, unit_defs, prefire_defender_rolls,
@@ -4034,7 +4036,7 @@ def _handle_continue_combat(
         and bool(defender_archer_units_continue)
     )
     if archer_prefire_pending:
-        archer_prefire_penalty_c = _prefire_stat_delta(state)
+        archer_prefire_penalty_c = archer_prefire_penalty_delta(_prefire_stat_delta(state), territory_def)
         prefire_defender_rolls_c = dice_rolls.get("defender", [])
         round_result_ar = resolve_archer_prefire(
             attacker_units, defender_archer_units_continue, unit_defs, prefire_defender_rolls_c,
