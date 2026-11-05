@@ -173,6 +173,7 @@ from backend.setup_data import (
     try_scenario_display,
 )
 from backend.catalog import CatalogError, load_catalog, rule_descriptions, save_catalog, specials_for_units
+from backend.map_builder import MapBuilderError, convert_map_builder
 from backend.map_overrides import (
     MapOverridesError,
     list_map_bases,
@@ -2192,6 +2193,23 @@ def admin_put_map_overrides(
     except MapOverridesError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"ok": True, "map_base": map_base, "overrides": overrides}
+
+
+@app.post("/admin/maps/builder/convert")
+def admin_convert_map_builder(
+    body: dict[str, Any],
+    _admin: Player = Depends(get_current_admin),
+):
+    """Convert the admin map builder's shared-border graph into SVG territory paths.
+
+    The builder stores each border once; this traces the planar graph's faces,
+    reattaches labels by anchor point, and emits an svg_borders-layer SVG matching
+    the maps in frontend/public.
+    """
+    try:
+        return convert_map_builder(body)
+    except MapBuilderError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.get("/admin/formulas")

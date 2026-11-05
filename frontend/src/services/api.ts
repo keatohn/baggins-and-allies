@@ -1457,6 +1457,18 @@ export const api = {
         body: JSON.stringify(overrides),
       },
     ),
+  /** Admin: convert the map builder's shared-border graph into SVG territory paths. */
+  adminConvertMapBuilder: (body: unknown) =>
+    fetchJson<{
+      ok: boolean;
+      svg: string;
+      territories: { id: string; label: string; d: string }[];
+      stats: { joints: number; borders: number; pruned_borders: number; regions: number; labelled: number };
+      warnings: string[];
+    }>('/admin/maps/builder/convert', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   adminPutCatalog: (catalog: Catalog) =>
     fetchJson<{ ok: boolean; catalog: Catalog }>('/admin/catalog', {
       method: 'PUT',
