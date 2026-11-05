@@ -9,7 +9,11 @@ from collections import Counter
 from backend.engine.actions import continue_combat, end_phase, initiate_combat, retreat
 from backend.engine.combat_sim import SimOptions, SimResult, run_simulation
 from backend.engine.movement import _is_water_zone
-from backend.engine.queries import get_retreat_options, participates_in_sea_hex_naval_combat
+from backend.engine.queries import (
+    get_retreat_options,
+    participates_in_sea_hex_naval_combat,
+    staging_zone_blocks_sea_raid,
+)
 
 from backend.ai.context import AIContext
 from backend.ai.habits import (
@@ -140,13 +144,32 @@ def _continue_variance_penalty(sim: SimResult) -> float:
     return 0.0
 
 
+def _filter_initiable_battles(ctx: AIContext, entries: list[dict]) -> list[dict]:
+    """Drop sea raids whose staging zone still needs its forced naval battle (issue #92).
+
+    Those entries are listed so the UI can gray them out, but initiate_combat would be
+    rejected — scoring or random-picking them would stall the phase.
+    """
+    out: list[dict] = []
+    for entry in entries:
+        sea = entry.get("sea_zone_id")
+        if sea and staging_zone_blocks_sea_raid(
+            ctx.state, sea, ctx.faction_id, ctx.unit_defs, ctx.faction_defs, ctx.territory_defs
+        ):
+            continue
+        out.append(entry)
+    return out
+
+
 def decide_initiate_combat(ctx: AIContext):
     """
     When phase is combat, no active_combat, and there are contested territories:
     score each by sim expected_net_gain minus variance penalty; pick from top band.
     Falls back to random entry if sims cannot be built.
     """
-    territories = ctx.available_actions.get("combat_territories") or []
+    territories = _filter_initiable_battles(
+        ctx, ctx.available_actions.get("combat_territories") or []
+    )
     if not territories:
         return None
     state = ctx.state
@@ -446,15 +469,18 @@ def _battle_order_key(entry: dict) -> tuple[str, str]:
 def _declared_battles(ctx: AIContext) -> list[dict]:
     listed = (ctx.available_actions or {}).get("combat_territories")
     if isinstance(listed, list) and listed:
-        return [entry for entry in listed if isinstance(entry, dict)]
+        return _filter_initiable_battles(ctx, [entry for entry in listed if isinstance(entry, dict)])
     from backend.engine.queries import get_contested_territories
 
-    return get_contested_territories(
-        ctx.state,
-        ctx.faction_id,
-        ctx.faction_defs,
-        ctx.unit_defs,
-        ctx.territory_defs,
+    return _filter_initiable_battles(
+        ctx,
+        get_contested_territories(
+            ctx.state,
+            ctx.faction_id,
+            ctx.faction_defs,
+            ctx.unit_defs,
+            ctx.territory_defs,
+        ),
     )
 
 

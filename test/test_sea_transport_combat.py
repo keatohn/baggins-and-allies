@@ -2255,3 +2255,211 @@ def test_deferred_offload_empty_land_defers_capture_until_naval_resolved(wotr_de
     assert any(c["territory_id"] == "sea_zone_11" for c in contested), (
         "the forced naval battle must still be listed"
     )
+
+
+def test_sea_raid_initiate_rejected_while_staging_naval_unresolved(wotr_defs):
+    """
+    Issue #92: backend must reject initiate_combat for a sea raid whose staging sea zone
+    still has an unresolved forced naval battle — the raid cannot fire before the fleet fights.
+    """
+    (state, ship, raider, unit_defs, territory_defs,
+     faction_defs, camp_defs, port_defs) = _hostile_staging_offload_state(wotr_defs)
+    state = get_state_after_pending_moves(
+        state, "combat_move", unit_defs, territory_defs, faction_defs
+    )
+    state.phase = "combat"
+    state.current_faction = "harad"
+
+    raid = initiate_combat(
+        "harad", "harondor", {"attacker": [6], "defender": [6]},
+        sea_zone_id="sea_zone_11",
+    )
+    vr = validate_action(state, raid, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert not vr.valid, "blocked sea raid must be rejected while naval battle is pending"
+    assert "naval battle" in (vr.error or "").lower()
+
+    # The forced naval battle itself stays legal.
+    naval = initiate_combat(
+        "harad", "sea_zone_11", {"attacker": [6], "defender": [6]},
+    )
+    vr_naval = validate_action(state, naval, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert vr_naval.valid, vr_naval.error
+
+
+def test_naval_win_disembarks_surviving_staged_raiders(wotr_defs):
+    """
+    Issue #92: after the forced naval battle is won, surviving staged passengers disembark
+    onto the raid target; staging keeps sea_zone_id for the follow-up land raid (Sea Raider).
+    """
+    (state, ship, raider, unit_defs, territory_defs,
+     faction_defs, camp_defs, port_defs) = _hostile_staging_offload_state(wotr_defs)
+    state = get_state_after_pending_moves(
+        state, "combat_move", unit_defs, territory_defs, faction_defs
+    )
+    state.phase = "combat"
+    state.current_faction = "harad"
+    assert raider.instance_id in {u.instance_id for u in state.territories["sea_zone_11"].units}
+
+    # Attacker hits, defender misses → naval victory in one round.
+    state, events = apply_action(
+        state,
+        initiate_combat(
+            "harad", "sea_zone_11", dice_rolls={"attacker": [1], "defender": [10]},
+        ),
+        unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    ended = [e for e in events if e.type == "combat_ended"]
+    assert len(ended) == 1
+    assert ended[0].payload.get("winner") == "attacker"
+
+    # Survivors disembark onto harondor; boat stays at sea.
+    har_ids = {u.instance_id for u in state.territories["harondor"].units}
+    assert raider.instance_id in har_ids, "surviving raider must disembark after naval win"
+    assert ship.instance_id in {u.instance_id for u in state.territories["sea_zone_11"].units}
+    assert raider.instance_id not in {u.instance_id for u in state.territories["sea_zone_11"].units}
+    # Staging kept so the follow-up raid tags sea_zone_id.
+    assert state.territory_sea_raid_from.get("harondor") == "sea_zone_11"
+
+    # Follow-up land raid is now allowed (zone no longer hostile) and carries sea_zone_id.
+    contested = get_contested_territories(state, "harad", faction_defs, unit_defs, territory_defs)
+    raids = [c for c in contested if c["territory_id"] == "harondor"]
+    assert len(raids) == 1
+    assert raids[0].get("sea_zone_id") == "sea_zone_11"
+    assert raider.instance_id in raids[0]["attacker_unit_ids"]
+    land_act = initiate_combat(
+        "harad", "harondor", {"attacker": [6], "defender": [6]},
+        sea_zone_id="sea_zone_11",
+    )
+    vr = validate_action(state, land_act, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert vr.valid, vr.error
+
+
+def test_naval_win_empty_land_disembarks_and_sets_pending_capture(wotr_defs):
+    """
+    Issue #92: deferred capture of an empty landing fires once the staging naval battle is won
+    and survivors disembark.
+    """
+    (state, ship, raider, unit_defs, territory_defs,
+     faction_defs, camp_defs, port_defs) = _hostile_staging_offload_state(
+        wotr_defs, defenders=False
+    )
+    state = get_state_after_pending_moves(
+        state, "combat_move", unit_defs, territory_defs, faction_defs
+    )
+    assert "harondor" not in state.pending_captures
+    state.phase = "combat"
+    state.current_faction = "harad"
+
+    state, _events = apply_action(
+        state,
+        initiate_combat(
+            "harad", "sea_zone_11", dice_rolls={"attacker": [1], "defender": [10]},
+        ),
+        unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+
+    har_ids = {u.instance_id for u in state.territories["harondor"].units}
+    assert raider.instance_id in har_ids, "survivor must disembark onto the empty land"
+    assert state.pending_captures.get("harondor") == "harad", (
+        "empty land capture must be set once the naval battle is won"
+    )
+
+
+def test_naval_retreat_clears_staging_for_retreated_sea_zone(wotr_defs):
+    """
+    Issue #92: retreating from a pure naval battle must clear every land staged from that
+    sea zone (the old pop(combat.territory_id) was a no-op because tsrf keys are land ids).
+    """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    sea = state.territories["sea_zone_11"]
+    sea.units.clear()
+    ship = _make_unit(state, "harad", "black_ship", unit_defs)
+    raider = _make_unit(state, "harad", "corsair_of_umbar", unit_defs)
+    raider.loaded_onto = ship.instance_id
+    gship = _make_unit(state, "gondor", "gondor_ship", unit_defs)
+    sea.units.extend([ship, raider, gship])
+    # Deferred staging onto an empty land (capture deferred; naval must resolve first).
+    state.territory_sea_raid_from["harondor"] = "sea_zone_11"
+    state.territory_sea_raid_faction["harondor"] = "harad"
+    state.territory_sea_raid_passenger_instance_ids["harondor"] = [raider.instance_id]
+    state.territories["umbar"].owner = "harad"
+    state.current_faction = "harad"
+    state.phase = "combat"
+
+    # Initiate naval combat, roll one non-ending round, then retreat to adjacent umbar.
+    state, _events = apply_action(
+        state,
+        initiate_combat(
+            "harad", "sea_zone_11", dice_rolls={"attacker": [6], "defender": [6]},
+        ),
+        unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    assert state.active_combat is not None
+    assert state.active_combat.territory_id == "sea_zone_11"
+    # Attackers must have rolled before retreat is allowed.
+    if not state.active_combat.attackers_have_rolled:
+        state, _events = apply_action(
+            state,
+            continue_combat("harad", dice_rolls={"attacker": [6], "defender": [6]}),
+            unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+        )
+    assert state.active_combat is not None and state.active_combat.attackers_have_rolled
+
+    state, _events = apply_action(
+        state,
+        retreat("harad", "umbar"),
+        unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    assert state.active_combat is None
+    assert "harondor" not in (state.territory_sea_raid_from or {}), (
+        "naval retreat must clear staging whose value is the retreated sea zone"
+    )
+    assert "harondor" not in (state.territory_sea_raid_faction or {})
+    assert "harondor" not in (state.territory_sea_raid_passenger_instance_ids or {})
+    # Raiders travelled with the surviving boat to the retreat land.
+    umbar_ids = {u.instance_id for u in state.territories["umbar"].units}
+    assert raider.instance_id in umbar_ids
+    assert ship.instance_id in umbar_ids
+
+
+def test_ai_initiate_combat_skips_blocked_sea_raid(wotr_defs):
+    """
+    Issue #92: the heuristic AI must not pick a blocked sea raid (initiate would be rejected);
+    it should initiate the forced naval battle instead.
+    """
+    from backend.ai.combat import decide_initiate_combat
+    from backend.ai.context import AIContext
+
+    (state, ship, raider, unit_defs, territory_defs,
+     faction_defs, camp_defs, port_defs) = _hostile_staging_offload_state(wotr_defs)
+    state = get_state_after_pending_moves(
+        state, "combat_move", unit_defs, territory_defs, faction_defs
+    )
+    state.phase = "combat"
+    state.current_faction = "harad"
+
+    contested = get_contested_territories(state, "harad", faction_defs, unit_defs, territory_defs)
+    assert any(c["territory_id"] == "sea_zone_11" for c in contested)
+    assert any(c["territory_id"] == "harondor" and c.get("sea_zone_id") for c in contested)
+
+    ctx = AIContext(
+        state=state,
+        unit_defs=unit_defs,
+        territory_defs=territory_defs,
+        faction_defs=faction_defs,
+        camp_defs=camp_defs,
+        port_defs=port_defs,
+        available_actions={"combat_territories": contested},
+    )
+    action = decide_initiate_combat(ctx)
+    assert action is not None, "AI must still initiate the forced naval battle"
+    assert action.payload.get("territory_id") == "sea_zone_11", (
+        f"AI must skip the blocked raid, got {action.payload}"
+    )
+    assert not action.payload.get("sea_zone_id")

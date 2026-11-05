@@ -4364,13 +4364,23 @@ def _handle_retreat(
         outcome="retreat",
     ))
 
-    # Clear active combat and sea-raid origin for this territory
+    # Clear active combat and sea-raid staging for this battle.
+    # Keys of territory_sea_raid_from are land ids: a sea-raid retreat clears that land's
+    # entry; a pure naval retreat has combat.territory_id == the sea zone, so clear every
+    # land staged from it (the old pop(combat.territory_id) was a no-op for naval).
     state.active_combat = None
-    if getattr(state, "territory_sea_raid_from", None):
-        state.territory_sea_raid_from.pop(combat.territory_id, None)
-    if getattr(state, "territory_sea_raid_faction", None):
-        state.territory_sea_raid_faction.pop(combat.territory_id, None)
-    _pop_sea_raid_passenger_instance_ids(state, combat.territory_id)
+    tsrf = getattr(state, "territory_sea_raid_from", None) or {}
+    if tsrf:
+        combat_tdef = territory_defs.get(combat.territory_id)
+        if combat_tdef is not None and _is_water_zone(combat_tdef):
+            cleared_lands = [lid for lid, sz in tsrf.items() if sz == combat.territory_id]
+        else:
+            cleared_lands = [lid for lid in tsrf if lid == combat.territory_id]
+        for lid in cleared_lands:
+            tsrf.pop(lid, None)
+            if getattr(state, "territory_sea_raid_faction", None):
+                state.territory_sea_raid_faction.pop(lid, None)
+            _pop_sea_raid_passenger_instance_ids(state, lid)
 
     return state, events
 
@@ -4598,6 +4608,114 @@ def _purge_sea_raid_staging_after_lost_naval(
     return events
 
 
+def _offload_sea_raid_survivors_after_naval_win(
+    state: GameState,
+    sea_territory_id: str,
+    attacker_faction: str,
+    unit_defs: dict[str, UnitDefinition],
+    faction_defs: dict[str, FactionDefinition],
+    territory_defs: dict[str, TerritoryDefinition] | None = None,
+) -> list[GameEvent]:
+    """
+    Issue #92: after a naval battle is won, disembark surviving staged sea-raid passengers
+    onto each land they were staging an offload onto. Only survivors still aboard move
+    (their boat lived); casualties already died with sunk boats via _remove_casualties.
+
+    Staging records (tsrf / faction / passenger map) are kept so the follow-up land raid
+    still tags sea_zone_id (Sea Raider bonus) — same as an immediate offload. They clear
+    when that raid resolves, or via purge/retreat. Empty land gets pending_captures
+    (capture was deferred while the staging zone was hostile).
+    """
+    events: list[GameEvent] = []
+    tsrf = getattr(state, "territory_sea_raid_from", None) or {}
+    lands = [lid for lid, sz in tsrf.items() if sz == sea_territory_id]
+    if not lands:
+        return events
+    sea_t = state.territories.get(sea_territory_id)
+    if not sea_t:
+        return events
+    tsfac = getattr(state, "territory_sea_raid_faction", None) or {}
+    passenger_map = dict(getattr(state, "territory_sea_raid_passenger_instance_ids", None) or {})
+    attacker_alliance = getattr(faction_defs.get(attacker_faction), "alliance", None)
+
+    for lid in lands:
+        staged_fac = tsfac.get(lid)
+        if staged_fac is not None and staged_fac != attacker_faction:
+            continue
+        land_t = state.territories.get(lid)
+        if not land_t:
+            continue
+        staged_ids = passenger_map.get(lid)
+        staged_set = set(staged_ids) if staged_ids else None
+
+        to_disembark: list[Unit] = []
+        for u in list(sea_t.units):
+            if staged_set is not None and u.instance_id not in staged_set:
+                continue
+            if not faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), attacker_faction):
+                continue
+            ud = unit_defs.get(u.unit_id)
+            if not is_land_unit(ud) or _purchase_kind(ud) != "land":
+                continue
+            to_disembark.append(u)
+
+        if not to_disembark:
+            # No survivors still aboard: if none of the staged passengers are alive on the
+            # land either, the whole raid party died with the fleet — drop the staging entry.
+            if staged_set:
+                alive_on_land = {u.instance_id for u in land_t.units}
+                if staged_set.isdisjoint(alive_on_land):
+                    tsrf.pop(lid, None)
+                    if lid in tsfac:
+                        tsfac.pop(lid, None)
+                    if lid in passenger_map:
+                        passenger_map.pop(lid, None)
+            continue
+
+        for u in to_disembark:
+            sea_t.units.remove(u)
+            u.loaded_onto = None
+            land_t.units.append(u)
+        events.append(
+            units_moved(
+                attacker_faction,
+                sea_territory_id,
+                lid,
+                [u.instance_id for u in to_disembark],
+                "combat",
+                move_type="offload",
+            )
+        )
+
+        # Deferred capture: only when the land has no enemy defenders left and is ownable.
+        has_enemy = any(
+            get_unit_faction(u, unit_defs) is not None
+            and faction_defs.get(
+                get_unit_faction(u, unit_defs), FactionDefinition("", "", "", "", "")
+            ).alliance != attacker_alliance
+            for u in land_t.units
+        )
+        if has_enemy:
+            continue
+        ldef = (territory_defs or {}).get(lid)
+        if ldef is not None and not getattr(ldef, "ownable", True):
+            continue
+        owner = land_t.owner
+        if owner is not None:
+            if owner == attacker_faction or faction_acts_as(faction_defs, owner, attacker_faction):
+                continue
+        if not any(can_conquer_territory_as_attacker(unit_defs.get(u.unit_id)) for u in to_disembark):
+            continue
+        state.pending_captures[lid] = capture_owner_for_units(
+            state, to_disembark, attacker_faction, unit_defs, faction_defs
+        )
+
+    state.territory_sea_raid_from = tsrf
+    state.territory_sea_raid_faction = tsfac
+    state.territory_sea_raid_passenger_instance_ids = passenger_map
+    return events
+
+
 def _liberation_beneficiary_if_allied_original(
     territory_id: str,
     territory: TerritoryState,
@@ -4805,7 +4923,7 @@ def _resolve_combat_end(
             outcome="defeat",
         ))
 
-    # Clear active combat; if naval battle in a sea zone was lost, cancel any staged land sea raid
+    # Clear active combat; handle staged sea-raid offloads against this sea zone.
     state.active_combat = None
     tsrf = getattr(state, "territory_sea_raid_from", None) or {}
     tdef_end = territory_defs.get(territory_id)
@@ -4815,6 +4933,14 @@ def _resolve_combat_end(
             events.extend(
                 _purge_sea_raid_staging_after_lost_naval(
                     state, territory_id, attacker_faction, unit_defs, faction_defs
+                )
+            )
+        elif is_sea_combat and round_result.defenders_eliminated and not round_result.attackers_eliminated:
+            # Naval win (issue #92): disembark surviving staged raiders; staging records stay
+            # so the follow-up land raid still tags sea_zone_id (Sea Raider bonus).
+            events.extend(
+                _offload_sea_raid_survivors_after_naval_win(
+                    state, territory_id, attacker_faction, unit_defs, faction_defs, territory_defs
                 )
             )
         else:
