@@ -1399,6 +1399,15 @@ def _validate_initiate_combat(
             return ValidationResult(False, f"Sea zone {sea_zone_id} is not a valid sea or river zone")
         if combat_territory_is_water:
             return ValidationResult(False, "Sea raid target must be land territory")
+        # Issue #92: a sea raid staged from a hostile sea zone must wait for the forced
+        # naval battle there — raiders stay embarked until the fleet survives that fight.
+        if staging_zone_blocks_sea_raid(
+            state, sea_zone_id, attacker_faction, unit_defs, faction_defs, territory_defs
+        ):
+            return ValidationResult(
+                False,
+                f"Naval battle in {sea_zone_id} must be resolved before sea raid on {territory_id}",
+            )
         sea_raid_from = getattr(state, "territory_sea_raid_from", None) or {}
         if sea_raid_from.get(territory_id) != sea_zone_id:
             sea_adj = getattr(sea_def, "adjacent", []) or []
@@ -2665,6 +2674,53 @@ def _faction_has_sea_raid_passengers_in_sea_zone(
     return False
 
 
+def staging_zone_blocks_sea_raid(
+    state: GameState,
+    sea_zone_id: str,
+    faction_id: str,
+    unit_defs: dict[str, UnitDefinition],
+    faction_defs: dict[str, FactionDefinition],
+    territory_defs: dict[str, Any] | None,
+) -> bool:
+    """
+    True when a sea raid staged from `sea_zone_id` must wait for the naval battle in that zone
+    first (issue #92): the staging zone still holds hostile ships AND a naval battle would
+    actually list for this faction (a friendly and an enemy naval combatant both present).
+
+    The listable-naval guard keeps hostile-but-unlistable zones (e.g. factionless-only stacks,
+    which `_sea_zone_has_hostile_enemy_boats` treats as hostile but which have no listable
+    defenders) from blocking a raid that could never be unlocked.
+    """
+    if not faction_id or not sea_zone_id or not territory_defs:
+        return False
+    if not _sea_zone_has_hostile_enemy_boats(
+        state, sea_zone_id, faction_id, unit_defs, faction_defs, territory_defs
+    ):
+        return False
+    sea_t = state.territories.get(
+        resolve_territory_key_in_state(state, sea_zone_id, territory_defs)
+    )
+    if not sea_t:
+        return False
+    attacker_alliance = faction_defs.get(
+        faction_id, FactionDefinition("", "", "", "", "")
+    ).alliance
+    has_friendly = False
+    has_enemy = False
+    for u in sea_t.units:
+        ud = unit_defs.get(u.unit_id)
+        if not participates_in_sea_hex_naval_combat(u, ud):
+            continue
+        uf = get_unit_faction(u, unit_defs)
+        if faction_acts_as(faction_defs, uf, faction_id):
+            has_friendly = True
+        elif uf is not None:
+            ua = getattr(faction_defs.get(uf), "alliance", None)
+            if ua != attacker_alliance:
+                has_enemy = True
+    return has_friendly and has_enemy
+
+
 def get_contested_territories(
     state: GameState,
     faction_id: str,
@@ -2683,6 +2739,10 @@ def get_contested_territories(
     faction matches (see `territory_sea_raid_faction`), so full offload still advertises the sea raid for
     initiate_combat (Sea Raider bonus). Older saves without faction metadata fall back to requiring passengers
     still in the staging sea.
+
+    Issue #92 (deferred offload): when the staging sea zone is still hostile, raiders stay embarked until the
+    forced naval battle resolves — those raids are synthesized below with `sea_zone_id` set and attackers
+    listed from the staged passengers still aboard, so the UI can gray them out.
     """
     attacker_alliance = faction_defs.get(faction_id, FactionDefinition(
         "", "", "", "", "")).alliance
@@ -2737,6 +2797,63 @@ def get_contested_territories(
             if include_sea_zone:
                 entry["sea_zone_id"] = staged_sea
             result.append(entry)
+
+    # Deferred sea raid (issue #92): raiders staged aboard in a hostile staging sea have not
+    # disembarked, so the normal loop above finds no attackers on the land. Synthesize the raid
+    # entry (attackers = staged passengers still in the sea) so the UI can gray it out until the
+    # forced naval battle in `sea_zone_id` resolves. Empty-land raids stay unlisted (no battle).
+    if territory_defs:
+        listed_lands = {e["territory_id"] for e in result}
+        sea_raid_from = getattr(state, "territory_sea_raid_from", None) or {}
+        sea_raid_fac = getattr(state, "territory_sea_raid_faction", None) or {}
+        staged_passengers = getattr(state, "territory_sea_raid_passenger_instance_ids", None) or {}
+        for land_tid, sea_tid in sorted(sea_raid_from.items()):
+            if land_tid in listed_lands:
+                continue
+            staged_fac = sea_raid_fac.get(land_tid)
+            if staged_fac is not None:
+                if staged_fac != faction_id:
+                    continue
+            elif not _faction_has_sea_raid_passengers_in_sea_zone(
+                state.territories.get(sea_tid), faction_id, unit_defs, faction_defs
+            ):
+                continue
+            if not staging_zone_blocks_sea_raid(
+                state, sea_tid, faction_id, unit_defs, faction_defs, territory_defs
+            ):
+                continue
+            sea_t = state.territories.get(sea_tid)
+            land_t = state.territories.get(land_tid)
+            if not sea_t or not land_t:
+                continue
+            defender_units = [
+                u for u in land_t.units
+                if get_unit_faction(u, unit_defs) is not None
+                and faction_defs.get(
+                    get_unit_faction(u, unit_defs), FactionDefinition("", "", "", "", "")
+                ).alliance != attacker_alliance
+            ]
+            if not defender_units:
+                continue
+            staged_ids = staged_passengers.get(land_tid)
+            attacker_units = [
+                u for u in sea_t.units
+                if faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), faction_id)
+                and (staged_ids is None or u.instance_id in staged_ids)
+                and is_land_unit(unit_defs.get(u.unit_id))
+                and not _is_naval_unit(unit_defs.get(u.unit_id))
+                and not _is_river_unit(unit_defs.get(u.unit_id))
+            ]
+            if not attacker_units:
+                continue
+            result.append({
+                "territory_id": land_tid,
+                "attacker_count": len(attacker_units),
+                "defender_count": len(defender_units),
+                "attacker_unit_ids": [u.instance_id for u in attacker_units],
+                "defender_unit_ids": [u.instance_id for u in defender_units],
+                "sea_zone_id": sea_tid,
+            })
 
     return result
 
