@@ -1,7 +1,9 @@
 """Shadow of war: one-step sight from the viewer's alliance.
 
 The stored game stays complete. Responses drop units, casualty order, and log
-lines for territories outside that ring. Cavalry get no extra sight.
+lines for territories outside that ring. Cavalry get no extra sight. A unit
+with the foresight special lifts the shadow three ground/ford steps around it,
+for its own alliance only.
 """
 
 from __future__ import annotations
@@ -9,6 +11,9 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from backend.engine.state import GameState
+from backend.engine.utils import get_unit_faction, has_unit_special
+
+FORESIGHT_DEPTH = 3
 
 _PUBLIC_EVENT_TYPES = frozenset({
     "units_purchased",
@@ -55,13 +60,25 @@ def alliance_of(faction_defs: dict, faction_id: str | None, fallback: Callable[[
     return str(alliance) if alliance else "neutral"
 
 
+def _ground_neighbors(tdef: Any) -> set[str]:
+    """Ground and ford edges. Aerial links never grant sight."""
+    neighbors = list(getattr(tdef, "adjacent", None) or [])
+    neighbors.extend(getattr(tdef, "ford_adjacent", None) or [])
+    return {str(nid) for nid in neighbors if nid}
+
+
 def visible_territory_ids(
     state: GameState,
     territory_defs: dict,
     viewer_alliance: str,
     faction_defs: dict,
+    unit_defs: dict | None = None,
 ) -> set[str]:
-    """Owned land of this alliance, plus one ground or ford step, including coastal sea."""
+    """Owned land of this alliance, plus one ground or ford step, including coastal sea.
+
+    With unit defs, a foresight unit of this alliance adds every territory
+    within FORESIGHT_DEPTH ground/ford steps of where it stands.
+    """
     owned: list[str] = []
     for tid, terr in state.territories.items():
         if alliance_of(faction_defs, terr.owner) == viewer_alliance:
@@ -71,11 +88,46 @@ def visible_territory_ids(
         tdef = territory_defs.get(tid)
         if tdef is None:
             continue
-        neighbors = list(getattr(tdef, "adjacent", None) or [])
-        neighbors.extend(getattr(tdef, "ford_adjacent", None) or [])
-        for nid in neighbors:
-            if nid:
-                visible.add(str(nid))
+        visible.update(_ground_neighbors(tdef))
+    if unit_defs:
+        visible.update(
+            _foresight_ring(state, territory_defs, viewer_alliance, faction_defs, unit_defs)
+        )
+    return visible
+
+
+def _foresight_ring(
+    state: GameState,
+    territory_defs: dict,
+    viewer_alliance: str,
+    faction_defs: dict,
+    unit_defs: dict,
+) -> set[str]:
+    """Territories within FORESIGHT_DEPTH ground/ford steps of a viewer-alliance foresight unit."""
+    seeds: set[str] = set()
+    for tid, terr in state.territories.items():
+        for unit in terr.units or []:
+            if not has_unit_special(unit_defs.get(unit.unit_id), "foresight"):
+                continue
+            if alliance_of(faction_defs, get_unit_faction(unit, unit_defs)) != viewer_alliance:
+                continue
+            seeds.add(tid)
+            break
+    visible: set[str] = set()
+    frontier = set(seeds)
+    seen = set(seeds)
+    for _ in range(FORESIGHT_DEPTH + 1):
+        visible |= frontier
+        nxt: set[str] = set()
+        for tid in frontier:
+            tdef = territory_defs.get(tid)
+            if tdef is None:
+                continue
+            nxt |= _ground_neighbors(tdef) - seen
+        seen |= nxt
+        frontier = nxt
+        if not frontier:
+            break
     return visible
 
 
@@ -120,9 +172,10 @@ def apply_shadow_view(
     territory_defs: dict,
     faction_defs: dict,
     viewer_alliance: str,
+    unit_defs: dict | None = None,
 ) -> None:
     """Mutate a response state dict so this alliance cannot see past one territory."""
-    visible = visible_territory_ids(state, territory_defs, viewer_alliance, faction_defs)
+    visible = visible_territory_ids(state, territory_defs, viewer_alliance, faction_defs, unit_defs)
     territories = out.get("territories")
     shadowed: list[str] = []
     if isinstance(territories, dict):

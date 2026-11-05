@@ -1,4 +1,4 @@
-"""Shadow of war: one-step alliance sight, with no cavalry exception."""
+"""Shadow of war: one-step alliance sight, with no cavalry exception, widened by foresight."""
 
 from types import SimpleNamespace
 
@@ -9,7 +9,7 @@ from backend.engine.shadow import (
     filter_events_for_sight,
     visible_territory_ids,
 )
-from backend.engine.state import GameState, TerritoryState
+from backend.engine.state import GameState, TerritoryState, Unit
 
 
 def _terr(owner: str | None) -> TerritoryState:
@@ -59,6 +59,108 @@ def test_visible_ring_is_one_ground_step():
     state, territory_defs, faction_defs = _board()
     visible = visible_territory_ids(state, territory_defs, "good", faction_defs)
     assert visible == {"home", "near", "sea", "ford"}
+
+
+def _chain_board():
+    """a-b-c-d-e-f chain. Good owns only a; a foresight unit on b reaches e, not f."""
+    state = GameState(
+        turn_number=1,
+        current_faction="gondor",
+        phase="combat_move",
+        territories={
+            "a": _terr("gondor"),
+            "b": _terr("mordor"),
+            "c": _terr("mordor"),
+            "d": _terr("mordor"),
+            "e": _terr("mordor"),
+            "f": _terr("mordor"),
+        },
+        faction_resources={},
+        shadow_of_war=True,
+    )
+    territory_defs = {
+        "a": _tdef(["b"]),
+        "b": _tdef(["a", "c"]),
+        "c": _tdef(["b", "d"]),
+        "d": _tdef(["c", "e"]),
+        "e": _tdef(["d", "f"]),
+        "f": _tdef(["e"]),
+    }
+    faction_defs = {
+        "gondor": SimpleNamespace(alliance="good", parent=None),
+        "mordor": SimpleNamespace(alliance="evil", parent=None),
+    }
+    unit_defs = {
+        "gondor_scout": SimpleNamespace(faction="gondor", specials=["foresight"], tags=[]),
+        "mordor_scout": SimpleNamespace(faction="mordor", specials=["foresight"], tags=[]),
+        "gondor_infantry": SimpleNamespace(faction="gondor", specials=[], tags=[]),
+    }
+    return state, territory_defs, faction_defs, unit_defs
+
+
+def _place(state: GameState, tid: str, unit_id: str) -> None:
+    state.territories[tid].units.append(
+        Unit(
+            instance_id=f"{unit_id}_1",
+            unit_id=unit_id,
+            remaining_movement=2,
+            remaining_health=1,
+            base_movement=2,
+            base_health=1,
+        )
+    )
+
+
+def test_foresight_lifts_shadow_three_hops_and_no_further():
+    state, territory_defs, faction_defs, unit_defs = _chain_board()
+    assert visible_territory_ids(state, territory_defs, "good", faction_defs, unit_defs) == {"a", "b"}
+    _place(state, "b", "gondor_scout")
+    visible = visible_territory_ids(state, territory_defs, "good", faction_defs, unit_defs)
+    assert visible == {"a", "b", "c", "d", "e"}
+    assert "f" not in visible
+
+
+def test_foresight_only_helps_the_viewers_alliance():
+    state, territory_defs, faction_defs, unit_defs = _chain_board()
+    _place(state, "b", "mordor_scout")
+    visible = visible_territory_ids(state, territory_defs, "good", faction_defs, unit_defs)
+    assert visible == {"a", "b"}
+
+
+def test_foresight_unit_without_the_special_does_not_widen_the_ring():
+    state, territory_defs, faction_defs, unit_defs = _chain_board()
+    _place(state, "b", "gondor_infantry")
+    visible = visible_territory_ids(state, territory_defs, "good", faction_defs, unit_defs)
+    assert visible == {"a", "b"}
+
+
+def test_apply_shadow_view_redacts_only_past_the_foresight_ring():
+    state, territory_defs, faction_defs, unit_defs = _chain_board()
+    _place(state, "b", "gondor_scout")
+    out = {
+        "territories": {
+            tid: {"owner": terr.owner, "units": [{"instance_id": tid}]}
+            for tid, terr in state.territories.items()
+        },
+    }
+    apply_shadow_view(out, state, territory_defs, faction_defs, "good", unit_defs)
+    assert out["shadowed_territories"] == ["f"]
+    assert out["territories"]["e"]["units"]
+    assert out["territories"]["f"]["units"] == []
+
+
+def test_foresight_gate_is_closed_outside_shadow_of_war():
+    from backend.api.main import shadow_viewer_alliance
+
+    state = GameState(
+        turn_number=1,
+        current_faction="gondor",
+        phase="purchase",
+        territories={},
+        faction_resources={},
+    )
+    assert state.shadow_of_war is False
+    assert shadow_viewer_alliance("missing-game", object(), None, state) is None
 
 
 def test_redaction_clears_units_and_casualty_order():
