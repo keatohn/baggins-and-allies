@@ -759,6 +759,9 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
 .territory-panel-footer-owner {
   justify-self: end;
   min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
 }
 
 .defender-casualty-order {
@@ -780,6 +783,80 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
   object-fit: cover;
   border-radius: 50%;
   margin-top: 0.15rem;
+}
+
+/* Adjacency tip button — sits beside Original Owner / signal controls in the panel footer.
+   Specificity beats the small-screen `.sidebar button` padding/font rules. */
+.sidebar button.territory-adjacency-btn {
+  position: relative;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ink-faded);
+  border-radius: 50%;
+  background: var(--parchment-light);
+  color: var(--ink-faded);
+  cursor: help;
+  z-index: 5;
+}
+
+.sidebar button.territory-adjacency-btn svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sidebar button.territory-adjacency-btn:hover,
+.sidebar button.territory-adjacency-btn:focus-visible,
+.sidebar button.territory-adjacency-btn--open {
+  color: var(--ink);
+  border-color: var(--gold-dark);
+}
+
+/* Portal'd to document.body with fixed positioning: escapes .territory-panel
+   overflow:hidden and the sidebar's scroll clipping. */
+.territory-adj-tip {
+  position: fixed;
+  z-index: 1000;
+  max-width: min(260px, 70vw);
+  padding: 0.4rem 0.65rem;
+  border: 1.5px solid var(--gold-dark);
+  border-radius: 6px;
+  background: linear-gradient(180deg, var(--parchment-light) 0%, var(--parchment) 100%);
+  color: var(--ink);
+  font-family: var(--font-parchment);
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.4;
+  letter-spacing: 0;
+  text-align: left;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  /* Hide immediately on close; show after a short dwell so a quick pass doesn't flicker */
+  transition: opacity 0.12s ease, visibility 0s linear 0.12s;
+}
+
+.territory-adj-tip--visible {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.12s ease 0.18s, visibility 0s linear 0.18s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .territory-adj-tip {
+    transition: none;
+  }
 }
 
 .defender-casualty-order-label {
@@ -1597,6 +1674,26 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
   .territory-original-owner-logo {
     width: 10px;
     height: 10px;
+  }
+
+  .territory-panel-footer-owner {
+    gap: 0.25rem;
+  }
+
+  .sidebar button.territory-adjacency-btn {
+    width: 16px;
+    height: 16px;
+  }
+
+  .sidebar button.territory-adjacency-btn svg {
+    width: 11px;
+    height: 11px;
+  }
+
+  .territory-adj-tip {
+    max-width: min(240px, 78vw);
+    font-size: 0.72rem;
+    padding: 0.35rem 0.55rem;
   }
 
   /* Territory panel — compact header bar (Select Territory / territory name) */

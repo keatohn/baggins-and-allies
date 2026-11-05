@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import type { GameState, GamePhase, GameEvent, DeclaredBattle, PendingMove } from '../types/game';
 import { mergeGroupedEventLogForDisplay } from '../utils/eventLogDisplay';
 import { compareUnitStacksByMapOrder } from '../utils/unitStackSort';
@@ -65,6 +66,8 @@ interface SidebarProps {
     stronghold: boolean;
     produces: number;
     adjacent: string[];
+    aerial_adjacent?: string[];
+    ford_adjacent?: string[];
     hasCamp?: boolean;
     hasPort?: boolean;
     isCapital?: boolean;
@@ -624,6 +627,88 @@ function Sidebar({
   const phaseConfig = PHASE_CONFIG[gameState.phase] || { buttons: [] };
   const owner = territory?.owner;
   const ownerData = owner ? factionData[owner] : null;
+
+  // Adjacency tip lines: Neighbors (land first, then water; alphabetical within each),
+  // then Aerial / Ford only when non-empty. Water zones stay in Neighbors — a land
+  // territory lists its sea zones and a sea zone lists its land destinations.
+  const adjacencyTipLines = useMemo(() => {
+    if (!selectedTerritory || !territory) return null;
+    const displayName = (id: string) => territoryData[id]?.name || id.replace(/_/g, ' ');
+    const sortedNames = (ids: readonly string[] | undefined) => {
+      if (!ids || ids.length === 0) return [];
+      const land: string[] = [];
+      const water: string[] = [];
+      for (const id of ids) (isWaterTid(id, territoryData) ? water : land).push(id);
+      const cmp = (a: string, b: string) => displayName(a).localeCompare(displayName(b));
+      land.sort(cmp);
+      water.sort(cmp);
+      return [...land, ...water].map(displayName);
+    };
+    const lines: string[] = [];
+    const neighbors = sortedNames(territory.adjacent);
+    if (neighbors.length > 0) lines.push(`Neighbors: ${neighbors.join(', ')}`);
+    const aerial = sortedNames(territory.aerial_adjacent);
+    if (aerial.length > 0) lines.push(`Aerial: ${aerial.join(', ')}`);
+    const fords = sortedNames(territory.ford_adjacent);
+    if (fords.length > 0) lines.push(`Ford: ${fords.join(', ')}`);
+    return lines.length > 0 ? lines : null;
+  }, [selectedTerritory, territory, territoryData]);
+
+  // Open state is keyed by territory id so switching selection closes the tip without an effect.
+  const [adjTipOpenFor, setAdjTipOpenFor] = useState<string | null>(null);
+  const adjTipOpen = adjTipOpenFor !== null && adjTipOpenFor === selectedTerritory;
+  const [adjTipPos, setAdjTipPos] = useState<{ left: number; top: number } | null>(null);
+  const adjBtnRef = useRef<HTMLButtonElement | null>(null);
+  const adjTipRef = useRef<HTMLDivElement | null>(null);
+  const adjPointerTypeRef = useRef('mouse');
+  const openAdjTip = () => {
+    if (selectedTerritory) setAdjTipOpenFor(selectedTerritory);
+  };
+  const closeAdjTip = () => setAdjTipOpenFor(null);
+  const toggleAdjTip = () => {
+    if (!selectedTerritory) return;
+    setAdjTipOpenFor((cur) => (cur === selectedTerritory ? null : selectedTerritory));
+  };
+
+  // Touch (and iOS, where tapping a button may not focus it): tapping outside closes the tip.
+  useEffect(() => {
+    if (!adjTipOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (adjBtnRef.current?.contains(e.target as Node)) return;
+      setAdjTipOpenFor(null);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [adjTipOpen]);
+
+  // Fixed positioning so the tip escapes .territory-panel overflow:hidden and the
+  // sidebar's scroll clipping. Keep the last position while closing so the fade-out plays.
+  useLayoutEffect(() => {
+    if (!adjTipOpen || !adjacencyTipLines) return;
+    const place = () => {
+      const btn = adjBtnRef.current;
+      if (!btn) return;
+      const b = btn.getBoundingClientRect();
+      const t = adjTipRef.current?.getBoundingClientRect();
+      const w = t?.width ?? 0;
+      const h = t?.height ?? 0;
+      const gap = 8;
+      // Prefer above the button, right-aligned to it; flip below / clamp inside the viewport.
+      let left = b.right - w;
+      let top = b.top - gap - h;
+      if (top < 4) top = b.bottom + gap;
+      if (left < 4) left = 4;
+      else if (left + w > window.innerWidth - 4) left = window.innerWidth - 4 - w;
+      setAdjTipPos({ left, top });
+    };
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [adjTipOpen, adjacencyTipLines]);
 
   /** Naval battle in a sea zone must resolve before a sea raid that stages from that same zone. */
   const { sortedDeclaredBattles, isSeaRaidBlockedByPendingNaval } = useMemo(() => {
@@ -1715,6 +1800,50 @@ function Sidebar({
                       </div>
                     );
                   })()}
+                  {adjacencyTipLines ? (
+                    <>
+                      <button
+                        type="button"
+                        ref={adjBtnRef}
+                        className={`territory-adjacency-btn${adjTipOpen ? ' territory-adjacency-btn--open' : ''}`}
+                        aria-label="Territory neighbors"
+                        aria-describedby={adjTipOpen ? 'territory-adj-tip' : undefined}
+                        onPointerDown={(e) => { adjPointerTypeRef.current = e.pointerType; }}
+                        onPointerEnter={(e) => { if (e.pointerType === 'mouse') openAdjTip(); }}
+                        onPointerLeave={(e) => { if (e.pointerType === 'mouse') closeAdjTip(); }}
+                        onBlur={closeAdjTip}
+                        onClick={(e) => {
+                          // Touch (and keyboard activation, detail 0) toggles; on hover-capable
+                          // pointers hover already manages open/close, so a click just keeps it open.
+                          if (e.detail === 0 || adjPointerTypeRef.current !== 'mouse') {
+                            toggleAdjTip();
+                          } else {
+                            openAdjTip();
+                          }
+                        }}
+                      >
+                        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                          <rect x="2.5" y="3.5" width="7.5" height="9" rx="1.5" />
+                          <path d="M7 8h6.5M11.2 5.8 13.5 8l-2.3 2.2" />
+                        </svg>
+                      </button>
+                      {createPortal(
+                        <div
+                          ref={adjTipRef}
+                          id="territory-adj-tip"
+                          className={`territory-adj-tip${adjTipOpen ? ' territory-adj-tip--visible' : ''}`}
+                          role="tooltip"
+                          aria-hidden={!adjTipOpen}
+                          style={adjTipPos ?? { left: -99999, top: -99999 }}
+                        >
+                          {adjacencyTipLines.map((line) => (
+                            <div key={line} className="territory-adj-tip__line">{line}</div>
+                          ))}
+                        </div>,
+                        document.body
+                      )}
+                    </>
+                  ) : null}
                 </div>
               </div>
             )}
