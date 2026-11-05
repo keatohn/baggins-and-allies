@@ -11,7 +11,7 @@ import pytest
 from copy import deepcopy
 
 from backend.engine.state import Unit, PendingMove, ActiveCombat
-from backend.engine.definitions import load_static_definitions, load_starting_setup
+from backend.engine.definitions import UnitDefinition, load_static_definitions, load_starting_setup
 from backend.engine.actions import (
     move_units,
     initiate_combat,
@@ -29,6 +29,7 @@ from backend.engine.utils import (
 )
 from backend.engine.queries import (
     validate_action,
+    get_sea_raid_targets,
     get_valid_offload_sea_zones,
     get_retreat_options,
     participates_in_sea_hex_naval_combat,
@@ -340,6 +341,147 @@ def test_sea_raid_onto_own_or_allied_land_blocked(state_with_sea_units):
         get_unit_faction(u, unit_defs) != "harad"
         for u in state.territories["harondor"].units
     ), "harad passengers must not land on allied/own hex"
+
+
+def test_sea_raid_targets_exclude_own_and_allied_land(state_with_sea_units):
+    """
+    M4: get_sea_raid_targets must not advertise land validate_action rejects —
+    own land ("Cannot attack own territory") and allied land ("allied faction").
+    Every advertised pair must itself pass validate_action (the real contract).
+    """
+    state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs = state_with_sea_units
+    umbar = state.territories["umbar"]
+    harondor = state.territories["harondor"]
+    assert umbar.owner == "harad"
+
+    def pairs():
+        return {
+            (t["territory_id"], t["sea_zone_id"])
+            for t in get_sea_raid_targets(state, "harad", faction_defs, unit_defs, territory_defs)
+        }
+
+    def raid(tid, sid="sea_zone_11"):
+        return initiate_combat(
+            "harad", tid, dice_rolls={"attacker": [1], "defender": []}, sea_zone_id=sid
+        )
+
+    def check(tid):
+        return validate_action(
+            state, raid(tid), unit_defs, territory_defs, faction_defs, camp_defs, port_defs
+        )
+
+    # Control: neutral land is advertised and valid.
+    assert ("harondor", "sea_zone_11") in pairs()
+    assert check("harondor").valid
+
+    # Own land was advertised pre-fix while validation rejects it.
+    assert ("umbar", "sea_zone_11") not in pairs()
+    vr = check("umbar")
+    assert not vr.valid and "own territory" in vr.error
+
+    # Every advertised pair must validate as initiate_combat.
+    for t in get_sea_raid_targets(state, "harad", faction_defs, unit_defs, territory_defs):
+        vr = validate_action(
+            state, raid(t["territory_id"], t["sea_zone_id"]),
+            unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+        )
+        assert vr.valid, f"advertised target {t} rejected: {vr.error}"
+
+    # Allied-owned (mordor is evil, same alliance as harad): excluded and rejected.
+    harondor.owner = "mordor"
+    assert ("harondor", "sea_zone_11") not in pairs()
+    vr = check("harondor")
+    assert not vr.valid and "allied" in vr.error
+
+    # Enemy-owned: advertised again (no over-blocking).
+    harondor.owner = "gondor"
+    assert ("harondor", "sea_zone_11") in pairs()
+    assert check("harondor").valid
+
+
+def test_sea_raid_targets_require_land_passengers_not_aerials(state_with_sea_units):
+    """
+    M4: aerials in a sea zone must not count as raid passengers. Validation's raid roster
+    requires is_land_unit, so an aerial-only fleet advertises targets that then fail
+    validation with "No attacking units". A real land passenger makes targets return.
+    """
+    state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs = state_with_sea_units
+    unit_defs = dict(unit_defs)
+    unit_defs["harad_dummy_aerial"] = UnitDefinition(
+        id="harad_dummy_aerial",
+        display_name="Dummy Harad Aerial",
+        faction="harad",
+        archetype="aerial",
+        tags=["aerial"],
+        attack=1,
+        defense=1,
+        movement=4,
+        health=1,
+        cost={},
+    )
+    sea = state.territories["sea_zone_11"]
+    harondor = state.territories["harondor"]
+    harondor.units.clear()
+    sea.units.clear()
+    sea.units.append(_make_unit(state, "harad", "black_ship", unit_defs))
+    sea.units.append(_make_unit(state, "harad", "harad_dummy_aerial", unit_defs))
+
+    targets = get_sea_raid_targets(state, "harad", faction_defs, unit_defs, territory_defs)
+    assert not any(t["sea_zone_id"] == "sea_zone_11" for t in targets), (
+        "aerial-only fleet must not advertise sea raid targets"
+    )
+    vr = validate_action(
+        state,
+        initiate_combat(
+            "harad", "harondor",
+            dice_rolls={"attacker": [1], "defender": []},
+            sea_zone_id="sea_zone_11",
+        ),
+        unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    assert not vr.valid and "No attacking units" in vr.error
+
+    # Control: a real land passenger re-enables advertising and validation.
+    sea.units.append(_make_unit(state, "harad", "corsair_of_umbar", unit_defs))
+    targets = get_sea_raid_targets(state, "harad", faction_defs, unit_defs, territory_defs)
+    assert any(
+        t["territory_id"] == "harondor" and t["sea_zone_id"] == "sea_zone_11"
+        for t in targets
+    )
+    vr = validate_action(
+        state,
+        initiate_combat(
+            "harad", "harondor",
+            dice_rolls={"attacker": [1], "defender": []},
+            sea_zone_id="sea_zone_11",
+        ),
+        unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    assert vr.valid, vr.error
+
+
+def test_sea_raid_targets_gated_while_hostile_fleet_in_staging_zone(state_with_sea_units):
+    """
+    M4 regression guard: a staging zone holding a hostile listable fleet must not advertise
+    raid targets — validation rejects with "must be resolved before sea raid" (issue #92 gate).
+    """
+    state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs = state_with_sea_units
+    sea = state.territories["sea_zone_11"]
+    sea.units.append(_make_unit(state, "gondor", "gondor_ship", unit_defs))
+
+    targets = get_sea_raid_targets(state, "harad", faction_defs, unit_defs, territory_defs)
+    assert not any(t["sea_zone_id"] == "sea_zone_11" for t in targets)
+
+    vr = validate_action(
+        state,
+        initiate_combat(
+            "harad", "harondor",
+            dice_rolls={"attacker": [1], "defender": []},
+            sea_zone_id="sea_zone_11",
+        ),
+        unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    assert not vr.valid and "must be resolved" in vr.error
 
 
 def test_sea_raid_combat_attacker_win_moves_to_territory(state_with_sea_units):

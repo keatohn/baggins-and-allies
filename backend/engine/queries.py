@@ -2998,7 +2998,8 @@ def get_sea_raid_targets(
 ) -> list[dict[str, Any]]:
     """
     Land territories that can be sea-raided: adjacent to a sea zone where the faction
-    has at least one naval unit, at least one passenger (land unit), and no enemy units.
+    has at least one naval unit and at least one land passenger, the staging zone has no
+    unresolved naval battle, and the target is not own or allied-owned.
     Returns list of { territory_id, sea_zone_id } for the frontend to show as sea raid options.
     """
     if not territory_defs:
@@ -3011,7 +3012,6 @@ def get_sea_raid_targets(
             continue
         my_naval = []
         my_land = []
-        enemy_units = False
         for unit in territory.units:
             uf = get_unit_faction(unit, unit_defs)
             if faction_acts_as(faction_defs, uf, faction_id):
@@ -3020,14 +3020,13 @@ def get_sea_raid_targets(
                     my_naval.append(unit)
                 elif _is_naval_unit(ud) or _is_river_unit(ud):
                     continue
-                else:
+                elif is_land_unit(ud):
                     my_land.append(unit)
-            elif uf is not None:
-                other_alliance = faction_defs.get(uf, FactionDefinition("", "", "", "", "")).alliance
-                if other_alliance != attacker_alliance:
-                    enemy_units = True
-                    break
-        if enemy_units or not my_naval or not my_land:
+        if not my_naval or not my_land:
+            continue
+        if staging_zone_blocks_sea_raid(
+            state, sea_zone_id, faction_id, unit_defs, faction_defs, territory_defs
+        ):
             continue
         # Adjacent land: from sea's adjacent list, or any land that lists this sea zone (symmetric)
         adj_lands = set()
@@ -3040,7 +3039,19 @@ def get_sea_raid_targets(
                 continue
             if sea_zone_id in (getattr(land_def, "adjacent", []) or []):
                 adj_lands.add(tid)
-        for adj_id in adj_lands:
+        for adj_id in sorted(adj_lands):
+            adj_state = state.territories.get(adj_id)
+            if adj_state is None:
+                continue
+            owner = adj_state.owner
+            if owner is not None:
+                if owner == faction_id:
+                    continue
+                owner_alliance = faction_defs.get(
+                    owner, FactionDefinition("", "", "", "", "")
+                ).alliance
+                if attacker_alliance and owner_alliance == attacker_alliance:
+                    continue
             result.append({"territory_id": adj_id, "sea_zone_id": sea_zone_id})
     return result
 
