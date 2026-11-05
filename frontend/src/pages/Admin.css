@@ -3776,3 +3776,179 @@ body:has(.combat-sim-modal-overlay) {
     font-size: 1.15rem;
   }
 }
+
+/* --- Admin Map Builder (Maps editor → Builder pill) --- */
+
+.mapbuilder {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.mapbuilder__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.85rem;
+}
+
+.mapbuilder__size {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.mapbuilder__size .admin-form__input--narrow {
+  width: 5.5rem;
+  min-width: 0;
+}
+
+.mapbuilder__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.mapbuilder__stats {
+  margin-left: auto;
+  font-size: 0.85rem;
+  color: var(--ink-faded);
+  white-space: nowrap;
+}
+
+.mapbuilder__viewport {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--parchment);
+  border: 1px solid var(--ink-faded);
+  border-radius: 8px;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.mapbuilder__viewport--select {
+  cursor: default;
+}
+
+.mapbuilder__world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+.mapbuilder__svg {
+  display: block;
+  background: rgba(255, 253, 244, 0.55);
+  outline: 1px dashed var(--ink-faded);
+}
+
+.mapbuilder__border {
+  stroke: var(--ink);
+  stroke-linecap: round;
+  fill: none;
+}
+
+.mapbuilder__border--selected {
+  stroke: var(--gold-dark);
+}
+
+.mapbuilder__border--pen {
+  stroke: #2f6fed;
+}
+
+.mapbuilder__preview {
+  stroke: #2f6fed;
+  stroke-dasharray: 6 5;
+  fill: none;
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+.mapbuilder__joint {
+  fill: var(--parchment-light);
+  stroke: var(--ink);
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+  cursor: pointer;
+}
+
+.mapbuilder__joint--selected {
+  fill: var(--gold);
+}
+
+.mapbuilder__joint--pen {
+  fill: #2f6fed;
+  stroke: #1d4fbf;
+}
+
+.mapbuilder__label circle {
+  fill: var(--gold-dark);
+  stroke: var(--ink);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.mapbuilder__label text {
+  fill: var(--ink);
+  font-family: var(--font-parchment);
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: var(--parchment-light);
+  stroke-width: 3px;
+  pointer-events: none;
+}
+
+.mapbuilder__label--selected text {
+  fill: var(--gold-dark);
+}
+
+.mapbuilder__status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  align-items: baseline;
+  font-size: 0.85rem;
+  color: var(--ink-faded);
+  min-height: 1.2em;
+}
+
+.mapbuilder__hint {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mapbuilder__sel {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.mapbuilder__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.mapbuilder__textarea {
+  width: 100%;
+  min-height: 12rem;
+  max-height: 40vh;
+  box-sizing: border-box;
+}
+
+.mapbuilder__warnings {
+  margin: 0 0 0.6rem;
+  padding-left: 1.1rem;
+  color: #9a3412;
+  font-size: 0.88rem;
+}

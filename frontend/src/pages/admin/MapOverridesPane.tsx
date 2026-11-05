@@ -22,6 +22,7 @@ import {
   type LandscapeManifest,
 } from './landscape';
 import { loadTerritorySvgPaths, sameTerritoryId, type TerritoryPathData } from './territoryGraph';
+import { MapBuilder } from './MapBuilder';
 
 type Pt = { x: number; y: number };
 type Dict = Record<string, Record<string, unknown>>;
@@ -205,7 +206,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
-  const [editorTab, setEditorTab] = useState<'icon' | 'landscape'>('icon');
+  const [editorTab, setEditorTab] = useState<'icon' | 'landscape' | 'builder'>('icon');
   const [manifest, setManifest] = useState<LandscapeManifest>({});
   const [placing, setPlacing] = useState<{ cat: string; img: string } | null>(null);
   const [borderMode, setBorderMode] = useState(false);
@@ -482,6 +483,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (editorTab === 'builder') return; // the Builder owns Escape (cancel stroke / close its dialogs)
       if (e.key === 'Escape' && copyOpen) {
         e.stopPropagation();
         setCopyOpen(false);
@@ -519,7 +521,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [discardOpen, saving, dirty, onClose, placing, band, multiSel, copyOpen]);
+  }, [discardOpen, saving, dirty, onClose, placing, band, multiSel, copyOpen, editorTab]);
 
   const changeMap = (next: string) => {
     if (!next || next === mapBase) return;
@@ -1756,7 +1758,9 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   }, [selected, selectedEntry, territories]);
 
   const description =
-    editorTab === 'landscape'
+    editorTab === 'builder'
+      ? 'Draw border lines once — neighbours share the same line. Set the map size, sketch with Pen/Pencil, then Label each enclosed region; Build SVG converts the graph into closed territory paths (saved work autosaves in this browser).'
+      : editorTab === 'landscape'
       ? 'Place terrain art constrained by each territory’s type. Auto-generate fills interiors; Border mode snaps to outlines. Emoji fallback stays until interior art exists for that type. Save applies to every setup using this map.'
       : spots
         ? 'Four dots per territory: blue units · red production/sea number · yellow faction logo · green other icons (territory type, homes, camps, ports, signals, rings). Pick a territory, switch it to Override, then drag its dots. Save applies to every setup using this map.'
@@ -1799,6 +1803,21 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                 onClick={() => setEditorTab('landscape')}
               >
                 Landscape
+              </button>
+              <button
+                type="button"
+                className={`admin-mapview__toggle-btn${editorTab === 'builder' ? ' admin-mapview__toggle-btn--active' : ''}`}
+                aria-pressed={editorTab === 'builder'}
+                onClick={() => {
+                  setEditorTab('builder');
+                  setPlacing(null);
+                  setSelectedPlacement(null);
+                  setCursorMode('navigate');
+                  setBand(null);
+                  setMultiSel(new Set());
+                }}
+              >
+                Builder
               </button>
             </div>
             <label className="admin-graph__prop">
@@ -1875,14 +1894,16 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                 </button>
               </>
             ) : null}
-            <button
-              type="button"
-              className={`admin-page__btn${dirty ? ' admin-page__btn--primary' : ''}`}
-              disabled={saving || !dirty}
-              onClick={() => void save()}
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
+            {editorTab === 'builder' ? null : (
+              <button
+                type="button"
+                className={`admin-page__btn${dirty ? ' admin-page__btn--primary' : ''}`}
+                disabled={saving || !dirty}
+                onClick={() => void save()}
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            )}
             <button type="button" className="admin-page__btn" onClick={requestClose} disabled={saving}>
               Close
             </button>
@@ -1901,6 +1922,12 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                 </li>
               ))}
             </ul>
+          ) : editorTab === 'builder' ? (
+            <p className="admin-form__micro mapov-landscape-hint">
+              Each border is stored once and shared by both neighbouring regions — no more editing two territory
+              paths in sync. Outer frame borders are created from the map size; ends snap onto joints or split
+              borders they land on so strokes join the shared graph.
+            </p>
           ) : (
             <p className="admin-form__micro mapov-landscape-hint">
               {cursorMode === 'select'
@@ -1919,7 +1946,11 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
         {loading ? <p className="admin-form__micro">Loading map…</p> : null}
         {err ? <p className="admin-page__error">{err}</p> : null}
         {saveError ? <p className="admin-page__error">{saveError}</p> : null}
-        {!loading && !err ? (
+        {!loading && !err && editorTab === 'builder' ? (
+          <div className="admin-graph__body">
+            <MapBuilder />
+          </div>
+        ) : !loading && !err ? (
           <div className="admin-graph__body">
             <div className="admin-graph__side mapov-side">
               <input
@@ -2340,7 +2371,9 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
           </div>
         ) : null}
         <p className="admin-graph__status">
-          {editorTab === 'landscape'
+          {editorTab === 'builder'
+            ? null
+            : editorTab === 'landscape'
             ? selected
               ? `${territoryLabel(selected, territories)} · ${selectedTerrainType || 'land'} · ${selectedPlacements.length} placed${landscapeCount ? ` · ${landscapeCount} total` : ''}`
               : 'No territory selected'
