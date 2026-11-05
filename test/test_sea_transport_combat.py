@@ -731,6 +731,64 @@ def test_ai_sea_raid_names_the_boat_so_must_attack_clears(wotr_defs):
     ]
 
 
+def test_validate_end_phase_blocks_when_loaded_boat_must_attack(wotr_defs):
+    """validate_action(end_phase) must reject pre-apply when a loaded boat has not attacked yet.
+
+    Residual of naval audit H2: the reducer raises post-apply if loaded_naval_must_attack
+    remains, but validate_action previously only checked idle-sail/ladder — so end_phase
+    validated clean then blew up in apply_action (unhandled 500 / AI softlock).
+    """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    ship_def = unit_defs.get("black_ship")
+    if ship_def is not None:
+        setattr(ship_def, "transport_capacity", 2)
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    sea_11 = state.territories.get("sea_zone_11")
+    harondor = state.territories.get("harondor")
+    assert sea_11 is not None and harondor is not None
+    sea_11.units.clear()
+    ship = _make_unit(state, "harad", "black_ship", unit_defs)
+    land = _make_unit(state, "harad", "corsair_of_umbar", unit_defs)
+    harondor.units.append(land)
+    sea_11.units.append(ship)
+    if harondor.owner == "harad":
+        harondor.owner = "gondor"
+    state.current_faction = "harad"
+    state.phase = "combat_move"
+
+    load_a = move_units(
+        "harad", "harondor", "sea_zone_11", [land.instance_id],
+        move_type="load", load_onto_boat_instance_id=ship.instance_id,
+    )
+    assert validate_action(state, load_a, unit_defs, territory_defs, faction_defs, camp_defs, port_defs).valid
+    state, _ = apply_action(state, load_a, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    # Must-attack is set when the pending load applies (sim / end_phase), not at declaration.
+    sim = get_state_after_pending_moves(state, "combat_move", unit_defs, territory_defs, faction_defs)
+    assert ship.instance_id in (sim.loaded_naval_must_attack_instance_ids or [])
+
+    # No attack declared: validate must fail pre-apply with the same rule the reducer enforces.
+    ve = validate_action(state, end_phase("harad"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert not ve.valid, "end_phase must be rejected while a loaded boat still must attack"
+    assert "must attack" in (ve.error or "")
+    with pytest.raises(ValueError, match="must attack"):
+        apply_action(state, end_phase("harad"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+
+    # Declaring a boat-inclusive raid unblocks validation (pending move clears must-attack on sim).
+    raid = move_units("harad", "sea_zone_11", "harondor", [ship.instance_id, land.instance_id], move_type="offload")
+    vr = validate_action(state, raid, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert vr.valid, vr.error
+    state, _ = apply_action(state, raid, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    ve2 = validate_action(state, end_phase("harad"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert ve2.valid, ve2.error
+    state, _ = apply_action(state, end_phase("harad"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert not state.loaded_naval_must_attack_instance_ids
+
+
 def test_expand_offload_includes_pending_when_request_lists_embarked_passengers(wotr_defs):
     """Regression: do not skip pending-load splice when IDs already include embarked land units in the sea hex."""
     unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
