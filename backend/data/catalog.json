@@ -49,6 +49,12 @@
       "description": "Can cross rivers at a ford and bring up to 2 units with it"
     },
     {
+      "id": "foresight",
+      "name": "Foresight",
+      "display_code": "FS",
+      "description": "Lifts the shadow from territories up to 3 spaces away; Shadow of War only"
+    },
+    {
       "id": "forest",
       "name": "Forest",
       "display_code": "FR",
