@@ -857,15 +857,20 @@
 }
 
 .unit-stats-modal .header-stats-table.header-stats-table--units col.stats-units-col-name {
-  width: 24%;
+  width: 22%;
 }
 
 .unit-stats-modal .header-stats-table.header-stats-table--units col.stats-units-col-num {
   width: 6%;
 }
 
+.unit-stats-modal .header-stats-table.header-stats-table--units col.stats-units-col-tc,
+.unit-stats-modal .header-stats-table.header-stats-table--units col.stats-units-col-tr {
+  width: 4.5%;
+}
+
 .unit-stats-modal .header-stats-table.header-stats-table--units col.stats-units-col-specials {
-  width: 40%;
+  width: 31%;
 }
 
 /* Admin formula columns after SP */
@@ -874,7 +879,7 @@
 }
 
 .unit-stats-modal .header-stats-table.header-stats-table--extra col.stats-units-col-specials {
-  width: 26%;
+  width: 24%;
 }
 
 .unit-stats-modal .header-stats-table.header-stats-table--extra col.stats-units-col-extra {
@@ -922,9 +927,9 @@
   box-sizing: border-box;
 }
 
-/* Extra gap between right-aligned HP and left-aligned SP (no vertical rule) */
-.unit-stats-modal .header-stats-table.header-stats-table--units thead th:nth-child(7),
-.unit-stats-modal .header-stats-table.header-stats-table--units tbody td:nth-child(7) {
+/* Extra gap between right-aligned TR (last numeric col) and left-aligned SP (no vertical rule) */
+.unit-stats-modal .header-stats-table.header-stats-table--units thead th:nth-child(9),
+.unit-stats-modal .header-stats-table.header-stats-table--units tbody td:nth-child(9) {
   padding-right: 0.9rem;
 }
 
@@ -942,10 +947,10 @@
   line-height: 1.3;
 }
 
-/* Unit stats: default cap (≥768px uses flex lock + 920–960px) */
+/* Unit stats: default cap (≥768px uses flex lock + 1010–1050px; widened for TC/TR cols) */
 .unit-stats-modal {
   min-width: 0;
-  max-width: min(920px, 98vw);
+  max-width: min(1010px, 98vw);
 }
 
 /* Frozen (sticky) unit-stats column headers — opaque fill + shadow so rows don’t read through */
@@ -1719,7 +1724,7 @@
 
   .unit-stats-modal {
     width: auto;
-    max-width: min(920px, 98vw);
+    max-width: min(1010px, 98vw);
   }
 
   .stats-modal .header-stats-table th,
@@ -1745,7 +1750,7 @@
   }
 
   .unit-stats-modal {
-    max-width: min(960px, 97vw);
+    max-width: min(1050px, 97vw);
   }
 
   .stats-modal-body,
@@ -1820,8 +1825,8 @@
   }
 
   .modal-overlay > .modal.unit-stats-modal {
-    width: min(920px, 98vw) !important;
-    max-width: min(920px, 98vw) !important;
+    width: min(1010px, 98vw) !important;
+    max-width: min(1010px, 98vw) !important;
     min-width: 0 !important;
     flex: 0 0 auto;
     box-sizing: border-box;
@@ -1874,13 +1879,13 @@
   }
 
   .modal-overlay > .modal.unit-stats-modal {
-    width: min(960px, 97vw) !important;
-    max-width: min(960px, 97vw) !important;
+    width: min(1050px, 97vw) !important;
+    max-width: min(1050px, 97vw) !important;
   }
 
   .modal-overlay > .modal.unit-stats-modal.unit-stats-modal--wide {
-    width: min(1180px, 97vw) !important;
-    max-width: min(1180px, 97vw) !important;
+    width: min(1290px, 97vw) !important;
+    max-width: min(1290px, 97vw) !important;
   }
 }
 

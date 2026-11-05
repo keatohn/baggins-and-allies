@@ -1395,6 +1395,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         dice: u.dice ?? 1,
         movement: u.movement,
         health: u.health,
+        transportCapacity: typeof u.transport_capacity === 'number' && Number.isFinite(u.transport_capacity) ? u.transport_capacity : 0,
+        transportable: Array.isArray(u.tags) && u.tags.includes('transportable'),
         specials: getUnitSpecials(u, homeNames.length ? { homeTerritoryDisplayNames: homeNames } : undefined),
         purchasable: u.purchasable !== false,
         hero: typeof u.hero_id === 'string' && u.hero_id.trim() !== '',

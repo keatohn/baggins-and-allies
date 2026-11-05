@@ -173,6 +173,8 @@ export function previewStatsFromBundle(
       dice: asNumber(u.dice, 1),
       movement: asNumber(u.movement),
       health: asNumber(u.health),
+      transportCapacity: asNumber(u.transport_capacity),
+      transportable: Array.isArray(u.tags) && u.tags.includes('transportable'),
       specials: unitSpecialLabels(u.specials, specials, homeNames),
       purchasable: u.purchasable !== false,
       hero: asString(u.hero_id).trim() !== '',
