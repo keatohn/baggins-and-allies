@@ -55,6 +55,7 @@ def _get_initiate_rosters(
 ) -> tuple[list, list]:
     """Attackers and defenders for an initiate_combat on territory_id (optional sea raid)."""
     from backend.engine.definitions import faction_acts_as
+    from backend.engine.reducer import _land_combat_unit_side
     from backend.engine.utils import get_unit_faction
 
     territory = state.territories.get(territory_id)
@@ -90,12 +91,9 @@ def _get_initiate_rosters(
             [
                 u for u in territory.units
                 if ud.get(u.unit_id)
-                and not faction_acts_as(fd, getattr(ud[u.unit_id], "faction", None), attacker_faction)
-                and (
-                    getattr(fd.get(getattr(ud[u.unit_id], "faction", None)), "alliance", None)
-                    if fd.get(getattr(ud[u.unit_id], "faction", None))
-                    else None
-                ) != attacker_alliance
+                and _land_combat_unit_side(
+                    u, attacker_faction, attacker_alliance, ud, fd
+                ) == "defender"
             ],
             key=lambda u: u.instance_id,
         )
@@ -113,10 +111,8 @@ def _get_initiate_rosters(
         u_faction = get_unit_faction(u, ud)
         if faction_acts_as(fd, u_faction, attacker_faction):
             attackers.append(u)
-        elif u_faction is not None:
-            u_alliance = getattr(fd.get(u_faction), "alliance", None) if fd.get(u_faction) else None
-            if u_alliance != attacker_alliance:
-                defenders.append(u)
+        elif _land_combat_unit_side(u, attacker_faction, attacker_alliance, ud, fd) == "defender":
+            defenders.append(u)
     attackers.sort(key=lambda u: u.instance_id)
     defenders.sort(key=lambda u: u.instance_id)
     return attackers, defenders

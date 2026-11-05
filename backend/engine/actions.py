@@ -121,8 +121,9 @@ def initiate_combat(
     attackers and defenders present.
 
     initiate_combat resolves battle in that territory:
-    - Attackers = units owned by current faction in the territory
-    - Defenders = units owned by territory owner in the territory
+    - Attackers = the current faction's units in the territory (including its subfactions)
+    - Defenders = every other factioned unit in the territory, including garrisons from
+      an allied faction — units in the territory defend it
 
     dice_rolls must be provided for round 1 (deterministic, no RNG in reducer).
 

@@ -284,9 +284,8 @@ def test_sea_raid_empty_land_conquer(state_with_sea_units):
 def test_sea_raid_onto_own_or_allied_land_blocked(state_with_sea_units):
     """
     Regression (naval audit High #1): a sea raid may not target the attacker's own or allied
-    land. Same-alliance units on the hex are bystanders (not defenders), so the old
-    empty-defender path conquered an ally's hex and set pending_captures (destroying their camp
-    before the liberation rule restored ownership).
+    land. Units on the hex defend it, so raiding an ally's territory would fight (and could
+    destroy) our own ally's garrison and camp.
     Assert BOTH that own/allied raids now fail validate + apply AND that enemy/neutral targets
     remain valid raid targets (no over-blocking).
     """
