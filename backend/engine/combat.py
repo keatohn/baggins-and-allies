@@ -1603,6 +1603,8 @@ def resolve_siegeworks_round(
     - ladder: does not roll; transport_capacity per ladder = infantry (climbs_ladder) bypassing stronghold in round 1+.
     - Other siegework: normal hits to stronghold then overflow to defender units.
     Non-siegework attackers with ram also roll here vs stronghold only.
+    attacker_effective_dice_override / defender_effective_dice_override (e.g. ring bonus
+    dice) set per-unit dice counts for both roll consumption and hit counting.
     """
     attacker_siegework = [
         u for u in attacker_units if _is_siegework_unit(unit_defs.get(u.unit_id))]
@@ -1630,7 +1632,12 @@ def resolve_siegeworks_round(
     roll_idx = 0
     for u in rolling_attacker:
         ud = unit_defs.get(u.unit_id)
-        dice_count = getattr(ud, "dice", 1)
+        dice_count = (
+            attacker_effective_dice_override.get(
+                u.instance_id, getattr(ud, "dice", 1))
+            if attacker_effective_dice_override is not None
+            else getattr(ud, "dice", 1)
+        )
         rolls_for_unit: list[int] = []
         for _ in range(dice_count):
             if roll_idx < len(attacker_rolls):
@@ -1641,6 +1648,7 @@ def resolve_siegeworks_round(
                 ram_hits_total += _count_hits(
                     [u], rolls_for_unit, unit_defs, is_attacker=True,
                     stat_modifiers=stat_modifiers_attacker,
+                    effective_dice_override=attacker_effective_dice_override,
                 )
         else:
             other_attacker_units.append(u)
@@ -1649,6 +1657,7 @@ def resolve_siegeworks_round(
     normal_attacker_hits = _count_hits(
         other_attacker_units, other_attacker_rolls, unit_defs, is_attacker=True,
         stat_modifiers=stat_modifiers_attacker,
+        effective_dice_override=attacker_effective_dice_override,
     ) if other_attacker_units else 0
 
     # Ram hits apply to stronghold only, capped (no overflow to units)

@@ -3049,6 +3049,7 @@ def _handle_initiate_combat(
             fuse_bomb=fuse_bomb,
         )
         def_sw_units = get_siegework_defender_rolling_units(defender_units, unit_defs)
+        ring_att_siege_dice = merge_ring_dice(None, attacker_units, unit_defs, ring_att_boosts)
         round_result_sw, defender_stronghold_hp_after_sw, ladder_count_sw = resolve_siegeworks_round(
             attacker_units, defender_units, unit_defs, dice_rolls,
             stat_modifiers_attacker=attacker_mods or None,
@@ -3059,7 +3060,7 @@ def _handle_initiate_combat(
             defender_territory_is_stronghold=defender_territory_is_stronghold_early,
             fuse_bomb=fuse_bomb,
             hp_shield=ring_hp_shield,
-            attacker_effective_dice_override=merge_ring_dice(None, attacker_units, unit_defs, ring_att_boosts),
+            attacker_effective_dice_override=ring_att_siege_dice,
             defender_effective_dice_override=ring_def_dice,
         )
         ladder_ids_sw = get_ladder_infantry_instance_ids(attacker_units, unit_defs)
@@ -3072,17 +3073,20 @@ def _handle_initiate_combat(
         siege_att_dice_grouped = group_dice_by_stat(
             att_rolling_sw, siege_att_rolls, unit_defs, is_attacker=True,
             stat_modifiers=attacker_mods or None,
+            effective_dice_override=ring_att_siege_dice,
         ) if att_rolling_sw else {}
         siege_att_dice_split_sw = (
             group_siegework_attacker_dice_ram_and_flex(
                 att_rolling_sw, siege_att_rolls, unit_defs,
                 stat_modifiers=attacker_mods or None,
+                effective_dice_override=ring_att_siege_dice,
             )
             if att_rolling_sw else None
         )
         siege_def_dice_grouped = group_dice_by_stat(
             def_sw_units, siege_def_rolls, unit_defs, is_attacker=False,
             stat_modifiers=defender_mods or None,
+            effective_dice_override=ring_def_dice,
         ) if def_sw_units else {}
         attacker_hits_by_type_sw = hits_by_unit_type_sw(
             round_result_sw.attacker_casualties, round_result_sw.attacker_wounded, attacker_id_to_type_health_sw
@@ -3835,6 +3839,9 @@ def _handle_continue_combat(
             fuse_bomb=fuse_bomb,
         )
         def_sw = get_siegework_defender_rolling_units(defender_units, unit_defs)
+        # Ring-only dice override: the siegeworks round rolls base dice for paired bombs
+        # (unlike att_effective_dice, which zeroes them for standard combat).
+        ring_att_siege_dice = merge_ring_dice(None, attacker_units, unit_defs, ring_att_boosts)
         # Run siegeworks round with provided dice (client sends only siegework unit dice)
         round_result, defender_stronghold_hp_after, ladder_count = resolve_siegeworks_round(
             attacker_units, defender_units, unit_defs, dice_rolls,
@@ -3846,7 +3853,7 @@ def _handle_continue_combat(
             defender_territory_is_stronghold=defender_territory_is_stronghold,
             fuse_bomb=fuse_bomb,
             hp_shield=ring_hp_shield,
-            attacker_effective_dice_override=att_effective_dice,
+            attacker_effective_dice_override=ring_att_siege_dice,
             defender_effective_dice_override=ring_def_dice,
         )
         combat.ladder_infantry_instance_ids = get_ladder_infantry_instance_ids(
@@ -3861,17 +3868,20 @@ def _handle_continue_combat(
         siege_att_dice_grouped = group_dice_by_stat(
             att_rolling, siege_att_rolls, unit_defs, is_attacker=True,
             stat_modifiers=attacker_mods or None,
+            effective_dice_override=ring_att_siege_dice,
         ) if att_rolling else {}
         siege_att_dice_split_continue = (
             group_siegework_attacker_dice_ram_and_flex(
                 att_rolling, siege_att_rolls, unit_defs,
                 stat_modifiers=attacker_mods or None,
+                effective_dice_override=ring_att_siege_dice,
             )
             if att_rolling else None
         )
         siege_def_dice_grouped = group_dice_by_stat(
             def_sw, siege_def_rolls, unit_defs, is_attacker=False,
             stat_modifiers=defender_mods or None,
+            effective_dice_override=ring_def_dice,
         ) if def_sw else {}
         attacker_hits_by_type_sw = hits_by_unit_type(
             round_result.attacker_casualties, round_result.attacker_wounded, attacker_id_to_type_health
