@@ -123,6 +123,7 @@ from backend.engine.queries import (
     _total_pending_mobilization_to_port,
     validate_move_as_sea_offload_if_applicable,
     validate_sail_move_for_offload_sea_raid,
+    staging_zone_blocks_sea_raid,
     valid_camp_placement_territory_ids,
     mobilization_block_reason,
 )
@@ -1841,6 +1842,28 @@ def _apply_pending_moves(
             if ud and (getattr(ud, "archetype", "") == "aerial" or "aerial" in getattr(ud, "tags", [])):
                 any_aerial = True
                 break
+        # Deferred sea raid (issue #92): an offload staged from a hostile sea zone must not put
+        # raiders ashore before the forced naval battle there. Staging records are still written
+        # below, but passengers stay embarked (loaded_onto untouched, no offload movement cost,
+        # no pending_captures) — only survivors disembark once the naval battle resolves.
+        defer_sea_raid_offload = False
+        if (
+            phase == "combat_move"
+            and faction_id
+            and not all_movers_aerial
+            and (
+                move_type == "offload"
+                or (
+                    from_def_norm
+                    and to_def_norm
+                    and _is_water_zone(from_def_norm)
+                    and not _is_water_zone(to_def_norm)
+                )
+            )
+        ):
+            defer_sea_raid_offload = staging_zone_blocks_sea_raid(
+                state, from_id, faction_id, unit_defs, faction_defs, territory_defs
+            )
         if charge_through:
             path = [from_id] + list(charge_through) + [to_id]
             distance = movement_cost_along_path(path, territory_defs, is_aerial=any_aerial)
@@ -1907,6 +1930,8 @@ def _apply_pending_moves(
             unit = units_by_id.get(instance_id)
             if not unit:
                 continue
+            if defer_sea_raid_offload and _purchase_kind(unit_defs.get(unit.unit_id)) == "land":
+                continue  # deferred sea-raid passengers do not move yet, so they pay no offload cost
             if move_type == "sail":
                 ud = unit_defs.get(unit.unit_id)
                 unit_cost = distance if _is_driver(ud) else 0
@@ -2036,19 +2061,21 @@ def _apply_pending_moves(
                 ):
                     idle_naval_sail_ids.append(u.instance_id)
         # Move each unit and deduct movement cost
-        for instance_id in ids_to_move:
-            unit = units_by_id.get(instance_id)
-            if unit:
-                from_territory.units.remove(unit)
-                if move_type == "sail":
-                    ud = unit_defs.get(unit.unit_id)
-                    unit_cost = distance if _is_driver(ud) else 0
-                elif move_type == "offload":
-                    unit_cost = 1  # ids_to_move are land passengers only
-                else:
-                    unit_cost = cost_per_unit
-                unit.remaining_movement -= unit_cost
-                to_territory.units.append(unit)
+        # Deferred sea raid: passengers stay aboard in the staging sea zone (issue #92).
+        if not defer_sea_raid_offload:
+            for instance_id in ids_to_move:
+                unit = units_by_id.get(instance_id)
+                if unit:
+                    from_territory.units.remove(unit)
+                    if move_type == "sail":
+                        ud = unit_defs.get(unit.unit_id)
+                        unit_cost = distance if _is_driver(ud) else 0
+                    elif move_type == "offload":
+                        unit_cost = 1  # ids_to_move are land passengers only
+                    else:
+                        unit_cost = cost_per_unit
+                    unit.remaining_movement -= unit_cost
+                    to_territory.units.append(unit)
 
         if idle_naval_sail_ids:
             if not hasattr(state, "combat_move_naval_idle_sail_instance_ids"):
@@ -2114,7 +2141,7 @@ def _apply_pending_moves(
                         f"Not enough transport capacity in {to_id} for {len(passengers)} passengers "
                         f"({len(passengers) - idx} unassigned after filling boats)"
                     )
-        elif move_type == "offload":
+        elif move_type == "offload" and not defer_sea_raid_offload:
             # Clear loaded_onto for units we moved to land (same object refs in to_territory)
             for u in to_territory.units:
                 if u.instance_id in ids_to_move:
@@ -2168,7 +2195,14 @@ def _apply_pending_moves(
 
         # Check if this is combat_move into territory we capture (undefended enemy or empty unowned)
         # Aerial-only / siegework-only cannot conquer: require at least one conquering-capable unit
-        if unit_instance_ids and faction_id and phase == "combat_move" and force_can_conquer_territory:
+        # Deferred sea raid: capture waits for the staging naval battle; only disembarked survivors conquer.
+        if (
+            unit_instance_ids
+            and faction_id
+            and phase == "combat_move"
+            and force_can_conquer_territory
+            and not defer_sea_raid_offload
+        ):
             to_owner = to_territory.owner
             to_def = territory_defs.get(to_id)
             if not to_def or not getattr(to_def, "ownable", True):
@@ -2207,7 +2241,8 @@ def _apply_pending_moves(
 
         event_faction = state.current_faction or faction_id or ""
         ids_for_log = ids_to_move if ids_to_move else list(unit_instance_ids)
-        apply_carried_ring(state, pending_move, to_id)
+        if not defer_sea_raid_offload:
+            apply_carried_ring(state, pending_move, to_id)
         sync_ring_movement(state, unit_defs)
         events.append(
             units_moved(

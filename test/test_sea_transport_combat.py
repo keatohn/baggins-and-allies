@@ -34,6 +34,7 @@ from backend.engine.queries import (
     participates_in_sea_hex_naval_combat,
     get_contested_territories,
     get_aerial_units_must_move,
+    staging_zone_blocks_sea_raid,
 )
 from backend.engine.combat import calculate_required_dice
 from backend.engine.movement import expand_sea_offload_instance_ids, remaining_sea_load_passenger_slots
@@ -1364,7 +1365,8 @@ def test_validate_rejects_single_load_when_all_units_reach_but_zone_full(wotr_de
 def test_naval_loss_after_offload_clears_sea_raid_staging_and_passengers(wotr_defs):
     """
     Mandatory naval combat in the sea zone must not leave a follow-up land sea raid if all attackers
-    are eliminated: clear territory_sea_raid_from and remove only sea-raid passengers on the target hex.
+    are eliminated: clear territory_sea_raid_from and remove only sea-raid passengers from the fleet
+    (issue #92: they stay embarked during the forced naval battle and die with their boat).
     Walk-in land attackers on the same territory must survive (they were not on the losing fleet).
     """
     unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
@@ -1379,6 +1381,7 @@ def test_naval_loss_after_offload_clears_sea_raid_staging_and_passengers(wotr_de
     sea.units.clear()
     ship = _make_unit(state, "harad", "black_ship", unit_defs)
     land = _make_unit(state, "harad", "corsair_of_umbar", unit_defs)
+    land.loaded_onto = ship.instance_id
     gship = _make_unit(state, "gondor", "gondor_ship", unit_defs)
     sea.units.extend([ship, land, gship])
     if har.owner != "gondor":
@@ -1404,11 +1407,14 @@ def test_naval_loss_after_offload_clears_sea_raid_staging_and_passengers(wotr_de
     assert state.territory_sea_raid_from.get("harondor") == "sea_zone_11"
     assert land.instance_id in (state.territory_sea_raid_passenger_instance_ids.get("harondor") or [])
     assert walk_in.instance_id not in (state.territory_sea_raid_passenger_instance_ids.get("harondor") or [])
+    # Issue #92: hostile staging zone defers the offload — the raider never leaves the boat.
+    sea_ids = {u.instance_id for u in state.territories["sea_zone_11"].units}
     harad_on_land_before = [
         u for u in state.territories["harondor"].units
         if get_unit_faction(u, unit_defs) == "harad"
     ]
-    assert len(harad_on_land_before) >= 2
+    assert land.instance_id in sea_ids
+    assert [u.instance_id for u in harad_on_land_before] == [walk_in.instance_id]
 
     state.phase = "combat"
     state.current_faction = "harad"
@@ -1423,6 +1429,10 @@ def test_naval_loss_after_offload_clears_sea_raid_staging_and_passengers(wotr_de
     )
     assert state.active_combat is None
     assert state.territory_sea_raid_from.get("harondor") is None
+    # Raider died embarked with the sinking fleet; only the walk-in attacker remains on land.
+    assert land.instance_id not in {
+        u.instance_id for t in state.territories.values() for u in t.units
+    }
     harad_on_land_after = [
         u for u in state.territories["harondor"].units
         if get_unit_faction(u, unit_defs) == "harad"
@@ -2091,3 +2101,157 @@ def test_sea_raider_attack_delta_sea_raid_initiate_vs_land_only_after_full_offlo
     assert eff_raid - eff_land == 1, (eff_raid, eff_land)
 
 
+
+
+def _hostile_staging_offload_state(wotr_defs, *, enemy_ship=True, defenders=True):
+    """
+    Harad black ship with an embarked corsair in sea_zone_11 staging an offload onto harondor.
+    A gondor ship shares the sea zone unless enemy_ship=False (hostile staging zone for issue #92);
+    harondor holds a gondor defender unless defenders=False (empty land, capture candidate).
+    """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    sea = state.territories["sea_zone_11"]
+    har = state.territories["harondor"]
+    sea.units.clear()
+    ship = _make_unit(state, "harad", "black_ship", unit_defs)
+    raider = _make_unit(state, "harad", "corsair_of_umbar", unit_defs)
+    raider.loaded_onto = ship.instance_id
+    sea.units.append(ship)
+    sea.units.append(raider)
+    if enemy_ship:
+        sea.units.append(_make_unit(state, "gondor", "gondor_ship", unit_defs))
+    har.units = []
+    if defenders:
+        har.owner = "gondor"
+        har.units.append(_make_unit(state, "gondor", "gondor_soldier", unit_defs))
+    else:
+        har.owner = None
+    state.pending_moves = [
+        PendingMove(
+            from_territory="sea_zone_11",
+            to_territory="harondor",
+            unit_instance_ids=[ship.instance_id, raider.instance_id],
+            phase="combat_move",
+            move_type="offload",
+        )
+    ]
+    state.current_faction = "harad"
+    state.phase = "combat_move"
+    return (
+        state, ship, raider,
+        unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+
+
+def test_deferred_offload_keeps_raiders_embarked_until_naval_battle_resolved(wotr_defs):
+    """
+    Issue #92 B: an offload staged from a hostile sea zone must not drop raiders ashore before the
+    forced naval battle. Raiders stay embarked (staging recorded, no capture, no offload cost);
+    get_contested_territories synthesizes the blocked raid with sea_zone_id so the UI grays it out.
+    """
+    (state, ship, raider, unit_defs, territory_defs,
+     faction_defs, camp_defs, port_defs) = _hostile_staging_offload_state(wotr_defs)
+
+    assert staging_zone_blocks_sea_raid(
+        state, "sea_zone_11", "harad", unit_defs, faction_defs, territory_defs
+    ), "hostile staging zone with listable naval battle must block the raid"
+    # A boat load obligation must still clear: the raid is declared and the naval battle is forced.
+    state.loaded_naval_must_attack_instance_ids = [ship.instance_id]
+    base_movement = raider.remaining_movement
+    state = get_state_after_pending_moves(
+        state, "combat_move", unit_defs, territory_defs, faction_defs
+    )
+
+    # Raiders stay embarked in the staging sea zone (not dropped off on land before the battle).
+    sea_units = {u.instance_id: u for u in state.territories["sea_zone_11"].units}
+    assert raider.instance_id in sea_units
+    assert getattr(sea_units[raider.instance_id], "loaded_onto", None) == ship.instance_id
+    assert raider.instance_id not in {
+        u.instance_id for u in state.territories["harondor"].units
+    }
+    # The deferred land hop is not charged (units did not move).
+    assert sea_units[raider.instance_id].remaining_movement == base_movement
+    # Staging is recorded; the land is not capture-pending while the naval battle is unresolved.
+    assert state.territory_sea_raid_from.get("harondor") == "sea_zone_11"
+    assert state.territory_sea_raid_faction.get("harondor") == "harad"
+    assert raider.instance_id in (
+        state.territory_sea_raid_passenger_instance_ids.get("harondor") or []
+    )
+    assert "harondor" not in state.pending_captures
+    assert ship.instance_id not in (state.loaded_naval_must_attack_instance_ids or [])
+
+    # Contested listing: forced naval battle + blocked raid whose attackers are still at sea.
+    state.phase = "combat"
+    contested = get_contested_territories(state, "harad", faction_defs, unit_defs, territory_defs)
+    assert any(c["territory_id"] == "sea_zone_11" for c in contested), (
+        "naval battle in the staging zone must be listed"
+    )
+    raids = [c for c in contested if c["territory_id"] == "harondor"]
+    assert len(raids) == 1
+    assert raids[0].get("sea_zone_id") == "sea_zone_11"
+    assert raids[0]["attacker_unit_ids"] == [raider.instance_id]
+    assert len(raids[0]["defender_unit_ids"]) == 1
+
+
+def test_offload_into_unhostile_staging_zone_disembarks_immediately(wotr_defs):
+    """
+    Regression guard for issue #92: without hostile ships in the staging zone the offload behaves
+    exactly as before — raiders go ashore immediately and pay the offload cost, listed once.
+    """
+    (state, ship, raider, unit_defs, territory_defs,
+     faction_defs, camp_defs, port_defs) = _hostile_staging_offload_state(
+        wotr_defs, enemy_ship=False
+    )
+    assert not staging_zone_blocks_sea_raid(
+        state, "sea_zone_11", "harad", unit_defs, faction_defs, territory_defs
+    )
+    base_movement = raider.remaining_movement
+    state = get_state_after_pending_moves(
+        state, "combat_move", unit_defs, territory_defs, faction_defs
+    )
+
+    land_units = {u.instance_id: u for u in state.territories["harondor"].units}
+    assert raider.instance_id in land_units, "unhostile staging must still disembark immediately"
+    assert getattr(land_units[raider.instance_id], "loaded_onto", None) is None
+    assert land_units[raider.instance_id].remaining_movement == base_movement - 1
+
+    state.phase = "combat"
+    contested = get_contested_territories(state, "harad", faction_defs, unit_defs, territory_defs)
+    har_entries = [c for c in contested if c["territory_id"] == "harondor"]
+    assert len(har_entries) == 1, "no synthesized duplicate when the raiders are already ashore"
+    assert har_entries[0].get("sea_zone_id") == "sea_zone_11"
+
+
+def test_deferred_offload_empty_land_defers_capture_until_naval_resolved(wotr_defs):
+    """
+    Issue #92: an empty landing from a hostile staging zone has no battle to list — capture must be
+    deferred (no pending_captures) until the forced naval battle resolves and survivors disembark.
+    """
+    (state, ship, raider, unit_defs, territory_defs,
+     faction_defs, camp_defs, port_defs) = _hostile_staging_offload_state(
+        wotr_defs, defenders=False
+    )
+    state = get_state_after_pending_moves(
+        state, "combat_move", unit_defs, territory_defs, faction_defs
+    )
+
+    sea_ids = {u.instance_id for u in state.territories["sea_zone_11"].units}
+    assert raider.instance_id in sea_ids, "raider must stay embarked over the empty landing"
+    assert "harondor" not in state.pending_captures, (
+        "capture of the empty land must wait for the staging naval battle"
+    )
+
+    state.phase = "combat"
+    contested = get_contested_territories(state, "harad", faction_defs, unit_defs, territory_defs)
+    assert not any(c["territory_id"] == "harondor" for c in contested), (
+        "empty land has no defenders, so no raid battle may be listed"
+    )
+    assert any(c["territory_id"] == "sea_zone_11" for c in contested), (
+        "the forced naval battle must still be listed"
+    )
