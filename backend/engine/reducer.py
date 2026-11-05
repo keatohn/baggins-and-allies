@@ -246,18 +246,17 @@ def _land_combat_unit_side(
     """
     Land / sea-raid-land combat roster: must stay identical between initiate_combat and continue_combat
     (including non-passenger attackers on the land hex, e.g. aerial joining the same assault).
-    attacker = attacking faction's units; defender = other faction with a different alliance;
-    None = bystander (no faction on unit def, or allied non-attacker sharing attacker's alliance).
+    attacker = the attacking force (attacking faction + its subfactions);
+    defender = every other factioned unit on the hex — including garrisons from an allied
+    faction, which defend the territory (roll and take hits) per the game rule;
+    None = non-participant only when the unit has no faction (missing/broken unit def).
     """
     uo = get_unit_faction(unit, unit_defs)
     if uo is None:
         return None
     if faction_acts_as(faction_defs, uo, attacker_faction):
         return "attacker"
-    ua = getattr(faction_defs.get(uo), "alliance", None)
-    if ua != attacker_alliance:
-        return "defender"
-    return None
+    return "defender"
 
 
 def _sea_raid_attacker_units_from_board(
@@ -2657,8 +2656,8 @@ def _handle_initiate_combat(
             land_adj = getattr(territory_defs.get(territory_id), "adjacent", []) or []
             if territory_id not in sea_adj and sea_zone_id not in land_adj:
                 raise ValueError(f"Territory {territory_id} is not adjacent to sea zone {sea_zone_id}")
-        # Sea raid may not target allied land: same-alliance units on the hex are bystanders, so
-        # the empty-defender conquer path would seize the ally's hex and destroy their camp.
+        # Sea raid may not target allied land: units on the hex defend it, so a raid on an
+        # ally's territory would fight (and could destroy) our own ally's garrison and camp.
         # (Own land is rejected above; normal land combat is unaffected.)
         if territory.owner is not None and attacker_alliance is not None:
             owner_alliance = getattr(faction_defs.get(territory.owner), "alliance", None)
@@ -4699,15 +4698,15 @@ def _offload_sea_raid_survivors_after_naval_win(
             )
         )
 
-        # Deferred capture: only when the land has no enemy defenders left and is ownable.
-        has_enemy = any(
-            get_unit_faction(u, unit_defs) is not None
-            and faction_defs.get(
-                get_unit_faction(u, unit_defs), FactionDefinition("", "", "", "", "")
-            ).alliance != attacker_alliance
+        # Deferred capture: only when the land has no defenders left (allied garrisons
+        # defend the territory too) and is ownable.
+        has_defenders = any(
+            _land_combat_unit_side(
+                u, attacker_faction, attacker_alliance, unit_defs, faction_defs
+            ) == "defender"
             for u in land_t.units
         )
-        if has_enemy:
+        if has_defenders:
             continue
         ldef = (territory_defs or {}).get(lid)
         if ldef is not None and not getattr(ldef, "ownable", True):
@@ -4876,8 +4875,9 @@ def _resolve_combat_end(
                         territory.units.append(u)
         else:
             # Land battle: keep surviving attackers (bombikazi/bomb removal is via round casualties only),
-            # bystanders, and defender-roster survivors only. When all defenders are eliminated, purge any
-            # stray defender-side units so allied garrison / roster drift cannot leave ghosts or wipe the wrong stack.
+            # non-participants (no-faction units), and defender-roster survivors only. When all defenders
+            # are eliminated, purge any stray defender-side units so garrison / roster drift cannot leave
+            # ghosts or wipe the wrong stack.
             # Pure naval victory also runs here: embarked passengers are excluded from the naval roster
             # (participates_in_sea_hex_naval_combat) but must stay with a boat that survived the battle.
             aa = getattr(faction_defs.get(attacker_faction), "alliance", None)

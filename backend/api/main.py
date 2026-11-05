@@ -99,6 +99,7 @@ from backend.engine.actions import (
 from backend.engine.reducer import (
     apply_action,
     get_state_after_pending_moves,
+    _land_combat_unit_side,
     _sea_raid_attacker_units_from_board,
 )
 from backend.engine.combat import (
@@ -1156,9 +1157,10 @@ def _get_combat_modifiers_and_specials(
     defenders = sorted(
         [
             u for u in territory.units
-            if u.instance_id not in attacker_ids
-            and ud.get(u.unit_id)
-            and (getattr(fd.get(ud[u.unit_id].faction), "alliance", None) if fd.get(ud[u.unit_id].faction) else None) != attacker_alliance
+            if ud.get(u.unit_id)
+            and _land_combat_unit_side(
+                u, attacker_faction, attacker_alliance, ud, fd
+            ) == "defender"
         ],
         key=lambda u: u.instance_id,
     )
@@ -5764,8 +5766,9 @@ def _generate_initiate_combat_payload(
             [
                 u for u in territory.units
                 if ud.get(u.unit_id)
-                and not faction_acts_as(fd, ud[u.unit_id].faction, attacker_faction)
-                and (getattr(fd.get(ud[u.unit_id].faction), "alliance", None) if fd.get(ud[u.unit_id].faction) else None) != attacker_alliance
+                and _land_combat_unit_side(
+                    u, attacker_faction, attacker_alliance, ud, fd
+                ) == "defender"
             ],
             key=lambda u: u.instance_id,
         )
@@ -5788,8 +5791,9 @@ def _generate_initiate_combat_payload(
             [
                 u for u in territory.units
                 if ud.get(u.unit_id)
-                and not faction_acts_as(fd, ud[u.unit_id].faction, attacker_faction)
-                and (getattr(fd.get(ud[u.unit_id].faction), "alliance", None) if fd.get(ud[u.unit_id].faction) else None) != attacker_alliance
+                and _land_combat_unit_side(
+                    u, attacker_faction, attacker_alliance, ud, fd
+                ) == "defender"
                 and (
                     not is_sea_zone_combat
                     or participates_in_sea_hex_naval_combat(u, ud.get(u.unit_id))
@@ -6424,7 +6428,13 @@ def _get_active_combat_units(
     unit_defs: dict | None = None,
     faction_defs: dict | None = None,
 ):
-    """Return (attackers, defenders) for current active combat. Handles sea raid (sea + land roster)."""
+    """Return (attackers, defenders) for current active combat. Handles sea raid (sea + land roster).
+
+    Side classification matches reducer._land_combat_unit_side: the attacking force is the
+    attacker's faction (+ subfactions); every other factioned unit on the hex — including
+    garrisons from an allied faction — is a defender (they roll and take hits). Units with no
+    faction (missing unit def) are excluded from both rosters.
+    """
     if not state.active_combat:
         return [], []
     combat = state.active_combat
@@ -6432,7 +6442,23 @@ def _get_active_combat_units(
     if not territory:
         return [], []
     attacker_ids = set(combat.attacker_instance_ids)
+    attacker_faction = combat.attacker_faction
+    attacker_alliance = (
+        getattr(faction_defs.get(attacker_faction), "alliance", None)
+        if faction_defs and faction_defs.get(attacker_faction)
+        else None
+    )
     sea_zone_id = getattr(combat, "sea_zone_id", None)
+
+    def _is_attacker_unit(u) -> bool:
+        if u.instance_id not in attacker_ids:
+            return False
+        if unit_defs is None or faction_defs is None:
+            return True
+        return _land_combat_unit_side(
+            u, attacker_faction, attacker_alliance, unit_defs, faction_defs
+        ) == "attacker"
+
     if (
         sea_zone_id
         and faction_defs
@@ -6442,14 +6468,8 @@ def _get_active_combat_units(
         sea_zone = state.territories.get(sea_zone_id)
         if not sea_zone:
             return [], []
-        af = combat.attacker_faction
-        aa = (
-            getattr(faction_defs.get(af), "alliance", None)
-            if af and faction_defs.get(af)
-            else None
-        )
         full_raid = _sea_raid_attacker_units_from_board(
-            sea_zone, territory, af, aa, unit_defs, faction_defs
+            sea_zone, territory, attacker_faction, attacker_alliance, unit_defs, faction_defs
         )
         attackers = sorted(
             [u for u in full_raid if u.instance_id in attacker_ids],
@@ -6463,13 +6483,24 @@ def _get_active_combat_units(
         else:
             attacker_territory = territory
         attackers = sorted(
-            [u for u in attacker_territory.units if u.instance_id in attacker_ids],
+            [u for u in attacker_territory.units if _is_attacker_unit(u)],
             key=lambda u: u.instance_id,
         )
-    defenders = sorted(
-        [u for u in territory.units if u.instance_id not in attacker_ids],
-        key=lambda u: u.instance_id,
-    )
+    if unit_defs is not None and faction_defs is not None:
+        defenders = sorted(
+            [
+                u for u in territory.units
+                if _land_combat_unit_side(
+                    u, attacker_faction, attacker_alliance, unit_defs, faction_defs
+                ) == "defender"
+            ],
+            key=lambda u: u.instance_id,
+        )
+    else:
+        defenders = sorted(
+            [u for u in territory.units if u.instance_id not in attacker_ids],
+            key=lambda u: u.instance_id,
+        )
     if (
         territory_defs is not None
         and unit_defs is not None

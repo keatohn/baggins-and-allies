@@ -3,6 +3,10 @@ Combat roster parity: continue_combat must classify units like initiate_combat.
 Previously, any unit not in surviving_attacker_ids was treated as a defender, so allied
 units sharing the attacker's alliance (e.g. Harad with Mordor attacking) became
 defenders from round 2 onward, corrupting casualties and end-of-battle unit lists.
+
+Roster rule (game rule): the attacking force = attacking faction + its subfactions;
+every other factioned unit on the hex defends the territory — including garrisons
+from an allied faction (they roll and take hits).
 """
 
 from backend.engine.definitions import load_static_definitions
@@ -32,7 +36,8 @@ def test_land_combat_side_matches_initiate_rules():
     gondor_u = _u("gondor_x", "gondor_archer", unit_defs)
 
     assert _land_combat_unit_side(mordor_u, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "attacker"
-    assert _land_combat_unit_side(harad_u, attacker_faction, attacker_alliance, unit_defs, faction_defs) is None
+    # Allied faction garrison in the defending hex defends the territory (game rule).
+    assert _land_combat_unit_side(harad_u, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "defender"
     assert _land_combat_unit_side(gondor_u, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "defender"
 
 

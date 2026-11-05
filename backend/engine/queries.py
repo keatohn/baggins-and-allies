@@ -569,10 +569,7 @@ def _land_combat_unit_side_for_queries(
         return None
     if faction_acts_as(faction_defs, uo, attacker_faction):
         return "attacker"
-    ua = getattr(faction_defs.get(uo), "alliance", None)
-    if ua != attacker_alliance:
-        return "defender"
-    return None
+    return "defender"
 
 
 def validate_move_as_sea_offload_if_applicable(
@@ -1414,9 +1411,8 @@ def _validate_initiate_combat(
             land_adj = getattr(territory_def, "adjacent", []) or []
             if territory_id not in sea_adj and sea_zone_id not in land_adj:
                 return ValidationResult(False, f"Territory {territory_id} is not adjacent to sea zone {sea_zone_id}")
-        # A sea raid may not target the attacker's own or allied land. Same-alliance units on
-        # the hex are bystanders (not defenders), so the empty-defender conquer path would
-        # seize an ally's hex and destroy their camp before liberation restores ownership.
+        # A sea raid may not target the attacker's own or allied land. Units on the hex defend
+        # it, so raiding an ally's territory would fight and destroy our own ally's garrison.
         owner = territory.owner
         if owner is not None:
             if owner == attacker_faction:
@@ -1448,8 +1444,9 @@ def _validate_initiate_combat(
         attacker_units = list(raid_attackers.values())
         defender_units = [
             u for u in territory.units
-            if get_unit_faction(u, unit_defs) is not None
-            and faction_defs.get(get_unit_faction(u, unit_defs), FactionDefinition("", "", "", "", "")).alliance != attacker_alliance
+            if _land_combat_unit_side_for_queries(
+                u, attacker_faction, attacker_alliance, unit_defs, faction_defs
+            ) == "defender"
         ]
         if not attacker_units:
             return ValidationResult(
@@ -1471,18 +1468,19 @@ def _validate_initiate_combat(
                     "Naval units cannot attack or fight on land. For a sea raid, initiate combat with sea_zone_id (attackers in that sea zone)."
                 )
 
-    # Find attacker and defender units (normal combat: both in same territory)
+    # Find attacker and defender units (normal combat: both in same territory).
+    # Defenders = every factioned unit that is not part of the attacking force, including
+    # garrisons from an allied faction (they defend the territory).
     attacker_units = []
     defender_units = []
     for unit in territory.units:
-        unit_faction = get_unit_faction(unit, unit_defs)
-        if faction_acts_as(faction_defs, unit_faction, attacker_faction):
+        side = _land_combat_unit_side_for_queries(
+            unit, attacker_faction, attacker_alliance, unit_defs, faction_defs
+        )
+        if side == "attacker":
             attacker_units.append(unit)
-        elif unit_faction is not None:
-            unit_alliance = faction_defs.get(unit_faction, FactionDefinition(
-                "", "", "", "", "")).alliance
-            if unit_alliance != attacker_alliance:
-                defender_units.append(unit)
+        elif side == "defender":
+            defender_units.append(unit)
 
     if not attacker_units:
         return ValidationResult(False, f"No attacking units in {territory_id}")
@@ -2766,17 +2764,16 @@ def get_contested_territories(
             is_water = bool(tdef and _is_water_zone(tdef))
 
         for unit in territory.units:
-            unit_faction = get_unit_faction(unit, unit_defs)
             ud = unit_defs.get(unit.unit_id)
             if is_water and not participates_in_sea_hex_naval_combat(unit, ud):
                 continue
-            if faction_acts_as(faction_defs, unit_faction, faction_id):
+            side = _land_combat_unit_side_for_queries(
+                unit, faction_id, attacker_alliance, unit_defs, faction_defs
+            )
+            if side == "attacker":
                 attacker_units.append(unit)
-            elif unit_faction is not None:
-                unit_alliance = faction_defs.get(unit_faction, FactionDefinition(
-                    "", "", "", "", "")).alliance
-                if unit_alliance != attacker_alliance:
-                    defender_units.append(unit)
+            elif side == "defender":
+                defender_units.append(unit)
 
         if attacker_units and defender_units:
             entry = {
@@ -2835,10 +2832,9 @@ def get_contested_territories(
                 continue
             defender_units = [
                 u for u in land_t.units
-                if get_unit_faction(u, unit_defs) is not None
-                and faction_defs.get(
-                    get_unit_faction(u, unit_defs), FactionDefinition("", "", "", "", "")
-                ).alliance != attacker_alliance
+                if _land_combat_unit_side_for_queries(
+                    u, faction_id, attacker_alliance, unit_defs, faction_defs
+                ) == "defender"
             ]
             if not defender_units:
                 continue
