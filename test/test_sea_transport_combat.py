@@ -189,6 +189,62 @@ def test_naval_combat_ended_lists_embarked_attacker_casualties(wotr_defs):
     assert har_land.instance_id in att_cas
 
 
+def test_naval_victory_keeps_embarked_passengers_of_surviving_boats(wotr_defs):
+    """Pure naval win: passengers are off the roster but must stay embarked on a boat that survived.
+
+    The combat-end kept-filter previously dropped any attacker-side unit not in
+    surviving_attacker_ids, which deleted embarked land units on naval victory.
+    """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    sea = state.territories["sea_zone_11"]
+    sea.units.clear()
+    har_ship = _make_unit(state, "harad", "black_ship", unit_defs)
+    har_land = _make_unit(state, "harad", "corsair_of_umbar", unit_defs)
+    har_land.loaded_onto = har_ship.instance_id
+    g_ship = _make_unit(state, "gondor", "gondor_ship", unit_defs)
+    sea.units.extend([har_ship, har_land, g_ship])
+
+    state.current_faction = "harad"
+    state.phase = "combat"
+
+    # Attacker hits (roll 1 <= attack 3), defender misses (roll 10 > defense 3).
+    action = initiate_combat(
+        "harad",
+        "sea_zone_11",
+        dice_rolls={"attacker": [1], "defender": [10]},
+    )
+    vr = validate_action(
+        state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    assert vr.valid, vr.error
+    state, events = apply_action(
+        state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+
+    ended = [e for e in events if e.type == "combat_ended"]
+    assert len(ended) == 1
+    payload = ended[0].payload
+    assert payload.get("winner") == "attacker"
+    assert payload.get("outcome") in ("victory", "conquer")
+    assert payload.get("surviving_attacker_ids") == [har_ship.instance_id]
+
+    # Assert against the returned state — apply_action copies, so pre-apply refs go stale.
+    sea_after = state.territories["sea_zone_11"]
+    ids_on_board = {u.instance_id: u for u in sea_after.units}
+    assert g_ship.instance_id not in ids_on_board, "dead defender must be removed"
+    assert har_ship.instance_id in ids_on_board, "surviving attacker boat must remain"
+    assert har_land.instance_id in ids_on_board, (
+        "embarked passenger of a surviving boat must not be deleted on naval victory"
+    )
+    assert ids_on_board[har_land.instance_id].loaded_onto == har_ship.instance_id
+
+
 def test_sea_raid_empty_land_conquer(state_with_sea_units):
     """Sea raid on empty land: land units move to territory, ships stay in sea."""
     state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs = state_with_sea_units
@@ -221,6 +277,68 @@ def test_sea_raid_empty_land_conquer(state_with_sea_units):
     assert state.pending_captures.get("harondor") == "harad"
     combat_ended = [e for e in events if e.type == "combat_ended"]
     assert len(combat_ended) == 1 and combat_ended[0].payload.get("outcome") == "conquer"
+
+
+def test_sea_raid_onto_own_or_allied_land_blocked(state_with_sea_units):
+    """
+    Regression (naval audit High #1): a sea raid may not target the attacker's own or allied
+    land. Same-alliance units on the hex are bystanders (not defenders), so the old
+    empty-defender path conquered an ally's hex and set pending_captures (destroying their camp
+    before the liberation rule restored ownership).
+    Assert BOTH that own/allied raids now fail validate + apply AND that enemy/neutral targets
+    remain valid raid targets (no over-blocking).
+    """
+    state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs = state_with_sea_units
+    harondor = state.territories["harondor"]
+    harondor.units.clear()
+    sea_before = [u.instance_id for u in state.territories["sea_zone_11"].units]
+
+    def raid():
+        return initiate_combat(
+            "harad", "harondor",
+            dice_rolls={"attacker": [1], "defender": []},
+            sea_zone_id="sea_zone_11",
+        )
+
+    def check():
+        return validate_action(
+            state, raid(), unit_defs, territory_defs, faction_defs, camp_defs, port_defs
+        )
+
+    # Control: enemy-owned and unowned targets are still valid raid targets (no over-blocking).
+    harondor.owner = "gondor"
+    result = check()
+    assert result.valid, result.error
+    harondor.owner = None
+    result = check()
+    assert result.valid, result.error
+
+    # Own land: rejected by validation now (previously only the reducer raised).
+    harondor.owner = "harad"
+    result = check()
+    assert not result.valid and "own territory" in result.error
+    with pytest.raises(ValueError, match="own territory"):
+        apply_action(
+            state, raid(), unit_defs, territory_defs, faction_defs, camp_defs, port_defs
+        )
+
+    # Allied land (harad and mordor are both evil): rejected by validation and apply.
+    harondor.owner = "mordor"
+    harondor.units.append(_make_unit(state, "mordor", "morgul_orc", unit_defs))
+    result = check()
+    assert not result.valid and "allied" in result.error
+    with pytest.raises(ValueError, match="allied"):
+        apply_action(
+            state, raid(), unit_defs, territory_defs, faction_defs, camp_defs, port_defs
+        )
+
+    # The failed raids must not conquer: no pending capture, no passengers landed.
+    assert "harondor" not in state.pending_captures
+    assert [u.instance_id for u in state.territories["sea_zone_11"].units] == sea_before
+    assert all(
+        get_unit_faction(u, unit_defs) != "harad"
+        for u in state.territories["harondor"].units
+    ), "harad passengers must not land on allied/own hex"
 
 
 def test_sea_raid_combat_attacker_win_moves_to_territory(state_with_sea_units):

@@ -2621,6 +2621,15 @@ def _handle_initiate_combat(
             land_adj = getattr(territory_defs.get(territory_id), "adjacent", []) or []
             if territory_id not in sea_adj and sea_zone_id not in land_adj:
                 raise ValueError(f"Territory {territory_id} is not adjacent to sea zone {sea_zone_id}")
+        # Sea raid may not target allied land: same-alliance units on the hex are bystanders, so
+        # the empty-defender conquer path would seize the ally's hex and destroy their camp.
+        # (Own land is rejected above; normal land combat is unaffected.)
+        if territory.owner is not None and attacker_alliance is not None:
+            owner_alliance = getattr(faction_defs.get(territory.owner), "alliance", None)
+            if owner_alliance == attacker_alliance:
+                raise ValueError(
+                    f"Cannot sea raid allied territory {territory_id} (owner={territory.owner})"
+                )
         _normalize_unit_health_for_combat(sea_zone.units, unit_defs)
         _normalize_unit_health_for_combat(territory.units, unit_defs)
         # Sea raid land battle: fleet passengers (in sea) plus any attacker-side units on land
@@ -4704,18 +4713,23 @@ def _resolve_combat_end(
             # Land battle: keep surviving attackers (bombikazi/bomb removal is via round casualties only),
             # bystanders, and defender-roster survivors only. When all defenders are eliminated, purge any
             # stray defender-side units so allied garrison / roster drift cannot leave ghosts or wipe the wrong stack.
+            # Pure naval victory also runs here: embarked passengers are excluded from the naval roster
+            # (participates_in_sea_hex_naval_combat) but must stay with a boat that survived the battle.
             aa = getattr(faction_defs.get(attacker_faction), "alliance", None)
             surv_def_set = set(round_result.surviving_defender_ids or [])
             kept: list[Unit] = []
             for u in territory.units:
                 uid = u.instance_id
+                carrier = getattr(u, "loaded_onto", None)
                 side = _land_combat_unit_side(u, attacker_faction, aa, unit_defs, faction_defs)
                 if side == "defender":
-                    if uid in surv_def_set:
+                    if uid in surv_def_set or (carrier is not None and carrier in surv_def_set):
                         kept.append(u)
                     continue
                 if side == "attacker":
-                    if uid in surviving_attacker_ids_set:
+                    if uid in surviving_attacker_ids_set or (
+                        carrier is not None and carrier in surviving_attacker_ids_set
+                    ):
                         kept.append(u)
                     continue
                 kept.append(u)
