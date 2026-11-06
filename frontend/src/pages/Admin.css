@@ -2126,6 +2126,35 @@ body:has(.combat-sim-modal-overlay) {
   gap: 0.5rem;
 }
 
+.mapov-art {
+  flex: 0 1 42%;
+  min-height: 7.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  overflow: hidden;
+}
+
+.mapov-art > .admin-mapview__toggle,
+.mapov-art > .admin-page__checkbox-label {
+  flex: 0 0 auto;
+}
+
+.mapov-art__images {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.mapov-landscape__group-label {
+  margin: 0.2rem 0 0;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+}
+
 .mapov-landscape__palette {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));

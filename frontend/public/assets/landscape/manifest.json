@@ -18,5 +18,30 @@
   "volcano": ["volcano.png"],
   "hills": ["hills.png"],
   "anywhere": ["bridge.png", "ford.png"],
-  "landmarks": []
+  "landmarks": [
+    "amon_lanc.png",
+    "annuminas.png",
+    "barad_dur.png",
+    "bree.png",
+    "cirith_ungol.png",
+    "dol_amroth.png",
+    "dol_guldur.png",
+    "dwarrowdelf.png",
+    "edoras.png",
+    "elven_halls.png",
+    "erebor.png",
+    "helms_deep.png",
+    "isengard.png",
+    "lothlorien.png",
+    "minas_ithil.png",
+    "minas_morgul.png",
+    "minas_tirith.png",
+    "numenor.png",
+    "osgiliath.png",
+    "osgiliath_ruins.png",
+    "ost_in_edhil.png",
+    "rivendell.png",
+    "the_black_gate.png",
+    "the_shire.png"
+  ]
 }

@@ -16,6 +16,9 @@ import { MapTextureSlider } from './MapTextureSlider';
 import {
   autoGenerateForTerritory,
   isPointInTerritoryPath,
+  landmarkFileForTerritory,
+  LANDSCAPE_LANDMARK_CATEGORY,
+  pointInsideTerritory,
   landscapeCategoriesForTerrain,
   landscapeRotation,
   landscapeSrc,
@@ -152,6 +155,36 @@ function stableJson(value: unknown): string {
 }
 
 const GRAPH_FIELDS: TerritoryEdgeField[] = ['adjacent', 'aerial_adjacent', 'ford_adjacent'];
+
+type EditorHistoryTab = 'icon' | 'landscape' | 'graph';
+
+/** One tab's slice of the map document. Undo restores only this slice. */
+type EditorSnapshot = {
+  territories?: MapOverridesData['territories'];
+  landscape?: LandscapeOverrides | null;
+  terrain?: Record<string, string> | null;
+  graph?: MapGraph | null;
+};
+
+const MAX_EDITOR_HISTORY = 100;
+
+function emptyEditorHistory(): Record<EditorHistoryTab, EditorSnapshot[]> {
+  return { icon: [], landscape: [], graph: [] };
+}
+
+function snapshotFor(tab: EditorHistoryTab, data: MapOverridesData): EditorSnapshot {
+  if (tab === 'icon') return { territories: data.territories };
+  if (tab === 'landscape') return { landscape: data.landscape ?? null, terrain: data.terrain ?? null };
+  return { graph: data.graph ?? null };
+}
+
+function cloneSnapshot(snap: EditorSnapshot): EditorSnapshot {
+  return JSON.parse(JSON.stringify(snap)) as EditorSnapshot;
+}
+
+function applyEditorSnapshot(base: MapOverridesData, snap: EditorSnapshot): MapOverridesData {
+  return nextOverrides(base, snap);
+}
 
 const EDGE_TYPES: { field: TerritoryEdgeField; label: string; kind: 'land' | 'aerial' | 'ford' }[] = [
   { field: 'adjacent', label: 'Land', kind: 'land' },
@@ -296,6 +329,8 @@ export function MapOverridesPane({
   const [terrainFilter, setTerrainFilter] = useState('');
   const [stored, setStored] = useState<MapOverridesData | null>(null);
   const [draft, setDraft] = useState<MapOverridesData | null>(null);
+  const [past, setPast] = useState(emptyEditorHistory);
+  const [future, setFuture] = useState(emptyEditorHistory);
   const [spots, setSpots] = useState<CalculatedSpots | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -307,6 +342,7 @@ export function MapOverridesPane({
   const [manifest, setManifest] = useState<LandscapeManifest>({});
   const [placing, setPlacing] = useState<{ cat: string; img: string } | null>(null);
   const [borderMode, setBorderMode] = useState(false);
+  const [artMode, setArtMode] = useState<'landscape' | 'landmarks'>('landscape');
   const [selectedPlacement, setSelectedPlacement] = useState<{ tid: string; index: number } | null>(null);
   const [autoBusy, setAutoBusy] = useState(false);
   const [cursorMode, setCursorMode] = useState<CursorMode>('navigate');
@@ -361,6 +397,123 @@ export function MapOverridesPane({
 
   const current = draft ?? stored;
   const dirty = draft != null && stored != null && stableJson(draft) !== stableJson(stored);
+  const currentRef = useRef(current);
+  const storedRef = useRef(stored);
+  const pastRef = useRef(past);
+  const futureRef = useRef(future);
+  /** Set on pointer-down so a drag or slider records one step, not one per move. */
+  const armedGesture = useRef<EditorHistoryTab | null>(null);
+  const gestureLock = useRef<EditorHistoryTab | null>(null);
+  currentRef.current = current;
+  storedRef.current = stored;
+  pastRef.current = past;
+  futureRef.current = future;
+
+  const clearHistory = useCallback(() => {
+    const empty = emptyEditorHistory();
+    pastRef.current = empty;
+    futureRef.current = emptyEditorHistory();
+    setPast(pastRef.current);
+    setFuture(futureRef.current);
+    armedGesture.current = null;
+    gestureLock.current = null;
+  }, []);
+
+  const recordChange = useCallback((tab: EditorHistoryTab) => {
+    if (gestureLock.current === tab) return;
+    const cur = currentRef.current ?? storedRef.current;
+    if (!cur) return;
+    const snap = cloneSnapshot(snapshotFor(tab, cur));
+    const nextPast = {
+      ...pastRef.current,
+      [tab]: [...pastRef.current[tab], snap].slice(-MAX_EDITOR_HISTORY),
+    };
+    pastRef.current = nextPast;
+    setPast(nextPast);
+    if (futureRef.current[tab].length) {
+      const nextFuture = { ...futureRef.current, [tab]: [] as EditorSnapshot[] };
+      futureRef.current = nextFuture;
+      setFuture(nextFuture);
+    }
+    if (armedGesture.current === tab) gestureLock.current = tab;
+  }, []);
+
+  const commitDraft = useCallback(
+    (tab: EditorHistoryTab, produce: (base: MapOverridesData) => MapOverridesData) => {
+      const base = currentRef.current ?? storedRef.current ?? { territories: {} };
+      const next = produce(base);
+      if (stableJson(next) === stableJson(base)) return;
+      recordChange(tab);
+      currentRef.current = next;
+      setDraft(storedRef.current && stableJson(next) === stableJson(storedRef.current) ? null : next);
+      setSaveError(null);
+    },
+    [recordChange],
+  );
+
+  const armGesture = useCallback((tab: EditorHistoryTab) => {
+    armedGesture.current = tab;
+    gestureLock.current = null;
+  }, []);
+
+  const endGesture = useCallback(() => {
+    armedGesture.current = null;
+    gestureLock.current = null;
+  }, []);
+
+  const restoreHistory = useCallback((tab: EditorHistoryTab, snap: EditorSnapshot) => {
+    const cur = currentRef.current ?? storedRef.current;
+    if (!cur) return;
+    const next = applyEditorSnapshot(cur, snap);
+    currentRef.current = next;
+    setDraft(storedRef.current && stableJson(next) === stableJson(storedRef.current) ? null : next);
+    if (tab === 'landscape') {
+      setSelectedPlacement(null);
+      setMultiSel(new Set());
+    }
+  }, []);
+
+  const undoTab = useCallback(() => {
+    if (editorTab !== 'icon' && editorTab !== 'landscape' && editorTab !== 'graph') return;
+    endGesture();
+    const stack = pastRef.current[editorTab];
+    if (!stack.length) return;
+    const prev = stack[stack.length - 1];
+    const cur = currentRef.current ?? storedRef.current;
+    if (!cur || !prev) return;
+    const now = cloneSnapshot(snapshotFor(editorTab, cur));
+    const nextPast = { ...pastRef.current, [editorTab]: stack.slice(0, -1) };
+    const nextFuture = {
+      ...futureRef.current,
+      [editorTab]: [now, ...futureRef.current[editorTab]].slice(0, MAX_EDITOR_HISTORY),
+    };
+    pastRef.current = nextPast;
+    futureRef.current = nextFuture;
+    setPast(nextPast);
+    setFuture(nextFuture);
+    restoreHistory(editorTab, prev);
+  }, [editorTab, endGesture, restoreHistory]);
+
+  const redoTab = useCallback(() => {
+    if (editorTab !== 'icon' && editorTab !== 'landscape' && editorTab !== 'graph') return;
+    endGesture();
+    const stack = futureRef.current[editorTab];
+    if (!stack.length) return;
+    const nextSnap = stack[0];
+    const cur = currentRef.current ?? storedRef.current;
+    if (!cur || !nextSnap) return;
+    const now = cloneSnapshot(snapshotFor(editorTab, cur));
+    const nextFuture = { ...futureRef.current, [editorTab]: stack.slice(1) };
+    const nextPast = {
+      ...pastRef.current,
+      [editorTab]: [...pastRef.current[editorTab], now].slice(-MAX_EDITOR_HISTORY),
+    };
+    pastRef.current = nextPast;
+    futureRef.current = nextFuture;
+    setPast(nextPast);
+    setFuture(nextFuture);
+    restoreHistory(editorTab, nextSnap);
+  }, [editorTab, endGesture, restoreHistory]);
   // Map terrain wins over the setup copy so the landscape palette follows what this map stores.
   const terrainBackedDefs = useMemo(() => {
     const terrain = current?.terrain;
@@ -449,7 +602,7 @@ export function MapOverridesPane({
     return () => {
       cancelled = true;
     };
-  }, [mapBase, setupId, territories]);
+  }, [mapBase, setupId, territories, clearHistory]);
 
   useEffect(() => {
     let cancelled = false;
@@ -485,6 +638,7 @@ export function MapOverridesPane({
     setSpots(null);
     setStored(null);
     setDraft(null);
+    clearHistory();
     setSelected(null);
     setPngFailed(false);
     setSearch('');
@@ -655,6 +809,15 @@ export function MapOverridesPane({
   };
 
   useEffect(() => {
+    window.addEventListener('pointerup', endGesture);
+    window.addEventListener('pointercancel', endGesture);
+    return () => {
+      window.removeEventListener('pointerup', endGesture);
+      window.removeEventListener('pointercancel', endGesture);
+    };
+  }, [endGesture]);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (editorTab === 'builder') return; // the Builder owns Escape (cancel stroke / close its dialogs)
       if (e.key === 'Escape' && copyOpen) {
@@ -683,6 +846,26 @@ export function MapOverridesPane({
         setPlacing(null);
         return;
       }
+      const target = e.target as HTMLElement | null;
+      const typing =
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable);
+      if (!typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.shiftKey) redoTab();
+        else undoTab();
+        return;
+      }
+      if (!typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        e.stopPropagation();
+        redoTab();
+        return;
+      }
       if (e.key !== 'Escape') return;
       if (discardOpen) {
         setDiscardOpen(false);
@@ -699,7 +882,7 @@ export function MapOverridesPane({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [discardOpen, saving, dirty, onClose, placing, band, multiSel, copyOpen, clearConfirmOpen, editorTab]);
+  }, [discardOpen, saving, dirty, onClose, placing, band, multiSel, copyOpen, clearConfirmOpen, editorTab, undoTab, redoTab]);
 
   const changeMap = (next: string) => {
     if (!next || next === mapBase) return;
@@ -713,6 +896,7 @@ export function MapOverridesPane({
 
   const confirmDiscard = () => {
     setDraft(null);
+    clearHistory();
     setDiscardOpen(false);
     if (pendingMap) {
       setMapBase(pendingMap);
@@ -775,6 +959,7 @@ export function MapOverridesPane({
       return;
     }
     if (landscape && cursorMode === 'paint') {
+      armGesture('landscape');
       const el = wrapRef.current;
       if (!el) return;
       paintPointerRef.current = e.pointerId;
@@ -879,8 +1064,7 @@ export function MapOverridesPane({
     for (const id of [sourceKey, neighborKey]) {
       for (const field of GRAPH_FIELDS) graph[field][id] = stringList(edited[id]?.[field]);
     }
-    setDraft(nextOverrides(current, { graph }));
-    setSaveError(null);
+    commitDraft('graph', (base) => nextOverrides(base, { graph }));
   };
 
   const viewportToViewBox = useCallback(
@@ -948,6 +1132,7 @@ export function MapOverridesPane({
       return;
     }
     if (editorTab === 'landscape' && cursorMode === 'paint') {
+      endGesture();
       if (paintPointerRef.current === e.pointerId) {
         try {
           if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
@@ -1041,29 +1226,23 @@ export function MapOverridesPane({
   );
 
   const updateEntry = useCallback((tid: string, entry: MapOverridesData['territories'][string] | null) => {
-    setDraft((prevDraft) => {
-      const base = prevDraft ?? stored ?? { territories: {} };
+    commitDraft('icon', (base) => {
       const key = resolveTid(base.territories, tid) ?? tid;
       const next = { ...base.territories };
       if (entry === null) delete next[key];
       else next[key] = entry;
-      const data = nextOverrides(base, { territories: next });
-      return stableJson(data) === stableJson(base) ? prevDraft ?? base : data;
+      return nextOverrides(base, { territories: next });
     });
-    setSaveError(null);
-  }, [stored]);
+  }, [commitDraft]);
 
   const updateLandscape = useCallback(
     (fn: (prev: LandscapeOverrides | undefined) => LandscapeOverrides | undefined) => {
-      setDraft((prevDraft) => {
-        const base = prevDraft ?? stored ?? { territories: {} };
+      commitDraft('landscape', (base) => {
         const nextLandscape = fn(base.landscape);
-        const data = nextOverrides(base, { landscape: nextLandscape ?? null });
-        return stableJson(data) === stableJson(base) ? prevDraft ?? base : data;
+        return nextOverrides(base, { landscape: nextLandscape ?? null });
       });
-      setSaveError(null);
     },
-    [stored],
+    [commitDraft],
   );
 
   const landscapeFor = useCallback(
@@ -1231,12 +1410,18 @@ export function MapOverridesPane({
 
   const autoGenerateLandscape = useCallback(() => {
     if (!paths.size) return;
+    const landmarksOnly = artMode === 'landmarks';
     setAutoBusy(true);
     try {
       updateLandscape((prev) => {
         const map: Record<string, LandscapePlacement[]> = { ...(prev?.territories ?? {}) };
+        // Replace only this pill's previous auto pass. The other set, and anything placed by hand, stays.
         for (const [tid, placements] of Object.entries(map)) {
-          map[tid] = placements.filter((p) => !p.auto);
+          map[tid] = placements.filter((p) => {
+            if (!p.auto) return true;
+            const isLandmark = p.cat === LANDSCAPE_LANDMARK_CATEGORY;
+            return landmarksOnly ? !isLandmark : isLandmark;
+          });
           if (!map[tid].length) delete map[tid];
         }
         const seed = (Date.now() % 2147483647) || 1;
@@ -1246,52 +1431,77 @@ export function MapOverridesPane({
           return seedAcc || 1;
         };
         let totalPlaced = Object.values(map).reduce((n, list) => n + list.length, 0);
-        for (const tid of paths.keys()) {
-          const defKey = resolveTid(terrainBackedDefs, tid) ?? tid;
-          const def = terrainBackedDefs[defKey];
-          const terrain =
-            def && typeof def.terrain_type === 'string'
-              ? def.terrain_type
-              : def && typeof def.terrain === 'string'
-                ? def.terrain
-                : '';
-          const cats = landscapeCategoriesForTerrain(terrain, manifest, { includeFree: false });
-          if (!cats.length) continue;
-          const pathEl = territoryPathEl(tid);
-          if (!pathEl) continue;
-          for (const cat of cats) {
-            const images = manifest[cat] ?? [];
-            if (!images.length) continue;
-            const key = resolveTid(map, tid) ?? tid;
-            const existing = map[key] ?? [];
-            const room = Math.min(50 - existing.length, 2500 - totalPlaced);
-            if (room <= 0) continue;
-            const generated = autoGenerateForTerritory(pathEl, cat, images, nextSeed()).slice(0, room);
-            if (generated.length) {
-              map[key] = [...existing, ...generated];
-              totalPlaced += generated.length;
+        if (!landmarksOnly) {
+          for (const tid of paths.keys()) {
+            const defKey = resolveTid(terrainBackedDefs, tid) ?? tid;
+            const def = terrainBackedDefs[defKey];
+            const terrain =
+              def && typeof def.terrain_type === 'string'
+                ? def.terrain_type
+                : def && typeof def.terrain === 'string'
+                  ? def.terrain
+                  : '';
+            const cats = landscapeCategoriesForTerrain(terrain, manifest, { includeFree: false });
+            if (!cats.length) continue;
+            const pathEl = territoryPathEl(tid);
+            if (!pathEl) continue;
+            for (const cat of cats) {
+              const images = manifest[cat] ?? [];
+              if (!images.length) continue;
+              const key = resolveTid(map, tid) ?? tid;
+              const existing = map[key] ?? [];
+              const room = Math.min(50 - existing.length, 2500 - totalPlaced);
+              if (room <= 0) continue;
+              const generated = autoGenerateForTerritory(pathEl, cat, images, nextSeed()).slice(0, room);
+              if (generated.length) {
+                map[key] = [...existing, ...generated];
+                totalPlaced += generated.length;
+              }
+              if (totalPlaced >= 2500) return Object.keys(map).length ? { territories: map } : undefined;
             }
-            if (totalPlaced >= 2500) return Object.keys(map).length ? { territories: map } : undefined;
           }
+          return Object.keys(map).length ? { territories: map } : undefined;
+        }
+        const landmarks = manifest[LANDSCAPE_LANDMARK_CATEGORY] ?? [];
+        for (const tid of paths.keys()) {
+          if (totalPlaced >= 2500) break;
+          const img = landmarkFileForTerritory(tid, landmarks);
+          if (!img) continue;
+          const key = resolveTid(map, tid) ?? tid;
+          const existing = map[key] ?? [];
+          if (existing.some((p) => p.img === img) || existing.length >= 50) continue;
+          const pathEl = territoryPathEl(tid);
+          const pt = pathEl ? pointInsideTerritory(pathEl) : null;
+          if (!pt) continue;
+          map[key] = [
+            ...existing,
+            {
+              cat: LANDSCAPE_LANDMARK_CATEGORY,
+              img,
+              x: pt.x,
+              y: pt.y,
+              layer: 'interior',
+              auto: true,
+              s: 1.5,
+            },
+          ];
+          totalPlaced += 1;
         }
         return Object.keys(map).length ? { territories: map } : undefined;
       });
     } finally {
       setAutoBusy(false);
     }
-  }, [paths, terrainBackedDefs, manifest, updateLandscape]);
+  }, [artMode, paths, terrainBackedDefs, manifest, updateLandscape]);
 
   const updateTerrain = useCallback(
     (tid: string, terrain: string) => {
-      setDraft((prevDraft) => {
-        const base = prevDraft ?? stored ?? { territories: {} };
+      commitDraft('landscape', (base) => {
         const key = resolveTid(base.terrain, tid) ?? resolveTid(territoryDefs, tid) ?? tid;
-        const data = nextOverrides(base, { terrain: { ...(base.terrain ?? {}), [key]: terrain } });
-        return stableJson(data) === stableJson(base) ? prevDraft ?? base : data;
+        return nextOverrides(base, { terrain: { ...(base.terrain ?? {}), [key]: terrain } });
       });
-      setSaveError(null);
     },
-    [stored, territoryDefs],
+    [commitDraft, territoryDefs],
   );
 
   const terrainTypeFor = useCallback(
@@ -1317,6 +1527,13 @@ export function MapOverridesPane({
     return cats;
   }, [selectedTerrainType, manifest, borderMode]);
 
+  const paletteCategories = useMemo(() => {
+    if (artMode === 'landmarks') {
+      return (manifest[LANDSCAPE_LANDMARK_CATEGORY]?.length ?? 0) > 0 ? [LANDSCAPE_LANDMARK_CATEGORY] : [];
+    }
+    return selectedCategories.filter((cat) => cat !== LANDSCAPE_LANDMARK_CATEGORY);
+  }, [artMode, manifest, selectedCategories]);
+
   const selectedPlacements = useMemo(
     () => (selected ? landscapeFor(selected) : []),
     [selected, landscapeFor],
@@ -1331,7 +1548,8 @@ export function MapOverridesPane({
       if (!vb) return false;
       let x = vb.x;
       let y = vb.y;
-      if (borderMode) {
+      const snapBorder = artMode === 'landscape' && borderMode;
+      if (snapBorder) {
         const pathEl = territoryPathEl(tid);
         if (!pathEl) return false;
         const snapped = nearestPointOnOutline(pathEl, x, y);
@@ -1348,7 +1566,7 @@ export function MapOverridesPane({
         img: placing.img,
         x: Math.round(x * 100) / 100,
         y: Math.round(y * 100) / 100,
-        layer: borderMode ? 'border' : 'interior',
+        layer: snapBorder ? 'border' : 'interior',
       };
       updateLandscape((prev) => {
         const map = { ...(prev?.territories ?? {}) };
@@ -1361,7 +1579,7 @@ export function MapOverridesPane({
       setSelectedPlacement({ tid: key, index: (current?.landscape?.territories?.[key]?.length ?? 0) });
       return true;
     },
-    [placing, borderMode, viewportToViewBox, current, updateLandscape],
+    [placing, artMode, borderMode, viewportToViewBox, current, updateLandscape],
   );
 
   /**
@@ -1380,6 +1598,7 @@ export function MapOverridesPane({
       const vb = viewportToViewBox(clientX, clientY);
       if (!vb) return;
       const radius = paintRadius;
+      const snapBorder = artMode === 'landscape' && borderMode;
       const offsets: Pt[] = [{ x: 0, y: 0 }];
       if (radius > 0) {
         const step = Math.min(PAINT_MIN_DIST, radius);
@@ -1398,7 +1617,7 @@ export function MapOverridesPane({
       for (const o of offsets) {
         let x = vb.x + o.x;
         let y = vb.y + o.y;
-        if (borderMode) {
+        if (snapBorder) {
           const snapped = nearestPointOnOutline(pathEl, x, y);
           if (!snapped) continue;
           // In brush mode only keep outline points within reach of the cursor.
@@ -1413,7 +1632,7 @@ export function MapOverridesPane({
       if (!accepted.length) return;
       const cat = placing.cat;
       const img = placing.img;
-      const layer = borderMode ? ('border' as const) : ('interior' as const);
+      const layer = snapBorder ? ('border' as const) : ('interior' as const);
       updateLandscape((prev) => {
         const map = { ...(prev?.territories ?? {}) };
         const key = resolveTid(map, tid) ?? tid;
@@ -1433,7 +1652,7 @@ export function MapOverridesPane({
       setSelected(tid);
       setSelectedPlacement(null);
     },
-    [placing, paintRadius, borderMode, viewportToViewBox, updateLandscape],
+    [placing, artMode, paintRadius, borderMode, viewportToViewBox, updateLandscape],
   );
 
   const setFocus = (tid: string, focus: 'calculated' | 'override') => {
@@ -1494,6 +1713,7 @@ export function MapOverridesPane({
     } catch {
       /* ignore */
     }
+    armGesture('icon');
     dotDragRef.current = {
       tid,
       kind,
@@ -1521,6 +1741,7 @@ export function MapOverridesPane({
 
   const onDotPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
+    endGesture();
     const d = dotDragRef.current;
     if (!d || e.pointerId !== d.id) return;
     try {
@@ -1568,6 +1789,7 @@ export function MapOverridesPane({
       } catch {
         /* ignore */
       }
+      armGesture('landscape');
       bulkDragRef.current = { id: e.pointerId, sx: e.clientX, sy: e.clientY, scale: transform.scale, items };
       setSelected(tid);
       return;
@@ -1583,6 +1805,7 @@ export function MapOverridesPane({
     } catch {
       /* ignore */
     }
+    armGesture('landscape');
     placeDragRef.current = {
       tid,
       index,
@@ -1675,6 +1898,7 @@ export function MapOverridesPane({
 
   const onPlacementPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
+    endGesture();
     const bd = bulkDragRef.current;
     if (bd && e.pointerId === bd.id) {
       try {
@@ -2118,7 +2342,7 @@ export function MapOverridesPane({
       : editorTab === 'graph'
       ? 'Choose a territory, then click another to toggle that border. Land replaces aerial and ford. Aerial and ford can both stay. Save writes both sides onto this map and every setup that uses it.'
       : editorTab === 'landscape'
-      ? 'Place terrain art constrained by each territory’s type. The type is stored on this map and saved with it. Auto-generate fills interiors; Border mode snaps to outlines. Save applies to every setup using this map.'
+      ? 'Place terrain art constrained by each territory’s type, or switch to Landmarks for named places. Auto-generate replaces only the selected set. Save applies to every setup using this map.'
       : spots
         ? 'Four dots per territory: blue units · red production/sea number · yellow faction logo · green other icons (territory type, homes, camps, ports, signals, rings). Pick a territory, switch it to Override, then drag its dots. Save applies to every setup using this map.'
         : 'Loading calculated spots…';
@@ -2212,6 +2436,28 @@ export function MapOverridesPane({
             <MapTextureSlider />
           </div>
           <div className="admin-graph__header-actions">
+            {editorTab === 'builder' ? null : (
+              <>
+                <button
+                  type="button"
+                  className="admin-page__btn"
+                  onClick={undoTab}
+                  disabled={past[editorTab].length === 0}
+                  title="Ctrl+Z"
+                >
+                  Undo
+                </button>
+                <button
+                  type="button"
+                  className="admin-page__btn"
+                  onClick={redoTab}
+                  disabled={future[editorTab].length === 0}
+                  title="Ctrl+Shift+Z"
+                >
+                  Redo
+                </button>
+              </>
+            )}
             {editorTab === 'graph' ? (
               <div className="admin-graph__types" role="group" aria-label="Adjacency type">
                 {EDGE_TYPES.map((type) => (
@@ -2261,7 +2507,11 @@ export function MapOverridesPane({
                   className="admin-page__btn"
                   disabled={autoBusy}
                   onClick={autoGenerateLandscape}
-                  title="Place interior art on every territory whose terrain type has landscape images (keeps manual placements)"
+                  title={
+                    artMode === 'landmarks'
+                      ? 'Place each landmark on its territory. Terrain art and hand-placed pieces stay.'
+                      : 'Fill terrain art. Landmarks and hand-placed pieces stay.'
+                  }
                 >
                   {autoBusy ? 'Generating…' : 'Auto-generate'}
                 </button>
@@ -2358,6 +2608,88 @@ export function MapOverridesPane({
         ) : !loading && !err ? (
           <div className="admin-graph__body">
             <div className="admin-graph__side mapov-side">
+              {editorTab === 'landscape' ? (
+                <div className="mapov-art">
+                  <div className="admin-mapview__toggle" role="group" aria-label="Art to place">
+                    <button
+                      type="button"
+                      className={`admin-mapview__toggle-btn${artMode === 'landscape' ? ' admin-mapview__toggle-btn--active' : ''}`}
+                      aria-pressed={artMode === 'landscape'}
+                      onClick={() => {
+                        setArtMode('landscape');
+                        setPlacing((current) => (current?.cat === LANDSCAPE_LANDMARK_CATEGORY ? null : current));
+                      }}
+                    >
+                      Landscape
+                    </button>
+                    <button
+                      type="button"
+                      className={`admin-mapview__toggle-btn${artMode === 'landmarks' ? ' admin-mapview__toggle-btn--active' : ''}`}
+                      aria-pressed={artMode === 'landmarks'}
+                      onClick={() => {
+                        setArtMode('landmarks');
+                        setPlacing((current) => (current?.cat === LANDSCAPE_LANDMARK_CATEGORY ? current : null));
+                      }}
+                    >
+                      Landmarks
+                    </button>
+                  </div>
+                  {artMode === 'landscape' ? (
+                    <label className="admin-page__checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={borderMode}
+                        onChange={(e) => setBorderMode(e.target.checked)}
+                      />
+                      Border mode (snap to outline)
+                    </label>
+                  ) : null}
+                  <div className="mapov-art__images">
+                    {paletteCategories.length ? (
+                      paletteCategories.map((cat) => (
+                        <div key={cat} className="mapov-landscape__group">
+                          {artMode === 'landscape' ? (
+                            <p className="mapov-landscape__group-label">{prettifyId(cat)}</p>
+                          ) : null}
+                          <div className="mapov-landscape__palette" role="listbox" aria-label={prettifyId(cat)}>
+                            {(manifest[cat] ?? []).map((img) => {
+                              const isPlacing = placing?.img === img && placing?.cat === cat;
+                              return (
+                                <button
+                                  key={`${cat}/${img}`}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={isPlacing}
+                                  className={`mapov-landscape__thumb${isPlacing ? ' mapov-landscape__thumb--active' : ''}`}
+                                  title={`${cat} · ${img}`}
+                                  onClick={() => {
+                                    setPlacing(isPlacing ? null : { cat, img });
+                                    setSelectedPlacement(null);
+                                  }}
+                                >
+                                  <img src={landscapeSrc({ img })} alt={img} draggable={false} />
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="admin-form__micro">
+                        {artMode === 'landmarks'
+                          ? 'No landmark images.'
+                          : selected
+                            ? `No landscape art for this terrain type (${selectedTerrainType || 'land'}).${
+                                borderMode && manifest.mountains
+                                  ? ' Border mountains are still available from the palette.'
+                                  : ' Enable Border mode to place mountain ranges on this territory’s edges.'
+                              }`
+                            : 'Select a territory to see its landscape images.'}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : null}
               <input
                 type="search"
                 className="admin-form__input admin-graph__search"
@@ -2455,41 +2787,6 @@ export function MapOverridesPane({
                       ).join(', ') || 'none'}
                     </p>
                   ) : editorTab === 'landscape' ? (
-                    selectedCategories.length ? (
-                      <div className="mapov-landscape">
-                        <div className="mapov-landscape__modes">
-                          <label className="admin-page__checkbox-label">
-                            <input
-                              type="checkbox"
-                              checked={borderMode}
-                              onChange={(e) => setBorderMode(e.target.checked)}
-                            />
-                            Border mode (snap to outline)
-                          </label>
-                        </div>
-                        <div className="mapov-landscape__palette" role="listbox" aria-label="Landscape images">
-                          {selectedCategories.flatMap((cat) =>
-                            (manifest[cat] ?? []).map((img) => {
-                              const isPlacing = placing?.img === img && placing?.cat === cat;
-                              return (
-                                <button
-                                  key={`${cat}/${img}`}
-                                  type="button"
-                                  role="option"
-                                  aria-selected={isPlacing}
-                                  className={`mapov-landscape__thumb${isPlacing ? ' mapov-landscape__thumb--active' : ''}`}
-                                  title={`${cat} · ${img}`}
-                                  onClick={() => {
-                                    setPlacing(isPlacing ? null : { cat, img });
-                                    setSelectedPlacement(null);
-                                  }}
-                                >
-                                  <img src={landscapeSrc({ img })} alt={img} draggable={false} />
-                                </button>
-                              );
-                            }),
-                          )}
-                        </div>
                         <ul className="mapov-kinds">
                           {selectedPlacements.map((p, index) => {
                             const isActive = selectedPlacement?.tid === selected && selectedPlacement?.index === index;
@@ -2531,6 +2828,10 @@ export function MapOverridesPane({
                                     step={1}
                                     value={Math.round(p.r ?? 0) % 360}
                                     aria-valuetext={`${Math.round(p.r ?? 0)} degrees`}
+                                    onPointerDown={(e) => {
+                                      e.stopPropagation();
+                                      armGesture('landscape');
+                                    }}
                                     onClick={(e) => e.stopPropagation()}
                                     onChange={(e) => setPlacementRotation(selected, index, Number(e.target.value))}
                                   />
@@ -2554,6 +2855,10 @@ export function MapOverridesPane({
                                     max={4}
                                     step={0.05}
                                     value={p.s ?? 1}
+                                    onPointerDown={(e) => {
+                                      e.stopPropagation();
+                                      armGesture('landscape');
+                                    }}
                                     onClick={(e) => e.stopPropagation()}
                                     onChange={(e) => setPlacementAt(selected, index, { s: Number(e.target.value) })}
                                   />
@@ -2578,15 +2883,6 @@ export function MapOverridesPane({
                             </li>
                           )}
                         </ul>
-                      </div>
-                    ) : (
-                      <p className="admin-form__micro">
-                        No landscape art for this terrain type ({selectedTerrainType || 'land'}).
-                        {borderMode && manifest.mountains
-                          ? ' Border mountains are still available from the palette.'
-                          : ' Enable Border mode to place mountain ranges on this territory’s edges.'}
-                      </p>
-                    )
                   ) : selectedFocus === 'override' ? (
                     <ul className="mapov-kinds">
                       {SPOT_KINDS.map(({ kind, hint }) => {
@@ -2792,6 +3088,7 @@ export function MapOverridesPane({
                       max={4}
                       step={0.05}
                       value={bulkScaleValue}
+                      onPointerDown={() => armGesture('landscape')}
                       onChange={(e) => setBulkScale(Number(e.target.value))}
                     />
                   </label>
@@ -2806,6 +3103,7 @@ export function MapOverridesPane({
                       max={359}
                       step={1}
                       value={Math.round(bulkRotationValue) % 360}
+                      onPointerDown={() => armGesture('landscape')}
                       onChange={(e) => setBulkRotation(Number(e.target.value))}
                     />
                     <button type="button" className="mapov-landscape__rot-btn" aria-label="Rotate selection right" onClick={() => nudgeBulkRotation(15)}>

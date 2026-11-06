@@ -42,8 +42,53 @@ export async function loadLandscapeManifest(): Promise<LandscapeManifest> {
 /**
  * Categories of landscape art that may be placed on a territory with this terrain type.
  * The free category (`anywhere`) and `landmarks` are included unless `includeFree` is false.
- * Auto-generate skips both so bridges, fords, and named places stay hand-placed.
+ * Auto-generate scatters terrain art only; landmarks are placed separately on a matching territory.
  */
+
+/** Landmark filename stem → territory ids used when that stem is not itself a territory id. */
+const LANDMARK_TERRITORY_ALIASES: Record<string, readonly string[]> = {
+  bree: ['bree_fornost'],
+  dwarrowdelf: ['khazad_dum', 'moria'],
+  elven_halls: ['thranduils_halls'],
+  osgiliath: ['west_osgiliath'],
+  osgiliath_ruins: ['east_osgiliath'],
+};
+
+/** The landmark image that belongs on this territory, if the manifest has one. */
+export function landmarkFileForTerritory(territoryId: string, images: readonly string[]): string | null {
+  const id = territoryId.toLowerCase();
+  const stem = (img: string) => img.replace(/\.png$/i, '').toLowerCase();
+  for (const img of images) {
+    if (stem(img) === id) return img;
+  }
+  for (const img of images) {
+    if (LANDMARK_TERRITORY_ALIASES[stem(img)]?.some((alias) => alias === id)) return img;
+  }
+  return null;
+}
+
+/** A viewBox point inside the territory, preferring the bbox center. */
+export function pointInsideTerritory(path: SVGPathElement): { x: number; y: number } | null {
+  try {
+    const bbox = path.getBBox();
+    if (!Number.isFinite(bbox.width) || bbox.width <= 0 || bbox.height <= 0) return null;
+    const round = (n: number) => Math.round(n * 100) / 100;
+    const cx = bbox.x + bbox.width / 2;
+    const cy = bbox.y + bbox.height / 2;
+    if (isPointInTerritoryPath(path, cx, cy)) return { x: round(cx), y: round(cy) };
+    for (let i = 1; i < 8; i++) {
+      for (let j = 1; j < 8; j++) {
+        const x = bbox.x + (bbox.width * i) / 8;
+        const y = bbox.y + (bbox.height * j) / 8;
+        if (isPointInTerritoryPath(path, x, y)) return { x: round(x), y: round(y) };
+      }
+    }
+    return { x: round(cx), y: round(cy) };
+  } catch {
+    return null;
+  }
+}
+
 export function landscapeCategoriesForTerrain(
   terrainType: string | undefined,
   manifest: LandscapeManifest,
