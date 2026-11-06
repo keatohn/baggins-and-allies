@@ -4684,11 +4684,11 @@ function GameMap({
                             <animateTransform attributeName="patternTransform" type="translate" from="0 0" to="-120 0" dur="3s" repeatCount="indefinite" />
                           )}
                         </pattern>
-                        <marker id="arrowhead-combat" markerWidth="8" markerHeight="8" refX="3.5" refY="2.5" orient="auto" viewBox="0 0 5 5">
-                          <polygon points="0,0 5,2.5 0,5" fill="#ff5252" />
+                        <marker id="arrowhead-combat" markerWidth="10" markerHeight="10" refX="3.5" refY="2.5" orient="auto" viewBox="0 0 5 5">
+                          <polygon points="0,0 5,2.5 0,5" fill="#b83838" />
                         </marker>
-                        <marker id="arrowhead-move" markerWidth="8" markerHeight="8" refX="3.5" refY="2.5" orient="auto" viewBox="0 0 5 5">
-                          <polygon points="0,0 5,2.5 0,5" fill="#4ade80" />
+                        <marker id="arrowhead-move" markerWidth="10" markerHeight="10" refX="3.5" refY="2.5" orient="auto" viewBox="0 0 5 5">
+                          <polygon points="0,0 5,2.5 0,5" fill="#2d8a46" />
                         </marker>
                         <marker id="arrowhead-opening" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
                           <polygon points="0,0 6,3 0,6" fill="#7a1f1a" />
@@ -4750,25 +4750,38 @@ function GameMap({
                           />
                         </g>
                       ))}
-                      {moveArrows.map((arrow, idx) => arrow && (
+                      {moveArrows.map((arrow, idx) => {
+                        if (!arrow) return null;
+                        const countLabel = String(Math.max(0, arrow.count));
+                        const scale = Math.max(transform.scale, 0.05);
+                        const badgeR = (countLabel.length >= 3 ? 6.5 : countLabel.length > 1 ? 5.5 : 4.5) / scale;
+                        const fontSize = (countLabel.length > 1 ? 6.5 : 7) / scale;
+                        return (
                         <g key={`arrow-${idx}`}>
                           <line
-                            className="move-arrow"
+                            className={`move-arrow ${arrow.isCombat ? 'move-arrow-combat' : 'move-arrow-move'}`}
                             x1={arrow.startX}
                             y1={arrow.startY}
                             x2={arrow.endX}
                             y2={arrow.endY}
-                            stroke={arrow.isCombat ? '#ff5252' : '#4ade80'}
-                            strokeWidth="6"
+                            stroke={arrow.isCombat ? '#b83838' : '#2d8a46'}
+                            strokeWidth="7"
                             strokeLinecap="round"
-                            strokeDasharray={arrow.isCombat ? 'none' : '11,5'}
+                            strokeDasharray={arrow.isCombat ? 'none' : '12,5'}
                             markerEnd={`url(#arrowhead-${arrow.isCombat ? 'combat' : 'move'})`}
-                            opacity="0.9"
+                            opacity="1"
                           />
+                          <g
+                            className={`move-arrow-count ${arrow.isCombat ? 'move-arrow-count--combat' : 'move-arrow-count--move'}`}
+                            transform={`translate(${arrow.midX} ${arrow.midY})`}
+                          >
+                            <circle r={badgeR} strokeWidth={1 / scale} />
+                            <text fontSize={fontSize}>{countLabel}</text>
+                          </g>
                           {arrow.isLoad && (
                             <text
                               x={arrow.midX}
-                              y={arrow.midY}
+                              y={arrow.midY - badgeR - 8 / scale}
                               textAnchor="middle"
                               dominantBaseline="middle"
                               className="move-arrow-load-emoji"
@@ -4778,7 +4791,8 @@ function GameMap({
                             </text>
                           )}
                         </g>
-                      ))}
+                        );
+                      })}
                     </svg>
 
                     {/* If the PNG fails, show the full-map SVG as a flat HTML layer (rare); normal path uses <image> inside the interactive SVG above. */}

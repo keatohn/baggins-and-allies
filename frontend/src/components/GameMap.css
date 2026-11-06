@@ -1431,8 +1431,14 @@
 /* Move arrows */
 .move-arrow {
   pointer-events: none;
-  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.55)) drop-shadow(1px 1px 2px rgba(0, 0, 0, 0.35));
   animation: arrow-pulse 2s ease-in-out infinite;
+}
+
+.move-arrow-move,
+.move-arrow-combat {
+  filter:
+    drop-shadow(0 0 1px rgba(255, 255, 255, 0.35))
+    drop-shadow(0 1px 1px rgba(0, 0, 0, 0.4));
 }
 
 .move-arrow-load-emoji {
@@ -1443,17 +1449,40 @@
   paint-order: stroke fill;
 }
 
+.move-arrow-count {
+  pointer-events: none;
+}
+
+.move-arrow-count circle {
+  fill: rgba(28, 22, 16, 0.94);
+}
+
+.move-arrow-count--move circle {
+  stroke: #2d8a46;
+}
+
+.move-arrow-count--combat circle {
+  stroke: #b83838;
+}
+
+.move-arrow-count text {
+  fill: #fff8e8;
+  font-weight: 800;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
 @keyframes arrow-pulse {
 
   0%,
   100% {
     opacity: 1;
-    stroke-width: 6;
+    stroke-width: 7;
   }
 
   50% {
-    opacity: 0.92;
-    stroke-width: 10;
+    opacity: 0.96;
+    stroke-width: 11;
   }
 }
 
