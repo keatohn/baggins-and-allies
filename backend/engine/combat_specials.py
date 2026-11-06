@@ -84,7 +84,7 @@ def compute_battle_specials_and_modifiers(
     )
     stealth_activated = (
         len(attacker_units) > 0
-        and all(has_unit_special(unit_defs.get(u.unit_id), "stealth") for u in attacker_units if unit_defs.get(u.unit_id))
+        and all(has_unit_special(unit_defs.get(u.unit_id), "stealth") for u in attacker_units)
     )
     paired_bombikazi_ids = set(get_bombikazi_pairing(attacker_units, unit_defs)[0]) if attacker_units else set()
 

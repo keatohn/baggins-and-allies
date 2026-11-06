@@ -7,7 +7,7 @@ import random
 
 import pytest
 
-from backend.engine.actions import end_phase, retreat
+from backend.engine.actions import Action, end_phase, retreat
 from backend.engine.movement import _is_water_zone
 from backend.engine.queries import get_retreat_options, validate_action
 from backend.engine.reducer import apply_action
@@ -22,6 +22,7 @@ from backend.ai.mcts.combat import (
     CombatProblem,
     decide_combat_mcts,
 )
+from backend.ai.mcts.dice import sample_dice_for_continue, sample_dice_for_initiate
 from backend.ai.mcts.search import run_mcts
 
 
@@ -422,6 +423,23 @@ def test_decide_combat_mcts_applies_cleanly():
     _plant_contested_territory(state, ud, td)
     ctx = _combat_ctx(state, ud, td, fd, cd, port_d)
     action = decide_combat_mcts(ctx, rng=random.Random(0))
+    # The API fills real rolls before dispatch (decide_combat_mcts strips them);
+    # mirror CombatProblem._with_sampled_dice so the reducer sees contract-correct dice.
+    if action.type == "initiate_combat":
+        dice = sample_dice_for_initiate(
+            state, action.payload.get("territory_id", ""),
+            action.payload.get("sea_zone_id"), action.faction, ud, td, fd,
+        )
+        action = Action(
+            type=action.type, faction=action.faction,
+            payload={**action.payload, "dice_rolls": dice},
+        )
+    elif action.type == "continue_combat":
+        dice = sample_dice_for_continue(state, ud, td, fd)
+        action = Action(
+            type=action.type, faction=action.faction,
+            payload={**action.payload, "dice_rolls": dice},
+        )
     new_state, _events = apply_action(state, action, ud, td, fd, cd, port_d)
     assert new_state is not None
 

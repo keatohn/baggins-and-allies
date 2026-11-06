@@ -6160,7 +6160,7 @@ def _generate_initiate_combat_payload(
     terror_reroll_response: dict[str, Any] = {}
     all_attackers_have_stealth = (
         len(attackers) > 0
-        and all(combat_has_special(ud.get(u.unit_id), "stealth") for u in attackers if ud.get(u.unit_id))
+        and all(combat_has_special(ud.get(u.unit_id), "stealth") for u in attackers)
     )
     defender_has_archers = any(has_unit_special(ud.get(u.unit_id), "archer") for u in defenders if getattr(u, "unit_id", "") in ud)
 
