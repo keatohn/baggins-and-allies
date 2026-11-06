@@ -2495,9 +2495,13 @@ function GameMap({
                   if (boatIds.size > 0 && !boatIds.has(u.loaded_onto)) return false;
                   return !navalUnitIds.has(u.unit_id);
                 });
-                const pendingIds = (pendingMoves ?? [])
-                  .filter((m) => pendingMoveIsSamePhaseLoadIntoSea(m, sz, territoryData, gameState.phase))
-                  .flatMap((m) => m.unit_instance_ids ?? []);
+                const pendingIds = pendingLoadInstanceIdsIntoSeaZone(
+                  sz,
+                  gameState.phase,
+                  pendingMoves,
+                  territoryData,
+                  boatIds,
+                );
                 const byId = new Map<string, { instance_id: string; unit_id: string; remaining_movement?: number }>();
                 for (const units of Object.values(territoryUnitsFull ?? {})) {
                   for (const u of units) byId.set(u.instance_id, u);
@@ -3686,30 +3690,38 @@ function GameMap({
         }
         if (
           isOffloadOrSeaRaid &&
-          gameState.phase === 'non_combat_move' &&
-          instanceIdsToUse &&
-          territoryUnitsFull?.[unitForDrop.territoryId]
+          (gameState.phase === 'non_combat_move' || gameState.phase === 'combat_move') &&
+          instanceIdsToUse
         ) {
-          const fullUnits = territoryUnitsFull[unitForDrop.territoryId];
-          const boatIds = new Set(fullUnits.filter((u) => navalUnitIds.has(u.unit_id)).map((u) => u.instance_id));
-          const draggedBoatIds = new Set(instanceIdsToUse.filter((id) => boatIds.has(id)));
-          // Same-phase loads are not aboard yet. Treat them as passengers so the drop is not discarded.
+          const fromSeaKey = unitForDrop.territoryId;
+          const fullUnits =
+            territoryUnitsFull?.[fromSeaKey] ??
+            territoryUnitsFull?.[canonicalSeaZoneId(fromSeaKey)] ??
+            [];
+          const hullIds = new Set(fullUnits.filter((u) => navalUnitIds.has(u.unit_id)).map((u) => u.instance_id));
+          const draggedBoatIds = new Set(instanceIdsToUse.filter((id) => hullIds.has(id)));
           const pendingPassengerIds = pendingLoadInstanceIdsIntoSeaZone(
-            unitForDrop.territoryId,
+            fromSeaKey,
             gameState.phase,
             pendingMoves,
             territoryData,
             draggedBoatIds,
           );
-          for (const id of pendingPassengerIds) {
-            if (!instanceIdsToUse.includes(id)) instanceIdsToUse.push(id);
+          const unitById = new Map<string, { instance_id: string; unit_id: string; remaining_movement?: number }>();
+          for (const units of Object.values(territoryUnitsFull ?? {})) {
+            for (const u of units) unitById.set(u.instance_id, u);
           }
-          const byId = new Map(fullUnits.map((u) => [u.instance_id, u]));
-          const kept = instanceIdsToUse.filter((id) => {
-            if (boatIds.has(id)) return true;
-            const passenger = byId.get(id);
-            if (!passenger) return true;
-            return !marchingOrdersBlocksEnd(
+          const passengerIds = [
+            ...instanceIdsToUse.filter((id) => !hullIds.has(id)),
+            ...pendingPassengerIds,
+          ];
+          const uniquePassengers = [...new Set(passengerIds)];
+          // Marching orders: a bonus unit cannot spend its last point reinforcing a territory conquered this turn.
+          // Pending loads are still on land, but they offload with this boat, so they count as aboard.
+          const marchingOrdersBlocksOffload = uniquePassengers.some((id) => {
+            const passenger = unitById.get(id);
+            if (!passenger) return false;
+            return marchingOrdersBlocksEnd(
               passenger.instance_id,
               passenger.unit_id,
               passenger.remaining_movement ?? 0,
@@ -3717,33 +3729,35 @@ function GameMap({
               storeTarget,
             );
           });
-          const pendingStillAboard = pendingPassengerIds.some((id) => kept.includes(id));
-          if (!kept.some((id) => !boatIds.has(id)) && !pendingStillAboard) {
+          if (uniquePassengers.length === 0 || marchingOrdersBlocksOffload) {
             setActiveUnit(null);
             setActiveDragId(null);
             setValidDropTargets(new Set());
             return;
           }
-          instanceIdsToUse = kept;
+          for (const id of pendingPassengerIds) {
+            if (!instanceIdsToUse.includes(id)) instanceIdsToUse.push(id);
+          }
           if (navalBoatStacks) {
+            const stackCount = navalBoatStacks.length;
             navalBoatStacks = navalBoatStacks
               .map((stack) => {
-                const boat = stack.find((id) => boatIds.has(id));
+                const boat = stack.find((id) => hullIds.has(id));
                 const extras = pendingLoadInstanceIdsIntoSeaZone(
-                  unitForDrop.territoryId,
+                  fromSeaKey,
                   gameState.phase,
                   pendingMoves,
                   territoryData,
                   boat ? new Set([boat]) : draggedBoatIds,
-                  navalBoatStacks.length === 1,
+                  stackCount === 1,
                 );
                 const merged = [...stack];
                 for (const id of extras) {
                   if (!merged.includes(id)) merged.push(id);
                 }
-                return merged.filter((id) => kept.includes(id));
+                return merged;
               })
-              .filter((stack) => stack.some((id) => !boatIds.has(id)));
+              .filter((stack) => stack.some((id) => !hullIds.has(id)));
           }
         }
         // Land → sea (embark): transportable land units only. Aerial → sea in combat is naval battle, not loading.
