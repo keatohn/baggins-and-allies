@@ -591,36 +591,148 @@
 
 .territory-landscape__smoke {
   position: absolute;
-  left: 50%;
-  bottom: 68%;
-  width: 12px;
-  height: 12px;
-  margin-left: -6px;
+  left: 54%;
+  bottom: 76%;
+  width: 20px;
+  height: 20px;
+  margin-left: -10px;
   border-radius: 50%;
-  background: rgba(190, 190, 190, 0.55);
-  filter: blur(1px);
-  animation: landscape-smoke 2.6s ease-out infinite;
+  background: radial-gradient(circle, rgba(220, 220, 220, 0.75) 0%, rgba(170, 170, 170, 0.28) 70%);
+  filter: blur(1.5px);
+  animation: landscape-smoke 2.8s ease-out infinite;
   pointer-events: none;
 }
 
 .territory-landscape__smoke--late {
-  animation-delay: 1.3s;
-  width: 9px;
-  height: 9px;
-  margin-left: -3px;
-  left: 42%;
+  animation-delay: 0.95s;
+  width: 15px;
+  height: 15px;
+  margin-left: -2px;
+  left: 46%;
+}
+
+.territory-landscape__smoke--high {
+  animation-delay: 1.85s;
+  width: 17px;
+  height: 17px;
+  margin-left: -14px;
+  left: 64%;
 }
 
 @keyframes landscape-smoke {
   0% {
-    transform: translateY(0) scale(0.45);
-    opacity: 0.65;
+    transform: translateY(6px) scale(0.4);
+    opacity: 0.15;
   }
-  70% {
-    opacity: 0.2;
+  18% {
+    opacity: 0.8;
   }
   100% {
-    transform: translateY(-16px) scale(1.7);
+    transform: translateY(-32px) scale(2.05);
+    opacity: 0;
+  }
+}
+
+.territory-landscape__fume {
+  position: absolute;
+  left: 54%;
+  bottom: 74%;
+  width: 12px;
+  height: 14px;
+  margin-left: -6px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 96, 28, 0.9) 0%, rgba(170, 18, 8, 0.4) 62%, transparent 76%);
+  filter: blur(1px);
+  animation: landscape-fume 2.1s ease-out infinite;
+  pointer-events: none;
+}
+
+.territory-landscape__fume--late {
+  animation-delay: 1.05s;
+  width: 9px;
+  height: 11px;
+  left: 47%;
+  margin-left: 0;
+}
+
+@keyframes landscape-fume {
+  0% {
+    transform: translateY(5px) scale(0.4);
+    opacity: 0.1;
+  }
+  16% {
+    opacity: 0.95;
+  }
+  100% {
+    transform: translateY(-20px) scale(1.55);
+    opacity: 0;
+  }
+}
+
+.territory-landscape__spark {
+  position: absolute;
+  left: 54%;
+  bottom: 78%;
+  width: 3px;
+  height: 3px;
+  margin-left: -1px;
+  border-radius: 50%;
+  background: #ffd2a8;
+  box-shadow: 0 0 3px 1px rgba(255, 64, 16, 0.9);
+  animation: landscape-spark 1.35s ease-out infinite;
+  pointer-events: none;
+}
+
+.territory-landscape__spark--b {
+  animation-delay: 0.45s;
+  left: 48%;
+  animation-name: landscape-spark-left;
+}
+
+.territory-landscape__spark--c {
+  animation-delay: 0.9s;
+  left: 61%;
+  animation-name: landscape-spark-right;
+}
+
+@keyframes landscape-spark {
+  0% {
+    transform: translate(0, 3px) scale(0.5);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(0, -24px) scale(0.25);
+    opacity: 0;
+  }
+}
+
+@keyframes landscape-spark-left {
+  0% {
+    transform: translate(0, 3px) scale(0.5);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-7px, -20px) scale(0.2);
+    opacity: 0;
+  }
+}
+
+@keyframes landscape-spark-right {
+  0% {
+    transform: translate(0, 3px) scale(0.5);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(8px, -22px) scale(0.2);
     opacity: 0;
   }
 }
@@ -628,8 +740,15 @@
 @media (prefers-reduced-motion: reduce) {
   .territory-landscape__smoke {
     animation: none;
-    opacity: 0.35;
-    transform: translateY(-6px) scale(1.1);
+    opacity: 0.5;
+    transform: translateY(-14px) scale(1.35);
+  }
+
+  .territory-landscape__fume,
+  .territory-landscape__spark {
+    animation: none;
+    opacity: 0.7;
+    transform: translateY(-8px);
   }
 }
 

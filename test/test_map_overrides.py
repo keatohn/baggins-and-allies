@@ -262,7 +262,7 @@ LANDSCAPE_PAYLOAD = {
         "territories": {
             "the_shire": [
                 {"cat": "forest", "img": "forest_large.png", "x": 10.5, "y": 20, "layer": "interior", "auto": True},
-                {"cat": "mountains", "img": "mountain_range.png", "x": 30, "y": 40, "layer": "border", "s": 1.5},
+                {"cat": "mountains", "img": "mountain_range.png", "x": 30, "y": 40, "layer": "border", "s": 1.5, "r": 90},
             ],
             "mordor": [
                 {"cat": "volcano", "img": "volcano.png", "x": 1, "y": 2},
@@ -282,6 +282,7 @@ def test_put_overrides_landscape_round_trip(make_client, players):
     assert landscape["the_shire"][0]["auto"] is True
     assert landscape["the_shire"][1]["layer"] == "border"
     assert landscape["the_shire"][1]["s"] == 1.5
+    assert landscape["the_shire"][1]["r"] == 90
     # missing layer defaults to interior; missing s omitted
     assert landscape["mordor"][0]["layer"] == "interior"
     assert "s" not in landscape["mordor"][0]
@@ -314,6 +315,8 @@ def test_put_overrides_landscape_only_no_territories(make_client, players):
         {"territories": {"the_shire": [{"cat": "forest", "img": "x.png", "x": 1, "y": 2, "layer": "sideways"}]}},
         {"territories": {"the_shire": [{"cat": "forest", "img": "x.png", "x": "a", "y": 2}]}},
         {"territories": {"the_shire": [{"cat": "forest", "img": "x.png", "x": 1, "y": 2, "s": 99}]}},
+        {"territories": {"the_shire": [{"cat": "forest", "img": "x.png", "x": 1, "y": 2, "r": "sideways"}]}},
+        {"territories": {"the_shire": [{"cat": "forest", "img": "x.png", "x": 1, "y": 2, "r": True}]}},
         {"territories": {"the_shire": [{"cat": "forest", "img": "x.png", "x": 1e9, "y": 2}]}},
     ],
 )
@@ -342,6 +345,26 @@ def test_put_overrides_rejects_too_many_landscape_placements(make_client, player
     }
     r = client.put("/admin/maps/wotr_map_1.2/overrides", json=payload)
     assert r.status_code == 400
+
+
+def test_landscape_rotation_wraps_and_drops_full_turns():
+    from backend.map_overrides import normalize_map_overrides
+
+    out = normalize_map_overrides(
+        {
+            "landscape": {
+                "territories": {
+                    "mordor": [
+                        {"cat": "landmarks", "img": "minas_tirith.png", "x": 1, "y": 2, "r": -90},
+                        {"cat": "forest", "img": "f.png", "x": 1, "y": 2, "r": 360},
+                    ]
+                }
+            }
+        }
+    )
+    rows = out["landscape"]["territories"]["mordor"]
+    assert rows[0]["r"] == 270
+    assert "r" not in rows[1]
 
 
 def test_normalize_map_overrides_landscape_lenient():

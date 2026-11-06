@@ -253,6 +253,29 @@ function countPendingPassengersLoadingIntoSeaZone(
   return n;
 }
 
+/** Instance ids of land units declared to load into this sea this phase, still on land until phase end. */
+function pendingLoadInstanceIdsIntoSeaZone(
+  seaTerritoryId: string,
+  gamePhase: string,
+  pendingMoves: PendingMove[] | undefined,
+  territoryData: Record<string, { terrain?: string } | undefined>,
+  boatIds?: Set<string>,
+  includeUnassigned = true,
+): string[] {
+  const out: string[] = [];
+  if (!pendingMoves?.length) return out;
+  for (const m of pendingMoves) {
+    if (!pendingMoveIsSamePhaseLoadIntoSea(m, seaTerritoryId, territoryData, gamePhase)) continue;
+    const boat = m.load_onto_boat_instance_id;
+    if (!boat && !includeUnassigned) continue;
+    if (boat && boatIds && boatIds.size > 0 && !boatIds.has(boat)) continue;
+    for (const id of m.unit_instance_ids ?? []) {
+      if (id && !out.includes(id)) out.push(id);
+    }
+  }
+  return out;
+}
+
 /**
  * Remaining passenger slots for land→sea load: sum over current faction's boats in the zone
  * (per-boat capacity minus onboard and pending loads assigned to that boat), minus pending loads
@@ -3669,6 +3692,18 @@ function GameMap({
         ) {
           const fullUnits = territoryUnitsFull[unitForDrop.territoryId];
           const boatIds = new Set(fullUnits.filter((u) => navalUnitIds.has(u.unit_id)).map((u) => u.instance_id));
+          const draggedBoatIds = new Set(instanceIdsToUse.filter((id) => boatIds.has(id)));
+          // Same-phase loads are not aboard yet. Treat them as passengers so the drop is not discarded.
+          const pendingPassengerIds = pendingLoadInstanceIdsIntoSeaZone(
+            unitForDrop.territoryId,
+            gameState.phase,
+            pendingMoves,
+            territoryData,
+            draggedBoatIds,
+          );
+          for (const id of pendingPassengerIds) {
+            if (!instanceIdsToUse.includes(id)) instanceIdsToUse.push(id);
+          }
           const byId = new Map(fullUnits.map((u) => [u.instance_id, u]));
           const kept = instanceIdsToUse.filter((id) => {
             if (boatIds.has(id)) return true;
@@ -3682,7 +3717,8 @@ function GameMap({
               storeTarget,
             );
           });
-          if (!kept.some((id) => !boatIds.has(id))) {
+          const pendingStillAboard = pendingPassengerIds.some((id) => kept.includes(id));
+          if (!kept.some((id) => !boatIds.has(id)) && !pendingStillAboard) {
             setActiveUnit(null);
             setActiveDragId(null);
             setValidDropTargets(new Set());
@@ -3691,7 +3727,22 @@ function GameMap({
           instanceIdsToUse = kept;
           if (navalBoatStacks) {
             navalBoatStacks = navalBoatStacks
-              .map((stack) => stack.filter((id) => kept.includes(id)))
+              .map((stack) => {
+                const boat = stack.find((id) => boatIds.has(id));
+                const extras = pendingLoadInstanceIdsIntoSeaZone(
+                  unitForDrop.territoryId,
+                  gameState.phase,
+                  pendingMoves,
+                  territoryData,
+                  boat ? new Set([boat]) : draggedBoatIds,
+                  navalBoatStacks.length === 1,
+                );
+                const merged = [...stack];
+                for (const id of extras) {
+                  if (!merged.includes(id)) merged.push(id);
+                }
+                return merged.filter((id) => kept.includes(id));
+              })
               .filter((stack) => stack.some((id) => !boatIds.has(id)));
           }
         }
@@ -4819,11 +4870,12 @@ function GameMap({
                         const screenPos = svgToScreen(placement.x, placement.y);
                         const clamped = clampToMap(screenPos);
                         const size = Math.round(40 * (placement.s ?? 1));
+                        const rotation = placement.r ? `translate(-50%, -50%) rotate(${placement.r}deg)` : undefined;
                         return (
                           <div
                             key={`${tid}|${i}|${placement.img}`}
                             className={`territory-landscape territory-landscape--${placement.cat}${placement.layer === 'border' ? ' territory-landscape--border' : ''}`}
-                            style={{ left: clamped.x, top: clamped.y, width: size, height: size }}
+                            style={{ left: clamped.x, top: clamped.y, width: size, height: size, transform: rotation }}
                             aria-hidden
                           >
                             <img src={landscapeSrc(placement)} alt="" draggable={false} />
@@ -4831,6 +4883,12 @@ function GameMap({
                               <>
                                 <span className="territory-landscape__smoke" />
                                 <span className="territory-landscape__smoke territory-landscape__smoke--late" />
+                                <span className="territory-landscape__smoke territory-landscape__smoke--high" />
+                                <span className="territory-landscape__fume" />
+                                <span className="territory-landscape__fume territory-landscape__fume--late" />
+                                <span className="territory-landscape__spark" />
+                                <span className="territory-landscape__spark territory-landscape__spark--b" />
+                                <span className="territory-landscape__spark territory-landscape__spark--c" />
                               </>
                             ) : null}
                           </div>

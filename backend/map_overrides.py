@@ -179,6 +179,21 @@ def _clean_placement(raw: Any) -> dict[str, Any] | None:
         if not math.isfinite(fscale) or not (MIN_LANDSCAPE_SCALE <= fscale <= MAX_LANDSCAPE_SCALE):
             return None
         out["s"] = fscale
+    rotation = raw.get("r")
+    if rotation is not None:
+        if isinstance(rotation, bool):
+            return None
+        try:
+            frot = float(rotation)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(frot):
+            return None
+        frot = round(frot % 360.0, 2)
+        if frot < 0:
+            frot += 360.0
+        if frot != 0.0:
+            out["r"] = frot
     if raw.get("auto") is True:
         out["auto"] = True
     return out
@@ -417,8 +432,8 @@ def _validate_landscape_section(raw: Any) -> None:
             if _clean_placement(item) is None:
                 raise MapOverridesError(
                     f"Landscape placement for {tid} needs cat/img (.png), layer "
-                    f"({'/'.join(LANDSCAPE_LAYERS)}), finite x/y, and optional s in "
-                    f"[{MIN_LANDSCAPE_SCALE}, {MAX_LANDSCAPE_SCALE}]."
+                    f"({'/'.join(LANDSCAPE_LAYERS)}), finite x/y, optional s in "
+                    f"[{MIN_LANDSCAPE_SCALE}, {MAX_LANDSCAPE_SCALE}], and optional r in degrees."
                 )
 
 

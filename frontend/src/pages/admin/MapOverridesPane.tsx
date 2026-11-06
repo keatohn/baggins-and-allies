@@ -17,6 +17,7 @@ import {
   autoGenerateForTerritory,
   isPointInTerritoryPath,
   landscapeCategoriesForTerrain,
+  landscapeRotation,
   landscapeSrc,
   loadLandscapeManifest,
   nearestPointOnOutline,
@@ -1104,6 +1105,74 @@ export function MapOverridesPane({
     setMultiSel(new Set());
   }, [updateLandscape]);
 
+  const setPlacementRotation = useCallback(
+    (tid: string, index: number, deg: number) => {
+      setPlacementAt(tid, index, { r: landscapeRotation(deg) });
+    },
+    [setPlacementAt],
+  );
+
+  const setBulkRotation = useCallback(
+    (deg: number) => {
+      if (!multiSel.size) return;
+      const next = landscapeRotation(deg);
+      updateLandscape((prev) => {
+        const map = { ...(prev?.territories ?? {}) };
+        const cloned = new Set<string>();
+        let changed = false;
+        for (const key of multiSel) {
+          const parsed = parsePlacementKey(key);
+          if (!parsed) continue;
+          const list = map[parsed.tid];
+          const p = list?.[parsed.index];
+          if (!p || (p.r ?? 0) === (next ?? 0)) continue;
+          if (!cloned.has(parsed.tid)) {
+            map[parsed.tid] = [...list!];
+            cloned.add(parsed.tid);
+          }
+          const updated = { ...p };
+          if (next == null) delete updated.r;
+          else updated.r = next;
+          map[parsed.tid]![parsed.index] = updated;
+          changed = true;
+        }
+        return changed ? { territories: map } : prev;
+      });
+    },
+    [multiSel, updateLandscape],
+  );
+
+  const nudgeBulkRotation = useCallback(
+    (delta: number) => {
+      if (!multiSel.size) return;
+      updateLandscape((prev) => {
+        const map = { ...(prev?.territories ?? {}) };
+        const cloned = new Set<string>();
+        let changed = false;
+        for (const key of multiSel) {
+          const parsed = parsePlacementKey(key);
+          if (!parsed) continue;
+          const list = map[parsed.tid];
+          const p = list?.[parsed.index];
+          if (!p) continue;
+          const next = landscapeRotation((p.r ?? 0) + delta);
+          if ((p.r ?? 0) === (next ?? 0)) continue;
+          if (!cloned.has(parsed.tid)) {
+            map[parsed.tid] = [...list!];
+            cloned.add(parsed.tid);
+          }
+          const updated = { ...p };
+          if (next == null) delete updated.r;
+          else updated.r = next;
+          map[parsed.tid]![parsed.index] = updated;
+          changed = true;
+        }
+        return changed ? { territories: map } : prev;
+      });
+    },
+    [multiSel, updateLandscape],
+  );
+
   const setBulkScale = useCallback(
     (s: number) => {
       if (!multiSel.size) return;
@@ -1741,6 +1810,16 @@ export function MapOverridesPane({
     return 1;
   }, [multiSel, current]);
 
+  const bulkRotationValue = useMemo(() => {
+    for (const key of multiSel) {
+      const parsed = parsePlacementKey(key);
+      if (!parsed) continue;
+      const p = current?.landscape?.territories?.[parsed.tid]?.[parsed.index];
+      if (p) return p.r ?? 0;
+    }
+    return 0;
+  }, [multiSel, current]);
+
   // --- copy from another map ----------------------------------------------
 
   const otherMaps = useMemo(() => maps.filter((m) => m !== mapBase), [maps, mapBase]);
@@ -1827,6 +1906,8 @@ export function MapOverridesPane({
       };
       // Copied pieces are a deliberate import: keep them across the next auto pass.
       if (typeof p.s === 'number' && p.s !== 1) placement.s = Math.min(4, Math.max(0.25, p.s));
+      const copiedRotation = landscapeRotation(p.r ?? 0);
+      if (copiedRotation != null) placement.r = copiedRotation;
       items.push({ tid: key, placement });
     }
     return { items, inRegion, outsideRegion, unmatched, capped };
@@ -2415,7 +2496,7 @@ export function MapOverridesPane({
                             return (
                               <li
                                 key={`${p.img}-${index}`}
-                                className={`mapov-kind${isActive ? ' mapov-kind--active' : ''}`}
+                                className={`mapov-kind mapov-kind--placement${isActive ? ' mapov-kind--active' : ''}`}
                                 onClick={() => setSelectedPlacement({ tid: selected, index })}
                               >
                                 <img
@@ -2428,7 +2509,43 @@ export function MapOverridesPane({
                                   {p.img.replace(/\.png$/i, '')}
                                   {p.layer === 'border' ? ' · border' : ''}
                                   {p.auto ? ' · auto' : ''}
+                                  {p.r ? ` · ${Math.round(p.r)}°` : ''}
                                 </span>
+                                <label className="mapov-landscape__rotate" title="Rotation">
+                                  <span className="visually-hidden">Rotation</span>
+                                  <button
+                                    type="button"
+                                    className="mapov-landscape__rot-btn"
+                                    aria-label="Rotate left"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setPlacementRotation(selected, index, (p.r ?? 0) - 15);
+                                    }}
+                                  >
+                                    ↺
+                                  </button>
+                                  <input
+                                    type="range"
+                                    min={0}
+                                    max={359}
+                                    step={1}
+                                    value={Math.round(p.r ?? 0) % 360}
+                                    aria-valuetext={`${Math.round(p.r ?? 0)} degrees`}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => setPlacementRotation(selected, index, Number(e.target.value))}
+                                  />
+                                  <button
+                                    type="button"
+                                    className="mapov-landscape__rot-btn"
+                                    aria-label="Rotate right"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setPlacementRotation(selected, index, (p.r ?? 0) + 15);
+                                    }}
+                                  >
+                                    ↻
+                                  </button>
+                                </label>
                                 <label className="mapov-landscape__scale" title="Scale">
                                   <span className="visually-hidden">Scale</span>
                                   <input
@@ -2678,6 +2795,23 @@ export function MapOverridesPane({
                       onChange={(e) => setBulkScale(Number(e.target.value))}
                     />
                   </label>
+                  <label className="mapov-bulk__scale" title="Rotate all selected pieces">
+                    Rotate
+                    <button type="button" className="mapov-landscape__rot-btn" aria-label="Rotate selection left" onClick={() => nudgeBulkRotation(-15)}>
+                      ↺
+                    </button>
+                    <input
+                      type="range"
+                      min={0}
+                      max={359}
+                      step={1}
+                      value={Math.round(bulkRotationValue) % 360}
+                      onChange={(e) => setBulkRotation(Number(e.target.value))}
+                    />
+                    <button type="button" className="mapov-landscape__rot-btn" aria-label="Rotate selection right" onClick={() => nudgeBulkRotation(15)}>
+                      ↻
+                    </button>
+                  </label>
                   <button
                     type="button"
                     className="admin-page__btn admin-page__btn--danger"
@@ -2733,6 +2867,9 @@ export function MapOverridesPane({
                     const x = transform.x + row.placement.x * transform.scale;
                     const y = transform.y + row.placement.y * transform.scale;
                     const size = Math.max(18, 36 * (row.placement.s ?? 1) * Math.min(transform.scale, 1.4));
+                    const rotation = row.placement.r
+                      ? `translate(-50%, -50%) rotate(${row.placement.r}deg)`
+                      : undefined;
                     return (
                       <div
                         key={`${row.tid}|${row.index}|${row.placement.img}`}
@@ -2740,7 +2877,7 @@ export function MapOverridesPane({
                         tabIndex={0}
                         aria-label={`${territoryLabel(row.tid, territoryDefs)} ${row.placement.img}`}
                         className={`mapov-placement${isActive ? ' mapov-placement--active' : ''}${isMulti ? ' mapov-placement--multi' : ''}${row.placement.layer === 'border' ? ' mapov-placement--border' : ''}${row.placement.auto ? ' mapov-placement--auto' : ''}`}
-                        style={{ left: x, top: y, width: size, height: size }}
+                        style={{ left: x, top: y, width: size, height: size, transform: rotation }}
                         title={`${territoryLabel(row.tid, territoryDefs)} · ${row.placement.img} · ${row.placement.layer}${placing ? '' : ' — drag to move'}`}
                         onPointerDown={(e) => onPlacementPointerDown(e, row.tid, row.index)}
                         onPointerMove={onPlacementPointerMove}

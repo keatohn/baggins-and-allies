@@ -14,6 +14,14 @@ export function landscapeSrc(placement: Pick<LandscapePlacement, 'img'>): string
   return `${LANDSCAPE_ASSET_BASE}/${placement.img}`;
 }
 
+/** Clockwise degrees to store. A full turn and 0 are omitted. */
+export function landscapeRotation(deg: number): number | undefined {
+  if (!Number.isFinite(deg)) return undefined;
+  const wrapped = ((deg % 360) + 360) % 360;
+  const rounded = Math.round(wrapped * 10) / 10;
+  return rounded === 0 ? undefined : rounded;
+}
+
 export async function loadLandscapeManifest(): Promise<LandscapeManifest> {
   try {
     const res = await fetch(`${LANDSCAPE_ASSET_BASE}/manifest.json`, { cache: 'no-store' });

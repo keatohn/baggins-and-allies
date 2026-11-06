@@ -151,6 +151,8 @@ export interface LandscapePlacement {
   layer: LandscapeLayer;
   /** Display scale (default 1, clamped 0.25–4). */
   s?: number;
+  /** Clockwise rotation in degrees (omitted when 0). */
+  r?: number;
   /** Placed by Auto-generate — re-generated on the next auto pass; manual ones are preserved. */
   auto?: boolean;
 }
@@ -218,6 +220,12 @@ export function normalizeLandscapePlacement(raw: unknown): LandscapePlacement | 
   const out: LandscapePlacement = { cat, img, x, y, layer };
   if (typeof rec.s === 'number' && Number.isFinite(rec.s)) {
     out.s = Math.min(LANDSCAPE_SCALE_MAX, Math.max(LANDSCAPE_SCALE_MIN, rec.s));
+  }
+  if (rec.r != null) {
+    if (typeof rec.r !== 'number' || !Number.isFinite(rec.r)) return null;
+    const wrapped = ((rec.r % 360) + 360) % 360;
+    const deg = Math.round(wrapped * 100) / 100;
+    if (deg !== 0) out.r = deg;
   }
   if (rec.auto === true) out.auto = true;
   return out;
