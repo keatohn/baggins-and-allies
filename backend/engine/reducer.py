@@ -32,6 +32,7 @@ from backend.engine.combat import (
     get_attacker_effective_dice_and_bombikazi_self_destruct,
     get_bombikazi_pairing,
     get_ladder_infantry_instance_ids,
+    compute_standard_round_combat_inputs,
     get_siegework_dice_counts,
     get_siegework_attacker_rolling_units,
     get_siegework_defender_rolling_units,
@@ -3679,10 +3680,6 @@ def _handle_continue_combat(
     fuse_bomb = getattr(combat, "fuse_bomb", True)
     if not isinstance(fuse_bomb, bool):
         fuse_bomb = True
-    had_siegeworks_in_battle = any(
-        getattr(r, "is_siegeworks_round", False) for r in (combat.combat_log or [])
-    )
-    use_paired_fused_siegework_rules = (not had_siegeworks_in_battle) or fuse_bomb
 
     # Get the contested territory (land) and attacker roster (sea raid: sea + land, same as initiate_combat)
     territory = state.territories[combat.territory_id]
@@ -3754,28 +3751,19 @@ def _handle_continue_combat(
 
     defender_faction = territory.owner or (get_unit_faction(defender_units[0], unit_defs) if defender_units else "neutral")
 
-    # Terrain + anti-cavalry + captain bonuses (merged; recomputed every round)
-    terrain_att, terrain_def = compute_terrain_stat_modifiers(
-        territory_def, attacker_units, defender_units, unit_defs
+    # Shared standard-round inputs: terrain/anticav/captain/sea-raider/ring modifiers,
+    # fresh ladder ids, and fuse-aware effective dice — computed by the same function
+    # the API's dice generation uses (main.py), so both sides sort and group attackers
+    # identically.
+    round_inputs = compute_standard_round_combat_inputs(
+        state, attacker_units, defender_units, unit_defs, territory_def, combat,
     )
-    anticav_att, anticav_def = compute_anti_cavalry_stat_modifiers(
-        attacker_units, defender_units, unit_defs
-    )
-    captain_att, captain_def = compute_captain_stat_modifiers(
-        attacker_units, defender_units, unit_defs
-    )
-    sea_raider_att, _ = compute_sea_raider_stat_modifiers(
-        attacker_units,
-        unit_defs,
-        is_sea_raid=bool(sea_zone_id),
-    )
-    attacker_mods = merge_stat_modifiers(terrain_att, anticav_att, captain_att, sea_raider_att)
-    defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
-    attacker_mods, defender_mods, ring_att_boosts, ring_def_boosts, fresh_ring_shield = _apply_ring_combat(
-        state, attacker_units, defender_units, unit_defs, combat.territory_id, attacker_mods, defender_mods,
-    )
+    attacker_mods = round_inputs.attacker_mods
+    defender_mods = round_inputs.defender_mods
+    ring_att_boosts = round_inputs.ring_att_boosts
+    ring_def_boosts = round_inputs.ring_def_boosts
     if combat.ring_hp_shield is None:
-        combat.ring_hp_shield = fresh_ring_shield
+        combat.ring_hp_shield = round_inputs.fresh_ring_hp_shield
     ring_hp_shield = combat.ring_hp_shield
     if isinstance(dice_rolls, dict):
         dice_rolls["attacker"] = expand_rolls_for_bonus(
@@ -3788,15 +3776,15 @@ def _handle_continue_combat(
         )
     ring_def_dice = merge_ring_dice(None, defender_units, unit_defs, ring_def_boosts)
 
-    att_effective_dice, att_self_destruct, att_attack_override = get_attacker_effective_dice_and_bombikazi_self_destruct(
-        attacker_units, unit_defs,
-        use_paired_fused_siegework_rules=use_paired_fused_siegework_rules,
+    att_effective_dice = merge_ring_dice(
+        round_inputs.effective_dice, attacker_units, unit_defs, ring_att_boosts,
     )
-    att_effective_dice = merge_ring_dice(att_effective_dice, attacker_units, unit_defs, ring_att_boosts)
+    att_self_destruct = round_inputs.self_destruct
+    att_attack_override = round_inputs.attack_override
     # Re-evaluate which infantry are currently "on ladders" for this round.
     # Ladder equipment (siegeworks) can be destroyed between rounds, so the
     # available capacity (and thus which climbers are laddered) can change.
-    ladder_ids_list_combat = get_ladder_infantry_instance_ids(attacker_units, unit_defs)
+    ladder_ids_list_combat = round_inputs.ladder_ids
     ladder_ids_combat = set(ladder_ids_list_combat)
     combat.ladder_infantry_instance_ids = ladder_ids_list_combat
     combat.ladder_equipment_count = len([

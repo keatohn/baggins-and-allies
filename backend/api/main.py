@@ -114,6 +114,7 @@ from backend.engine.combat import (
     get_siegework_defender_rolling_units,
     get_siegework_round_attacker_display_units,
     get_siegework_round_defender_display_units,
+    compute_standard_round_combat_inputs,
     group_dice_by_stat,
     sort_attackers_for_ladder_dice_order,
     _is_siegework_unit as combat_is_siegework_unit,
@@ -1073,37 +1074,31 @@ def save_game(
         db.commit()
 
 
-def _sort_attackers_for_ladder_dice_if_needed(
+def _prepare_attacker_dice_for_round(
     state, attackers: list, defenders: list, ud, td,
-) -> None:
-    """Match reducer dice order: off-ladder attackers before on-ladder per attack shelf."""
+) -> dict:
+    """Sort attackers to match reducer ladder dice order; return effective dice.
+
+    Matches the reducer's continue path (compute_standard_round_combat_inputs):
+    derives ladder ids, ring mods, and fuse-aware bombikazi rules fresh from the
+    active combat instead of trusting persisted values, then sorts off-ladder
+    attackers before on-ladder per attack shelf. With no active combat (dice are
+    generated before initiate_combat applies) it is a no-op sort with the default
+    fused bombikazi rules, matching reducer initiate.
+    """
     combat = state.active_combat
     if not combat or not attackers:
-        return
-    ladder_ids = set(getattr(combat, "ladder_infantry_instance_ids", []) or [])
-    if not ladder_ids:
-        return
-    sz_id = getattr(combat, "sea_zone_id", None)
+        return get_attacker_effective_dice_and_bombikazi_self_destruct(attackers, ud)[0]
     territory_def = td.get(combat.territory_id)
-    terrain_att, terrain_def = compute_terrain_stat_modifiers(
-        territory_def, attackers, defenders, ud
+    round_inputs = compute_standard_round_combat_inputs(
+        state, attackers, defenders, ud, territory_def, combat,
     )
-    anticav_att, anticav_def = compute_anti_cavalry_stat_modifiers(
-        attackers, defenders, ud
-    )
-    captain_att, captain_def = compute_captain_stat_modifiers(
-        attackers, defenders, ud
-    )
-    sea_raider_att, _ = compute_sea_raider_stat_modifiers(
-        attackers, ud, is_sea_raid=bool(sz_id)
-    )
-    attacker_mods = merge_stat_modifiers(
-        terrain_att, anticav_att, captain_att, sea_raider_att
-    )
-    _, _, att_ov = get_attacker_effective_dice_and_bombikazi_self_destruct(attackers, ud)
-    sort_attackers_for_ladder_dice_order(
-        attackers, ud, ladder_ids, attacker_mods, att_ov or None,
-    )
+    if round_inputs.ladder_ids:
+        sort_attackers_for_ladder_dice_order(
+            attackers, ud, set(round_inputs.ladder_ids),
+            round_inputs.attacker_mods, round_inputs.attack_override or None,
+        )
+    return round_inputs.effective_dice
 
 
 def roll_dice(count: int, sides: int = 10) -> list[int]:
@@ -5916,8 +5911,7 @@ def _generate_initiate_combat_payload(
             "defender": generate_dice_rolls_for_units(defender_archer_units, ud),
         }
     else:
-        att_effective_dice, _, _ = get_attacker_effective_dice_and_bombikazi_self_destruct(attackers, ud)
-        _sort_attackers_for_ladder_dice_if_needed(state, attackers, defenders, ud, td)
+        att_effective_dice = _prepare_attacker_dice_for_round(state, attackers, defenders, ud, td)
         dice_rolls = {
             "attacker": generate_dice_rolls_for_units(
                 attackers, ud, effective_dice_override=att_effective_dice,
@@ -6152,8 +6146,7 @@ def do_continue_combat(
             "defender": generate_dice_rolls_for_units(defender_archer_units, ud),
         }
     else:
-        att_effective_dice, _, _ = get_attacker_effective_dice_and_bombikazi_self_destruct(attackers, ud)
-        _sort_attackers_for_ladder_dice_if_needed(state, attackers, defenders, ud, td)
+        att_effective_dice = _prepare_attacker_dice_for_round(state, attackers, defenders, ud, td)
         dice_rolls = {
             "attacker": generate_dice_rolls_for_units(
                 attackers, ud, effective_dice_override=att_effective_dice,
@@ -6672,8 +6665,7 @@ def _generate_dice_rolls_for_active_combat(state, ud, td, fd) -> dict:
             "attacker": [],
             "defender": generate_dice_rolls_for_units(defender_archer_units, ud),
         }
-    att_effective_dice, _, _ = get_attacker_effective_dice_and_bombikazi_self_destruct(attackers, ud)
-    _sort_attackers_for_ladder_dice_if_needed(state, attackers, defenders, ud, td)
+    att_effective_dice = _prepare_attacker_dice_for_round(state, attackers, defenders, ud, td)
     return {
         "attacker": generate_dice_rolls_for_units(
             attackers, ud, effective_dice_override=att_effective_dice,
