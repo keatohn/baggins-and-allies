@@ -178,12 +178,18 @@ export interface BulkMoveConfirmStack {
   instanceIds: string[];
   destForApi: string;
   chargeThrough?: string[];
+  /** Full charge route list for destForApi (used to compute shared prompt options). */
+  chargePaths?: string[][];
+  /** Backend flag: some route for this stack conquers an intermediate territory. */
+  chargePrompt?: boolean;
 }
 
 export interface BulkMoveConfirmState {
   fromTerritory: string;
   toTerritory: string;
   stacks: BulkMoveConfirmStack[];
+  /** Shared charge routes to choose from before confirming (only when every stack can charge). */
+  chargePathOptions?: string[][];
   /** Rings carried by the highest-power hero in this All move. */
   ringIds?: string[];
   ringCarryDecided?: boolean;
@@ -375,6 +381,12 @@ function buildBulkMoveStacks(
       cr?.[destForApi] ?? cr?.[toTerritory] ?? cr?.[canonicalSeaZoneId(toTerritory)];
     const chargeThrough =
       Array.isArray(chargePaths) && chargePaths.length > 0 ? chargePaths[0] : undefined;
+    const prompts = firstMatch?.charge_route_prompts;
+    const chargePrompt =
+      prompts?.[destForApi] ??
+      prompts?.[toTerritory] ??
+      prompts?.[canonicalSeaZoneId(toTerritory)] ??
+      false;
 
     const unitName = definitions?.units?.[unitId]?.display_name ?? unitId;
 
@@ -385,6 +397,9 @@ function buildBulkMoveStacks(
       instanceIds: ids,
       destForApi,
       chargeThrough,
+      ...(chargeThrough !== undefined
+        ? { chargePaths: chargePaths as string[][], chargePrompt: Boolean(chargePrompt) }
+        : {}),
     });
   }
 
@@ -425,6 +440,29 @@ function buildBulkMoveStacks(
   }
 
   return stacks;
+}
+
+/**
+ * Charge-route options for a bulk "All" move (issue #113): only when EVERY stack can
+ * charge (any stack without charge routes — infantry etc. — leaves the move as-is),
+ * the stacks share 2+ routes, and some shared route conquers an intermediate
+ * (backend charge_route_prompts flag). Returns the shared routes, else undefined.
+ */
+function sharedChargePathOptions(stacks: BulkMoveConfirmStack[]): string[][] | undefined {
+  const samePath = (a: string[], b: string[]) =>
+    a.length === b.length && a.every((x, i) => x === b[i]);
+  let shared: string[][] | undefined;
+  let anyPrompt = false;
+  for (const s of stacks) {
+    if (!s.chargePaths || s.chargePaths.length === 0) return undefined; // a unit that can't charge → leave as-is
+    shared =
+      shared === undefined
+        ? s.chargePaths.map((p) => [...p])
+        : shared.filter((p) => s.chargePaths!.some((q) => samePath(q, p)));
+    if (s.chargePrompt) anyPrompt = true;
+  }
+  if (!shared || shared.length < 2 || !anyPrompt) return undefined;
+  return shared;
 }
 
 /** API pending move shape for load-allocation math (snake_case from backend). */
@@ -3427,11 +3465,13 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         return;
       }
 
+      const chargePathOptions = sharedChargePathOptions(stacks);
       setPendingMoveConfirm(null);
       setBulkMoveConfirm({
         fromTerritory: fromKey,
         toTerritory: toTerritory.trim(),
         stacks,
+        ...(chargePathOptions ? { chargePathOptions } : {}),
       });
     },
     [backendState, availableActions, gameState.phase, definitions, currentTerritoryData, addLogEntry, setPendingMoveConfirm],
@@ -3439,6 +3479,20 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
 
   const handleCancelBulkMove = useCallback(() => {
     setBulkMoveConfirm(null);
+  }, []);
+
+  const handleChooseBulkChargePath = useCallback((path: string[]) => {
+    setBulkMoveConfirm((prev) =>
+      prev
+        ? {
+            ...prev,
+            chargePathOptions: undefined,
+            stacks: prev.stacks.map((s) =>
+              s.chargeThrough !== undefined ? { ...s, chargeThrough: path } : s,
+            ),
+          }
+        : null,
+    );
   }, []);
 
   const handleConfirmBulkMove = useCallback(async () => {
@@ -4690,6 +4744,12 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
                   m.charge_routes && typeof m.charge_routes === 'object' && !Array.isArray(m.charge_routes)
                     ? m.charge_routes
                     : {},
+                charge_route_prompts:
+                  m.charge_route_prompts &&
+                  typeof m.charge_route_prompts === 'object' &&
+                  !Array.isArray(m.charge_route_prompts)
+                    ? m.charge_route_prompts
+                    : undefined,
               }))}
               aerialUnitsMustMove={aerialMustMove}
               loadedNavalMustAttackInstanceIds={availableActions?.loaded_naval_must_attack_instance_ids ?? []}
@@ -4822,6 +4882,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               bulkMoveConfirm={bulkMoveConfirm}
               onConfirmBulkMove={handleConfirmBulkMove}
               onCancelBulkMove={handleCancelBulkMove}
+              onChooseBulkChargePath={handleChooseBulkChargePath}
               onDecideBulkRingCarry={(ringIds) => setBulkMoveConfirm((prev) => prev ? { ...prev, ringIds, ringCarryDecided: true } : prev)}
               onCancelPendingMove={handleCancelPendingMove}
               bulkMobilizeConfirm={bulkMobilizeConfirm}

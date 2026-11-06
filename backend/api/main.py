@@ -191,6 +191,7 @@ from backend.engine.queries import (
     get_purchasable_units,
     get_movable_units,
     get_unit_move_targets,
+    charge_route_prompt_flags,
     limit_embark_destinations_to_capacity,
     get_aerial_units_must_move,
     get_ladder_only_attack_instance_ids,
@@ -4999,6 +5000,10 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
                     "unit": unit_info,
                     "destinations": targets,
                     "charge_routes": charge_routes,
+                    # dest -> prompt the charge-route chooser (only when a route conquers a via)
+                    "charge_route_prompts": charge_route_prompt_flags(
+                        state, charge_routes, faction, ud.get(unit_info.get("unit_id") or ""), td, fd,
+                    ),
                 })
             actions["load_slots_remaining"] = limit_embark_destinations_to_capacity(
                 actions["moveable_units"], slot_check_state, faction, ud, td, fd, phase,

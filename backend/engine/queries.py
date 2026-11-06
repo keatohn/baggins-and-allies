@@ -60,6 +60,7 @@ from backend.engine.subfaction_rules import (
     unit_destination_spec,
 )
 from backend.engine.utils import (
+    can_conquer_territory_as_attacker,
     effective_territory_owner,
     get_unit_faction,
     has_unit_special,
@@ -2275,6 +2276,73 @@ def get_unit_move_targets(
                 )
 
     return {}, {}  # Unit not found
+
+
+def charge_path_conquers_via(
+    state: GameState,
+    path: list[str],
+    faction_id: str,
+    unit_def: UnitDefinition | None,
+    territory_defs: dict[str, TerritoryDefinition],
+    faction_defs: dict[str, FactionDefinition],
+) -> bool:
+    """
+    True when charging along `path` would conquer at least one via territory.
+
+    Mirrors the charge-through capture conditions in reducer.apply_action: the via
+    must be ownable, not friendly (own or subfaction), not same-alliance, and either
+    unowned or enemy-held and empty. Stacks that cannot hold territory (aerial-only,
+    siegework-only) never conquer anything.
+    """
+    if not can_conquer_territory_as_attacker(unit_def):
+        return False
+    moving_faction_def = faction_defs.get(faction_id)
+    moving_alliance = getattr(moving_faction_def, "alliance", "") if moving_faction_def else ""
+    for tid in path:
+        t = state.territories.get(tid)
+        tdef = territory_defs.get(tid)
+        if not t or not tdef or not getattr(tdef, "ownable", True):
+            continue
+        owner = t.owner
+        if owner == faction_id or faction_acts_as(faction_defs, owner, faction_id):
+            continue  # friendly: never conquer
+        if owner and moving_faction_def:
+            owner_def = faction_defs.get(owner)
+            if owner_def and owner_def.alliance == moving_alliance:
+                continue  # allied: never conquer
+        if owner is None:
+            return True
+        if len(t.units) == 0:
+            return True
+    return False
+
+
+def charge_route_prompt_flags(
+    state: GameState,
+    charge_routes: dict[str, list[list[str]]],
+    faction_id: str,
+    unit_def: UnitDefinition | None,
+    territory_defs: dict[str, TerritoryDefinition],
+    faction_defs: dict[str, FactionDefinition],
+) -> dict[str, bool]:
+    """
+    destination -> whether the UI should ask the player which charge route to take.
+
+    Prompt only when the choice matters: more than one route AND at least one route
+    conquers an intermediate territory. Single routes and routes whose vias are all
+    own/allied/unownable auto-pick without asking (issue #113).
+    """
+    flags: dict[str, bool] = {}
+    for dest, paths in (charge_routes or {}).items():
+        if not isinstance(paths, list) or len(paths) < 2:
+            flags[str(dest)] = False
+            continue
+        flags[str(dest)] = any(
+            charge_path_conquers_via(state, p, faction_id, unit_def, territory_defs, faction_defs)
+            for p in paths
+            if isinstance(p, list)
+        )
+    return flags
 
 
 def limit_embark_destinations_to_capacity(

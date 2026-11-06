@@ -348,6 +348,12 @@ export interface ApiMoveableUnit {
   } | Record<string, number>;
   /** Cavalry charging: destination_id -> list of charge_through paths (empty enemy territory IDs). */
   charge_routes?: Record<string, string[][]>;
+  /**
+   * destination_id -> whether to prompt for a charge route. True only when a choice
+   * matters (2+ routes and at least one conquers an intermediate). Absent on old
+   * backends; treat missing as "prompt" for single moves (today's behavior).
+   */
+  charge_route_prompts?: Record<string, boolean>;
 }
 
 export interface ApiCombatTerritory {
