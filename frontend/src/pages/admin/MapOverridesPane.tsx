@@ -349,6 +349,8 @@ export function MapOverridesPane({
   const [band, setBand] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [multiSel, setMultiSel] = useState<Set<string>>(() => new Set());
   const [paintRadius, setPaintRadius] = useState(0);
+  const [paintScale, setPaintScale] = useState(1);
+  const [paletteHeight, setPaletteHeight] = useState(42);
   // Copy-from-another-map dialog: source map preview + optional region filter.
   const [copyOpen, setCopyOpen] = useState(false);
   const [copySource, setCopySource] = useState('');
@@ -1643,7 +1645,7 @@ export function MapOverridesPane({
           if (list.length >= 50) break;
           const tooClose = list.some((q) => (q.x - p.x) ** 2 + (q.y - p.y) ** 2 < minD2);
           if (tooClose) continue;
-          list.push({ cat, img, x: p.x, y: p.y, layer });
+          list.push({ cat, img, x: p.x, y: p.y, layer, s: paintScale });
         }
         if (list.length === before) return prev;
         map[key] = list;
@@ -1652,7 +1654,7 @@ export function MapOverridesPane({
       setSelected(tid);
       setSelectedPlacement(null);
     },
-    [placing, artMode, paintRadius, borderMode, viewportToViewBox, updateLandscape],
+    [placing, artMode, paintRadius, paintScale, borderMode, viewportToViewBox, updateLandscape],
   );
 
   const setFocus = (tid: string, focus: 'calculated' | 'override') => {
@@ -2350,7 +2352,7 @@ export function MapOverridesPane({
   return (
     <div className="admin-modal-overlay" role="presentation" onClick={requestClose}>
       <div
-        className="admin-modal admin-modal--graph"
+        className="admin-modal admin-modal--graph admin-modal--map-editor"
         role="dialog"
         aria-modal="true"
         aria-labelledby="admin-mapov-title"
@@ -2607,9 +2609,10 @@ export function MapOverridesPane({
           </div>
         ) : !loading && !err ? (
           <div className="admin-graph__body">
-            <div className="admin-graph__side mapov-side">
+            <div className={`admin-graph__side mapov-side${editorTab === 'landscape' ? ' mapov-side--landscape' : ''}`}>
               {editorTab === 'landscape' ? (
-                <div className="mapov-art">
+                <>
+                <div className="mapov-art" style={{ flexBasis: `${paletteHeight}%` }}>
                   <div className="admin-mapview__toggle" role="group" aria-label="Art to place">
                     <button
                       type="button"
@@ -2689,6 +2692,40 @@ export function MapOverridesPane({
                     )}
                   </div>
                 </div>
+                <div
+                  className="mapov-art__resize"
+                  role="separator"
+                  aria-label="Resize landscape palette"
+                  aria-orientation="horizontal"
+                  aria-valuemin={20}
+                  aria-valuemax={75}
+                  aria-valuenow={paletteHeight}
+                  tabIndex={0}
+                  title="Drag up or down to resize the palette"
+                  onPointerDown={(e) => {
+                    if (e.button !== 0) return;
+                    e.preventDefault();
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                  }}
+                  onPointerMove={(e) => {
+                    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+                    const side = e.currentTarget.parentElement;
+                    if (!side) return;
+                    const bounds = side.getBoundingClientRect();
+                    if (!bounds.height) return;
+                    setPaletteHeight(Math.min(75, Math.max(20, ((e.clientY - bounds.top) / bounds.height) * 100)));
+                  }}
+                  onPointerUp={(e) => {
+                    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+                  }}
+                  onKeyDown={(e) => {
+                    if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) return;
+                    e.preventDefault();
+                    setPaletteHeight((height) => e.key === 'Home' ? 20 : e.key === 'End' ? 75
+                      : Math.min(75, Math.max(20, height + (e.key === 'ArrowDown' ? 5 : -5))));
+                  }}
+                />
+                </>
               ) : null}
               <input
                 type="search"
@@ -3154,6 +3191,18 @@ export function MapOverridesPane({
                     />
                   </label>
                   <span className="mapov-brush__value">{paintRadius ? String(paintRadius) : 'line'}</span>
+                  <label className="mapov-brush__scale" title="Size of every new painted piece, across all images">
+                    Piece size
+                    <input
+                      type="range"
+                      min={0.25}
+                      max={4}
+                      step={0.05}
+                      value={paintScale}
+                      onChange={(e) => setPaintScale(Number(e.target.value))}
+                    />
+                  </label>
+                  <span className="mapov-brush__value">{paintScale.toFixed(2)}×</span>
                 </div>
               ) : null}
               {editorTab === 'landscape' ? (
