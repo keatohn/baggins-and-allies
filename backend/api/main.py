@@ -6153,7 +6153,10 @@ def _generate_initiate_combat_payload(
     if all_attackers_have_stealth:
         att_effective_dice, _, _ = get_attacker_effective_dice_and_bombikazi_self_destruct(attackers, ud)
         dice_rolls = {
-            "attacker": generate_dice_rolls_for_units(attackers, ud, effective_dice_override=att_effective_dice),
+            "attacker": generate_dice_rolls_for_units(
+                attackers, ud, effective_dice_override=att_effective_dice,
+                exclude_archetypes=set(NORMAL_COMBAT_EXCLUDE_ARCHETYPES),
+            ),
             "defender": [],
         }
     elif siegeworks_needed_first:

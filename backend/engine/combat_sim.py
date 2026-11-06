@@ -268,7 +268,15 @@ def run_one_battle(
         _has_special(unit_defs.get(u.unit_id), "stealth") for u in attacker_units
     ):
         ran_stealth_prefire = True
-        dice = generate_combat_rolls_for_units(attacker_units, defender_units, unit_defs, seed=None)
+        stealth_eff_dice, _, stealth_attack_ov = get_attacker_effective_dice_and_bombikazi_self_destruct(
+            attacker_units, unit_defs,
+            use_paired_fused_siegework_rules=True,
+        )
+        dice = generate_combat_rolls_for_units(
+            attacker_units, defender_units, unit_defs, seed=None,
+            attacker_effective_dice_override=stealth_eff_dice,
+            exclude_archetypes={"siegework"},
+        )
         terrain_att, terrain_def = compute_terrain_stat_modifiers(
             territory_def, attacker_units, defender_units, unit_defs
         )
@@ -291,6 +299,9 @@ def run_one_battle(
             dice.get("attacker", []),
             stat_modifiers_attacker_extra=attacker_mods,
             prefire_penalty_delta=pdelta,
+            attacker_effective_dice_override=stealth_eff_dice,
+            effective_stat_override=stealth_attack_ov or None,
+            exclude_archetypes={"siegework"},
             casualty_order_defender=defender_casualty_order,
         )
         att_prefire_applicable = True

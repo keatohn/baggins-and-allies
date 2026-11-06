@@ -194,6 +194,18 @@ def sample_dice_for_initiate(
     )
     siegeworks_pending = sw_a > 0 or sw_d > 0
 
+    # Stealth first: matches the resolver (reducer/main.py), which runs stealth prefire and
+    # cancels the dedicated siegework round when every attacker has stealth.
+    if all_stealth:
+        att_eff, _, _ = get_attacker_effective_dice_and_bombikazi_self_destruct(attackers, ud)
+        return {
+            "attacker": generate_dice_rolls_for_units(
+                attackers, ud, effective_dice_override=att_eff,
+                exclude_archetypes=set(NORMAL_COMBAT_EXCLUDE_ARCHETYPES),
+            ),
+            "defender": [],
+        }
+
     if siegeworks_pending:
         att_rolling = get_siegework_attacker_rolling_units(
             attackers, ud, def_sh, defender_stronghold_hp=def_sh_hp, fuse_bomb=fuse
@@ -202,15 +214,6 @@ def sample_dice_for_initiate(
         return {
             "attacker": generate_dice_rolls_for_units(att_rolling, ud),
             "defender": generate_dice_rolls_for_units(def_sw, ud),
-        }
-
-    if all_stealth:
-        att_eff, _, _ = get_attacker_effective_dice_and_bombikazi_self_destruct(attackers, ud)
-        return {
-            "attacker": generate_dice_rolls_for_units(
-                attackers, ud, effective_dice_override=att_eff
-            ),
-            "defender": [],
         }
 
     if defender_has_archers:
