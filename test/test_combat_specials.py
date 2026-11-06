@@ -1,5 +1,6 @@
 """Tests for the combat specials engine (single source of truth for terror, captain, bombikazi, etc.)."""
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 from backend.engine.combat import (
@@ -14,6 +15,7 @@ from backend.engine.definitions import UnitDefinition, load_static_definitions
 from backend.engine.state import Unit
 from backend.engine.combat_specials import (
     compute_battle_specials_and_modifiers,
+    pending_combat_round,
     specials_flags_for_round_payload,
     stacks_to_synthetic_units,
     BattleSpecialsResult,
@@ -703,3 +705,147 @@ def test_synthetic_multi_hp_unit_soaks_one_hit(defs):
     assert result.defender_casualties == []
     assert def_[0].instance_id in result.defender_wounded
     assert def_[0].remaining_health == 1
+
+
+def test_pending_combat_round_archer_when_no_siegeworks(defs):
+    """Round 0, no siege dice, defender archer: archer prefire pending, nothing else."""
+    unit_defs, _ = defs
+    archer_id = next((k for k in unit_defs if getattr(unit_defs[k], "archetype", "") == "archer"), None)
+    if not archer_id or "gondor_soldier" not in unit_defs:
+        pytest.skip("need archer + gondor_soldier")
+    att, dfn = stacks_to_synthetic_units(
+        [{"unit_id": "gondor_soldier", "count": 1}],
+        [{"unit_id": archer_id, "count": 1}],
+        unit_defs,
+    )
+    p = pending_combat_round([], 0, att, dfn, unit_defs)
+    assert p.siegeworks is False
+    assert p.archer_prefire is True
+    assert p.stealth_prefire is False
+
+
+def test_pending_combat_round_siegeworks_suppresses_archer(defs):
+    """Round 0 with siege dice vs stronghold: siegeworks pending, archer suppressed."""
+    unit_defs, _ = defs
+    if "catapult" not in unit_defs:
+        pytest.skip("need catapult")
+    archer_id = next((k for k in unit_defs if getattr(unit_defs[k], "archetype", "") == "archer"), None)
+    if not archer_id:
+        pytest.skip("need archer")
+    att, dfn = stacks_to_synthetic_units(
+        [{"unit_id": "catapult", "count": 1}],
+        [{"unit_id": archer_id, "count": 1}],
+        unit_defs,
+    )
+    p = pending_combat_round(
+        [], 0, att, dfn, unit_defs,
+        defender_territory_is_stronghold=True, defender_stronghold_hp=4,
+    )
+    assert p.siegeworks is True
+    assert p.archer_prefire is False
+    assert p.siegework_attacker_dice > 0
+
+
+def test_pending_combat_round_after_siegeworks_logged_dict_entry(defs):
+    """A logged siegeworks round (dict entry, API serialization) clears siegeworks and enables archer."""
+    unit_defs, _ = defs
+    if "catapult" not in unit_defs:
+        pytest.skip("need catapult")
+    archer_id = next((k for k in unit_defs if getattr(unit_defs[k], "archetype", "") == "archer"), None)
+    if not archer_id:
+        pytest.skip("need archer")
+    att, dfn = stacks_to_synthetic_units(
+        [{"unit_id": "catapult", "count": 1}],
+        [{"unit_id": archer_id, "count": 1}],
+        unit_defs,
+    )
+    log = [{"is_siegeworks_round": True, "is_archer_prefire": False, "is_stealth_prefire": False}]
+    p = pending_combat_round(
+        log, 0, att, dfn, unit_defs,
+        defender_territory_is_stronghold=True, defender_stronghold_hp=4,
+    )
+    assert p.siegeworks is False
+    assert p.archer_prefire is True
+
+
+def test_pending_combat_round_object_and_dict_logs_parity(defs):
+    """CombatRoundResult-style objects and dict entries produce identical pending flags."""
+    unit_defs, _ = defs
+    if "catapult" not in unit_defs:
+        pytest.skip("need catapult")
+    archer_id = next((k for k in unit_defs if getattr(unit_defs[k], "archetype", "") == "archer"), None)
+    if not archer_id:
+        pytest.skip("need archer")
+    att, dfn = stacks_to_synthetic_units(
+        [{"unit_id": "catapult", "count": 1}],
+        [{"unit_id": archer_id, "count": 1}],
+        unit_defs,
+    )
+    obj_log = [SimpleNamespace(is_siegeworks_round=True, is_archer_prefire=False, is_stealth_prefire=False)]
+    dict_log = [{"is_siegeworks_round": True, "is_archer_prefire": False, "is_stealth_prefire": False}]
+    kw = dict(
+        round_number=0, attacker_units=att, defender_units=dfn, unit_defs=unit_defs,
+        defender_territory_is_stronghold=True, defender_stronghold_hp=4,
+    )
+    p_obj = pending_combat_round(obj_log, **kw)
+    p_dict = pending_combat_round(dict_log, **kw)
+    assert p_obj == p_dict
+    assert p_obj.siegeworks is False and p_obj.archer_prefire is True
+
+
+def test_pending_combat_round_all_false_after_round_one(defs):
+    """From round 1 on, no dedicated round is pending (dice counts still exposed)."""
+    unit_defs, _ = defs
+    if "catapult" not in unit_defs:
+        pytest.skip("need catapult")
+    att, dfn = stacks_to_synthetic_units(
+        [{"unit_id": "catapult", "count": 1}],
+        [{"unit_id": "gondor_soldier", "count": 1}],
+        unit_defs,
+    )
+    p = pending_combat_round(
+        [], 1, att, dfn, unit_defs,
+        defender_territory_is_stronghold=True, defender_stronghold_hp=4,
+    )
+    assert p.siegeworks is False
+    assert p.archer_prefire is False
+    assert p.stealth_prefire is False
+    assert p.siegework_attacker_dice > 0
+
+
+def test_pending_combat_round_stealth_flags(defs):
+    """Stealth prefire pending until logged; a stealth entry clears it and blocks archer prefire."""
+    unit_defs, territory_defs = defs
+    stealth_unit_id = "stealth_mock_unit"
+    mock_ud = UnitDefinition(
+        id=stealth_unit_id,
+        display_name="Stealth Mock",
+        faction="gondor",
+        archetype="infantry",
+        tags=["land", "stealth"],
+        attack=2,
+        defense=1,
+        movement=1,
+        health=1,
+        cost={"power": 1},
+        dice=1,
+    )
+    ud_ext = {**unit_defs, stealth_unit_id: mock_ud}
+    archer_id = next((k for k in unit_defs if getattr(unit_defs[k], "archetype", "") == "archer"), None)
+    if not archer_id:
+        pytest.skip("need archer")
+    att, dfn = stacks_to_synthetic_units(
+        [{"unit_id": stealth_unit_id, "count": 2}],
+        [{"unit_id": archer_id, "count": 1}],
+        ud_ext,
+    )
+    pending = pending_combat_round([], 0, att, dfn, ud_ext)
+    assert pending.stealth_prefire is True
+    assert pending.siegeworks is False
+
+    after_stealth = [SimpleNamespace(
+        is_siegeworks_round=False, is_archer_prefire=False, is_stealth_prefire=True,
+    )]
+    p2 = pending_combat_round(after_stealth, 0, att, dfn, ud_ext)
+    assert p2.stealth_prefire is False
+    assert p2.archer_prefire is False, "stealth entry blocks archer prefire"
