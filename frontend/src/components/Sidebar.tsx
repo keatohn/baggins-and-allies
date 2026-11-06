@@ -1780,26 +1780,6 @@ function Sidebar({
                       onSet={(presetId) => onSetTerritorySignal?.(selectedTerritory, presetId)}
                     />
                   )}
-                </div>
-                <div className="territory-panel-footer-owner">
-                  {(() => {
-                    const oid = typeof territory.original_owner === 'string' ? territory.original_owner.trim() : '';
-                    if (!oid || oid.toLowerCase() === 'neutral') return null;
-                    const origFaction = factionData[oid];
-                    return (
-                      <div className="territory-original-owner">
-                        <span className="defender-casualty-order-label">Original Owner</span>
-                        {origFaction?.icon ? (
-                          <img
-                            className="territory-original-owner-logo"
-                            src={origFaction.icon}
-                            alt={origFaction.name ?? oid}
-                            title={origFaction.name ?? oid}
-                          />
-                        ) : null}
-                      </div>
-                    );
-                  })()}
                   {adjacencyTipLines ? (
                     <>
                       <button
@@ -1844,6 +1824,26 @@ function Sidebar({
                       )}
                     </>
                   ) : null}
+                </div>
+                <div className="territory-panel-footer-owner">
+                  {(() => {
+                    const oid = typeof territory.original_owner === 'string' ? territory.original_owner.trim() : '';
+                    if (!oid || oid.toLowerCase() === 'neutral') return null;
+                    const origFaction = factionData[oid];
+                    return (
+                      <div className="territory-original-owner">
+                        <span className="defender-casualty-order-label">Original Owner</span>
+                        {origFaction?.icon ? (
+                          <img
+                            className="territory-original-owner-logo"
+                            src={origFaction.icon}
+                            alt={origFaction.name ?? oid}
+                            title={origFaction.name ?? oid}
+                          />
+                        ) : null}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             )}

@@ -693,8 +693,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.7rem;
-  height: 1.7rem;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 1px solid var(--ink-faded);
   background: transparent;
@@ -754,6 +754,9 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
 
 .territory-panel-footer-signals {
   justify-self: center;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
 }
 
 .territory-panel-footer-owner {
@@ -785,13 +788,13 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
   margin-top: 0.15rem;
 }
 
-/* Adjacency tip button — sits beside Original Owner / signal controls in the panel footer.
+/* Adjacency tip button — right of the signal pills in the center footer column.
    Specificity beats the small-screen `.sidebar button` padding/font rules. */
 .sidebar button.territory-adjacency-btn {
   position: relative;
   flex-shrink: 0;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -805,8 +808,8 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
 }
 
 .sidebar button.territory-adjacency-btn svg {
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 14px;
   display: block;
   fill: none;
   stroke: currentColor;
@@ -1408,14 +1411,14 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
   }
 
   .sidebar .territory-signal-pill {
-    width: 1.3rem;
-    height: 1.3rem;
+    width: 14px;
+    height: 14px;
     padding: 0;
   }
 
   .territory-signal-pill-flag {
-    width: 11px;
-    height: 13px;
+    width: 8px;
+    height: 10px;
   }
 
   .sidebar .count-controls {
@@ -1692,19 +1695,19 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
   }
 
   .sidebar button.territory-adjacency-btn {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
   }
 
   .sidebar button.territory-adjacency-btn svg {
-    width: 11px;
-    height: 11px;
+    width: 10px;
+    height: 10px;
   }
 
   .territory-adj-tip {
-    max-width: min(240px, 78vw);
-    font-size: 0.72rem;
-    padding: 0.35rem 0.55rem;
+    max-width: min(220px, 72vw);
+    font-size: 0.66rem;
+    padding: 0.3rem 0.5rem;
   }
 
   /* Territory panel — compact header bar (Select Territory / territory name) */
