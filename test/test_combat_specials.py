@@ -172,6 +172,42 @@ def test_combat_specials_stealth_activated_when_all_have_stealth(defs):
         assert spec.get("stealth") is True
 
 
+def test_combat_specials_stealth_not_activated_when_unit_def_missing(defs):
+    """A missing unit def fails stealth_activated (matches reducer): stealth flag stays off."""
+    unit_defs, territory_defs = defs
+    stealth_unit_id = "test_stealth_unit"
+    mock_ud = UnitDefinition(
+        id=stealth_unit_id,
+        display_name="Stealth Test",
+        faction="gondor",
+        archetype="infantry",
+        tags=["land", "stealth"],
+        attack=2,
+        defense=1,
+        movement=1,
+        health=1,
+        cost={"power": 1},
+        dice=1,
+    )
+    ud_extended = {**unit_defs, stealth_unit_id: mock_ud}
+    att_units, def_units = stacks_to_synthetic_units(
+        [
+            {"unit_id": stealth_unit_id, "count": 1},
+            {"unit_id": "unit_with_no_definition", "count": 1},
+        ],
+        [{"unit_id": "morannon_orc", "count": 1}],
+    )
+    territory_def = next(iter(territory_defs.values()))
+    result = compute_battle_specials_and_modifiers(
+        att_units, def_units, territory_def, ud_extended,
+        is_sea_raid=False, archer_prefire_applicable=False,
+        stealth_prefire_applicable=True,
+    )
+    stealth_spec = result.specials_attacker.get("att_0_" + stealth_unit_id)
+    assert stealth_spec is not None, "known stealth unit should still appear in specials"
+    assert stealth_spec.get("stealth") is False
+
+
 def test_archer_special_only_when_prefire_applicable(defs):
     """Defender archer flag is True only when archer_prefire_applicable (round payload / prefire UI)."""
     unit_defs, territory_defs = defs

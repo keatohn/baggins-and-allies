@@ -183,7 +183,7 @@ def sample_dice_for_initiate(
     fuse = True  # default for new battles
 
     all_stealth = all(
-        has_unit_special(ud.get(u.unit_id), "stealth") for u in attackers if ud.get(u.unit_id)
+        has_unit_special(ud.get(u.unit_id), "stealth") for u in attackers
     ) and len(attackers) > 0
     defender_has_archers = any(
         has_unit_special(ud.get(u.unit_id), "archer") for u in defenders if ud.get(u.unit_id)

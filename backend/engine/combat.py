@@ -750,6 +750,7 @@ def _count_hits(
 
     hits = 0
     roll_idx = 0
+    expected_dice = 0
 
     for unit in units:
         unit_def = unit_defs.get(unit.unit_id)
@@ -765,6 +766,7 @@ def _count_hits(
             if effective_dice_override is not None
             else getattr(unit_def, "dice", 1)
         )
+        expected_dice += dice_count
 
         if unit.instance_id in stat_override:
             stat_value = stat_override[unit.instance_id]
@@ -779,9 +781,11 @@ def _count_hits(
                 hits += 1
             roll_idx += 1
 
-    assert hits <= roll_idx <= len(rolls), (
-        f"Combat roll mismatch: hits={hits} roll_idx={roll_idx} len(rolls)={len(rolls)}"
-    )
+    if expected_dice > len(rolls):
+        raise ValueError(
+            f"Combat dice starvation: units expect {expected_dice} dice "
+            f"but only {len(rolls)} rolls were provided"
+        )
     return hits
 
 
@@ -807,6 +811,7 @@ def _count_hits_split(
     ladder_hits = 0
     other_hits = 0
     roll_idx = 0
+    expected_dice = 0
 
     for unit in units:
         unit_def = unit_defs.get(unit.unit_id)
@@ -822,6 +827,7 @@ def _count_hits_split(
             if effective_dice_override is not None
             else getattr(unit_def, "dice", 1)
         )
+        expected_dice += dice_count
         on_ladder = unit.instance_id in ladder_instance_ids
 
         if unit.instance_id in stat_override:
@@ -840,7 +846,11 @@ def _count_hits_split(
                     other_hits += 1
             roll_idx += 1
 
-    assert ladder_hits + other_hits <= roll_idx <= len(rolls)
+    if expected_dice > len(rolls):
+        raise ValueError(
+            f"Combat dice starvation: units expect {expected_dice} dice "
+            f"but only {len(rolls)} rolls were provided"
+        )
     return ladder_hits, other_hits
 
 

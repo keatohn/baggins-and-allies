@@ -68,12 +68,13 @@ def _synthetic_defs(unit_defs):
 
     siegebox (siegework, dice 3) forces a siegeworks round at initiate so the
     archer prefire defers to the round-0 continue. Under best_attack its
-    attack*dice (30) is the highest, under best_unit its cost (100) the highest,
-    so it is never the first victim either way.
+    attack*dice (27) is the highest, under best_unit its cost (100) the highest,
+    so it is never the first victim either way. Attack 9 (not 10) lets an
+    in-range roll of 10 miss, so the incidental siegeworks volley is harmless.
     """
     unit_defs["siegebox"] = UnitDefinition(
         id="siegebox", display_name="Siege Box", faction="isengard", archetype="siegework",
-        tags=["land"], attack=10, defense=0, movement=0, health=1, cost={"power": 100},
+        tags=["land"], attack=9, defense=0, movement=0, health=1, cost={"power": 100},
         dice=3, specials=[],
     )
     unit_defs["cheapx"] = UnitDefinition(
@@ -126,7 +127,9 @@ def _fresh_battle():
 
 
 def _initiate(state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs):
-    action = initiate_combat("isengard", TERRITORY, {"attacker": [], "defender": []})
+    # All-miss rolls (10 > siegebox attack 9): the siegeworks round exists only
+    # to defer archer prefire to the continue, so it must leave survivors intact.
+    action = initiate_combat("isengard", TERRITORY, {"attacker": [10, 10, 10], "defender": []})
     return apply_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
 
 
