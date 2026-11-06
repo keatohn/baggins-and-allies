@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { api } from '../../services/api';
+import { createWheelNavIntentResolver, wheelZoomScaleMultiplier } from '../../utils/wheelNavIntent';
 import { fetchMapSvgText } from './territoryGraph';
 
 /**
@@ -46,7 +47,7 @@ const DEFAULT_W = 3500;
 const DEFAULT_H = 2600;
 
 const TOOL_HINTS: Record<Tool, string> = {
-  select: 'Drag joints to move them · click a border to select · Delete removes · drag the background to pan',
+  select: 'Drag joints to move them · click a border to select · click inside a territory to show its name · Delete removes · drag the background to pan',
   pen: 'Click to place points (endpoints snap onto joints or split borders they land on) · drag to pan · Enter or click the first point finishes · Esc cancels',
   pencil: 'Drag to draw a freehand border · ends snap and join the shared graph',
   label: 'Click inside a closed region to name it · click an existing label to edit · drag to pan',
@@ -425,7 +426,7 @@ export function MapBuilder() {
   const [bringIn, setBringIn] = useState('');
   const [tolerance, setTolerance] = useState('4');
   const [saveBox, setSaveBox] = useState<{
-    mode: 'save' | 'copy';
+    mode: 'save' | 'copy' | 'saveAs';
     sourceId: string | null;
     id: string;
     name: string;
@@ -438,6 +439,8 @@ export function MapBuilder() {
 
   const storeRef = useRef<DraftStore>(boot);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const worldRef = useRef<HTMLDivElement | null>(null);
+  const viewCommitTimer = useRef<number | null>(null);
   const docRef = useRef(doc);
   const pastRef = useRef(past);
   const futureRef = useRef(future);
@@ -458,9 +461,6 @@ export function MapBuilder() {
   useEffect(() => {
     futureRef.current = future;
   }, [future]);
-  useEffect(() => {
-    viewRef.current = view;
-  }, [view]);
   useEffect(() => {
     toolRef.current = tool;
   }, [tool]);
@@ -489,6 +489,43 @@ export function MapBuilder() {
     setSizeDraft({ w: String(doc.width), h: String(doc.height) });
   }, [doc.width, doc.height, currentId]);
 
+  // Pan/zoom paint the transform on the world node directly. A full React render
+  // rewrites every border stroke, which is what made zoom stutter. State catches
+  // up once the gesture settles so hit-testing sizes stay in sync.
+  const paintView = useCallback((next: { x: number; y: number; scale: number }, commit: 'now' | 'soon') => {
+    viewRef.current = next;
+    const node = worldRef.current;
+    if (node) node.style.transform = `translate(${next.x}px, ${next.y}px) scale(${next.scale})`;
+    if (viewCommitTimer.current != null) {
+      window.clearTimeout(viewCommitTimer.current);
+      viewCommitTimer.current = null;
+    }
+    if (commit === 'now') {
+      setView(next);
+      return;
+    }
+    viewCommitTimer.current = window.setTimeout(() => {
+      viewCommitTimer.current = null;
+      setView(viewRef.current);
+    }, 90);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (viewCommitTimer.current != null) window.clearTimeout(viewCommitTimer.current);
+    },
+    [],
+  );
+
+  // A render from somewhere else must not put the stale React transform back
+  // over a zoom that has not been committed to state yet.
+  useLayoutEffect(() => {
+    const node = worldRef.current;
+    const v = viewRef.current;
+    if (!node) return;
+    node.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.scale})`;
+  });
+
   const fitView = useCallback((which?: BuilderDoc) => {
     const el = wrapRef.current;
     if (!el) return;
@@ -496,14 +533,15 @@ export function MapBuilder() {
     const rect = el.getBoundingClientRect();
     if (rect.width < 10 || rect.height < 10) return;
     const scale = Math.min(rect.width / d.width, rect.height / d.height) * 0.95;
-    const next = {
-      x: (rect.width - d.width * scale) / 2,
-      y: (rect.height - d.height * scale) / 2,
-      scale,
-    };
-    viewRef.current = next;
-    setView(next);
-  }, []);
+    paintView(
+      {
+        x: (rect.width - d.width * scale) / 2,
+        y: (rect.height - d.height * scale) / 2,
+        scale,
+      },
+      'now',
+    );
+  }, [paintView]);
 
   // Fit on open.
   useEffect(() => {
@@ -511,36 +549,30 @@ export function MapBuilder() {
     return () => window.clearTimeout(t);
   }, [fitView]);
 
-  // Non-passive wheel: plain wheel pans, ctrl+wheel zooms toward the cursor.
+  // Non-passive wheel: trackpad pans, pinch and mouse-wheel zoom toward the cursor.
+  // Same step size as the game map — a notch is a small step, a pinch cannot jump.
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
+    const intentOf = createWheelNavIntentResolver();
     const handler = (e: WheelEvent) => {
       e.preventDefault();
       const rect = el.getBoundingClientRect();
       const v = viewRef.current;
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      if (!e.ctrlKey && !e.metaKey && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
-        const next = { ...v, x: v.x - e.deltaX, y: v.y - e.deltaY };
-        viewRef.current = next;
-        setView(next);
+      if (intentOf(e) === 'pan') {
+        paintView({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }, 'soon');
         return;
       }
-      // Delta-based zoom: one mouse notch (~100 units) ≈ ×1.1, but trackpad
-      // pinch storms (many tiny deltas) no longer compound into hypersensitivity.
-      const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
-      const factor = clamp(Math.exp(-dy * 0.001), 0.4, 2.5);
-      const ns = clamp(v.scale * factor, 0.02, 8);
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const ns = clamp(v.scale * wheelZoomScaleMultiplier(e), 0.02, 8);
       const wx = (mx - v.x) / v.scale;
       const wy = (my - v.y) / v.scale;
-      const next = { x: mx - wx * ns, y: my - wy * ns, scale: ns };
-      viewRef.current = next;
-      setView(next);
+      paintView({ x: mx - wx * ns, y: my - wy * ns, scale: ns }, 'soon');
     };
     el.addEventListener('wheel', handler, { passive: false });
     return () => el.removeEventListener('wheel', handler);
-  }, []);
+  }, [paintView]);
 
   const mutate = useCallback((fn: (d: BuilderDoc) => void) => {
     const next = cloneDoc(docRef.current);
@@ -744,6 +776,26 @@ export function MapBuilder() {
     }
   }, []);
 
+  const selectRegionLabel = useCallback((w: Pt | null) => {
+    if (!w) return;
+    const d = docRef.current;
+    const rings = interiorRings(d);
+    const idx = findRingIndex(rings, d.joints, w.x, w.y);
+    if (idx === null) {
+      setSelection(null);
+      return;
+    }
+    for (const [tid, lab] of Object.entries(d.labels)) {
+      if (findRingIndex(rings, d.joints, lab.x, lab.y) === idx) {
+        setSelection({ kind: 'label', id: tid });
+        setStatus(lab.display_name);
+        return;
+      }
+    }
+    setSelection(null);
+    setStatus('This region has no name yet — use Label to name it.');
+  }, []);
+
   const deleteSelection = useCallback(() => {
     const sel = selection;
     if (!sel) return;
@@ -812,7 +864,6 @@ export function MapBuilder() {
         setSelection({ kind: 'border', id: bid });
         return;
       }
-      setSelection(null);
       panRef.current = { x: e.clientX, y: e.clientY, vx: viewRef.current.x, vy: viewRef.current.y, id: e.pointerId };
       try {
         e.currentTarget.setPointerCapture(e.pointerId);
@@ -852,13 +903,14 @@ export function MapBuilder() {
 
     const pan = panRef.current;
     if (pan && e.pointerId === pan.id) {
-      const next = {
-        ...viewRef.current,
-        x: pan.vx + (e.clientX - pan.x),
-        y: pan.vy + (e.clientY - pan.y),
-      };
-      viewRef.current = next;
-      setView(next);
+      paintView(
+        {
+          x: pan.vx + (e.clientX - pan.x),
+          y: pan.vy + (e.clientY - pan.y),
+          scale: viewRef.current.scale,
+        },
+        'soon',
+      );
       return;
     }
 
@@ -896,6 +948,8 @@ export function MapBuilder() {
   const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
     const pan = panRef.current;
     if (pan && e.pointerId === pan.id) {
+      const down = downRef.current;
+      const moved = !down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > CLICK_PX;
       panRef.current = null;
       downRef.current = null;
       try {
@@ -903,6 +957,7 @@ export function MapBuilder() {
       } catch {
         /* ignore */
       }
+      if (!moved && toolRef.current === 'select') selectRegionLabel(screenToWorld(e.clientX, e.clientY));
       return;
     }
 
@@ -1297,10 +1352,10 @@ export function MapBuilder() {
 
   const currentMapBase = () => storeRef.current.drafts.find((d) => d.id === storeRef.current.currentId)?.mapBase ?? null;
 
-  const openSaveBox = (mode: 'save' | 'copy', sourceId: string | null) => {
+  const openSaveBox = (mode: 'save' | 'copy' | 'saveAs', sourceId: string | null) => {
     const cur = storeRef.current.drafts.find((d) => d.id === storeRef.current.currentId);
-    const id = mode === 'copy' ? '' : sourceId || cur?.mapBase || importHintRef.current || '';
-    const name = mode === 'copy' ? '' : cur?.name || '';
+    const id = mode === 'copy' || mode === 'saveAs' ? '' : sourceId || cur?.mapBase || importHintRef.current || '';
+    const name = mode === 'copy' ? '' : mode === 'saveAs' ? (cur?.name ? `${cur.name} copy` : '') : cur?.name || '';
     setSaveBox({ mode, sourceId, id, name, error: null });
   };
 
@@ -1317,6 +1372,21 @@ export function MapBuilder() {
       return;
     }
     const exists = savedMaps.some((m) => m.map_base === id);
+    if (saveBox.mode === 'saveAs') {
+      const cur = storeRef.current.drafts.find((d) => d.id === storeRef.current.currentId);
+      const original = cur?.mapBase || importHintRef.current;
+      if (original && id === original) {
+        setSaveBox({
+          ...saveBox,
+          error: 'That is the map you opened. Choose a different id so the original stays.',
+        });
+        return;
+      }
+      if (exists || knownMaps.includes(id)) {
+        setSaveBox({ ...saveBox, error: `“${id}” already exists. Pick another id.` });
+        return;
+      }
+    }
     if (exists && saveBox.mode === 'copy') {
       setSaveBox({ ...saveBox, error: `“${id}” already exists` });
       return;
@@ -1331,6 +1401,7 @@ export function MapBuilder() {
         await api.adminSaveMapBuilder(id, { display_name: name, doc: docRef.current });
         const s = storeRef.current;
         const cur = s.drafts.find((d) => d.id === s.currentId);
+        const openedAs = cur?.mapBase || importHintRef.current;
         if (cur) {
           cur.mapBase = id;
           cur.name = name;
@@ -1339,9 +1410,11 @@ export function MapBuilder() {
           refreshMeta();
         }
         setStatus(
-          knownMaps.includes(id) && !savedMaps.some((m) => m.map_base === id)
-            ? `Saved “${name}”. It now replaces the built-in ${id} SVG.`
-            : `Saved “${name}” (${id})`,
+          saveBox.mode === 'saveAs'
+            ? `Saved as “${name}” (${id}).${openedAs && openedAs !== id ? ` ${openedAs} was not changed.` : ''}`
+            : knownMaps.includes(id) && !savedMaps.some((m) => m.map_base === id)
+              ? `Saved “${name}”. It now replaces the built-in ${id} SVG.`
+              : `Saved “${name}” (${id})`,
         );
       }
       setSaveBox(null);
@@ -1766,15 +1839,24 @@ export function MapBuilder() {
               className="admin-page__btn admin-page__btn--primary"
               disabled={converting}
               onClick={() => openSaveBox('save', currentMapBase())}
-              title="Save this drawing and its territory SVG under a map id"
+              title="Write this drawing over the map id in the dialog. A built-in id replaces that built-in map."
             >
               Save
             </button>
             <button
               type="button"
               className="admin-page__btn"
+              disabled={converting}
+              onClick={() => openSaveBox('saveAs', null)}
+              title="Store this drawing under a new map id and leave the one you opened unchanged"
+            >
+              Save as
+            </button>
+            <button
+              type="button"
+              className="admin-page__btn"
               onClick={openExport}
-              title="Download or copy the whole drawing as JSON — back it up or move it to another browser"
+              title="Download a backup of this drawing as text. This does not save the map the game uses."
             >
               Export JSON
             </button>
@@ -1782,7 +1864,7 @@ export function MapBuilder() {
               type="button"
               className="admin-page__btn"
               onClick={() => setJsonModal({ mode: 'import', text: '', error: null })}
-              title="Paste exported JSON to replace the current drawing"
+              title="Load a drawing from a backup you exported earlier. It replaces the open draft, not a saved map, until you Save."
             >
               Import JSON
             </button>
@@ -1811,6 +1893,7 @@ export function MapBuilder() {
           onPointerCancel={onPointerCancel}
         >
           <div
+            ref={worldRef}
             className="mapbuilder__world"
             style={{
               width: doc.width,
@@ -1879,10 +1962,17 @@ export function MapBuilder() {
                 const sel = selection?.kind === 'label' && selection.id === tid;
                 return (
                   <g key={tid} className={`mapbuilder__label${sel ? ' mapbuilder__label--selected' : ''}`}>
-                    <circle cx={lab.x} cy={lab.y} r={3 * k} />
-                    <text x={lab.x + 8 * k} y={lab.y + 4 * k} fontSize={14 * k}>
-                      {lab.display_name}
-                    </text>
+                    <circle cx={lab.x} cy={lab.y} r={(sel ? 3.5 : 2) * k} />
+                    {sel ? (
+                      <text
+                        x={lab.x + 7 * k}
+                        y={lab.y - 6 * k}
+                        fontSize={11 * k}
+                        strokeWidth={1.1 * k}
+                      >
+                        {lab.display_name}
+                      </text>
+                    ) : null}
                   </g>
                 );
               })}
@@ -2019,14 +2109,18 @@ export function MapBuilder() {
             className="admin-modal admin-modal--small"
             role="dialog"
             aria-modal="true"
-            aria-label={saveBox.mode === 'copy' ? 'Copy map' : 'Save map'}
+            aria-label={saveBox.mode === 'copy' ? 'Copy map' : saveBox.mode === 'saveAs' ? 'Save map as' : 'Save map'}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="admin-modal__title">{saveBox.mode === 'copy' ? 'Copy map' : 'Save map'}</h3>
+            <h3 className="admin-modal__title">
+              {saveBox.mode === 'copy' ? 'Copy map' : saveBox.mode === 'saveAs' ? 'Save as' : 'Save map'}
+            </h3>
             <p className="admin-form__micro">
               {saveBox.mode === 'copy'
                 ? 'Writes a new map id with its own name. The drawing is the saved source, not unsaved edits in the open draft.'
-                : 'Stores the shared-border drawing and the territory SVG. Using an existing built-in id replaces that map for setups and the icon and landscape editors.'}
+                : saveBox.mode === 'saveAs'
+                  ? 'Stores this drawing, including unsaved edits, under a new id. The map you opened is left as it was.'
+                  : 'Writes this drawing onto the map id below. If that id is a built-in map, the built-in file is replaced for setups and the icon and landscape editors. Use Save as to keep the original.'}
             </p>
             <label className="mapbuilder__field admin-form__label">
               Map id
@@ -2060,7 +2154,7 @@ export function MapBuilder() {
                 disabled={converting}
                 onClick={() => void commitSave()}
               >
-                {saveBox.mode === 'copy' ? 'Copy' : 'Save'}
+                {saveBox.mode === 'copy' ? 'Copy' : saveBox.mode === 'saveAs' ? 'Save as' : 'Save'}
               </button>
               <button type="button" className="admin-page__btn" onClick={() => setSaveBox(null)}>
                 Cancel
@@ -2108,8 +2202,8 @@ export function MapBuilder() {
             </h3>
             <p className="admin-form__micro">
               {jsonModal.mode === 'export'
-                ? 'Saves the whole drawing (size, joints, borders, labels) as text. Saved maps on the server are separate — use Save for those.'
-                : 'Replaces the open draft with a previously exported JSON drawing. The current drawing stays in undo history (Ctrl+Z) if you change your mind.'}
+                ? 'A text backup of this drawing: the canvas size, border points, and territory names. It is not the map the game loads. Use Save or Save as for that. Keep the file if you want to move the drawing to another browser, or to put it back later with Import JSON.'
+                : 'Paste a backup you made with Export JSON. It replaces the drawing open in this draft. The saved map on the server stays as it is until you Save. Undo (Ctrl+Z) brings the previous drawing back.'}
             </p>
             <textarea
               className="mapbuilder__textarea admin-form__textarea admin-form__textarea--json"

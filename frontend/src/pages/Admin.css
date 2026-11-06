@@ -4043,10 +4043,9 @@ body:has(.combat-sim-modal-overlay) {
 .mapbuilder__label text {
   fill: var(--ink);
   font-family: var(--font-parchment);
-  font-weight: 700;
+  font-weight: 600;
   paint-order: stroke;
   stroke: var(--parchment-light);
-  stroke-width: 3px;
   pointer-events: none;
 }
 
