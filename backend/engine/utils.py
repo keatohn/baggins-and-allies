@@ -130,6 +130,22 @@ def has_unit_special(unit_def: UnitDefinition | None, special: str) -> bool:
     return special in tags or special in specials
 
 
+def unit_can_charge(unit_def: UnitDefinition | None) -> bool:
+    """Conquer empty land along a combat-move path.
+
+    Cavalry (archetype or tag) already does this. The charging special grants the
+    same path, including on a unit that is not cavalry.
+    """
+    if not unit_def:
+        return False
+    if getattr(unit_def, "archetype", "") == "cavalry":
+        return True
+    tags = getattr(unit_def, "tags", None) or []
+    if "cavalry" in tags:
+        return True
+    return has_unit_special(unit_def, "charging")
+
+
 def archer_prefire_eligible(unit_def: UnitDefinition | None) -> bool:
     """Defender units with the archer special (tags or specials) roll archer prefire."""
     return has_unit_special(unit_def, "archer")

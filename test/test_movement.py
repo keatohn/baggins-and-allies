@@ -10,6 +10,8 @@ Covers:
 - Validation that destination is required (engine accepts "to" or "to_territory")
 """
 
+from dataclasses import replace
+
 from backend.engine.definitions import load_static_definitions, load_starting_setup
 from backend.engine.actions import move_units, end_phase
 from backend.engine.reducer import apply_action
@@ -447,6 +449,72 @@ def test_aerial_non_combat_still_crosses_neutral_land():
     assert "minas_morgul" not in reachable
 
 
+def test_charging_special_conquers_empty_enemy_land_on_the_way():
+    """Infantry with the charging special charge like cavalry. Infantry without it stop."""
+    state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs = _board(
+        "gondor", "combat_move"
+    )
+    unit_defs = dict(unit_defs)
+    soldier = unit_defs["gondor_soldier"]
+    unit_defs["plain"] = replace(soldier, id="plain", movement=2, specials=[])
+    unit_defs["charger"] = replace(soldier, id="charger", movement=2, specials=["charging"])
+    # Cavalry with the special removed still charges by archetype.
+    unit_defs["gondor_knight"] = replace(unit_defs["gondor_knight"], specials=[])
+
+    state.territories["pelennor"].owner = "mordor"
+    state.territories["pelennor"].units = []
+    state.territories["west_osgiliath"].owner = "mordor"
+    if not state.territories["west_osgiliath"].units:
+        state.territories["west_osgiliath"].units = [
+            Unit("mordor_hold", "orc_warrior", 0, 1, 0, 1, None)
+        ]
+    plain = Unit("plain_1", "plain", 2, 1, 2, 1, None)
+    charger = Unit("charger_1", "charger", 2, 1, 2, 1, None)
+    knight = Unit("knight_1", "gondor_knight", 2, 1, 2, 1, None)
+    state.territories["minas_tirith"].units.extend([plain, charger, knight])
+
+    def routes_for(unit):
+        _reachable, routes = get_reachable_territories_for_unit(
+            unit, "minas_tirith", state, unit_defs, territory_defs, faction_defs, "combat_move",
+        )
+        return _reachable, routes
+
+    plain_reach, plain_routes = routes_for(plain)
+    assert "west_osgiliath" not in plain_reach
+    assert plain_routes.get("west_osgiliath", []) == []
+
+    charger_reach, charger_routes = routes_for(charger)
+    assert charger_reach.get("west_osgiliath") == 2
+    assert ["pelennor"] in charger_routes["west_osgiliath"]
+
+    _knight_reach, knight_routes = routes_for(knight)
+    assert ["pelennor"] in knight_routes["west_osgiliath"]
+
+    rejected = validate_action(
+        state,
+        move_units("gondor", "minas_tirith", "west_osgiliath", ["plain_1"], charge_through=["pelennor"]),
+        unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    assert not rejected.valid
+
+    accepted = validate_action(
+        state,
+        move_units("gondor", "minas_tirith", "west_osgiliath", ["charger_1"], charge_through=["pelennor"]),
+        unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    assert accepted.valid, accepted.error
+    state, _ = apply_action(
+        state,
+        move_units("gondor", "minas_tirith", "west_osgiliath", ["charger_1"], charge_through=["pelennor"]),
+        unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    state, _ = apply_action(
+        state, end_phase("gondor"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    captured = state.territories["pelennor"].owner == "gondor" or state.pending_captures.get("pelennor") == "gondor"
+    assert captured, "charging through empty Pelennor should conquer it"
+
+
 def main():
     test_land_combat_move()
     test_non_combat_move()
@@ -457,6 +525,7 @@ def main():
     test_non_combat_cannot_cross_neutral_land()
     test_non_combat_charge_does_not_treat_neutral_land_as_a_shortcut()
     test_aerial_non_combat_still_crosses_neutral_land()
+    test_charging_special_conquers_empty_enemy_land_on_the_way()
     print("\n" + "=" * 60)
     print("All movement tests passed.")
     print("=" * 60)

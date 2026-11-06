@@ -15,6 +15,7 @@ from backend.engine.utils import (
     has_unit_special,
     is_aerial_unit,
     is_land_unit,
+    unit_can_charge,
 )
 
 
@@ -1181,8 +1182,9 @@ def get_reachable_territories_for_unit(
     Calculate all territories reachable by a specific unit instance from a starting territory.
     Returns (reachable_dict, charge_routes).
     - reachable_dict: territory_id -> distance (cost to reach).
-    - charge_routes: for cavalry in combat_move, territory_id -> list of charge_through paths
-      (each path = list of empty enemy territory IDs passed through). Empty dict for non-cavalry.
+    - charge_routes: for units that can charge in combat_move, territory_id -> list of
+      charge_through paths (each path = list of empty enemy territory IDs passed through).
+      Empty dict for units that cannot charge.
 
     acting_faction_id: if set, treat this faction as the moving player (friend/enemy/neutral
     edges). Defaults to state.current_faction. Used for AI threat checks without mutating state.
@@ -1200,7 +1202,7 @@ def get_reachable_territories_for_unit(
 
     Rules:
     - BFS up to remaining_movement
-    - Cavalry (charging): can pass through empty enemy, empty unowned, or empty friendly/allied territory in combat_move; enemy/unowned are conquered, friendly/allied are not.
+    - Charging (cavalry archetype or tag, or the charging special): can pass through empty enemy, empty unowned, or empty friendly/allied territory in combat_move; enemy/unowned are conquered, friendly/allied are not.
     - Aerial: can pass through any enemy/neutral in both phases.
     - Empty unownable: can be passed through in combat_move to reach an enemy in 2 moves; not valid as a combat_move destination. In non_combat_move it is a valid stop and is not a corridor.
     - Non-combat move: neutral land is never a corridor, whether or not it holds enemy units. Friendly and allied land still is. Sea zones are unchanged.
@@ -1231,10 +1233,7 @@ def get_reachable_territories_for_unit(
         getattr(unit_def, "archetype", "") == "aerial"
         or "aerial" in getattr(unit_def, "tags", [])
     )
-    is_cavalry = (
-        getattr(unit_def, "archetype", "") == "cavalry"
-        or "cavalry" in getattr(unit_def, "tags", [])
-    )
+    can_charge = unit_can_charge(unit_def)
     can_enter_enemy = phase == "combat_move"
     current_faction_def = faction_defs.get(cf)
 
@@ -1268,7 +1267,7 @@ def get_reachable_territories_for_unit(
 
     reachable = {}  # territory_id -> distance
     charge_routes: dict[str, list[list[str]]] = {}  # territory_id -> list of charge_through paths
-    # For cavalry we track (tid, charge) to allow multiple paths; key = (tid, tuple(charge))
+    # For units that can charge we track (tid, charge) to allow multiple paths; key = (tid, tuple(charge))
     # When uses_ford_budget, key includes ford_used along the path (ford-only edges).
     visited: dict[tuple, int] = {}
     queue: deque[tuple[str, int, list[str], int]] = deque([(start, 0, [], 0)])
@@ -1280,7 +1279,7 @@ def get_reachable_territories_for_unit(
         # Only record as reachable if within movement range (never allow > remaining_movement)
         if distance > 0 and distance <= max_move:
             reachable[territory_id] = min(reachable.get(territory_id, 999), distance)
-            if is_cavalry and can_enter_enemy:
+            if can_charge and can_enter_enemy:
                 # Via path must never include the destination (no "Via Pelennor" when moving to Pelennor)
                 via_path = [t for t in charge if t != territory_id]
                 charge_routes.setdefault(territory_id, [])
@@ -1379,7 +1378,7 @@ def get_reachable_territories_for_unit(
             can_charge_through = (
                 adjacent_empty_enemy or adjacent_empty_unowned or adjacent_friendly_or_allied
             )
-            new_charge = charge + [adjacent_id] if (is_cavalry and can_enter_enemy and can_charge_through) else charge
+            new_charge = charge + [adjacent_id] if (can_charge and can_enter_enemy and can_charge_through) else charge
             if uses_ford_budget:
                 adj_key = (adjacent_id, tuple(new_charge), new_fu)
             else:
@@ -1388,7 +1387,7 @@ def get_reachable_territories_for_unit(
             can_pass = True
             if is_enemy_territory and not is_allied_territory and not can_enter_enemy and not is_aerial:
                 can_pass = False
-            if is_enemy_territory and not is_allied_territory and can_enter_enemy and not is_aerial and not (is_cavalry and can_charge_through):
+            if is_enemy_territory and not is_allied_territory and can_enter_enemy and not is_aerial and not (can_charge and can_charge_through):
                 can_pass = False
             if is_neutral and phase == "combat_move" and neutral_has_enemies and not is_aerial:
                 can_pass = False
@@ -1415,7 +1414,7 @@ def get_reachable_territories_for_unit(
                 if (is_enemy_territory and not is_allied_territory) or (is_neutral and neutral_has_enemies):
                     if adjacent_id not in reachable or new_distance < reachable[adjacent_id]:
                         reachable[adjacent_id] = new_distance
-                    if is_cavalry:
+                    if can_charge:
                         via_path = [t for t in charge if t != adjacent_id]
                         charge_routes.setdefault(adjacent_id, [])
                         if via_path not in charge_routes[adjacent_id]:
