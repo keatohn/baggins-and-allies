@@ -1431,7 +1431,7 @@
 /* Move arrows */
 .move-arrow {
   pointer-events: none;
-  filter: drop-shadow(1px 1px 2px rgba(0, 0, 0, 0.4));
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.55)) drop-shadow(1px 1px 2px rgba(0, 0, 0, 0.35));
   animation: arrow-pulse 2s ease-in-out infinite;
 }
 
@@ -1447,13 +1447,13 @@
 
   0%,
   100% {
-    opacity: 0.9;
-    stroke-width: 4;
+    opacity: 1;
+    stroke-width: 6;
   }
 
   50% {
-    opacity: 0.6;
-    stroke-width: 7;
+    opacity: 0.92;
+    stroke-width: 10;
   }
 }
 

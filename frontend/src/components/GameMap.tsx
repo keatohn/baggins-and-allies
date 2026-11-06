@@ -4684,11 +4684,11 @@ function GameMap({
                             <animateTransform attributeName="patternTransform" type="translate" from="0 0" to="-120 0" dur="3s" repeatCount="indefinite" />
                           )}
                         </pattern>
-                        <marker id="arrowhead-combat" markerWidth="5" markerHeight="5" refX="3.5" refY="2.5" orient="auto">
-                          <polygon points="0,0 5,2.5 0,5" fill="#c62828" />
+                        <marker id="arrowhead-combat" markerWidth="8" markerHeight="8" refX="3.5" refY="2.5" orient="auto" viewBox="0 0 5 5">
+                          <polygon points="0,0 5,2.5 0,5" fill="#ff5252" />
                         </marker>
-                        <marker id="arrowhead-move" markerWidth="5" markerHeight="5" refX="3.5" refY="2.5" orient="auto">
-                          <polygon points="0,0 5,2.5 0,5" fill="#2e7d32" />
+                        <marker id="arrowhead-move" markerWidth="8" markerHeight="8" refX="3.5" refY="2.5" orient="auto" viewBox="0 0 5 5">
+                          <polygon points="0,0 5,2.5 0,5" fill="#4ade80" />
                         </marker>
                         <marker id="arrowhead-opening" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
                           <polygon points="0,0 6,3 0,6" fill="#7a1f1a" />
@@ -4758,10 +4758,10 @@ function GameMap({
                             y1={arrow.startY}
                             x2={arrow.endX}
                             y2={arrow.endY}
-                            stroke={arrow.isCombat ? '#c62828' : '#2e7d32'}
-                            strokeWidth="4"
+                            stroke={arrow.isCombat ? '#ff5252' : '#4ade80'}
+                            strokeWidth="6"
                             strokeLinecap="round"
-                            strokeDasharray={arrow.isCombat ? 'none' : '8,4'}
+                            strokeDasharray={arrow.isCombat ? 'none' : '11,5'}
                             markerEnd={`url(#arrowhead-${arrow.isCombat ? 'combat' : 'move'})`}
                             opacity="0.9"
                           />
