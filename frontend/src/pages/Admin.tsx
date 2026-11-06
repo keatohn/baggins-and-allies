@@ -1374,6 +1374,12 @@ export default function Admin() {
           setups={setups}
           specials={catalog.specials}
           onClose={() => setUnitsOpen(false)}
+          onSaved={(setupId, units) => {
+            const apply = (b: AdminSetupBundle | null) =>
+              b && b.id === setupId ? { ...b, units: { ...b.units, ...units } } : b;
+            setBundle((b) => apply(b));
+            setSavedBundle((b) => apply(b));
+          }}
         />
       )}
       {usersOpen && <UsersReportModal onClose={() => setUsersOpen(false)} />}

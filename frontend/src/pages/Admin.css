@@ -742,6 +742,14 @@ body:has(.combat-sim-modal-overlay) {
   flex: 1 1 14rem;
 }
 
+.units-across__header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .units-across__ranges {
   display: flex;
   flex-wrap: wrap;
@@ -812,6 +820,64 @@ body:has(.combat-sim-modal-overlay) {
   color: #fffef8;
   background-color: #b42318;
   font-weight: 700;
+}
+
+/* Inline stat editing: click a number to reveal up/down steppers. */
+.units-across.unit-stats-modal .header-stats-table.header-stats-table--units tbody td.stats-col-num:not(.stats-col-specials) {
+  cursor: pointer;
+}
+
+.units-across.unit-stats-modal .header-stats-table.header-stats-table--units tbody td.stats-col-num.units-across__editing {
+  background-color: rgba(139, 115, 85, 0.2);
+  color: var(--ink);
+}
+
+/* Later than the off-mode rule so a pending edit reads as "changed", not "unusual".
+   Both rules reset the off-mode white text: the tint below is light. */
+.units-across.unit-stats-modal .header-stats-table.header-stats-table--units tbody td.stats-col-num.units-across__pending {
+  background-color: rgba(214, 144, 24, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(150, 96, 10, 0.55);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  color: var(--ink);
+}
+
+.units-across__stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.units-across__step-value {
+  font-weight: 700;
+}
+
+.units-across__step-arrows {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.units-across__step-btn {
+  appearance: none;
+  margin: 0;
+  padding: 1px 3px;
+  border: 1px solid rgba(139, 115, 85, 0.55);
+  border-radius: 3px;
+  background: var(--parchment-light, #f7f1e4);
+  color: var(--ink, #3e3020);
+  font-size: 0.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.units-across__step-btn:hover {
+  background: rgba(139, 115, 85, 0.22);
+}
+
+.units-across__step-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Rowspan drops icon/scenario cells, so nth-child padding would shove HP on some rows. */
