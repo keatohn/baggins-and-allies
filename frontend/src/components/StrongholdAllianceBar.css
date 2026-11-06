@@ -31,7 +31,7 @@
 }
 
 .stronghold-alliance-bar--header .stronghold-alliance-bar__segments {
-  height: clamp(1.15rem, 1.7vw, 1.55rem);
+  height: clamp(0.9rem, 1.25vw, 1.16rem);
 }
 
 .stronghold-alliance-bar--header .stronghold-alliance-bar__marker {
@@ -90,7 +90,11 @@
 }
 
 .stronghold-alliance-bar--header .stronghold-alliance-bar__label {
-  font-size: clamp(0.72rem, 0.45vw + 0.5rem, 0.92rem);
+  font-size: clamp(0.64rem, 0.3vw + 0.52rem, 0.78rem);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
 }
 
 .stronghold-alliance-bar--game-list .stronghold-alliance-bar__label {

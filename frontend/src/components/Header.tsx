@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { GameState } from '../types/game';
 import type { ApiFactionStats, ApiSubfactionRule, SpecialDefinition } from '../services/api';
@@ -164,8 +164,69 @@ function subfactionRuleLines(
   return lines;
 }
 
+const TITLE_GAP = 14;
+
+/** Full text width of the centered title, ignoring the max-width that ellipsizes it. */
+function titleContentWidth(title: HTMLElement): number {
+  const brand = title.querySelector<HTMLElement>('.header-center-title-brand');
+  const sub = title.querySelector<HTMLElement>('.header-center-title-subrow');
+  let subWidth = 0;
+  if (sub) {
+    const gap = parseFloat(getComputedStyle(sub).columnGap) || 0;
+    const kids = [...sub.children] as HTMLElement[];
+    subWidth = kids.reduce((sum, kid, index) => sum + kid.scrollWidth + (index > 0 ? gap : 0), 0);
+  }
+  return Math.max(brand?.scrollWidth ?? 0, subWidth);
+}
+
+/**
+ * The title rests centered. That center is a left wall: the stronghold chart can
+ * push the block right, and it never slides back left of center.
+ */
+function placeHeaderTitle(scroll: HTMLElement, title: HTMLElement, bar: HTMLElement | null) {
+  if (getComputedStyle(title).position !== 'absolute') {
+    title.style.removeProperty('--title-nudge');
+    title.style.removeProperty('--title-fit');
+    return;
+  }
+
+  const scrollRect = scroll.getBoundingClientRect();
+  // Text width, not the ellipsized box, so shrinking the title cannot feed back
+  // into this measurement and slide it around.
+  const natural = Math.max(1, Math.ceil(titleContentWidth(title)));
+  const centerLeft = (scrollRect.width - natural) / 2;
+
+  let barEdge = 0;
+  if (bar) {
+    barEdge = bar.getBoundingClientRect().right - scrollRect.left;
+    const label = bar.querySelector<HTMLElement>('.stronghold-alliance-bar__label');
+    if (label) barEdge = Math.max(barEdge, label.getBoundingClientRect().right - scrollRect.left);
+  }
+  // Centered is the left wall. The chart can only push the title further right.
+  // Stop at the turn order so the name is never drawn on top of those icons.
+  let leftEdge = Math.max(centerLeft, barEdge + TITLE_GAP);
+  const ticker = scroll.querySelector<HTMLElement>('.header-turn-cluster');
+  if (ticker) {
+    const maxLeft = ticker.getBoundingClientRect().left - scrollRect.left - TITLE_GAP - natural;
+    leftEdge = Math.min(leftEdge, Math.max(centerLeft, maxLeft));
+  }
+  const nudge = leftEdge - scrollRect.width / 2 + natural / 2;
+
+  const nudgeValue = `${Math.round(Math.max(0, nudge))}px`;
+  const fitValue = '9999px';
+  if (title.style.getPropertyValue('--title-nudge') !== nudgeValue) {
+    title.style.setProperty('--title-nudge', nudgeValue);
+  }
+  if (title.style.getPropertyValue('--title-fit') !== fitValue) {
+    title.style.setProperty('--title-fit', fitValue);
+  }
+}
+
 function Header({ gameState, turnOrderForTicker, factionData, factionStats, ringsByFaction, ringsOfPower = null, unitsByFaction = {}, gameName = null, setupDisplayName = null, specials = {}, specialsOrder: _specialsOrder = [], unitsBySpecial = {}, onOpenCombatSim, subfactionRules = {}, unitNames = {}, specialRules = [], catalogRules = [], seatPortraits, computerSeats, viewerId = null }: HeaderProps) {
   const { navigateWithScroll } = useMenuScroll();
+  const headerScrollRef = useRef<HTMLDivElement>(null);
+  const strongholdBarRef = useRef<HTMLDivElement>(null);
+  const centerTitleRef = useRef<HTMLDivElement>(null);
   const [statsOpen, setStatsOpen] = useState(false);
   const [ringsOpen, setRingsOpen] = useState(false);
   const [specialsOpen, setSpecialsOpen] = useState(false);
@@ -218,6 +279,42 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
     });
   }, [factionData, subfactionRules, turnOrder, unitNames]);
   const helpRules = useMemo(() => helpSpecialRules(specialRules, catalogRules), [specialRules, catalogRules]);
+  const showStrongholdBar = allianceOrder.length > 0 && Boolean(factionStats);
+
+  useLayoutEffect(() => {
+    const scroll = headerScrollRef.current;
+    const title = centerTitleRef.current;
+    if (!scroll || !title) return;
+
+    const place = () => placeHeaderTitle(scroll, title, strongholdBarRef.current);
+    place();
+
+    // The chart sits in the flex row, so a button to its left can shove it into
+    // the title without the chart itself changing size. Watch every sibling.
+    const observer = new ResizeObserver(place);
+    const observeRow = () => {
+      observer.observe(scroll);
+      for (const child of scroll.children) observer.observe(child);
+    };
+    observeRow();
+    const mutations = new MutationObserver(() => {
+      observeRow();
+      place();
+    });
+    mutations.observe(scroll, { childList: true });
+
+    window.addEventListener('resize', place);
+    document.fonts?.addEventListener('loadingdone', place);
+    const fontsReady = document.fonts?.ready.then(place);
+    return () => {
+      observer.disconnect();
+      mutations.disconnect();
+      window.removeEventListener('resize', place);
+      document.fonts?.removeEventListener('loadingdone', place);
+      void fontsReady;
+    };
+  }, [gameName, setupDisplayName, showStrongholdBar, turnOrder.length, ringsOfPower, showSeatToggle]);
+
   return (
     <>
       <header
@@ -226,7 +323,7 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
           factionColor ? { ['--header-faction-accent' as string]: factionColor } : undefined
         }
       >
-        <div className="header-scroll">
+        <div className="header-scroll" ref={headerScrollRef}>
         <Link
           to="/"
           className="header-menu-btn"
@@ -324,14 +421,15 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
         )}
 
         {/* Stronghold bar: Good (white) | Neutral (gray) | Evil (black); victory threshold markers from setup */}
-        {allianceOrder.length > 0 && factionStats && (
-          <div className="header-stronghold-bar-wrap">
+        {showStrongholdBar && factionStats && (
+          <div className="header-stronghold-bar-wrap" ref={strongholdBarRef}>
             <StrongholdAllianceBar factionStats={factionStats} variant="header" />
           </div>
         )}
 
-        {/* Centered on the header: brand, scenario, and game name */}
-        <div className="header-center-title">
+        {/* Centered on the header: brand, scenario, and game name.
+            The chart may push this block right of center; it does not pull it left. */}
+        <div className="header-center-title" ref={centerTitleRef}>
           <span className="header-center-title-brand">Baggins & Allies</span>
           {(setupDisplayName || gameName) && (
             <div className="header-center-title-subrow">

@@ -33,10 +33,14 @@
 /* Title sits on the header midline. Taken out of the flex row so the buttons
    and turn ticker do not shove it left. */
 .header-center-title {
+  --title-cap: min(46rem, 46%);
+  --title-nudge: 0px;
+  --title-fit: 9999px;
   position: absolute;
   left: 50%;
   top: 50%;
-  transform: translate(-50%, -50%);
+  /* Nudge is added only when the stronghold chart crosses the centered left edge. */
+  transform: translate(calc(-50% + var(--title-nudge)), -50%);
   z-index: 2;
   display: flex;
   flex-direction: column;
@@ -44,7 +48,8 @@
   justify-content: center;
   gap: 0.08rem;
   width: max-content;
-  max-width: min(46rem, 46%);
+  max-width: min(var(--title-cap), var(--title-fit));
+  min-width: 0;
   text-align: center;
   pointer-events: none;
 }
@@ -109,21 +114,13 @@
 /* Extra headroom on very wide screens (ticker still has flex-shrink) */
 @media (min-width: 1600px) {
   .header-center-title {
-    max-width: min(52rem, calc(22vw + 18rem));
-    min-width: 10rem;
+    --title-cap: min(52rem, calc(22vw + 18rem));
   }
 }
 
 @media (min-width: 1900px) {
   .header-center-title {
-    max-width: min(56rem, calc(20vw + 22rem));
-  }
-}
-
-/* Absorbing flex space here hides the title on narrow screens — turn it off below wide laptop */
-@media (max-width: 1320px) {
-  .header-spacer {
-    display: none;
+    --title-cap: min(56rem, calc(20vw + 22rem));
   }
 }
 
@@ -1142,23 +1139,23 @@
   color: var(--ink-faded);
 }
 
-/* Stronghold bar — wider and taller than the icon row so the counts read at a glance */
+/* Stronghold bar — a step larger than the icon row, still short of the centered title */
 .header-stronghold-bar-wrap {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 0.15rem;
-  width: clamp(132px, 16vw, 220px);
-  min-width: 120px;
-  max-width: 240px;
+  align-items: stretch;
+  gap: 0.12rem;
+  width: clamp(100px, 12vw, 168px);
+  min-width: 92px;
+  max-width: 188px;
 }
 
 @media (min-width: 1600px) {
   .header-stronghold-bar-wrap {
-    width: clamp(168px, 14vw, 260px);
-    max-width: 280px;
-    gap: 0.18rem;
+    width: clamp(124px, 11vw, 196px);
+    max-width: 210px;
+    gap: 0.14rem;
   }
 }
 
@@ -1497,8 +1494,9 @@
   }
 
   .header-stronghold-bar-wrap {
-    width: clamp(120px, 18vw, 180px);
-    min-width: 110px;
+    width: clamp(96px, 14vw, 140px);
+    min-width: 88px;
+    max-width: 150px;
   }
 }
 
@@ -1514,8 +1512,9 @@
   }
 
   .header-stronghold-bar-wrap {
-    width: clamp(120px, 28vw, 190px);
-    min-width: 110px;
+    width: clamp(100px, 24vw, 156px);
+    min-width: 92px;
+    max-width: 168px;
   }
 }
 
@@ -1633,18 +1632,19 @@
 
   .header-stronghold-bar-wrap {
     flex: 0 0 auto;
-    width: clamp(128px, 38vw, 210px);
-    min-width: 120px;
+    width: clamp(104px, 34vw, 176px);
+    min-width: 96px;
+    max-width: 184px;
     margin-left: 0.18rem;
     margin-right: 0.18rem;
   }
 
   .header-stronghold-bar-wrap .stronghold-alliance-bar__segments {
-    height: 1.25rem;
+    height: 1.05rem;
   }
 
   .header-stronghold-bar-wrap .stronghold-alliance-bar__label {
-    font-size: 0.72rem;
+    font-size: 0.64rem;
   }
 
   .header-center-title {
@@ -1968,17 +1968,18 @@
   }
 
   .header-stronghold-bar-wrap {
-    width: 190px;
+    width: 164px;
+    max-width: 172px;
     margin-left: 0.28rem;
     margin-right: 0.28rem;
   }
 
   .header-stronghold-bar-wrap .stronghold-alliance-bar__segments {
-    height: 1.25rem;
+    height: 1.05rem;
   }
 
   .header-stronghold-bar-wrap .stronghold-alliance-bar__label {
-    font-size: 0.72rem;
+    font-size: 0.64rem;
   }
 
   .header-turn-ticker {
