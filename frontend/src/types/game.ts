@@ -156,6 +156,8 @@ export interface LandscapeOverrides {
 export interface MapOverridesData {
   territories: Record<string, MapOverrideTerritoryEntry>;
   landscape?: LandscapeOverrides;
+  /** Territory id → catalog terrain id. Map-level; shared by every setup on this map. */
+  terrain?: Record<string, string>;
 }
 
 /** Accept `[x, y]` or `{ x, y }`; anything else → null. */
@@ -207,6 +209,21 @@ export function normalizeLandscapePlacement(raw: unknown): LandscapePlacement | 
   return out;
 }
 
+const TERRAIN_RE = /^[a-z][a-z0-9_]{0,47}$/;
+const TERRAIN_TID_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+
+/** Lenient terrain map. A present key is kept even when every entry is dropped. */
+function normalizeTerrain(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [tid, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!TERRAIN_TID_RE.test(tid) || typeof value !== 'string') continue;
+    const name = value.trim().toLowerCase();
+    if (TERRAIN_RE.test(name)) out[tid] = name;
+  }
+  return out;
+}
+
 function normalizeLandscapeSection(raw: unknown): LandscapeOverrides | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const source = (raw as Record<string, unknown>).territories;
@@ -229,6 +246,12 @@ function normalizeLandscapeSection(raw: unknown): LandscapeOverrides | undefined
   return Object.keys(out).length ? { territories: out } : undefined;
 }
 
+function attachTerrain(result: MapOverridesData, rec: Record<string, unknown>): MapOverridesData {
+  if (!Object.prototype.hasOwnProperty.call(rec, 'terrain')) return result;
+  result.terrain = normalizeTerrain(rec.terrain) ?? {};
+  return result;
+}
+
 /** Lenient read of a server payload into the canonical shape (drops malformed entries). */
 export function normalizeMapOverrides(raw: unknown): MapOverridesData {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return emptyMapOverrides();
@@ -236,7 +259,8 @@ export function normalizeMapOverrides(raw: unknown): MapOverridesData {
   const source = rec.territories;
   if (!source || typeof source !== 'object' || Array.isArray(source)) {
     const landscapeOnly = normalizeLandscapeSection(rec.landscape);
-    return landscapeOnly ? { territories: {}, landscape: landscapeOnly } : emptyMapOverrides();
+    const base: MapOverridesData = landscapeOnly ? { territories: {}, landscape: landscapeOnly } : emptyMapOverrides();
+    return attachTerrain(base, rec);
   }
   const out: Record<string, MapOverrideTerritoryEntry> = {};
   for (const [tid, entryRaw] of Object.entries(source as Record<string, unknown>)) {
@@ -261,7 +285,7 @@ export function normalizeMapOverrides(raw: unknown): MapOverridesData {
   const result: MapOverridesData = { territories: out };
   const landscape = normalizeLandscapeSection(rec.landscape);
   if (landscape) result.landscape = landscape;
-  return result;
+  return attachTerrain(result, rec);
 }
 
 // Event types for logging (backend-enriched events include payload with turn_number, phase, faction, message)

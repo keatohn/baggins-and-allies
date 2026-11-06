@@ -1896,6 +1896,13 @@ body:has(.combat-sim-modal-overlay) {
   white-space: nowrap;
 }
 
+.mapov-inspector__terrain {
+  min-width: 0;
+  flex: 1 1 7rem;
+  width: auto;
+  max-width: 100%;
+}
+
 .mapov-kinds {
   display: flex;
   flex-direction: column;

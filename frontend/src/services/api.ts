@@ -759,6 +759,8 @@ export interface FriendRequestItem {
 export interface AdminSetupListItem {
   id: string;
   display_name: string;
+  /** Map file base this setup draws. Missing means the setup id. */
+  map_asset?: string;
   /** true = public menu, false = hidden, "admin" = create-game menu for admins only. */
   is_active?: boolean | 'admin';
   updated_at: string | null;

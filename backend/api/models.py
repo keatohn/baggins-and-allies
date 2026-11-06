@@ -102,8 +102,8 @@ class AppSetting(Base):
 class MapOverride(Base):
     """Map-level icon/location overrides keyed by map asset base name (shared across setups).
 
-    overrides_json: {"territories": {tid: {"focus": "calculated"|"override",
-    "positions": {kind: [x, y]}}}} in SVG viewBox coordinates.
+    overrides_json: {"territories": {...}, "landscape": {...}, "terrain": {tid: terrain_type}}
+    in SVG viewBox coordinates for positions. Terrain is the map-level source.
     """
 
     __tablename__ = "map_overrides"

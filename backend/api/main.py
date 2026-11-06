@@ -3063,6 +3063,13 @@ def admin_put_setup(
         save_setup_bundle(db, setup_id, payload)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    map_asset = manifest.get("map_asset") if isinstance(manifest.get("map_asset"), str) else ""
+    try:
+        from backend.map_overrides import publish_setup_terrain
+
+        publish_setup_terrain(db, map_asset or setup_id, payload.get("territories"))
+    except MapOverridesError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return {"ok": True, "id": setup_id}
 
 

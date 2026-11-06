@@ -12,7 +12,8 @@ from sqlalchemy.pool import StaticPool
 from backend.api.auth import get_current_admin, get_current_player
 from backend.api.database import Base, get_db
 from backend.api.main import app
-from backend.api.models import MapOverride, Player
+from backend.api.models import MapOverride, Player, Setup
+from backend.engine.definitions import TerritoryDefinition
 
 VALID_PAYLOAD = {
     "territories": {
@@ -415,3 +416,120 @@ def test_save_map_overrides_files_source(tmp_path, monkeypatch):
     on_disk = json.loads((tmp_path / "files_map_1.0" / "overrides.json").read_text(encoding="utf-8"))
     assert on_disk == data
     assert map_overrides.load_map_overrides(None, "files_map_1.0") == data
+
+
+def _setup_row(setup_id: str, map_base: str, terrain: dict[str, str]) -> Setup:
+    territories = {
+        tid: {"id": tid, "display_name": tid, "terrain_type": name, "adjacent": [], "produces": {"power": 0}}
+        for tid, name in terrain.items()
+    }
+    return Setup(
+        id=setup_id,
+        manifest_json=json.dumps({"id": setup_id, "map_asset": map_base}),
+        units_json="{}",
+        territories_json=json.dumps(territories),
+        factions_json="{}",
+        camps_json="{}",
+        ports_json="{}",
+        starting_setup_json="{}",
+        specials_json="{}",
+    )
+
+
+def test_seed_map_terrain_from_db_setups_and_keeps_edits(db_session):
+    from backend.map_overrides import seed_map_terrain_if_missing
+
+    db_session.add(_setup_row("wotr_1.1", "wotr_map_1.2", {"the_shire": "Hills", "mordor": "volcano"}))
+    db_session.add(_setup_row("wotr_2.0", "wotr_map_1.2", {"the_shire": "hills", "mordor": "volcano"}))
+    db_session.add(
+        MapOverride(
+            map_base="wotr_map_1.2",
+            overrides_json=json.dumps(
+                {
+                    "territories": {},
+                    "landscape": {
+                        "territories": {
+                            "mordor": [{"cat": "volcano", "img": "volcano.png", "x": 1, "y": 2}],
+                        }
+                    },
+                }
+            ),
+        )
+    )
+    db_session.commit()
+
+    assert seed_map_terrain_if_missing(db_session) == 1
+    row = db_session.query(MapOverride).filter(MapOverride.map_base == "wotr_map_1.2").one()
+    stored = json.loads(row.overrides_json)
+    assert stored["terrain"] == {"the_shire": "hills", "mordor": "volcano"}
+    assert stored["landscape"]["territories"]["mordor"][0]["img"] == "volcano.png"
+
+    stored["terrain"]["the_shire"] = "forest"
+    row.overrides_json = json.dumps(stored)
+    db_session.commit()
+    assert seed_map_terrain_if_missing(db_session) == 0
+    row = db_session.query(MapOverride).filter(MapOverride.map_base == "wotr_map_1.2").one()
+    assert json.loads(row.overrides_json)["terrain"]["the_shire"] == "forest"
+
+
+def test_put_terrain_round_trip_and_mirrors_setups(make_client, players, db_session):
+    admin, _ = players
+    db_session.add(_setup_row("wotr_1.1", "wotr_map_1.2", {"the_shire": "plains"}))
+    db_session.add(_setup_row("wotr_2.0", "wotr_map_1.2", {"the_shire": "plains"}))
+    db_session.commit()
+    client = make_client(admin)
+    payload = {"territories": {}, "terrain": {"the_shire": "hills"}}
+    r = client.put("/admin/maps/wotr_map_1.2/overrides", json=payload)
+    assert r.status_code == 200
+    assert r.json()["overrides"]["terrain"]["the_shire"] == "hills"
+    got = client.get("/maps/wotr_map_1.2/overrides")
+    assert got.json()["overrides"]["terrain"]["the_shire"] == "hills"
+    for setup_id in ("wotr_1.1", "wotr_2.0"):
+        row = db_session.query(Setup).filter(Setup.id == setup_id).one()
+        assert json.loads(row.territories_json)["the_shire"]["terrain_type"] == "hills"
+
+
+def test_put_terrain_rejects_unknown_catalog_type(make_client, players):
+    admin, _ = players
+    client = make_client(admin)
+    r = client.put(
+        "/admin/maps/wotr_map_1.2/overrides",
+        json={"territories": {}, "terrain": {"the_shire": "not_a_terrain"}},
+    )
+    assert r.status_code == 400
+
+
+def test_terrain_sibling_is_not_a_territory_id(make_client, players):
+    admin, _ = players
+    client = make_client(admin)
+    r = client.put(
+        "/admin/maps/wotr_map_1.2/overrides",
+        json={"terrain": {"the_shire": "lake"}},
+    )
+    assert r.status_code == 200
+    body = r.json()["overrides"]
+    assert body["territories"] == {}
+    assert body["terrain"]["the_shire"] == "lake"
+
+
+def test_apply_map_terrain_overrides_definition(db_session):
+    from backend.map_overrides import apply_map_terrain
+
+    db_session.add(
+        MapOverride(
+            map_base="wotr_map_1.2",
+            overrides_json=json.dumps({"territories": {}, "terrain": {"the_shire": "hills"}}),
+        )
+    )
+    db_session.commit()
+    defs = {
+        "the_shire": TerritoryDefinition(
+            id="the_shire",
+            display_name="The Shire",
+            terrain_type="plains",
+            adjacent=[],
+            produces={"power": 1},
+        )
+    }
+    apply_map_terrain(defs, "wotr_map_1.2", db_session)
+    assert defs["the_shire"].terrain_type == "hills"

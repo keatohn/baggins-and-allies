@@ -1232,6 +1232,7 @@ export default function Admin() {
       {mapsOpen ? (
         <MapOverridesPane
           territories={(bundle?.territories as DictEntityMap) ?? {}}
+          setupId={selectedId}
           onClose={() => setMapsOpen(false)}
         />
       ) : null}

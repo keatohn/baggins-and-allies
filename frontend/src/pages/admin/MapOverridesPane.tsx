@@ -21,7 +21,7 @@ import {
   territoryPathEl,
   type LandscapeManifest,
 } from './landscape';
-import { loadTerritorySvgPaths, sameTerritoryId, type TerritoryPathData } from './territoryGraph';
+import { loadTerritorySvgPaths, sameTerritoryId, toMapBase, type TerritoryPathData } from './territoryGraph';
 import { MapBuilder } from './MapBuilder';
 
 type Pt = { x: number; y: number };
@@ -136,6 +136,23 @@ function stableJson(value: unknown): string {
   );
 }
 
+/** Copy a map document, replacing only the fields in the patch. Sibling terrain/landscape stay. */
+function nextOverrides(
+  base: MapOverridesData,
+  patch: {
+    territories?: MapOverridesData['territories'];
+    landscape?: LandscapeOverrides | null;
+    terrain?: Record<string, string> | null;
+  },
+): MapOverridesData {
+  const data: MapOverridesData = { territories: patch.territories ?? base.territories };
+  const landscape = patch.landscape === undefined ? base.landscape : patch.landscape ?? undefined;
+  if (landscape) data.landscape = landscape;
+  const terrain = patch.terrain === undefined ? base.terrain : patch.terrain ?? undefined;
+  if (terrain) data.terrain = terrain;
+  return data;
+}
+
 function prettifyId(id: string): string {
   return id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
@@ -185,8 +202,18 @@ function fmt(pt: MapOverridePoint): string {
  * dot, flip a territory from "calculated" to "override", then drag its dots within the territory.
  * Saves the whole overrides blob for the map (shared by every setup using it).
  */
-export function MapOverridesPane({ territories = {}, onClose }: { territories?: Dict; onClose: () => void }) {
+export function MapOverridesPane({
+  territories = {},
+  setupId = '',
+  onClose,
+}: {
+  territories?: Dict;
+  /** Open setup, preferred when it uses the map being edited. */
+  setupId?: string;
+  onClose: () => void;
+}) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const [territoryDefs, setTerritoryDefs] = useState<Dict>(territories);
   const [maps, setMaps] = useState<string[]>([]);
   const [mapBase, setMapBase] = useState('');
   const [pendingMap, setPendingMap] = useState<string | null>(null);
@@ -207,6 +234,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
   const [saveError, setSaveError] = useState<string | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [editorTab, setEditorTab] = useState<'icon' | 'landscape' | 'builder'>('icon');
+  const [terrainTypes, setTerrainTypes] = useState<string[]>([]);
   const [manifest, setManifest] = useState<LandscapeManifest>({});
   const [placing, setPlacing] = useState<{ cat: string; img: string } | null>(null);
   const [borderMode, setBorderMode] = useState(false);
@@ -262,6 +290,17 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
 
   const current = draft ?? stored;
   const dirty = draft != null && stored != null && stableJson(draft) !== stableJson(stored);
+  // Map terrain wins over the setup copy so the landscape palette follows what this map stores.
+  const terrainBackedDefs = useMemo(() => {
+    const terrain = current?.terrain;
+    if (!terrain || !Object.keys(terrain).length) return territoryDefs;
+    const out: Dict = { ...territoryDefs };
+    for (const [tid, type] of Object.entries(terrain)) {
+      const key = resolveTid(out, tid) ?? tid;
+      out[key] = { ...(out[key] ?? {}), terrain_type: type };
+    }
+    return out;
+  }, [territoryDefs, current]);
 
   // --- data loading -------------------------------------------------------
 
@@ -289,11 +328,53 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     };
   }, []);
 
+  // Terrain comes from a setup that uses this map. The open setup is only a match
+  // when it is the one on screen; otherwise every region fell back to "land".
+  useEffect(() => {
+    if (!mapBase) return;
+    let cancelled = false;
+    api
+      .adminListSetups()
+      .then(async (res) => {
+        const rows = Array.isArray(res?.setups) ? res.setups : [];
+        const matches = rows.filter((row) => toMapBase(row.map_asset || row.id) === mapBase);
+        const preferred = matches.find((row) => row.id === setupId) ?? matches[0];
+        if (!preferred) {
+          if (!cancelled) setTerritoryDefs(territories);
+          return;
+        }
+        if (preferred.id === setupId && Object.keys(territories).length > 0) {
+          if (!cancelled) setTerritoryDefs(territories);
+          return;
+        }
+        const bundle = await api.adminGetSetup(preferred.id);
+        if (!cancelled) setTerritoryDefs((bundle.territories ?? {}) as Dict);
+      })
+      .catch(() => {
+        if (!cancelled) setTerritoryDefs(territories);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mapBase, setupId, territories]);
+
   useEffect(() => {
     let cancelled = false;
     loadLandscapeManifest().then((m) => {
       if (!cancelled) setManifest(m);
     });
+    api
+      .getCatalog()
+      .then((catalog) => {
+        if (cancelled) return;
+        const types = Array.isArray(catalog?.terrain_types)
+          ? catalog.terrain_types.filter((t): t is string => typeof t === 'string' && t.length > 0)
+          : [];
+        setTerrainTypes(types);
+      })
+      .catch(() => {
+        if (!cancelled) setTerrainTypes([]);
+      });
     return () => {
       cancelled = true;
     };
@@ -318,7 +399,6 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     setPlacing(null);
     setBorderMode(false);
     setSelectedPlacement(null);
-    setEditorTab('icon');
     setCursorMode('navigate');
     setBand(null);
     setMultiSel(new Set());
@@ -430,11 +510,11 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
 
   const oracleTerritoryData = useMemo(() => {
     const out: Record<string, { name: string; owner?: string; terrain: string; stronghold: boolean; produces: number; adjacent: string[] }> = {};
-    for (const [tid, def] of Object.entries(territories)) {
+    for (const [tid, def] of Object.entries(terrainBackedDefs)) {
       const terrain =
         typeof def.terrain_type === 'string' ? def.terrain_type : typeof def.terrain === 'string' ? def.terrain : 'land';
       out[tid] = {
-        name: territoryLabel(tid, territories),
+        name: territoryLabel(tid, terrainBackedDefs),
         terrain,
         stronghold: false,
         produces: 0,
@@ -442,7 +522,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
       };
     }
     return out;
-  }, [territories]);
+  }, [terrainBackedDefs]);
 
   // --- viewport fit / pan / zoom -----------------------------------------
 
@@ -776,7 +856,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
       const out: Partial<Record<UiKind, Pt>> = {};
       if (p?.unit) out.unit = p.unit;
       // Red = production (land / marker) or sea-zone number (sea / number hint, else marker).
-      out.power = isSeaTerritory(tid, territories) ? (h?.number ?? p?.marker) : p?.marker;
+      out.power = isSeaTerritory(tid, terrainBackedDefs) ? (h?.number ?? p?.marker) : p?.marker;
       if (h?.logo) out.logo = h.logo;
       if (h?.icons) out.icons = h.icons;
       // Reproduce the render-time unit pixel nudge (viewBox ≈ screen px, 1:1 per MAP_CONFIG).
@@ -787,7 +867,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
       }
       return out;
     },
-    [spots, territories],
+    [spots, terrainBackedDefs],
   );
 
   const overridePositionsFor = useCallback(
@@ -800,12 +880,12 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
 
   const effectiveFor = useCallback(
     (tid: string, kind: UiKind): { pt: MapOverridePoint; isOverride: boolean } | null => {
-      const ovp = overridePositionsFor(tid)?.[storageKindFor(tid, kind, territories)];
+      const ovp = overridePositionsFor(tid)?.[storageKindFor(tid, kind, terrainBackedDefs)];
       if (ovp) return { pt: ovp, isOverride: true };
       const calc = calculatedFor(tid)[kind];
       return calc ? { pt: calc, isOverride: false } : null;
     },
-    [calculatedFor, overridePositionsFor, territories],
+    [calculatedFor, overridePositionsFor, terrainBackedDefs],
   );
 
   const updateEntry = useCallback((tid: string, entry: MapOverridesData['territories'][string] | null) => {
@@ -815,8 +895,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
       const next = { ...base.territories };
       if (entry === null) delete next[key];
       else next[key] = entry;
-      const data: MapOverridesData = { territories: next };
-      if (base.landscape) data.landscape = base.landscape;
+      const data = nextOverrides(base, { territories: next });
       return stableJson(data) === stableJson(base) ? prevDraft ?? base : data;
     });
     setSaveError(null);
@@ -827,8 +906,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
       setDraft((prevDraft) => {
         const base = prevDraft ?? stored ?? { territories: {} };
         const nextLandscape = fn(base.landscape);
-        const data: MapOverridesData = { territories: base.territories };
-        if (nextLandscape) data.landscape = nextLandscape;
+        const data = nextOverrides(base, { landscape: nextLandscape ?? null });
         return stableJson(data) === stableJson(base) ? prevDraft ?? base : data;
       });
       setSaveError(null);
@@ -949,8 +1027,8 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
         };
         let totalPlaced = Object.values(map).reduce((n, list) => n + list.length, 0);
         for (const tid of paths.keys()) {
-          const defKey = resolveTid(territories, tid) ?? tid;
-          const def = territories[defKey];
+          const defKey = resolveTid(terrainBackedDefs, tid) ?? tid;
+          const def = terrainBackedDefs[defKey];
           const terrain =
             def && typeof def.terrain_type === 'string'
               ? def.terrain_type
@@ -981,12 +1059,25 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     } finally {
       setAutoBusy(false);
     }
-  }, [paths, territories, manifest, updateLandscape]);
+  }, [paths, terrainBackedDefs, manifest, updateLandscape]);
+
+  const updateTerrain = useCallback(
+    (tid: string, terrain: string) => {
+      setDraft((prevDraft) => {
+        const base = prevDraft ?? stored ?? { territories: {} };
+        const key = resolveTid(base.terrain, tid) ?? resolveTid(territoryDefs, tid) ?? tid;
+        const data = nextOverrides(base, { terrain: { ...(base.terrain ?? {}), [key]: terrain } });
+        return stableJson(data) === stableJson(base) ? prevDraft ?? base : data;
+      });
+      setSaveError(null);
+    },
+    [stored, territoryDefs],
+  );
 
   const terrainTypeFor = useCallback(
     (tid: string): string => {
-      const defKey = resolveTid(territories, tid) ?? tid;
-      const def = territories[defKey];
+      const defKey = resolveTid(terrainBackedDefs, tid) ?? tid;
+      const def = terrainBackedDefs[defKey];
       if (!def) return '';
       return typeof def.terrain_type === 'string'
         ? def.terrain_type
@@ -994,7 +1085,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
           ? def.terrain
           : '';
     },
-    [territories],
+    [terrainBackedDefs],
   );
 
   const selectedTerrainType = useMemo(() => (selected ? terrainTypeFor(selected) : ''), [selected, terrainTypeFor]);
@@ -1136,7 +1227,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     const positions: Partial<Record<MapSpotKind, MapOverridePoint>> = {};
     for (const kind of [...ALWAYS_KINDS, ...EXTRA_KINDS]) {
       const pt = calc[kind];
-      if (pt) positions[storageKindFor(tid, kind, territories)] = pt;
+      if (pt) positions[storageKindFor(tid, kind, terrainBackedDefs)] = pt;
     }
     updateEntry(tid, { focus: 'override', positions });
   };
@@ -1145,7 +1236,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     const existing = entryFor(current, tid);
     const positions = {
       ...(existing?.focus === 'override' ? existing.positions : {}),
-      [storageKindFor(tid, kind, territories)]: pt,
+      [storageKindFor(tid, kind, terrainBackedDefs)]: pt,
     };
     updateEntry(tid, { focus: 'override', positions });
   };
@@ -1154,7 +1245,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     const existing = entryFor(current, tid);
     if (existing?.focus !== 'override' || !existing.positions) return;
     const positions = { ...existing.positions };
-    delete positions[storageKindFor(tid, kind, territories)];
+    delete positions[storageKindFor(tid, kind, terrainBackedDefs)];
     updateEntry(tid, { focus: 'override', positions });
   };
 
@@ -1409,11 +1500,11 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     for (const id of paths.keys()) {
       if (seen.has(id)) continue;
       seen.add(id);
-      rows.push({ id, label: territoryLabel(id, territories) });
+      rows.push({ id, label: territoryLabel(id, territoryDefs) });
     }
     rows.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }) || a.id.localeCompare(b.id));
     return rows;
-  }, [paths, territories]);
+  }, [paths, territoryDefs]);
 
   const filteredChoices = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1751,17 +1842,17 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
     const positions = selectedEntry.positions ?? {};
     const out: Partial<Record<UiKind, MapOverridePoint>> = {};
     for (const { kind } of SPOT_KINDS) {
-      const pt = positions[storageKindFor(selected, kind, territories)];
+      const pt = positions[storageKindFor(selected, kind, terrainBackedDefs)];
       if (pt) out[kind] = pt;
     }
     return out;
-  }, [selected, selectedEntry, territories]);
+  }, [selected, selectedEntry, terrainBackedDefs]);
 
   const description =
     editorTab === 'builder'
       ? 'Draw border lines once — neighbours share the same line. Set the map size, sketch with Pen/Pencil, then Label each enclosed region; Build SVG converts the graph into closed territory paths (saved work autosaves in this browser).'
       : editorTab === 'landscape'
-      ? 'Place terrain art constrained by each territory’s type. Auto-generate fills interiors; Border mode snaps to outlines. Emoji fallback stays until interior art exists for that type. Save applies to every setup using this map.'
+      ? 'Place terrain art constrained by each territory’s type. The type is stored on this map and saved with it. Auto-generate fills interiors; Border mode snaps to outlines. Save applies to every setup using this map.'
       : spots
         ? 'Four dots per territory: blue units · red production/sea number · yellow faction logo · green other icons (territory type, homes, camps, ports, signals, rings). Pick a territory, switch it to Override, then drag its dots. Save applies to every setup using this map.'
         : 'Loading calculated spots…';
@@ -2000,7 +2091,7 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
               {selected ? (
                 <div className="mapov-inspector">
                   <div className="mapov-inspector__head">
-                    <strong title={selected}>{territoryLabel(selected, territories)}</strong>
+                    <strong title={selected}>{territoryLabel(selected, territoryDefs)}</strong>
                     {editorTab === 'icon' ? (
                       <div className="admin-mapview__toggle" role="group" aria-label="Spot focus">
                         <button
@@ -2021,7 +2112,22 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                         </button>
                       </div>
                     ) : (
-                      <span className="mapov-kind__pos" title="Terrain type">{selectedTerrainType || 'land'}</span>
+                      <select
+                        className="admin-page__select mapov-inspector__terrain"
+                        aria-label="Terrain type"
+                        value={selectedTerrainType}
+                        onChange={(e) => updateTerrain(selected, e.target.value)}
+                      >
+                        {selectedTerrainType ? null : <option value="">Select terrain</option>}
+                        {selectedTerrainType && !terrainTypes.includes(selectedTerrainType) ? (
+                          <option value={selectedTerrainType}>{prettifyId(selectedTerrainType)}</option>
+                        ) : null}
+                        {terrainTypes.map((type) => (
+                          <option key={type} value={type}>
+                            {prettifyId(type)}
+                          </option>
+                        ))}
+                      </select>
                     )}
                   </div>
                   {editorTab === 'landscape' ? (
@@ -2315,10 +2421,10 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                         key={`${row.tid}|${row.index}|${row.placement.img}`}
                         role="button"
                         tabIndex={0}
-                        aria-label={`${territoryLabel(row.tid, territories)} ${row.placement.img}`}
+                        aria-label={`${territoryLabel(row.tid, territoryDefs)} ${row.placement.img}`}
                         className={`mapov-placement${isActive ? ' mapov-placement--active' : ''}${isMulti ? ' mapov-placement--multi' : ''}${row.placement.layer === 'border' ? ' mapov-placement--border' : ''}${row.placement.auto ? ' mapov-placement--auto' : ''}`}
                         style={{ left: x, top: y, width: size, height: size }}
-                        title={`${territoryLabel(row.tid, territories)} · ${row.placement.img} · ${row.placement.layer}${placing ? '' : ' — drag to move'}`}
+                        title={`${territoryLabel(row.tid, territoryDefs)} · ${row.placement.img} · ${row.placement.layer}${placing ? '' : ' — drag to move'}`}
                         onPointerDown={(e) => onPlacementPointerDown(e, row.tid, row.index)}
                         onPointerMove={onPlacementPointerMove}
                         onPointerUp={onPlacementPointerUp}
@@ -2347,10 +2453,10 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
                         key={`${d.tid}|${d.kind}`}
                         role="button"
                         tabIndex={0}
-                        aria-label={`${territoryLabel(d.tid, territories)} ${KIND_LABEL[d.kind]}`}
+                        aria-label={`${territoryLabel(d.tid, territoryDefs)} ${KIND_LABEL[d.kind]}`}
                         className={`mapov-dot mapov-dot--${d.kind}${d.isOverride ? ' mapov-dot--override' : ''}${isActive ? ' mapov-dot--active' : ''}`}
                         style={{ left: x, top: y, background: KIND_COLOR[d.kind] }}
-                        title={`${territoryLabel(d.tid, territories)} · ${KIND_LABEL[d.kind]} · ${d.isOverride ? 'override' : 'calculated'}${selectedFocus === 'override' && d.tid === selected ? ' — drag to move' : ''}`}
+                        title={`${territoryLabel(d.tid, territoryDefs)} · ${KIND_LABEL[d.kind]} · ${d.isOverride ? 'override' : 'calculated'}${selectedFocus === 'override' && d.tid === selected ? ' — drag to move' : ''}`}
                         onPointerDown={(e) => onDotPointerDown(e, d.tid, d.kind)}
                         onPointerMove={onDotPointerMove}
                         onPointerUp={onDotPointerUp}
@@ -2375,10 +2481,10 @@ export function MapOverridesPane({ territories = {}, onClose }: { territories?: 
             ? null
             : editorTab === 'landscape'
             ? selected
-              ? `${territoryLabel(selected, territories)} · ${selectedTerrainType || 'land'} · ${selectedPlacements.length} placed${landscapeCount ? ` · ${landscapeCount} total` : ''}`
+              ? `${territoryLabel(selected, territoryDefs)} · ${selectedTerrainType || 'land'} · ${selectedPlacements.length} placed${landscapeCount ? ` · ${landscapeCount} total` : ''}`
               : 'No territory selected'
             : selected
-              ? `${territoryLabel(selected, territories)} · ${KIND_LABEL[activeKind]}${
+              ? `${territoryLabel(selected, territoryDefs)} · ${KIND_LABEL[activeKind]}${
                   selectedFocus === 'override' ? ' · override' : ' · calculated'
                 }${overrideCount ? ` · ${overrideCount} overridden` : ''}`
               : 'No territory selected'}

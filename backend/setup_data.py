@@ -232,6 +232,7 @@ def list_all_setups_admin(db: Session) -> list[dict[str, Any]]:
             {
                 "id": row.id,
                 "display_name": m.get("display_name", row.id),
+                "map_asset": m.get("map_asset") or row.id,
                 "is_active": m.get("is_active"),
                 "updated_at": row.updated_at.isoformat() + "Z" if row.updated_at else None,
             }
@@ -263,6 +264,10 @@ def get_admin_setup_bundle(db: Session, setup_id: str) -> dict[str, Any] | None:
     if not row:
         return None
     p = _row_to_parsed(row)
+    map_base = p["manifest"].get("map_asset") if isinstance(p["manifest"], dict) else None
+    from backend.map_overrides import apply_map_terrain
+
+    apply_map_terrain(p["territories"], map_base if isinstance(map_base, str) and map_base else row.id, db)
     return {
         "id": row.id,
         "manifest": p["manifest"],
@@ -561,13 +566,19 @@ def try_load_setup(setup_id: str, db: Session | None) -> dict[str, Any] | None:
 
 def try_load_static_definitions(setup_id: str, db: Session | None):
     if is_files_setup_source():
-        return load_static_definitions_from_files(setup_id=setup_id)
-    if db is not None and db_has_any_setup(db):
-        hit = load_static_definitions_from_db(db, setup_id)
-        if hit is None:
+        defs = load_static_definitions_from_files(setup_id=setup_id)
+    elif db is not None and db_has_any_setup(db):
+        defs = load_static_definitions_from_db(db, setup_id)
+        if defs is None:
             raise FileNotFoundError(f"Setup not found in database: {setup_id}")
-        return hit
-    return load_static_definitions_from_files(setup_id=setup_id)
+    else:
+        defs = load_static_definitions_from_files(setup_id=setup_id)
+    setup = try_load_setup(setup_id, db)
+    map_base = (setup or {}).get("map_asset") or setup_id
+    from backend.map_overrides import apply_map_terrain
+
+    apply_map_terrain(defs[1], map_base if isinstance(map_base, str) else setup_id, db)
+    return defs
 
 
 def try_list_setups_menu(db: Session | None, *, include_admin: bool = False) -> list[dict[str, Any]]:
