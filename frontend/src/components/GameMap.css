@@ -13,7 +13,8 @@
   min-height: 0;
   position: relative;
   overflow: hidden;
-  background: var(--parchment-dark);
+  /* Same parchment film as the header, so the letterbox matches the chrome. */
+  background: rgba(212, 196, 160, 0.5);
   display: flex;
   flex-direction: column;
 }

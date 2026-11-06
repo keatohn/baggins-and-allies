@@ -23,9 +23,20 @@
   opacity: 0.62;
 }
 
+/* Game chrome is its own translucent film, so the picture underneath can be stronger. */
+.menu-map-backdrop--game {
+  background-image:
+    linear-gradient(180deg, rgba(212, 196, 160, 0.22) 0%, rgba(212, 196, 160, 0.3) 100%),
+    url('/middle-earth.webp');
+  background-position: center, center;
+  background-size: auto, contain;
+  opacity: 0.8;
+}
+
 @media (max-width: 767px) and (orientation: portrait) {
   .menu-map-backdrop,
-  .menu-map-backdrop--home {
+  .menu-map-backdrop--home,
+  .menu-map-backdrop--game {
     background-position: center, center 30%;
     background-size: auto, cover;
   }
@@ -36,5 +47,9 @@
 
   .menu-map-backdrop--home {
     opacity: 0.52;
+  }
+
+  .menu-map-backdrop--game {
+    opacity: 0.62;
   }
 }

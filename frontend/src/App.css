@@ -196,7 +196,7 @@
 
 .sidebar-wrapper {
   flex-shrink: 0;
-  background: var(--parchment-light);
+  background: rgba(212, 196, 160, 0.5);
   border-left: 2px solid var(--ink-faded);
   position: relative;
   transition: width 0.2s ease;

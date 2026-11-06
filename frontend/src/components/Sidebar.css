@@ -12,7 +12,7 @@
 }
 
 .panel {
-  background: var(--parchment);
+  background: rgba(212, 196, 160, 0.72);
   border: 1px solid var(--ink-faded);
   border-radius: 4px;
   padding: 0.75rem;
