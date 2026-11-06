@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../services/api';
-import type { GameListItem } from '../../services/api';
+import type { AdminGameEditor, GameListItem } from '../../services/api';
+import { MapViewPane } from './MapViewPane';
 
 type FilterKey = 'all' | 'lobby' | 'active' | 'finished';
 
 const END_CONFIRM_PHRASE = 'END GAME';
 const TEST_CONFIRM_PHRASE = 'TEST MODE';
+const EDIT_CONFIRM_PHRASE = 'EDIT GAME';
 
 type EndWinner = 'good' | 'evil' | 'none';
 
@@ -106,6 +108,10 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
   const [testConfirm, setTestConfirm] = useState('');
   const [testBusy, setTestBusy] = useState(false);
   const [testError, setTestError] = useState<string | null>(null);
+  const [editDoc, setEditDoc] = useState<AdminGameEditor | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const editRequest = useRef(0);
 
   const refreshGames = () => {
     api
@@ -114,7 +120,37 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Could not load games'));
   };
 
+  const closeEdit = () => {
+    editRequest.current += 1;
+    setEditDoc(null);
+    setEditError(null);
+    setEditLoading(false);
+  };
+
+  const openEdit = (game: GameListItem) => {
+    const token = ++editRequest.current;
+    setEndTarget(null);
+    setTestTarget(null);
+    setEditDoc(null);
+    setEditError(null);
+    setEditLoading(true);
+    api
+      .adminGetGameEditor(game.id)
+      .then((doc) => {
+        if (editRequest.current === token) setEditDoc(doc);
+      })
+      .catch((e: unknown) => {
+        if (editRequest.current === token) {
+          setEditError(e instanceof Error ? e.message : 'Could not load this game');
+        }
+      })
+      .finally(() => {
+        if (editRequest.current === token) setEditLoading(false);
+      });
+  };
+
   const openEndGame = (game: GameListItem) => {
+    setEditDoc(null);
     setTestTarget(null);
     setEndTarget(game);
     setEndWinner(null);
@@ -408,6 +444,13 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
                       <td>{formatDate(g.completed_at)}</td>
                       <td className="games-report__actions">
                         <span className="games-report__action-row">
+                          <button
+                            type="button"
+                            className="games-report__end-btn"
+                            onClick={() => openEdit(g)}
+                          >
+                            Edit
+                          </button>
                           {g.status === 'active' ? (
                             <button
                               type="button"
@@ -539,6 +582,66 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
                   disabled={testConfirm !== TEST_CONFIRM_PHRASE || testBusy}
                 >
                   {testBusy ? 'Switching…' : 'Switch to Test Mode'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {editDoc ? (
+          <MapViewPane
+            mode="game"
+            title={`Edit ${editDoc.game.name}`}
+            contextLine={`${editDoc.turn_number ? `Turn ${editDoc.turn_number}` : 'Not started'} · ${editDoc.phase || '—'} · ${
+              (typeof editDoc.factions[editDoc.current_faction]?.display_name === 'string'
+                ? editDoc.factions[editDoc.current_faction].display_name
+                : editDoc.current_faction) || '—'
+            }`}
+            saveConfirmPhrase={EDIT_CONFIRM_PHRASE}
+            startEditing
+            mapAsset={editDoc.map_asset || undefined}
+            manifest={editDoc.manifest}
+            territories={editDoc.territories}
+            startingSetup={editDoc.starting_setup}
+            camps={editDoc.camps}
+            ports={editDoc.ports}
+            factions={editDoc.factions}
+            units={editDoc.units}
+            ringsView={editDoc.rings}
+            turnNumber={editDoc.turn_number}
+            phase={editDoc.phase}
+            currentFaction={editDoc.current_faction}
+            onClose={closeEdit}
+            onSaveUnits={async (units) => {
+              await api.adminPutGameUnits(editDoc.game.id, EDIT_CONFIRM_PHRASE, units);
+              setEditDoc((doc) => (doc ? { ...doc, units } : doc));
+            }}
+            onSave={async (draft) => {
+              await api.adminPutGameEditor(editDoc.game.id, {
+                confirm: EDIT_CONFIRM_PHRASE,
+                territories: draft.territories,
+                starting_setup: draft.starting_setup,
+                camps: draft.camps,
+                ports: draft.ports,
+              });
+            }}
+          />
+        ) : null}
+        {editLoading || (editError && !editDoc) ? (
+          <div className="admin-modal-overlay admin-graph__confirm" role="presentation" onClick={closeEdit}>
+            <div
+              className="admin-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="admin-edit-game-loading"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 id="admin-edit-game-loading" className="admin-modal__title">
+                Edit game
+              </h2>
+              {editError ? <p className="admin-page__error">{editError}</p> : <p className="admin-form__micro">Loading the board…</p>}
+              <div className="admin-modal__actions">
+                <button type="button" className="admin-page__btn" onClick={closeEdit}>
+                  Close
                 </button>
               </div>
             </div>

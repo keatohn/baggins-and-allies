@@ -26,6 +26,14 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .admin_query import SelectOnlyError, list_db_schema, run_admin_select
+from .game_board_edit import (
+    EDIT_GAME_PHRASE,
+    GameEditError,
+    UnitValidationError,
+    apply_editor_document,
+    apply_unit_document,
+    editor_document,
+)
 from .database import get_db, get_db_file_path, init_db, SessionLocal
 from .models import FriendRequest, Game as GameModel, GameInvite, GameResult, Player
 from .player_stats import compute_player_stats, player_headline_record
@@ -2816,6 +2824,122 @@ def admin_end_game(
     if game_id in game_defs:
         del game_defs[game_id]
     return {"ok": True, "game_id": game_id, "winner": None if winner == "none" else winner, "status": "finished"}
+
+
+def _admin_game_row_state(row: GameModel) -> tuple[GameState, dict]:
+    try:
+        raw = json.loads(row.game_state) if isinstance(row.game_state, str) else row.game_state
+        state = GameState.from_dict(raw) if isinstance(raw, dict) else None
+    except (TypeError, json.JSONDecodeError, ValueError):
+        state = None
+    if state is None:
+        raise HTTPException(status_code=400, detail="Game state is corrupt; cannot edit it")
+    try:
+        config = json.loads(row.config) if isinstance(row.config, str) else row.config
+    except (TypeError, json.JSONDecodeError):
+        config = {}
+    if not isinstance(config, dict):
+        config = {}
+    return state, config
+
+
+class AdminEditGameBody(BaseModel):
+    """Map-editor draft plus the typed confirmation. confirm must be EDIT GAME."""
+
+    confirm: str
+    territories: dict[str, Any]
+    starting_setup: dict[str, Any]
+    camps: dict[str, Any]
+    ports: dict[str, Any]
+
+
+@app.get("/admin/games/{game_id}/editor")
+def admin_get_game_editor(
+    game_id: str,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Current board in the setup-map editor shape, for the admin game editor."""
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Game not found")
+    state, config = _admin_game_row_state(row)
+    try:
+        doc = editor_document(state, config.get("definitions") or {})
+    except GameEditError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    doc["game"] = {"id": row.id, "name": row.name, "status": row.status}
+    return doc
+
+
+@app.put("/admin/games/{game_id}/editor")
+def admin_put_game_editor(
+    game_id: str,
+    body: AdminEditGameBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Replace this game's board with the map editor draft. Does not change the shared setup."""
+    if body.confirm != EDIT_GAME_PHRASE:
+        raise HTTPException(status_code=400, detail=f"Type {EDIT_GAME_PHRASE} to confirm")
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Game not found")
+    state, config = _admin_game_row_state(row)
+    try:
+        snapshot = apply_editor_document(
+            state,
+            config.get("definitions") or {},
+            {
+                "territories": body.territories,
+                "starting_setup": body.starting_setup,
+                "camps": body.camps,
+                "ports": body.ports,
+            },
+        )
+    except GameEditError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    config["definitions"] = snapshot
+    row.config = json.dumps(config)
+    save_game(game_id, state, db)
+    if game_id in game_defs:
+        del game_defs[game_id]
+    return {"ok": True, "game_id": game_id}
+
+
+class AdminEditGameUnitsBody(BaseModel):
+    """Replacement unit definitions for one game. confirm must be EDIT GAME."""
+
+    confirm: str
+    units: dict[str, Any]
+
+
+@app.put("/admin/games/{game_id}/editor/units")
+def admin_put_game_units(
+    game_id: str,
+    body: AdminEditGameUnitsBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Replace this game's unit definitions. The shared setup is left alone."""
+    if body.confirm != EDIT_GAME_PHRASE:
+        raise HTTPException(status_code=400, detail=f"Type {EDIT_GAME_PHRASE} to confirm")
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Game not found")
+    state, config = _admin_game_row_state(row)
+    try:
+        snapshot = apply_unit_document(state, config.get("definitions") or {}, body.units, load_catalog(db))
+    except UnitValidationError as e:
+        raise HTTPException(status_code=400, detail={"validation_errors": e.errors}) from e
+    except GameEditError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    config["definitions"] = snapshot
+    row.config = json.dumps(config)
+    save_game(game_id, state, db)
+    if game_id in game_defs:
+        del game_defs[game_id]
+    return {"ok": True, "game_id": game_id}
 
 
 def _mark_config_test_mode(row: GameModel) -> None:

@@ -1242,6 +1242,30 @@ export interface GameListItem {
   } | null;
 }
 
+export interface AdminGameEditor {
+  game: { id: string; name: string; status: string };
+  map_asset: string;
+  manifest: Record<string, unknown>;
+  territories: Record<string, Record<string, unknown>>;
+  starting_setup: Record<string, unknown>;
+  camps: Record<string, Record<string, unknown>>;
+  ports: Record<string, Record<string, unknown>>;
+  factions: Record<string, Record<string, unknown>>;
+  units: Record<string, Record<string, unknown>>;
+  rings: {
+    id: string;
+    name: string;
+    power: number;
+    territory_id: string;
+    bearer_hero_id?: string | null;
+    carried_in_by?: string | null;
+    returns_to?: string | null;
+  }[];
+  turn_number: number;
+  phase: string;
+  current_faction: string;
+}
+
 /** Setup/scenario from GET /setups (manifest id, display_name, map_asset, optional context for UX). */
 export interface SetupInfo {
   id: string;
@@ -1436,6 +1460,30 @@ export const api = {
       `/admin/games/${encodeURIComponent(gameId)}/test-mode`,
       { method: 'POST' },
     ),
+  /** Admin: live board in the setup-map editor shape. */
+  adminGetGameEditor: (gameId: string) =>
+    fetchJson<AdminGameEditor>(`/admin/games/${encodeURIComponent(gameId)}/editor`),
+  /** Admin: replace one game's unit definitions. confirm must be "EDIT GAME". */
+  adminPutGameUnits: (gameId: string, confirm: string, units: Record<string, Record<string, unknown>>) =>
+    fetchJson<{ ok: boolean; game_id: string }>(`/admin/games/${encodeURIComponent(gameId)}/editor/units`, {
+      method: 'PUT',
+      body: JSON.stringify({ confirm, units }),
+    }),
+  /** Admin: write a map-editor draft onto this game. confirm must be "EDIT GAME". */
+  adminPutGameEditor: (
+    gameId: string,
+    body: {
+      confirm: string;
+      territories: Record<string, Record<string, unknown>>;
+      starting_setup: Record<string, unknown>;
+      camps: Record<string, Record<string, unknown>>;
+      ports: Record<string, Record<string, unknown>>;
+    },
+  ) =>
+    fetchJson<{ ok: boolean; game_id: string }>(`/admin/games/${encodeURIComponent(gameId)}/editor`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
   /** Admin: end an in-progress game now. winner: "good" | "evil" | "none" (void, no stats rows). */
   adminEndGame: (gameId: string, winner: 'good' | 'evil' | 'none') =>
     fetchJson<{ ok: boolean; game_id: string; winner: string | null; status: string }>(

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointer
 import GameMap from '../../components/GameMap';
 import { api } from '../../services/api';
 import type { RingView } from '../../ringsDisplay';
-import type { GameState, MapOverridesData, PendingMove } from '../../types/game';
+import type { GamePhase, GameState, MapOverridesData, PendingMove } from '../../types/game';
 import { normalizeMapOverrides } from '../../types/game';
 import {
   adjacencyEdges,
@@ -155,6 +155,22 @@ function strongholdHp(def: Record<string, unknown> | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Setup edits the stronghold's base HP. A live game edits the HP it has right now. */
+const GAME_PHASES: readonly GamePhase[] = ['purchase', 'combat_move', 'combat', 'non_combat_move', 'mobilize'];
+
+function gamePhase(phase: string | undefined): GamePhase {
+  if (phase === 'mobilization') return 'mobilize';
+  return GAME_PHASES.find((item) => item === phase) ?? 'purchase';
+}
+
+function displayedStrongholdHp(def: Record<string, unknown> | undefined, mode: 'setup' | 'game'): number {
+  if (mode === 'game' && def?.stronghold_current_health != null) {
+    const n = Number(def.stronghold_current_health);
+    if (Number.isFinite(n)) return n;
+  }
+  return strongholdHp(def);
+}
+
 function ownersOf(startingSetup: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [tid, owner] of Object.entries(asRecord(startingSetup.territory_owners))) {
@@ -197,6 +213,16 @@ export function MapViewPane({
   units,
   onClose,
   onSave,
+  mode = 'setup',
+  title = 'Map view',
+  contextLine,
+  saveConfirmPhrase,
+  startEditing = false,
+  ringsView,
+  turnNumber,
+  phase,
+  currentFaction,
+  onSaveUnits,
 }: {
   mapAsset: string | undefined;
   manifest: Record<string, unknown>;
@@ -208,6 +234,20 @@ export function MapViewPane({
   units: Dict;
   onClose: () => void;
   onSave: (next: MapSetupDraft) => Promise<void>;
+  /** setup edits the scenario. game edits one live board and confirms before saving. */
+  mode?: 'setup' | 'game';
+  title?: string;
+  contextLine?: string;
+  /** When set, Save asks the admin to type this phrase before onSave runs. */
+  saveConfirmPhrase?: string;
+  startEditing?: boolean;
+  /** Live ring positions. When set, these replace the rings read from the manifest. */
+  ringsView?: RingView[];
+  turnNumber?: number;
+  phase?: string;
+  currentFaction?: string;
+  /** Game editor only: replace this game's unit definitions. */
+  onSaveUnits?: (units: Dict) => Promise<void>;
 }) {
   const mapBase = toMapBase(mapAsset);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -223,7 +263,7 @@ export function MapViewPane({
   const didDragRef = useRef(false);
   const [pngFailed, setPngFailed] = useState(false);
   const [mapOverrides, setMapOverrides] = useState<MapOverridesData | null>(null);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(startEditing);
   const [edgeField, setEdgeField] = useState<TerritoryEdgeField>('adjacent');
   const [editId, setEditId] = useState<string | null>(null);
   const [draft, setDraft] = useState<MapSetupDraft | null>(null);
@@ -235,6 +275,13 @@ export function MapViewPane({
   const [openingFactionId, setOpeningFactionId] = useState<string | null>(null);
   const [openingLoading, setOpeningLoading] = useState(false);
   const [openingError, setOpeningError] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
+  const [unitsOpen, setUnitsOpen] = useState(false);
+  const [unitsText, setUnitsText] = useState('');
+  const [unitsErr, setUnitsErr] = useState<string | null>(null);
+  const [unitsConfirm, setUnitsConfirm] = useState('');
+  const [unitsSaving, setUnitsSaving] = useState(false);
 
   const base = useMemo<MapSetupDraft>(
     () => ({ territories, starting_setup: startingSetup, camps, ports }),
@@ -330,15 +377,16 @@ export function MapViewPane({
       image?: string;
     }> = {};
     for (const [tid, def] of Object.entries(cur.territories)) {
-      const hp = strongholdHp(def);
+      const baseHp = strongholdHp(def);
+      const currentHp = displayedStrongholdHp(def, mode);
       const image = typeof def.image === 'string' ? def.image.trim() : '';
       out[tid] = {
         name: territoryLabel(tid, def),
         owner: owners[tid],
         terrain: typeof def.terrain_type === 'string' ? def.terrain_type : 'land',
         stronghold: def.is_stronghold === true,
-        stronghold_base_health: hp,
-        stronghold_current_health: hp,
+        stronghold_base_health: baseHp,
+        stronghold_current_health: currentHp,
         produces: territoryPower(def),
         adjacent: stringList(def.adjacent),
         aerial_adjacent: stringList(def.aerial_adjacent),
@@ -351,7 +399,7 @@ export function MapViewPane({
       };
     }
     return out;
-  }, [cur.territories, cur.camps, cur.ports, owners, capitals]);
+  }, [cur.territories, cur.camps, cur.ports, owners, capitals, mode]);
 
   const unitDefs = useMemo(() => {
     const defs: Record<string, { name: string; icon: string; faction?: string; archetype?: string; tags?: string[]; home_territory_ids?: string[]; cost?: number; transport_capacity?: number; hero_id?: string }> = {};
@@ -391,7 +439,7 @@ export function MapViewPane({
     return [naval, river];
   }, [units]);
 
-  const rings = useMemo(() => {
+  const manifestRings = useMemo(() => {
     const out: RingView[] = [];
     for (const rule of Array.isArray(manifest.special_rules) ? manifest.special_rules : []) {
       const rec = asRecord(rule);
@@ -411,13 +459,14 @@ export function MapViewPane({
     }
     return out;
   }, [manifest]);
+  const rings = ringsView ?? manifestRings;
 
   const gameState = useMemo<GameState>(() => {
     const order = stringList(cur.starting_setup.turn_order);
     return {
-      turn_number: 1,
-      current_faction: order[0] ?? '',
-      phase: 'purchase',
+      turn_number: turnNumber ?? 1,
+      current_faction: currentFaction || order[0] || '',
+      phase: gamePhase(phase),
       territories: {},
       faction_resources: {},
       pending_purchases: {},
@@ -428,7 +477,7 @@ export function MapViewPane({
       map_asset: mapBase,
       turn_order: order,
     };
-  }, [cur.starting_setup, mapBase]);
+  }, [cur.starting_setup, mapBase, turnNumber, phase, currentFaction]);
 
   const openingRequest = useMemo(
     () => ({
@@ -698,13 +747,24 @@ export function MapViewPane({
         : { ...d, ports: sitesWithToggle(d.ports, tid, on, 'port') },
     );
 
-  const setStronghold = (tid: string, on: boolean) =>
+  const setStronghold = (tid: string, on: boolean) => {
+    if (!on) {
+      patchTerritory(tid, { is_stronghold: false });
+      return;
+    }
+    const base = Math.max(1, strongholdHp(shown[tid]));
     patchTerritory(
       tid,
-      on
-        ? { is_stronghold: true, stronghold_base_health: Math.max(1, strongholdHp(shown[tid])), stronghold_health: undefined }
-        : { is_stronghold: false },
+      mode === 'game'
+        ? {
+            is_stronghold: true,
+            stronghold_base_health: base,
+            stronghold_current_health: Math.max(0, displayedStrongholdHp(shown[tid], mode)) || base,
+            stronghold_health: undefined,
+          }
+        : { is_stronghold: true, stronghold_base_health: base, stronghold_health: undefined },
     );
+  };
 
   useEffect(() => {
     if (view !== 'graph' || loading || err) return;
@@ -763,11 +823,59 @@ export function MapViewPane({
       await onSave(draft);
       setDraft(null);
       setDiscardOpen(false);
+      setConfirmOpen(false);
+      setConfirmText('');
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : 'Save failed');
+      setConfirmOpen(false);
     } finally {
       setSaving(false);
     }
+  };
+
+  const openUnitsEditor = () => {
+    setUnitsText(JSON.stringify(units, null, 2));
+    setUnitsErr(null);
+    setUnitsConfirm('');
+    setUnitsOpen(true);
+  };
+
+  const saveUnits = async () => {
+    if (!onSaveUnits || !saveConfirmPhrase || unitsConfirm !== saveConfirmPhrase || unitsSaving) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(unitsText);
+    } catch (e) {
+      setUnitsErr(e instanceof Error ? e.message : 'Invalid JSON');
+      return;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      setUnitsErr('Units JSON must be a single object.');
+      return;
+    }
+    setUnitsSaving(true);
+    setUnitsErr(null);
+    try {
+      await onSaveUnits(parsed as Dict);
+      setUnitsOpen(false);
+      setUnitsConfirm('');
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Save failed';
+      setUnitsErr(message.replace(/; /g, '\n'));
+    } finally {
+      setUnitsSaving(false);
+    }
+  };
+
+  const requestSave = () => {
+    if (!dirty || !draft || saving) return;
+    if (saveConfirmPhrase) {
+      setConfirmText('');
+      setConfirmOpen(true);
+      setSaveError(null);
+      return;
+    }
+    void saveEdits();
   };
 
   const onMapSelect = (tid: string | null) => {
@@ -909,25 +1017,35 @@ export function MapViewPane({
     ];
     if (def?.is_stronghold === true) {
       const projectedHp = openingBoard?.strongholdHp[key];
-      parts.push(`Stronghold ${projectedHp != null ? projectedHp : strongholdHp(def)} HP`);
+      parts.push(`Stronghold ${projectedHp != null ? projectedHp : displayedStrongholdHp(def, mode)} HP`);
     }
     if (hasSiteAt(cur.camps, key)) parts.push('Camp');
     if (hasSiteAt(cur.ports, key)) parts.push('Port');
     const stacks = stacksForTerritory(mapUnits, key);
-    parts.push(`Starting units: ${stacks.map((s) => `${s.count}× ${unitLabel(s.unit_id)}`).join(', ') || 'none'}`);
+    const unitWord = mode === 'game' ? 'Units' : 'Starting units';
+    parts.push(`${unitWord}: ${stacks.map((s) => `${s.count}× ${unitLabel(s.unit_id)}`).join(', ') || 'none'}`);
     return parts.join(' · ');
   };
 
-  const description =
+  const setupEditingCopy = mode === 'game'
+    ? 'Choose a territory from the list or the map, then set its owner, power, camp, port, stronghold, and units.'
+    : 'Choose a territory from the list or the map, then set its owner, power, camp, port, stronghold, and starting units.';
+  const setupViewCopy = mode === 'game'
+    ? 'The board as it is now. Click a territory for its details. Scroll to zoom, drag to pan.'
+    : 'The map as it starts on turn 1. Click a territory for its details. Scroll to zoom, drag to pan.';
+  const description = [
+    contextLine,
     view === 'openings'
       ? 'Opening moves in turn order, chosen by the same MCTS search the AI uses. Each later faction is shown after the earlier factions have fought those battles. A pill is the combat sim’s chance the attack wins; Take is an empty territory.'
       : view === 'setup'
       ? editing
-        ? 'Choose a territory from the list or the map, then set its owner, power, camp, port, stronghold, and starting units.'
-        : 'The map as it starts on turn 1. Click a territory for its details. Scroll to zoom, drag to pan.'
+        ? setupEditingCopy
+        : setupViewCopy
       : editing
         ? 'Choose a territory, then click the map to toggle its neighbors and set its power and starting units. Land replaces aerial and ford on that border. Aerial and ford can both stay. Save writes both sides.'
-        : `Landscape from ${mapBase}.png with borders from the SVG. Click a territory to highlight neighbors. Scroll to zoom, drag to pan.`;
+        : `Landscape from ${mapBase}.png with borders from the SVG. Click a territory to highlight neighbors. Scroll to zoom, drag to pan.`,
+    mode === 'game' && editing ? `Saving asks you to type ${saveConfirmPhrase}.` : '',
+  ].filter(Boolean).join(' ');
 
   return (
     <div className="admin-modal-overlay" role="presentation" onClick={requestClose}>
@@ -941,20 +1059,20 @@ export function MapViewPane({
         <div className="admin-graph__header">
           <div className="admin-graph__title-row">
             <h2 id="admin-graph-title" className="admin-modal__title">
-              Map view
+              {title}
             </h2>
             <div className="admin-mapview__toggle" role="group" aria-label="Map view mode">
               {([
-                ['setup', 'Setup'],
+                ['setup', mode === 'game' ? 'Board' : 'Setup'],
                 ['graph', 'Graph'],
-                ['openings', 'Openings'],
-              ] as const).map(([mode, label]) => (
+                ...(mode === 'game' ? [] : [['openings', 'Openings']]),
+              ] as ['setup' | 'graph' | 'openings', string][]).map(([viewMode, label]) => (
                 <button
-                  key={mode}
+                  key={viewMode}
                   type="button"
-                  className={`admin-mapview__toggle-btn${view === mode ? ' admin-mapview__toggle-btn--active' : ''}`}
-                  aria-pressed={view === mode}
-                  onClick={() => setView(mode)}
+                  className={`admin-mapview__toggle-btn${view === viewMode ? ' admin-mapview__toggle-btn--active' : ''}`}
+                  aria-pressed={view === viewMode}
+                  onClick={() => setView(viewMode)}
                 >
                   {label}
                 </button>
@@ -1046,27 +1164,33 @@ export function MapViewPane({
                         <label className="admin-graph__prop">
                           HP
                           <NumberField
-                            min={1}
+                            min={mode === 'game' ? 0 : 1}
                             step={1}
                             className="admin-form__input admin-graph__power"
-                            value={String(strongholdHp(editDef))}
+                            value={String(displayedStrongholdHp(editDef, mode))}
                             onChange={(e) => {
                               const raw = e.target.value.trim();
                               if (raw === '' || raw === '-') return;
                               const n = Number(raw);
                               if (!Number.isFinite(n)) return;
-                              patchTerritory(editKey, {
-                                stronghold_base_health: Math.max(1, Math.trunc(n)),
-                                stronghold_health: undefined,
-                              });
+                              const hp = Math.max(mode === 'game' ? 0 : 1, Math.trunc(n));
+                              patchTerritory(
+                                editKey,
+                                mode === 'game'
+                                  ? { stronghold_current_health: hp }
+                                  : { stronghold_base_health: hp, stronghold_health: undefined },
+                              );
                             }}
                             onBlur={(e) => {
                               const n = Number(e.target.value);
-                              if (!Number.isFinite(n) || n < 1) {
-                                patchTerritory(editKey, {
-                                  stronghold_base_health: 1,
-                                  stronghold_health: undefined,
-                                });
+                              const floor = mode === 'game' ? 0 : 1;
+                              if (!Number.isFinite(n) || n < floor) {
+                                patchTerritory(
+                                  editKey,
+                                  mode === 'game'
+                                    ? { stronghold_current_health: floor }
+                                    : { stronghold_base_health: 1, stronghold_health: undefined },
+                                );
                               }
                             }}
                           />
@@ -1138,6 +1262,11 @@ export function MapViewPane({
             </div>
           ) : null}
           <div className="admin-graph__header-actions">
+            {mode === 'game' && onSaveUnits ? (
+              <button type="button" className="admin-page__btn" onClick={openUnitsEditor} disabled={saving || unitsSaving}>
+                Edit Units
+              </button>
+            ) : null}
             {editing ? (
               <button
                 type="button"
@@ -1158,7 +1287,7 @@ export function MapViewPane({
               className={`admin-page__btn${editing ? ' admin-page__btn--primary' : ''}`}
               disabled={saving || (editing && !dirty)}
               onClick={() => {
-                if (editing) void saveEdits();
+                if (editing) requestSave();
                 else {
                   setEditing(true);
                   setDraft(null);
@@ -1405,6 +1534,114 @@ export function MapViewPane({
           <p className="admin-graph__status admin-graph__status--info">{infoText(selectedKey)}</p>
         ) : view !== 'graph' ? (
           <p className="admin-graph__status">{editing ? 'Choose a territory' : 'No territory selected'}</p>
+        ) : null}
+        {unitsOpen && saveConfirmPhrase ? (
+          <div className="admin-modal-overlay admin-graph__confirm" role="presentation">
+            <div
+              className="admin-modal admin-modal--unit-json"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="admin-edit-units-title"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 id="admin-edit-units-title" className="admin-modal__title">
+                Edit units
+              </h2>
+              <p className="admin-form__micro">
+                Unit definitions for this game. Type <strong>{saveConfirmPhrase}</strong> to save.
+              </p>
+              <textarea
+                className="admin-page__editor"
+                spellCheck={false}
+                aria-label="Units JSON"
+                value={unitsText}
+                onChange={(e) => {
+                  setUnitsText(e.target.value);
+                  setUnitsErr(null);
+                }}
+              />
+              <div className="admin-form__row">
+                <label className="admin-form__label" htmlFor="admin-edit-units-confirm">
+                  Confirmation
+                </label>
+                <input
+                  id="admin-edit-units-confirm"
+                  className="admin-form__input"
+                  value={unitsConfirm}
+                  onChange={(e) => setUnitsConfirm(e.target.value)}
+                  placeholder={saveConfirmPhrase}
+                />
+              </div>
+              {unitsErr ? <p className="admin-page__error admin-page__error--pre">{unitsErr}</p> : null}
+              <div className="admin-modal__actions">
+                <button
+                  type="button"
+                  className="admin-page__btn"
+                  onClick={() => setUnitsOpen(false)}
+                  disabled={unitsSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="admin-page__btn admin-page__btn--danger"
+                  onClick={() => void saveUnits()}
+                  disabled={unitsConfirm !== saveConfirmPhrase || unitsSaving}
+                >
+                  {unitsSaving ? 'Saving…' : 'Save units'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {confirmOpen && saveConfirmPhrase ? (
+          <div className="admin-modal-overlay admin-graph__confirm" role="presentation">
+            <div
+              className="admin-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="admin-graph-confirm-title"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 id="admin-graph-confirm-title" className="admin-modal__title">
+                Save this game?
+              </h2>
+              <p className="admin-form__micro">
+                This writes the board of the game in progress. Type <strong>{saveConfirmPhrase}</strong> to confirm.
+              </p>
+              <div className="admin-form__row">
+                <label className="admin-form__label" htmlFor="admin-edit-game-confirm">
+                  Confirmation
+                </label>
+                <input
+                  id="admin-edit-game-confirm"
+                  className="admin-form__input"
+                  value={confirmText}
+                  onChange={(e) => setConfirmText(e.target.value)}
+                  placeholder={saveConfirmPhrase}
+                  autoFocus
+                />
+              </div>
+              <div className="admin-modal__actions">
+                <button
+                  type="button"
+                  className="admin-page__btn"
+                  onClick={() => setConfirmOpen(false)}
+                  disabled={saving}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="admin-page__btn admin-page__btn--danger"
+                  onClick={() => void saveEdits()}
+                  disabled={confirmText !== saveConfirmPhrase || saving}
+                >
+                  {saving ? 'Saving…' : 'Save game'}
+                </button>
+              </div>
+            </div>
+          </div>
         ) : null}
         {discardOpen ? (
           <div className="admin-modal-overlay admin-graph__confirm" role="presentation" onClick={() => setDiscardOpen(false)}>

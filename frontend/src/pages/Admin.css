@@ -943,7 +943,7 @@ body:has(.combat-sim-modal-overlay) {
 }
 
 .games-report__col-name {
-  width: 16%;
+  width: 13%;
 }
 
 .games-report__col-players {
@@ -1072,7 +1072,7 @@ body:has(.combat-sim-modal-overlay) {
 }
 
 .games-report__col-actions {
-  width: 9%;
+  width: 14%;
 }
 
 .games-report__table td.games-report__actions {
@@ -1534,8 +1534,20 @@ body:has(.combat-sim-modal-overlay) {
   grid-column: 2;
   grid-row: 1;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 0.5rem;
   align-self: start;
+}
+
+.admin-modal--unit-json {
+  width: min(100%, 52rem);
+  max-height: min(92vh, 48rem);
+  overflow: auto;
+}
+
+.admin-page__error--pre {
+  white-space: pre-line;
 }
 
 .admin-graph__toolbar {
@@ -3265,7 +3277,7 @@ body:has(.combat-sim-modal-overlay) {
     padding: 0.55rem 0.65rem;
   }
 
-  .admin-modal:not(.admin-modal--units):not(.admin-modal--games):not(.admin-modal--balance):not(.admin-modal--graph):not(.admin-modal--icons) {
+  .admin-modal:not(.admin-modal--units):not(.admin-modal--games):not(.admin-modal--balance):not(.admin-modal--graph):not(.admin-modal--icons):not(.admin-modal--unit-json) {
     width: min(100% - 1rem, 26rem);
     max-height: min(88dvh, 32rem);
     padding-left: max(1rem, env(safe-area-inset-left, 0px));
