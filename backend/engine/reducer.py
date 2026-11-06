@@ -51,7 +51,6 @@ from backend.engine.combat import (
     group_siegework_attacker_dice_ram_and_flex,
     group_attacker_dice_with_ladder_segments,
     sort_attackers_for_ladder_dice_order,
-    ARCHETYPE_CAVALRY,
     calculate_required_dice,
     compute_terrain_stat_modifiers,
     compute_anti_cavalry_stat_modifiers,
@@ -60,7 +59,10 @@ from backend.engine.combat import (
     merge_stat_modifiers,
 )
 from backend.engine.movement import (
+    calculate_movement_cost,
     get_reachable_territories_for_unit,
+    marching_orders_block_message,
+    marching_orders_blocks_destination,
     movement_cost_along_path,
     get_shortest_path,
     path_traversable_for_charging,
@@ -145,6 +147,7 @@ from backend.engine.utils import (
     is_land_unit,
     is_aerial_unit,
     has_unit_special,
+    unit_can_charge,
     archer_prefire_eligible,
     can_conquer_territory_as_attacker,
     faction_owns_capital,
@@ -1275,6 +1278,19 @@ def _handle_move_units(
                         f"(ford crossers' transport_capacity in {from_id}, minus pending moves)"
                     )
 
+    if state.phase == "non_combat_move" and not sea_offload_ok:
+        for unit in units_to_move:
+            cost = calculate_movement_cost(
+                from_id,
+                to_id,
+                territory_defs,
+                is_aerial=is_aerial_unit(unit_defs.get(unit.unit_id)),
+            )
+            if marching_orders_blocks_destination(
+                state, unit, to_id, cost, unit_defs, faction_defs
+            ):
+                raise ValueError(marching_orders_block_message(unit.instance_id, to_id))
+
     if not all(can_reach_list) and not sea_offload_ok:
         path = get_shortest_path(from_id, to_id, territory_defs)
         path_includes_water = path and any(
@@ -1774,13 +1790,12 @@ def _apply_pending_moves(
                 acting = state.current_faction or faction_id
                 moving_faction_def = faction_defs.get(acting)
                 moving_alliance = moving_faction_def.alliance if moving_faction_def else ""
-                # Use charge_through from payload, or infer from shortest path only for cavalry charges
+                # Use charge_through from payload, or infer from shortest path for units that can charge
                 territories_to_capture = list(charge_through)
                 if not territories_to_capture and phase == "combat_move" and from_id != to_id:
                     first_unit = units_by_id.get(unit_instance_ids[0])
                     ud = unit_defs.get(first_unit.unit_id) if first_unit else None
-                    is_cavalry = ud and getattr(ud, "archetype", "") == ARCHETYPE_CAVALRY
-                    if is_cavalry:
+                    if unit_can_charge(ud):
                         path = get_shortest_path(from_id, to_id, territory_defs, is_aerial=False)
                         if path and len(path) > 2:
                             # Middle territories (exclude from_id and to_id) — cavalry charge conquers path
@@ -2032,6 +2047,10 @@ def _apply_pending_moves(
                 raise ValueError(
                     f"Move from {from_id} to {to_id}: unit {instance_id} has remaining_movement={unit.remaining_movement}, need {unit_cost}"
                 )
+            if phase == "non_combat_move" and marching_orders_blocks_destination(
+                state, unit, to_id, unit_cost, unit_defs, faction_defs
+            ):
+                raise ValueError(marching_orders_block_message(instance_id, to_id))
 
         # Cavalry charge_through: enemy/unowned via-territories must be empty; friendly/allied may have units
         if charge_through and faction_id:
@@ -5153,7 +5172,10 @@ def _handle_end_phase(
 
     # If ending combat phase, apply all pending territory captures
     if state.phase == "combat":
+        conquered_this_turn: dict[str, str] = {}
         for territory_id, capturer in state.pending_captures.items():
+            if isinstance(capturer, str) and capturer:
+                conquered_this_turn[territory_id] = capturer
             territory = state.territories[territory_id]
             old_owner = territory.owner
             
@@ -5200,13 +5222,15 @@ def _handle_end_phase(
                 surviving_attacker_ids,
             ))
         
-        # Clear pending captures
+        # Clear pending captures. conquered_this_turn keeps the capturer for this turn's non-combat move.
+        state.conquered_this_turn = conquered_this_turn
         state.pending_captures = {}
 
     # Only reset remaining_health (and movement) when leaving non_combat_move — never between combat rounds.
     # Combat damage must persist across rounds until the combat phase is over.
     if state.phase == "non_combat_move":
         _reset_unit_stats_for_faction(state, state.current_faction, unit_defs, faction_defs)
+        state.marching_orders_bonus_ids = []
 
     phase_order = [
         "purchase",
@@ -5286,6 +5310,7 @@ def _handle_end_phase(
         and getattr(state, "marching_orders", False)
     ):
         moved_ids = set(getattr(state, "combat_move_moved_ids", None) or [])
+        bonus_ids: list[str] = []
         for territory in state.territories.values():
             for unit in territory.units:
                 if unit.instance_id in moved_ids:
@@ -5303,7 +5328,11 @@ def _handle_end_phase(
                 if not faction_acts_as(faction_defs, unit_faction, state.current_faction):
                     continue
                 unit.remaining_movement = int(getattr(unit, "remaining_movement", 0) or 0) + 1
+                bonus_ids.append(unit.instance_id)
+        state.marching_orders_bonus_ids = bonus_ids
         state.combat_move_moved_ids = []
+    elif state.phase == "non_combat_move" and old_phase == "combat":
+        state.marching_orders_bonus_ids = []
 
     # When entering combat_move, ensure all current-faction units have full movement
     # (including units in neutral/unownable territories like Dagorlad that may have
@@ -5438,6 +5467,8 @@ def _handle_end_turn(
     unit_defs = unit_defs or {}
     events: list[GameEvent] = []
     old_faction = state.current_faction
+    state.conquered_this_turn = {}
+    state.marching_orders_bonus_ids = []
 
     if not force and state.phase == "mobilization":
         blocked = mobilization_block_reason(

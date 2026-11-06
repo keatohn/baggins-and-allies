@@ -158,6 +158,10 @@ export interface ApiGameState {
   shadow_of_war?: boolean;
   /** Create-game option. Missing or false means units get no extra non-combat movement. */
   marching_orders?: boolean;
+  /** Instance ids that received the Marching Orders +1 this non-combat move. */
+  marching_orders_bonus_ids?: string[];
+  /** Territory id → faction that captured it this turn. */
+  conquered_this_turn?: Record<string, string>;
   /** Create-game option. Missing or false means this game has no rings. */
   rings_of_power?: boolean;
   rings?: ApiRing[];

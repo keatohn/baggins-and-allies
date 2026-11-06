@@ -1116,6 +1116,54 @@ def _can_reach_friendly_from(
     return False
 
 
+def marching_orders_block_message(instance_id: str, destination: str) -> str:
+    return (
+        f"Marching Orders: unit {instance_id} cannot use its extra movement "
+        f"to end in {destination} (conquered this turn)"
+    )
+
+
+def marching_orders_blocks_destination(
+    state: GameState,
+    unit: Unit,
+    destination: str,
+    movement_cost: int | None,
+    unit_defs: dict[str, UnitDefinition],
+    faction_defs: dict[str, FactionDefinition] | None,
+) -> bool:
+    """True when a Marching Orders bonus unit would spend its whole non-combat budget ending in a territory its faction conquered this turn.
+
+    Spending less than the full budget, including ending in that territory with movement left, is allowed.
+    Passing through is allowed because a through-hex is never the destination.
+    """
+    if movement_cost is None or movement_cost <= 0:
+        return False
+    if getattr(state, "phase", None) != "non_combat_move":
+        return False
+    if not getattr(state, "marching_orders", False):
+        return False
+    if unit.instance_id not in (getattr(state, "marching_orders_bonus_ids", None) or []):
+        return False
+    conquered = getattr(state, "conquered_this_turn", None) or {}
+    capturer = conquered.get(destination)
+    if not isinstance(capturer, str) or not capturer:
+        return False
+    unit_faction = get_unit_faction(unit, unit_defs)
+    if (
+        unit_faction is None
+        and getattr(state, "current_faction", None)
+        and unit.instance_id.startswith(str(state.current_faction) + "_")
+    ):
+        unit_faction = state.current_faction
+    if not (
+        faction_acts_as(faction_defs, unit_faction, capturer)
+        or faction_acts_as(faction_defs, capturer, unit_faction)
+    ):
+        return False
+    remaining = int(getattr(unit, "remaining_movement", 0) or 0)
+    return movement_cost == remaining
+
+
 def get_reachable_territories_for_unit(
     unit: Unit,
     start: str,
@@ -1601,6 +1649,18 @@ def get_reachable_territories_for_unit(
     filtered_reachable = restrict_home_only_destinations(
         state, unit_defs.get(unit.unit_id), filtered_reachable, faction_defs
     )
+
+    # Marching Orders: a bonus unit may enter a territory conquered this turn, but not by spending its last movement point.
+    if phase == "non_combat_move" and getattr(state, "marching_orders", False):
+        blocked = [
+            tid
+            for tid, dist in filtered_reachable.items()
+            if marching_orders_blocks_destination(
+                state, unit, tid, dist, unit_defs, faction_defs
+            )
+        ]
+        for tid in blocked:
+            filtered_reachable.pop(tid, None)
 
     # Restrict charge_routes to only destinations that are in filtered_reachable
     charge_routes_filtered = {

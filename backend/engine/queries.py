@@ -33,9 +33,12 @@ from backend.engine.movement import (
     empty_sea_zone_valid_for_combat_move_sail_then_load_raid,
     get_forced_naval_combat_instance_ids,
     expand_sea_offload_instance_ids,
+    calculate_movement_cost,
     get_reachable_territories_for_unit,
     get_sea_zones_reachable_by_sail,
     get_shortest_path,
+    marching_orders_block_message,
+    marching_orders_blocks_destination,
     is_friendly_territory_for_landing,
     ford_shortcut_requires_escort_lead,
     land_move_ford_escort_cost_for_instances,
@@ -649,6 +652,14 @@ def validate_move_as_sea_offload_if_applicable(
                         False,
                         f"Non-combat move cannot target ownable neutral territory {destination} (conquest is combat move only)",
                     )
+        for passenger in land_offload:
+            if marching_orders_blocks_destination(
+                state, passenger, destination, 1, unit_defs, faction_defs
+            ):
+                return ValidationResult(
+                    False,
+                    marching_orders_block_message(passenger.instance_id, destination),
+                )
 
     origin_territory = state.territories.get(origin)
     naval_in_territory = [
@@ -971,6 +982,22 @@ def _validate_move(
     )
     if sea_offload_vr is not None:
         return sea_offload_vr
+
+    if state.phase == "non_combat_move":
+        for unit in units_in_stack:
+            cost = calculate_movement_cost(
+                origin,
+                destination,
+                territory_defs,
+                is_aerial=is_aerial_unit(unit_defs.get(unit.unit_id)),
+            )
+            if marching_orders_blocks_destination(
+                state, unit, destination, cost, unit_defs, faction_defs
+            ):
+                return ValidationResult(
+                    False,
+                    marching_orders_block_message(unit.instance_id, destination),
+                )
 
     can_reach = {}
     charge_routes_by_unit = {}

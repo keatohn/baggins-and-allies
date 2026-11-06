@@ -765,6 +765,10 @@ class GameState:
     marching_orders: bool = False
     # Unit instance ids that moved during the combat move phase; captured at combat_move end, consumed at NCM entry.
     combat_move_moved_ids: list[str] = field(default_factory=list)
+    # Instance ids that received the Marching Orders +1 this non-combat move. Cleared when that phase ends.
+    marching_orders_bonus_ids: list[str] = field(default_factory=list)
+    # territory_id -> faction that captured it this turn (the capturer, even when liberation restores an ally).
+    conquered_this_turn: dict[str, str] = field(default_factory=dict)
     # Create-game switch. The ring catalog lives in special_rules; this turns it on for the game.
     rings_of_power: bool = False
     rings: list["Ring"] = field(default_factory=list)
@@ -858,6 +862,8 @@ class GameState:
             "shadow_of_war": bool(getattr(self, "shadow_of_war", False)),
             "marching_orders": bool(getattr(self, "marching_orders", False)),
             "combat_move_moved_ids": list(getattr(self, "combat_move_moved_ids", None) or []),
+            "marching_orders_bonus_ids": list(getattr(self, "marching_orders_bonus_ids", None) or []),
+            "conquered_this_turn": dict(getattr(self, "conquered_this_turn", None) or {}),
             "rings_of_power": bool(getattr(self, "rings_of_power", False)),
             "rings": [ring.to_dict() for ring in (getattr(self, "rings", None) or [])],
             "special_rules": list(getattr(self, "special_rules", None) or []),
@@ -981,6 +987,14 @@ class GameState:
             shadow_of_war=bool(data.get("shadow_of_war")),
             marching_orders=bool(data.get("marching_orders")),
             combat_move_moved_ids=_ensure_str_list(data.get("combat_move_moved_ids")),
+            marching_orders_bonus_ids=_ensure_str_list(data.get("marching_orders_bonus_ids")),
+            conquered_this_turn={
+                str(k): str(v)
+                for k, v in (data.get("conquered_this_turn") or {}).items()
+                if isinstance(k, str) and isinstance(v, str) and k and v
+            }
+            if isinstance(data.get("conquered_this_turn"), dict)
+            else {},
             rings_of_power=bool(data.get("rings_of_power")),
             rings=[Ring.from_dict(row) for row in (data.get("rings") or []) if isinstance(row, dict)],
             special_rules=parse_special_rules(data.get("special_rules")),

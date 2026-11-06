@@ -466,7 +466,7 @@ interface GameMapProps {
   shadowedTerritories?: ReadonlySet<string>;
   rings?: RingView[];
   /** Full unit list per territory (for sea zones: boats + loaded_onto to show passenger count per boat). */
-  territoryUnitsFull?: Record<string, { instance_id: string; unit_id: string; loaded_onto?: string | null }[]>;
+  territoryUnitsFull?: Record<string, { instance_id: string; unit_id: string; loaded_onto?: string | null; remaining_movement?: number }[]>;
   unitDefs: Record<string, { name: string; icon: string; faction?: string; archetype?: string; tags?: string[]; home_territory_ids?: string[]; cost?: number; transport_capacity?: number; hero_id?: string }>;
   unitStats: Record<string, { movement: number }>;
   factionData: Record<string, { name: string; icon: string; banner?: string; color: string; alliance: string; capital?: string; parent?: string }>;
@@ -2245,6 +2245,38 @@ function GameMap({
     };
   }, [territoryData]);
 
+  /** Bonus unit spending its last movement point into a territory its faction conquered this turn. */
+  const marchingOrdersBlocksEnd = useCallback((
+    instanceId: string,
+    unitId: string,
+    remaining: number,
+    cost: number,
+    destination: string,
+  ): boolean => {
+    if (gameState.phase !== 'non_combat_move' || !gameState.marching_orders) return false;
+    if (!(cost > 0 && cost === remaining)) return false;
+    if (!(gameState.marching_orders_bonus_ids ?? []).includes(instanceId)) return false;
+    const graph = territoryData as Record<string, { adjacent?: string[]; ford_adjacent?: string[] } | undefined>;
+    const key = resolveTerritoryGraphKey(destination, graph);
+    const conquered = gameState.conquered_this_turn ?? {};
+    const capturer = conquered[destination] || conquered[key];
+    if (!capturer) return false;
+    const unitFaction = unitDefs[unitId]?.faction;
+    if (!unitFaction) return false;
+    if (capturer === unitFaction) return true;
+    if (factionData[unitFaction]?.parent === capturer) return true;
+    if (factionData[capturer]?.parent === unitFaction) return true;
+    return false;
+  }, [
+    gameState.phase,
+    gameState.marching_orders,
+    gameState.marching_orders_bonus_ids,
+    gameState.conquered_this_turn,
+    territoryData,
+    unitDefs,
+    factionData,
+  ]);
+
   // Valid move targets come only from available-actions (backend pathfinding). No client BFS — empty highlights mean fix API/state sync, not paper over it here.
   /** Naval drags from sea: strip raid/offload land unless passengers or pending loads into this sea. */
   const getValidTargets = useCallback((
@@ -2409,6 +2441,34 @@ function GameMap({
               ) {
                 continue;
               }
+              if (gameState.phase === 'non_combat_move' && gameState.marching_orders) {
+                const boatIds = new Set(navalDrag?.instanceIds ?? []);
+                const fullSea = territoryUnitsFull?.[sz] ?? territoryUnitsFull?.[gk] ?? [];
+                const aboard = fullSea.filter((u) => {
+                  if (!u.loaded_onto) return false;
+                  if (boatIds.size > 0 && !boatIds.has(u.loaded_onto)) return false;
+                  return !navalUnitIds.has(u.unit_id);
+                });
+                const pendingIds = (pendingMoves ?? [])
+                  .filter((m) => pendingMoveIsSamePhaseLoadIntoSea(m, sz, territoryData, gameState.phase))
+                  .flatMap((m) => m.unit_instance_ids ?? []);
+                const byId = new Map<string, { instance_id: string; unit_id: string; remaining_movement?: number }>();
+                for (const units of Object.values(territoryUnitsFull ?? {})) {
+                  for (const u of units) byId.set(u.instance_id, u);
+                }
+                const passengers = [
+                  ...aboard,
+                  ...pendingIds.map((id) => byId.get(id)).filter((u): u is NonNullable<typeof u> => !!u),
+                ];
+                if (
+                  passengers.length > 0 &&
+                  passengers.some((p) =>
+                    marchingOrdersBlocksEnd(p.instance_id, p.unit_id, p.remaining_movement ?? 0, 1, adjId),
+                  )
+                ) {
+                  continue;
+                }
+              }
               addDestinationWithSeaZoneAlias(validTargets, adjId);
             }
           }
@@ -2478,6 +2538,22 @@ function GameMap({
             if (costs) {
               const c = costs[d] ?? costs[dk];
               if (c !== undefined && c > escortRm) continue;
+              const alreadyListed = validTargets.has(d) || validTargets.has(dk);
+              if (!alreadyListed && c !== undefined) {
+                const escortUnits =
+                  territoryUnitsFull?.[fromKey] ?? territoryUnitsFull?.[fromTerritory] ?? [];
+                const candidates = escortUnits.filter(
+                  (u) => u.unit_id === unitId && (u.remaining_movement ?? 0) >= c,
+                );
+                if (
+                  candidates.length > 0 &&
+                  candidates.every((u) =>
+                    marchingOrdersBlocksEnd(u.instance_id, u.unit_id, u.remaining_movement ?? 0, c, d),
+                  )
+                ) {
+                  continue;
+                }
+              }
             }
             addDestinationWithSeaZoneAlias(validTargets, d);
           }
@@ -2567,6 +2643,7 @@ function GameMap({
     gameState.phase,
     navalUnitIds,
     pendingMoves,
+    marchingOrdersBlocksEnd,
   ]);
 
   const territoryMatchesValidDrop = useCallback(
@@ -3561,6 +3638,40 @@ function GameMap({
             }
           }
         }
+        if (
+          isOffloadOrSeaRaid &&
+          gameState.phase === 'non_combat_move' &&
+          instanceIdsToUse &&
+          territoryUnitsFull?.[unitForDrop.territoryId]
+        ) {
+          const fullUnits = territoryUnitsFull[unitForDrop.territoryId];
+          const boatIds = new Set(fullUnits.filter((u) => navalUnitIds.has(u.unit_id)).map((u) => u.instance_id));
+          const byId = new Map(fullUnits.map((u) => [u.instance_id, u]));
+          const kept = instanceIdsToUse.filter((id) => {
+            if (boatIds.has(id)) return true;
+            const passenger = byId.get(id);
+            if (!passenger) return true;
+            return !marchingOrdersBlocksEnd(
+              passenger.instance_id,
+              passenger.unit_id,
+              passenger.remaining_movement ?? 0,
+              1,
+              storeTarget,
+            );
+          });
+          if (!kept.some((id) => !boatIds.has(id))) {
+            setActiveUnit(null);
+            setActiveDragId(null);
+            setValidDropTargets(new Set());
+            return;
+          }
+          instanceIdsToUse = kept;
+          if (navalBoatStacks) {
+            navalBoatStacks = navalBoatStacks
+              .map((stack) => stack.filter((id) => kept.includes(id)))
+              .filter((stack) => stack.some((id) => !boatIds.has(id)));
+          }
+        }
         // Land → sea (embark): transportable land units only. Aerial → sea in combat is naval battle, not loading.
         const isLandToSeaLoad =
           !unitForDrop.isNaval && !unitIsAerial(unitForDrop.unitId, unitDefs) && isSeaT(storeTarget);
@@ -3710,7 +3821,7 @@ function GameMap({
     setActiveUnit(null);
     setActiveDragId(null);
     setValidDropTargets(new Set());
-  }, [activeUnit, validDropTargets, territoryUnits, territoryUnitsFull, pendingMoves, availableMoveTargets, loadSlotsRemaining, navalUnitIds, onSetPendingMove, _onDropDestination, onBulkMoveDrop, onMobilizationDrop, onMobilizationAllDrop, onCampDrop, remainingMobilizationCapacity, remainingHomeSlots, mobilizeUnitDestinations, gameState.phase, gameState.current_faction, factionData, unitDefs, territoryData, resolveTerritoryDropId, canAct, loadAllocation, onLoadAllocationChange, navalTray]);
+  }, [activeUnit, validDropTargets, territoryUnits, territoryUnitsFull, pendingMoves, availableMoveTargets, loadSlotsRemaining, navalUnitIds, onSetPendingMove, _onDropDestination, onBulkMoveDrop, onMobilizationDrop, onMobilizationAllDrop, onCampDrop, remainingMobilizationCapacity, remainingHomeSlots, mobilizeUnitDestinations, gameState.phase, gameState.current_faction, factionData, unitDefs, territoryData, resolveTerritoryDropId, canAct, loadAllocation, onLoadAllocationChange, navalTray, marchingOrdersBlocksEnd]);
 
   const handleDragCancel = useCallback(() => {
     lastMapDragPointerRef.current = null;

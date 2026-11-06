@@ -2194,6 +2194,9 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       declared_battles: declaredBattles,
       map_asset: backendState.map_asset ?? undefined,
       turn_order: initialTurnOrderRef.current ?? backendState.turn_order ?? undefined,
+      marching_orders: backendState.marching_orders === true,
+      marching_orders_bonus_ids: backendState.marching_orders_bonus_ids ?? [],
+      conquered_this_turn: backendState.conquered_this_turn ?? {},
     };
   }, [backendState, availableActions, definitions, factionData, purchaseDraftUnits, purchaseDraftCamps, purchaseDraftRepairs]);
 

@@ -24,7 +24,7 @@ CATALOG_SETTING_KEY = "catalog"
 SPECIAL_RULE_IDS = ("rings_of_power", "evolving_territory")
 GAME_OPTION_IDS = ("shadow_of_war", "marching_orders")
 MARCHING_ORDERS_DESCRIPTION = (
-    "Any land unit that does not move during the combat move phase gets one extra movement point for the non-combat move phase. A unit with 1 movement that held back has 2 to spend there, a unit with 4 has 5. Ships and aerial units never benefit."
+    "Any land unit that does not move during the combat move phase gets one extra movement point for the non-combat move phase. A unit with 1 movement that held back has 2 to spend there, a unit with 4 has 5. Ships and aerial units never benefit. Units cannot use the extra movement to reinforce a territory conquered in the same turn."
 )
 REQUIRED_TERRAIN_TYPES = ("sea",)
 ENTRY_SECTIONS = ("specials", "special_rules", "game_options")

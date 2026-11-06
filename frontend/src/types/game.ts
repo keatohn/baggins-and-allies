@@ -106,6 +106,12 @@ export interface GameState {
   map_asset?: string | null;
   /** Faction IDs in turn order (from setup). Empty/omitted = use alphabetical. */
   turn_order?: string[];
+  /** Create-game option. Missing or false means units get no extra non-combat movement. */
+  marching_orders?: boolean;
+  /** Instance ids that received the Marching Orders +1 this non-combat move. */
+  marching_orders_bonus_ids?: string[];
+  /** Territory id → faction that captured it this turn. */
+  conquered_this_turn?: Record<string, string>;
 }
 
 // UI State types
