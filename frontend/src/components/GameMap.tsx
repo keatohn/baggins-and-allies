@@ -3739,8 +3739,9 @@ function GameMap({
             if (!instanceIdsToUse.includes(id)) instanceIdsToUse.push(id);
           }
           if (navalBoatStacks) {
-            const stackCount = navalBoatStacks.length;
-            navalBoatStacks = navalBoatStacks
+            const stacks = navalBoatStacks;
+            const stackCount = stacks.length;
+            navalBoatStacks = stacks
               .map((stack) => {
                 const boat = stack.find((id) => hullIds.has(id));
                 const extras = pendingLoadInstanceIdsIntoSeaZone(
