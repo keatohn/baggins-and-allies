@@ -2982,8 +2982,14 @@ def _handle_initiate_combat(
         siegework_att_dice_init > 0
         or siegework_def_dice_init > 0
     )
-    _initiate_ladder_infantry_ids: list[str] = []
-    _initiate_ladder_equipment_count = 0
+    _initiate_ladder_infantry_ids: list[str] = get_ladder_infantry_instance_ids(
+        attacker_units, unit_defs,
+    )
+    _initiate_ladder_equipment_count = len([
+        u for u in attacker_units
+        if _is_siegework_unit(unit_defs.get(u.unit_id))
+        and has_unit_special(unit_defs.get(u.unit_id), SIEGEWORK_SPECIAL_LADDER)
+    ])
 
     if siege_needed_at_start:
         _, _, att_attack_ov_siege = get_attacker_effective_dice_and_bombikazi_self_destruct(
