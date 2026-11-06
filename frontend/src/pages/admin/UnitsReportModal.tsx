@@ -205,6 +205,9 @@ export function UnitsReportModal({ setups, specials, onClose, onSaved }: Props) 
   const [loading, setLoading] = useState(listed.length > 0);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [selectedScenarios, setSelectedScenarios] = useState<string[]>([]);
+  const [scenariosOpen, setScenariosOpen] = useState(false);
+  const scenariosMenuRef = useRef<HTMLDivElement>(null);
   const [ranges, setRanges] = useState(EMPTY_RANGES);
   const [selectedSpecials, setSelectedSpecials] = useState<string[]>([]);
   const [specialsOpen, setSpecialsOpen] = useState(false);
@@ -214,6 +217,27 @@ export function UnitsReportModal({ setups, specials, onClose, onSaved }: Props) 
   const [editing, setEditing] = useState<{ key: string; stat: StatKey } | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!scenariosOpen) return;
+    const onDown = (event: MouseEvent) => {
+      if (!scenariosMenuRef.current?.contains(event.target as Node)) setScenariosOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        setScenariosOpen(false);
+        scenariosMenuRef.current?.querySelector('button')?.focus();
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    const menu = scenariosMenuRef.current;
+    menu?.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      menu?.removeEventListener('keydown', onKey);
+    };
+  }, [scenariosOpen]);
 
   useEffect(() => {
     if (!specialsOpen) return;
@@ -271,6 +295,7 @@ export function UnitsReportModal({ setups, specials, onClose, onSaved }: Props) 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return sources.filter((row) => {
+      if (selectedScenarios.length && !selectedScenarios.includes(row.setupId)) return false;
       if (
         needle
         && !row.unitId.toLowerCase().includes(needle)
@@ -285,7 +310,7 @@ export function UnitsReportModal({ setups, specials, onClose, onSaved }: Props) 
         ranges[stat.key],
       ));
     });
-  }, [sources, query, ranges, selectedSpecials]);
+  }, [sources, query, ranges, selectedSpecials, selectedScenarios]);
 
   const rows = useMemo(() => withSpans(filtered), [filtered]);
   const modes = useMemo(() => {
@@ -313,7 +338,7 @@ export function UnitsReportModal({ setups, specials, onClose, onSaved }: Props) 
     const mode = modes.get(row.icon)?.[key];
     return mode == null || value !== mode;
   };
-  const filtersActive = query.trim() !== ''
+  const filtersActive = selectedScenarios.length > 0 || query.trim() !== ''
     || selectedSpecials.length > 0
     || STATS.some((stat) => ranges[stat.key].min.trim() !== '' || ranges[stat.key].max.trim() !== '');
 
@@ -329,6 +354,8 @@ export function UnitsReportModal({ setups, specials, onClose, onSaved }: Props) 
 
   const clearFilters = () => {
     setQuery('');
+    setSelectedScenarios([]);
+    setScenariosOpen(false);
     setRanges(EMPTY_RANGES);
     setSelectedSpecials([]);
     setSpecialsOpen(false);
@@ -563,6 +590,35 @@ export function UnitsReportModal({ setups, specials, onClose, onSaved }: Props) 
               onChange={(e) => setQuery(e.target.value)}
             />
           </label>
+          <div className={`games-report__dropdown${scenariosOpen ? ' games-report__dropdown--open' : ''}`} ref={scenariosMenuRef}>
+            <button
+              type="button"
+              className={`games-report__filter${selectedScenarios.length ? ' games-report__filter--active' : ''}`}
+              aria-expanded={scenariosOpen}
+              aria-controls="units-scenario-filter"
+              onClick={() => setScenariosOpen((open) => !open)}
+            >
+              Scenarios{selectedScenarios.length ? ` (${selectedScenarios.length})` : ' (all)'} ▾
+            </button>
+            {scenariosOpen ? (
+              <div id="units-scenario-filter" className="games-report__dropdown-menu" role="group" aria-label="Filter by scenarios">
+                <button type="button" className="admin-page__btn" onClick={() => setSelectedScenarios([])}>
+                  All scenarios
+                </button>
+                {listed.map((setup) => (
+                  <label key={setup.id} className="games-report__dropdown-item">
+                    <input
+                      type="checkbox"
+                      checked={selectedScenarios.includes(setup.id)}
+                      onChange={() => setSelectedScenarios((current) => current.includes(setup.id)
+                        ? current.filter((id) => id !== setup.id) : [...current, setup.id])}
+                    />
+                    <span>{setup.display_name?.trim() || setup.id} ({setup.id})</span>
+                  </label>
+                ))}
+              </div>
+            ) : null}
+          </div>
           <div className={`games-report__dropdown${specialsOpen ? ' games-report__dropdown--open' : ''}`} ref={specialsMenuRef}>
             <button
               type="button"
@@ -622,7 +678,7 @@ export function UnitsReportModal({ setups, specials, onClose, onSaved }: Props) 
           ))}
         </div>
         <p className="admin-form__micro units-across__filter-note">
-          A unit is kept when each filled minimum and maximum includes its stat, and it has every selected special.
+          Selected scenarios are combined; no selection includes all scenarios. A unit is kept when each filled minimum and maximum includes its stat, and it has every selected special.
         </p>
         {error ? <p className="admin-page__error games-report__error">{error}</p> : null}
         {saveError ? <p className="admin-page__error games-report__error">{saveError}</p> : null}
