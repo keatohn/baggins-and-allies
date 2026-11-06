@@ -969,7 +969,7 @@
 /* Outer: horizontal center under stack; inner gets dnd-kit transform only */
 .all-stacks-drag-btn-wrap {
   position: absolute;
-  top: -26px;
+  top: -34px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 25;
@@ -980,15 +980,15 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 24px;
-  min-width: 38px;
-  padding: 0 8px;
+  height: 30px;
+  min-width: 52px;
+  padding: 0 11px;
   box-sizing: border-box;
   border: 1px solid var(--ink-faded);
-  border-radius: 12px;
+  border-radius: 15px;
   background: var(--parchment);
   color: var(--ink);
-  font-size: 0.72rem;
+  font-size: 0.85rem;
   line-height: 1;
   text-transform: none;
   letter-spacing: 0;
@@ -1004,6 +1004,16 @@
 .all-stacks-drag-btn:hover {
   border-color: var(--ink);
   background: var(--parchment-light);
+}
+
+/* Armed: "All" tapped, waiting for a destination tap — must out-specify :hover. */
+.all-stacks-drag-btn.all-stacks-drag-btn--selected,
+.all-stacks-drag-btn.all-stacks-drag-btn--selected:hover {
+  background: #c9a227;
+  border-color: var(--ink);
+  color: var(--ink);
+  font-weight: 700;
+  box-shadow: 0 0 0 2px rgba(201, 162, 39, 0.45), 0 1px 4px rgba(44, 24, 16, 0.35);
 }
 
 /* Bulk move: full tokens in a row — no scale() here (scale ignores layout and causes overlap). */
@@ -1430,10 +1440,12 @@
   0%,
   100% {
     opacity: 0.9;
+    stroke-width: 4;
   }
 
   50% {
     opacity: 0.6;
+    stroke-width: 7;
   }
 }
 

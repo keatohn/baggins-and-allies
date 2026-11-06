@@ -13,6 +13,10 @@ export interface UnitForStats {
   dice: number;
   movement: number;
   health: number;
+  /** Transport capacity (TC); 0 = cannot carry. */
+  transportCapacity: number;
+  /** Whether the unit can be loaded onto transports (TR). */
+  transportable: boolean;
   specials: string[];
   purchasable: boolean;
   hero: boolean;
@@ -422,6 +426,8 @@ export function UnitStatsModal({
                 {[1, 2, 3, 4, 5, 6].map((i) => (
                   <col key={i} className="stats-units-col-num" />
                 ))}
+                <col className="stats-units-col-num stats-units-col-tc" />
+                <col className="stats-units-col-num stats-units-col-tr" />
                 <col className="stats-units-col-specials" />
                 {extraColumns.map((col) => (
                   <col key={col.key} className="stats-units-col-extra" />
@@ -436,6 +442,8 @@ export function UnitStatsModal({
                   <th className="stats-col-num">R</th>
                   <th className="stats-col-num">M</th>
                   <th className="stats-col-num">HP</th>
+                  <th className="stats-col-num" title="Transport capacity">TC</th>
+                  <th className="stats-col-num" title="Transportable">TR</th>
                   <th className="stats-col-num stats-col-specials">SP</th>
                   {extraColumns.map((col) => (
                     <th key={col.key} className={`stats-col-num stats-col-extra stats-col-extra--${col.tone}`} title={col.label}>
@@ -450,7 +458,7 @@ export function UnitStatsModal({
                   const fd = factionData[fid];
                   return [
                     <tr key={`faction-${fid}`} className="unit-stats-faction-row">
-                      <td colSpan={8 + extraColumns.length} className="stats-col-unit">
+                      <td colSpan={10 + extraColumns.length} className="stats-col-unit">
                         <div className="unit-stats-name-cell">
                           {fd?.icon && (fd?.alliance === 'good' || fd?.alliance === 'evil') && (
                             <span
@@ -478,6 +486,8 @@ export function UnitStatsModal({
                         <td className="stats-col-num">{u.dice}</td>
                         <td className="stats-col-num">{u.movement}</td>
                         <td className="stats-col-num">{u.health}</td>
+                        <td className="stats-col-num">{u.transportCapacity > 0 ? u.transportCapacity : '–'}</td>
+                        <td className="stats-col-num">{u.transportable ? '✓' : '–'}</td>
                         <td className="stats-col-num stats-col-specials">
                           {u.specials?.length ? u.specials.join(', ') : ''}
                         </td>
@@ -497,7 +507,7 @@ export function UnitStatsModal({
           )}
         </div>
         <p className="unit-stats-modal-key">
-          P = Power cost | A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points | SP = Specials
+          P = Power cost | A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points | TC = Transport capacity | TR = Transportable | SP = Specials
           {extraKey ? ` | ${extraKey}` : ''}
         </p>
       </div>

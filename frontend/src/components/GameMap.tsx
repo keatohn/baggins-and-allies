@@ -920,10 +920,12 @@ function DroppableTerritory({
 function DraggableAllStacksButton({
   territoryId,
   disabled,
+  selected,
   onTapPrepPointerDown,
 }: {
   territoryId: string;
   disabled: boolean;
+  selected?: boolean;
   onTapPrepPointerDown?: (territoryId: string, e: ReactPointerEvent<HTMLDivElement>) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -937,17 +939,19 @@ function DraggableAllStacksButton({
     opacity: isDragging ? 0.45 : 1,
     zIndex: isDragging ? 1000 : undefined,
   };
+  const selectedClass = selected ? ' all-stacks-drag-btn--selected' : '';
   return (
     <div className="all-stacks-drag-btn-wrap">
       <div
         ref={setNodeRef}
-        className={`all-stacks-drag-btn${isDragging ? ' dragging' : ''}`}
+        className={`all-stacks-drag-btn${isDragging ? ' dragging' : ''}${selectedClass}`}
         style={dragStyle}
         title="Drag all your stacks to a destination, or tap All then tap a highlighted territory (mobile)"
         aria-label="Move all stacks: drag to destination or tap then tap territory"
         onPointerDownCapture={(e) => onTapPrepPointerDown?.(territoryId, e)}
         {...listeners}
         {...attributes}
+        aria-pressed={selected || undefined}
         role="button"
         tabIndex={attributes.tabIndex ?? 0}
       >
@@ -5588,6 +5592,7 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                               <DraggableAllStacksButton
                                 territoryId={territoryId}
                                 disabled={!isMovementPhase || !canAct}
+                                selected={tapBulkAllFromTerritory === territoryId}
                                 onTapPrepPointerDown={(tid, ev) => {
                                   bulkAllTapStartRef.current = { territoryId: tid, x: ev.clientX, y: ev.clientY };
                                 }}

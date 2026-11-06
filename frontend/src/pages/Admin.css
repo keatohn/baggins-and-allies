@@ -3283,6 +3283,21 @@ body:has(.combat-sim-modal-overlay) {
     padding: max(0.35rem, env(safe-area-inset-top, 0px)) 0.35rem max(0.35rem, env(safe-area-inset-bottom, 0px));
   }
 
+  /* Report tables (users, games): fixed layout + ellipsis squishes every text
+     column into the phone-width modal. Size columns to their content and let
+     .games-report__table-scroll scroll right instead. Wrapping cells get a
+     min-width so username/players/scenario/turn can't collapse to one word. */
+  .games-report__table {
+    table-layout: auto;
+  }
+
+  .games-report__table td.games-report__name,
+  .games-report__table td.games-report__players,
+  .games-report__table td.games-report__scenario,
+  .games-report__table td.games-report__turn {
+    min-width: 7rem;
+  }
+
   .admin-modal--icons .admin-icon-group {
     grid-template-columns: 1fr;
   }

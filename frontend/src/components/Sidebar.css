@@ -1330,6 +1330,17 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
     padding: 0;
   }
 
+  .sidebar .territory-signal-pill {
+    width: 1.3rem;
+    height: 1.3rem;
+    padding: 0;
+  }
+
+  .territory-signal-pill-flag {
+    width: 11px;
+    height: 13px;
+  }
+
   .sidebar .count-controls {
     gap: 0.48rem;
     margin: 0.34rem 0;
