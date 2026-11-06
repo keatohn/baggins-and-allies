@@ -2948,6 +2948,11 @@ def _handle_initiate_combat(
     )
     if all_attackers_have_stealth:
         pd_prefire = _prefire_stat_delta(state)
+        stealth_eff_dice, _, stealth_attack_ov = get_attacker_effective_dice_and_bombikazi_self_destruct(
+            attacker_units, unit_defs,
+            use_paired_fused_siegework_rules=True,
+        )
+        stealth_eff_dice = merge_ring_dice(stealth_eff_dice, attacker_units, unit_defs, ring_att_boosts)
         stealth_stat_modifiers = prefire_stat_modifiers(
             attacker_units, unit_defs, True, pd_prefire, attacker_mods,
         )
@@ -2965,6 +2970,7 @@ def _handle_initiate_combat(
                 u, unit_defs.get(u.unit_id),
                 stealth_stat_modifiers.get(u.instance_id, 0), True, attacker_faction,
                 territory_def, spec_stealth,
+                attacker_effective_attack_override=stealth_attack_ov,
                 passenger_aboard=_passengers_aboard_on_boat(u, passenger_lookup_units, unit_defs),
             )
             for u in attacker_units
@@ -2984,12 +2990,17 @@ def _handle_initiate_combat(
             stat_modifiers_attacker_extra=attacker_mods,
             prefire_penalty_delta=pd_prefire,
             hp_shield=ring_hp_shield,
-            attacker_effective_dice_override=merge_ring_dice(None, attacker_units, unit_defs, ring_att_boosts),
+            attacker_effective_dice_override=stealth_eff_dice,
             casualty_order_defender=defender_casualty_order,
+            effective_stat_override=stealth_attack_ov or None,
+            exclude_archetypes={"siegework"},
         )
         attacker_dice_grouped_stealth = group_dice_by_stat(
             attacker_units, prefire_attacker_rolls, unit_defs, is_attacker=True,
             stat_modifiers=stealth_stat_modifiers,
+            effective_dice_override=stealth_eff_dice,
+            effective_stat_override=stealth_attack_ov or None,
+            exclude_archetypes_from_rolling={"siegework"},
         )
         prefire_log_entry = CombatRoundResult(
             round_number=0,

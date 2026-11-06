@@ -1835,6 +1835,8 @@ def resolve_stealth_prefire(
     hp_shield: dict[str, int] | None = None,
     attacker_effective_dice_override: dict[str, int] | None = None,
     casualty_order_defender: str = "best_unit",
+    effective_stat_override: dict[str, int] | None = None,
+    exclude_archetypes: set[str] | None = None,
 ) -> RoundResult:
     """
     Resolve attacker stealth prefire: only attackers roll at attack-1, hits applied to defenders only.
@@ -1842,6 +1844,10 @@ def resolve_stealth_prefire(
     prefire_penalty_delta: -1 when setup manifest enables prefire penalty; 0 when disabled.
     casualty_order_defender: defender hit assignment order ("best_unit" | "best_defense");
     pass the territory's configured order so prefire matches every other round.
+    effective_stat_override: instance_id -> attack used instead of stat+mods (bombikazi at the
+    paired bomb's raw attack; replaces the prefire penalty for those units, matching display).
+    exclude_archetypes: archetypes that do not roll here ({"siegework"} — bombs roll 0 via
+    effective_dice_override, but exclusion keeps counts aligned with generation).
     """
     stat_modifiers = prefire_stat_modifiers(
         attacker_units, unit_defs, True, prefire_penalty_delta, stat_modifiers_attacker_extra,
@@ -1850,6 +1856,8 @@ def resolve_stealth_prefire(
         attacker_units, attacker_rolls, unit_defs, is_attacker=True,
         stat_modifiers=stat_modifiers,
         effective_dice_override=attacker_effective_dice_override,
+        effective_stat_override=effective_stat_override,
+        exclude_archetypes=exclude_archetypes,
     )
     defender_hits = 0  # Defenders do not roll in stealth prefire
 
