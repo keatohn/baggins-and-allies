@@ -1936,6 +1936,117 @@ def movement_cost_along_path(
     return cost
 
 
+def path_traversable_for_charging(
+    path: list[str],
+    state: GameState,
+    units: list[Unit],
+    unit_defs: dict[str, UnitDefinition],
+    territory_defs: dict[str, TerritoryDefinition],
+    faction_defs: dict[str, FactionDefinition],
+    acting_faction_id: str | None,
+) -> bool:
+    """
+    True when every unit in `units` can pass through the intermediate hexes of `path`
+    (start and destination excluded) under the same corridor rules as
+    get_reachable_territories_for_unit:
+
+    - water corridor hexes require every mover to be craft of that hull domain, free of
+      hostile units (land units and aerials cannot expand from water hexes either);
+    - land corridor hexes cannot be enemy-owned unless every mover is aerial, or a
+      cavalry charging through an empty hex; hostile-neutral hexes are aerial-only;
+    - movers cannot drive over land, and cannot use aerial-only shortcuts or ford-only
+      edges without a ford crosser (escort capacity is pathfinding's call).
+
+    Movement charging (issue #50 audit M5) uses this to decide whether the geometric
+    shortest path length equals each payer's hostility-aware reachability distance:
+    True means the geometric length is safe to charge; False means the caller must
+    charge each unit's reachability distance instead.
+    """
+    if len(path) < 2 or not units:
+        return True
+    cf = (acting_faction_id or "").strip()
+    if not cf:
+        return False
+    faction_def = faction_defs.get(cf)
+    if not faction_def:
+        return False
+    alliance = faction_def.alliance
+
+    def _hostile_units(territory: TerritoryState) -> bool:
+        for u in territory.units:
+            uf = get_unit_faction(u, unit_defs)
+            if not uf:
+                return True
+            ufd = faction_defs.get(uf)
+            if not ufd or ufd.alliance != alliance:
+                return True
+        return False
+
+    for tid in path[1:-1]:
+        tdef = territory_defs.get(tid)
+        territory = state.territories.get(tid)
+        if not tdef or not territory:
+            return False
+        water = _is_water_zone(tdef)
+        eff = effective_territory_owner(state, tid)
+        enemy_owned = False
+        if eff is not None and eff != cf:
+            owner_def = faction_defs.get(eff)
+            enemy_owned = owner_def is None or owner_def.alliance != alliance
+        neutral = eff is None
+        hostile_here = _hostile_units(territory)
+        for unit in units:
+            ud = unit_defs.get(unit.unit_id)
+            if not ud:
+                return False
+            aerial = _is_aerial_unit_def(ud)
+            craft = _is_water_craft(ud)
+            if water:
+                if not craft or not _craft_can_enter(ud, tdef):
+                    return False
+                if hostile_here:
+                    return False
+            else:
+                if craft and not aerial:
+                    return False  # boats cannot drive over land
+                if enemy_owned:
+                    if not aerial:
+                        cavalry = (
+                            getattr(ud, "archetype", "") == "cavalry"
+                            or "cavalry" in (getattr(ud, "tags", []) or [])
+                        )
+                        if not cavalry or territory.units:
+                            return False
+                elif neutral and hostile_here and not aerial:
+                    return False
+
+    # Edge rules: aerial shortcuts are unavailable to ground movers, and ford-only
+    # edges need a ford crosser (escort budget is resolved by full pathfinding).
+    for i in range(len(path) - 1):
+        a_id, b_id = path[i], path[i + 1]
+        adef = territory_defs.get(a_id)
+        if not adef:
+            return False
+        plain_adjacent = set(getattr(adef, "adjacent", []) or [])
+        ford_adjacent = set(getattr(adef, "ford_adjacent", []) or [])
+        aerial_edges = set(_adjacent_ids(adef, True))
+        for unit in units:
+            ud = unit_defs.get(unit.unit_id)
+            if not ud:
+                return False
+            if _is_aerial_unit_def(ud):
+                if b_id not in aerial_edges:
+                    return False
+            elif b_id in plain_adjacent:
+                continue
+            elif b_id in ford_adjacent:
+                if not has_unit_special(ud, "ford_crosser"):
+                    return False
+            else:
+                return False  # aerial-only shortcut (mountain/river leap)
+    return True
+
+
 # Legacy function for backwards compatibility during transition
 def get_reachable_territories(
     unit_def: UnitDefinition,
