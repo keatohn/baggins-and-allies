@@ -7,6 +7,7 @@ from backend.engine.combat import (
     get_siegework_attacker_rolling_units,
     get_siegework_dice_counts,
     get_terror_reroll_targets,
+    resolve_combat_round,
     siegework_dice_round_applies,
 )
 from backend.engine.definitions import UnitDefinition, load_static_definitions
@@ -34,6 +35,7 @@ def test_combat_specials_terror(defs):
     att_units, def_units = stacks_to_synthetic_units(
         [{"unit_id": nazgul_id, "count": 1}],
         [{"unit_id": "gondor_soldier", "count": 2}],
+        unit_defs,
     )
     territory_def = next(iter(territory_defs.values()))
     result = compute_battle_specials_and_modifiers(
@@ -57,6 +59,7 @@ def test_combat_specials_captain(defs):
             {"unit_id": "gondor_soldier", "count": 2},
         ],
         [{"unit_id": "morannon_orc", "count": 2}],
+        unit_defs,
     )
     territory_def = next(iter(territory_defs.values()))
     result = compute_battle_specials_and_modifiers(
@@ -87,6 +90,7 @@ def test_combat_specials_bombikazi(defs):
             {"unit_id": "bomb", "count": 1},
         ],
         [{"unit_id": "gondor_soldier", "count": 2}],
+        unit_defs,
     )
     territory_def = next(iter(territory_defs.values()))
     result = compute_battle_specials_and_modifiers(
@@ -107,6 +111,7 @@ def test_combat_specials_sea_raider(defs):
     att_units, def_units = stacks_to_synthetic_units(
         [{"unit_id": corsair_id, "count": 2}],
         [{"unit_id": "gondor_soldier", "count": 1}],
+        unit_defs,
     )
     territory_def = next(iter(territory_defs.values()))
     result = compute_battle_specials_and_modifiers(
@@ -128,6 +133,7 @@ def test_combat_specials_hope_when_attacker_has_terror(defs):
     att_units, def_units = stacks_to_synthetic_units(
         [{"unit_id": "nazgul", "count": 1}],
         [{"unit_id": "eagle", "count": 1}],
+        unit_defs,
     )
     territory_def = next(iter(territory_defs.values()))
     result = compute_battle_specials_and_modifiers(
@@ -161,6 +167,7 @@ def test_combat_specials_stealth_activated_when_all_have_stealth(defs):
     att_units, def_units = stacks_to_synthetic_units(
         [{"unit_id": stealth_unit_id, "count": 2}],
         [{"unit_id": "morannon_orc", "count": 1}],
+        ud_extended,
     )
     territory_def = next(iter(territory_defs.values()))
     result = compute_battle_specials_and_modifiers(
@@ -196,6 +203,7 @@ def test_combat_specials_stealth_not_activated_when_unit_def_missing(defs):
             {"unit_id": "unit_with_no_definition", "count": 1},
         ],
         [{"unit_id": "morannon_orc", "count": 1}],
+        ud_extended,
     )
     territory_def = next(iter(territory_defs.values()))
     result = compute_battle_specials_and_modifiers(
@@ -217,6 +225,7 @@ def test_archer_special_only_when_prefire_applicable(defs):
     att_units, def_units = stacks_to_synthetic_units(
         [{"unit_id": "gondor_soldier", "count": 1}],
         [{"unit_id": archer_id, "count": 1}],
+        unit_defs,
     )
     territory_def = next(iter(territory_defs.values()))
     off = compute_battle_specials_and_modifiers(
@@ -254,6 +263,7 @@ def test_stealth_special_only_when_stealth_prefire_applicable(defs):
     att_units, def_units = stacks_to_synthetic_units(
         [{"unit_id": stealth_unit_id, "count": 2}],
         [{"unit_id": "morannon_orc", "count": 1}],
+        ud_extended,
     )
     territory_def = next(iter(territory_defs.values()))
     off = compute_battle_specials_and_modifiers(
@@ -278,6 +288,7 @@ def test_ram_special_only_when_ram_applicable(defs):
     att_units, def_units = stacks_to_synthetic_units(
         [{"unit_id": "battering_ram", "count": 1}],
         [{"unit_id": "gondor_soldier", "count": 1}],
+        unit_defs,
     )
     territory_def = next(iter(territory_defs.values()))
     off = compute_battle_specials_and_modifiers(
@@ -298,6 +309,7 @@ def test_stacks_to_synthetic_units():
     att, def_ = stacks_to_synthetic_units(
         [{"unit_id": "a", "count": 2}, {"unit_id": "b", "count": 1}],
         [{"unit_id": "c", "count": 1}],
+        {},
     )
     assert len(att) == 3
     assert len(def_) == 1
@@ -325,6 +337,7 @@ def test_paired_bomb_siegework_dice_when_bomb_not_siegework_archetype():
             {"unit_id": "bomb", "count": 1},
         ],
         [{"unit_id": "gondor_soldier", "count": 1}],
+        ud,
     )
     att_dice, _def_dice = get_siegework_dice_counts(
         att_units,
@@ -357,6 +370,7 @@ def test_siegework_archetype_bombikazi_does_not_roll_in_siegeworks():
             {"unit_id": "bomb", "count": 1},
         ],
         [{"unit_id": "gondor_soldier", "count": 1}],
+        ud,
     )
     att_dice, _ = get_siegework_dice_counts(
         att_paired,
@@ -374,6 +388,7 @@ def test_siegework_archetype_bombikazi_does_not_roll_in_siegeworks():
     att_unpaired, _ = stacks_to_synthetic_units(
         [{"unit_id": "berserker", "count": 1}],
         [{"unit_id": "gondor_soldier", "count": 1}],
+        ud,
     )
     att_dice_unpaired, _ = get_siegework_dice_counts(
         att_unpaired,
@@ -405,6 +420,7 @@ def test_defending_battering_ram_no_siegework_defender_dice(defs):
     att_units, def_units = stacks_to_synthetic_units(
         [{"unit_id": "gondor_soldier", "count": 1}],
         [{"unit_id": "battering_ram", "count": 1}],
+        unit_defs,
     )
     att_d, def_d = get_siegework_dice_counts(
         att_units,
@@ -435,6 +451,7 @@ def test_attacker_catapult_defender_ram_still_has_attacker_siegework_dice(defs):
     att_units, def_units = stacks_to_synthetic_units(
         [{"unit_id": "catapult", "count": 1}],
         [{"unit_id": "battering_ram", "count": 1}],
+        unit_defs,
     )
     att_d, def_d = get_siegework_dice_counts(
         att_units,
@@ -635,3 +652,54 @@ def test_light_badge_when_opposing_side_has_terror():
     )
     assert swapped.specials_attacker["a_light"]["light"] is True
     assert swapped.specials_defender["d_terror"]["terror"] is False
+
+
+def test_stacks_to_synthetic_units_uses_unit_defs_health(defs):
+    """Multi-HP units keep their real HP/movement (regression: hardcoded 1 HP)."""
+    unit_defs, _ = defs
+    if "armored_troll" not in unit_defs:
+        pytest.skip("need armored_troll")
+    _, def_ = stacks_to_synthetic_units(
+        [],
+        [{"unit_id": "armored_troll", "count": 1}],
+        unit_defs,
+    )
+    assert def_[0].base_health == unit_defs["armored_troll"].health
+    assert def_[0].remaining_health == unit_defs["armored_troll"].health
+    assert def_[0].remaining_health > 1
+    assert def_[0].base_movement == unit_defs["armored_troll"].movement
+    assert def_[0].remaining_movement == unit_defs["armored_troll"].movement
+
+
+def test_stacks_to_synthetic_units_unknown_unit_kept_with_1_hp_fallback():
+    """Unknown unit_ids are kept (counts unchanged) with the 1 HP / 0 movement fallback."""
+    att, def_ = stacks_to_synthetic_units(
+        [{"unit_id": "unit_with_no_definition", "count": 2}],
+        [],
+        {},
+    )
+    assert len(att) == 2
+    assert def_ == []
+    for u in att:
+        assert u.base_health == 1
+        assert u.remaining_health == 1
+        assert u.base_movement == 0
+
+
+def test_synthetic_multi_hp_unit_soaks_one_hit(defs):
+    """A 2-HP synthetic unit survives one hit (it would die at the old hardcoded 1 HP)."""
+    unit_defs, _ = defs
+    if "armored_troll" not in unit_defs or "gondor_soldier" not in unit_defs:
+        pytest.skip("need armored_troll and gondor_soldier")
+    att, def_ = stacks_to_synthetic_units(
+        [{"unit_id": "gondor_soldier", "count": 1}],
+        [{"unit_id": "armored_troll", "count": 1}],
+        unit_defs,
+    )
+    result, _ = resolve_combat_round(
+        att, def_, unit_defs,
+        {"attacker": [1], "defender": [6]},
+    )
+    assert result.defender_casualties == []
+    assert def_[0].instance_id in result.defender_wounded
+    assert def_[0].remaining_health == 1

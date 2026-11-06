@@ -193,24 +193,31 @@ def empty_round_special_payload() -> dict[str, bool]:
 def stacks_to_synthetic_units(
     attacker_stacks: list[dict[str, Any]],  # [{"unit_id": str, "count": int}, ...]
     defender_stacks: list[dict[str, Any]],
+    unit_defs: dict[str, UnitDefinition],
 ) -> tuple[list[Unit], list[Unit]]:
     """
     Convert stack payloads to lists of Unit with synthetic instance_ids.
     Used by combat sim so we can run the same specials engine as real combat.
+
+    Health/movement mirror unit_defs so multi-HP units (trolls) keep their real HP;
+    unknown unit_ids are kept with the 1 HP / 0 movement fallback (never skipped).
     """
     attacker_units: list[Unit] = []
     idx = 0
     for s in attacker_stacks:
         unit_id = (s.get("unit_id") or "").strip()
         count = max(0, int(s.get("count") or 0))
+        ud = unit_defs.get(unit_id)
+        base_health = int(getattr(ud, "health", 1) or 1) if ud else 1
+        base_movement = int(getattr(ud, "movement", 0) or 0) if ud else 0
         for _ in range(count):
             attacker_units.append(Unit(
                 instance_id=f"att_{idx}_{unit_id}",
                 unit_id=unit_id,
-                remaining_movement=0,
-                remaining_health=1,
-                base_movement=0,
-                base_health=1,
+                remaining_movement=base_movement,
+                remaining_health=base_health,
+                base_movement=base_movement,
+                base_health=base_health,
             ))
             idx += 1
     defender_units: list[Unit] = []
@@ -218,14 +225,17 @@ def stacks_to_synthetic_units(
     for s in defender_stacks:
         unit_id = (s.get("unit_id") or "").strip()
         count = max(0, int(s.get("count") or 0))
+        ud = unit_defs.get(unit_id)
+        base_health = int(getattr(ud, "health", 1) or 1) if ud else 1
+        base_movement = int(getattr(ud, "movement", 0) or 0) if ud else 0
         for _ in range(count):
             defender_units.append(Unit(
                 instance_id=f"def_{idx}_{unit_id}",
                 unit_id=unit_id,
-                remaining_movement=0,
-                remaining_health=1,
-                base_movement=0,
-                base_health=1,
+                remaining_movement=base_movement,
+                remaining_health=base_health,
+                base_movement=base_movement,
+                base_health=base_health,
             ))
             idx += 1
     return attacker_units, defender_units

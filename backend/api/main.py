@@ -4156,6 +4156,7 @@ def simulate_combat(request: SimulateCombatRequest, db: Session = Depends(get_db
         att_units, def_units = stacks_to_synthetic_units(
             [s for s in (request.attacker_stacks or []) if (s.get("count") or 0) > 0],
             [s for s in (request.defender_stacks or []) if (s.get("count") or 0) > 0],
+            ud,
         )
         territory_def = td.get(territory_id_for_sim)
         if att_units and def_units and territory_def is not None:
