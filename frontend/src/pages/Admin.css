@@ -4255,6 +4255,10 @@ body:has(.combat-sim-modal-overlay) {
 }
 
 /* Let the map workspace use the available screen, including tall displays. */
+body:has(.admin-modal--map-editor) .menu-scroll-overlay:not(.menu-scroll-overlay--closing):not(.menu-scroll-overlay--opening) {
+  visibility: hidden;
+}
+
 .admin-modal.admin-modal--map-editor {
   width: calc(100vw - 1rem);
   max-width: none;
