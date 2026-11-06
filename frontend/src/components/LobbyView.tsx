@@ -237,13 +237,18 @@ export default function LobbyView({
     });
   };
 
-  const handleDifficulty = async (difficulty: string) => {
-    if (!difficulty || difficulty === meta.ai_difficulty || savingDifficulty) return;
+  const handleFactionDifficulty = async (factionId: string, difficulty: string) => {
+    const current = meta.ai_faction_difficulties?.[factionId] ?? meta.ai_difficulty;
+    if (!difficulty || difficulty === current || savingDifficulty) return;
     setClaimError(null);
     setSavingDifficulty(true);
     try {
-      const saved = await api.updateAiDifficulty(gameId, difficulty);
-      onMetaUpdate({ ...meta, ai_difficulty: saved.ai_difficulty });
+      const saved = await api.updateAiDifficulty(gameId, difficulty, factionId);
+      onMetaUpdate({
+        ...meta,
+        ai_difficulty: saved.ai_difficulty,
+        ai_faction_difficulties: saved.ai_faction_difficulties ?? meta.ai_faction_difficulties,
+      });
     } catch (err) {
       setClaimError(err instanceof Error ? err.message : 'Could not save difficulty');
     } finally {
@@ -479,7 +484,7 @@ export default function LobbyView({
                             <input
                               type="checkbox"
                               className="lobby-view__invite-check"
-                              checked={selected || already}
+                              checked={selected || already || inLobby}
                               disabled={locked || inviteSending}
                               onChange={() => toggleInvite(friend.id)}
                             />
@@ -640,10 +645,10 @@ export default function LobbyView({
                         {!isClaimedByMe && (
                           <DifficultyPills
                             levels={meta.ai_levels}
-                            selected={meta.ai_difficulty}
+                            selected={meta.ai_faction_difficulties?.[fid] ?? meta.ai_difficulty}
                             disabled={!isHost || savingDifficulty}
                             label={`${displayName} difficulty`}
-                            onSelect={(id) => void handleDifficulty(id)}
+                            onSelect={(id) => void handleFactionDifficulty(fid, id)}
                           />
                         )}
                       </div>
@@ -686,10 +691,10 @@ export default function LobbyView({
                         {isClaimedByComputer && (
                           <DifficultyPills
                             levels={meta.ai_levels}
-                            selected={meta.ai_difficulty}
+                            selected={meta.ai_faction_difficulties?.[fid] ?? meta.ai_difficulty}
                             disabled={!isHost || savingDifficulty}
                             label={`${displayName} difficulty`}
-                            onSelect={(id) => void handleDifficulty(id)}
+                            onSelect={(id) => void handleFactionDifficulty(fid, id)}
                           />
                         )}
                       </div>

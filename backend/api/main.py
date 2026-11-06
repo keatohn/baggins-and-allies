@@ -4340,6 +4340,7 @@ def get_game_meta(
         "scenario": scenario,
         "ai_factions": ai_factions,
         "ai_difficulty": _ai_setting_from_config(row, "ai_difficulty", "normal"),
+        "ai_faction_difficulties": _ai_faction_difficulties_from_config(config),
         "ai_algorithm": _ai_setting_from_config(row, "ai_algorithm", "heuristic"),
         "ai_levels": [
             {"id": level["id"], "name": level["name"]}
@@ -4497,6 +4498,31 @@ def update_ai_faction_settings(
 
 class AiDifficultyBody(BaseModel):
     difficulty: str
+    faction_id: str | None = None
+
+
+def _ai_faction_difficulties_from_config(config: dict) -> dict[str, str]:
+    """Per-faction computer level. Missing factions use the game-wide difficulty."""
+    raw = config.get("ai_faction_difficulties") if isinstance(config, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for fid, value in raw.items():
+        if fid and isinstance(value, str) and value.strip():
+            out[str(fid)] = value.strip().lower()
+    return out
+
+
+def _lobby_faction_difficulty(row, faction_id: str | None) -> str | None:
+    if not faction_id or not getattr(row, "config", None):
+        return None
+    try:
+        config = json.loads(row.config) if isinstance(row.config, str) else row.config
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(config, dict):
+        return None
+    return _ai_faction_difficulties_from_config(config).get(str(faction_id))
 
 
 def _write_lobby_difficulty(row, game_id: str, difficulty: str) -> None:
@@ -4540,9 +4566,38 @@ def update_game_ai_difficulty(
         raise HTTPException(status_code=403, detail="Only the host can change the difficulty")
     levels = load_ai_defaults(db)["levels"]
     difficulty = normalize_difficulty(body.difficulty, levels)
+    if body.faction_id:
+        try:
+            config = json.loads(row.config) if isinstance(row.config, str) else {}
+        except (TypeError, json.JSONDecodeError):
+            config = {}
+        if not isinstance(config, dict):
+            config = {}
+        try:
+            state_dict = json.loads(row.game_state) if isinstance(row.game_state, str) else {}
+            turn_order = list((state_dict or {}).get("turn_order") or [])
+        except (TypeError, json.JSONDecodeError):
+            turn_order = []
+        faction_id = str(body.faction_id)
+        if faction_id not in {str(fid) for fid in turn_order if fid}:
+            raise HTTPException(status_code=400, detail="Faction is not in this game")
+        mapping = _ai_faction_difficulties_from_config(config)
+        mapping[faction_id] = difficulty
+        config["ai_faction_difficulties"] = mapping
+        row.config = json.dumps(config)
+        db.commit()
+        return {
+            "ai_difficulty": _ai_setting_from_config(row, "ai_difficulty", "normal"),
+            "ai_faction_difficulties": mapping,
+        }
     _write_lobby_difficulty(row, game_id, difficulty)
     db.commit()
-    return {"ai_difficulty": difficulty}
+    return {
+        "ai_difficulty": difficulty,
+        "ai_faction_difficulties": _ai_faction_difficulties_from_config(
+            json.loads(row.config) if isinstance(row.config, str) else {}
+        ),
+    }
 
 
 @app.post("/games/{game_id}/start")
@@ -6666,19 +6721,36 @@ def do_ai_step(
     from backend.ai.settings import faction_search_env, load_ai_defaults, style_env, style_for_difficulty
 
     faction_setting = _faction_search_setting(row, state.current_faction)
+    faction_difficulty = _lobby_faction_difficulty(row, state.current_faction)
     ai_defaults = load_ai_defaults(db)
     level_id = (
         (faction_setting or {}).get("difficulty")
+        or faction_difficulty
         or getattr(state, "ai_difficulty", None)
         or ai_defaults["difficulty"]
     )
-    with style_env(style_for_difficulty(ai_defaults["levels"], level_id)), budget_catalog_scope(ai_defaults["levels"]):
+
+    def _decide():
         if faction_setting is None:
-            action = decide(ctx)
+            return decide(ctx)
+        with _faction_search_lock:
+            with faction_search_env(faction_setting):
+                return decide(ctx)
+
+    with style_env(style_for_difficulty(ai_defaults["levels"], level_id)), budget_catalog_scope(ai_defaults["levels"]):
+        # Computer Only games already apply the faction level inside faction_search_env.
+        if faction_setting is None and faction_difficulty:
+            previous = os.environ.get("AI_MCTS_DIFFICULTY")
+            os.environ["AI_MCTS_DIFFICULTY"] = faction_difficulty
+            try:
+                action = _decide()
+            finally:
+                if previous is None:
+                    os.environ.pop("AI_MCTS_DIFFICULTY", None)
+                else:
+                    os.environ["AI_MCTS_DIFFICULTY"] = previous
         else:
-            with _faction_search_lock:
-                with faction_search_env(faction_setting):
-                    action = decide(ctx)
+            action = _decide()
     if action is None:
         raise HTTPException(status_code=400, detail="AI returned no action")
 

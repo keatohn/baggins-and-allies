@@ -82,6 +82,41 @@ def make_client(db_session, players):
         app.dependency_overrides.clear()
 
 
+def test_faction_difficulty_does_not_change_the_others(make_client, players):
+    admin, _user = players
+    client = make_client(admin)
+    created = client.post("/games/create", json={"name": "Solo", "setup_id": "wotr_exp_1.0"})
+    assert created.status_code == 200, created.text
+    game_id = created.json()["game_id"]
+    order = [fid for fid in created.json()["state"]["turn_order"] if fid]
+    assert len(order) >= 2
+    meta = client.get(f"/games/{game_id}/meta").json()
+    level_ids = [level["id"] for level in meta["ai_levels"]]
+    assert len(level_ids) >= 2
+    first = next(level for level in level_ids if level != meta["ai_difficulty"])
+    second = next(level for level in level_ids if level != first)
+
+    saved = client.put(
+        f"/games/{game_id}/ai-difficulty",
+        json={"difficulty": first, "faction_id": order[0]},
+    )
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    assert body["ai_difficulty"] == meta["ai_difficulty"]
+    assert body["ai_faction_difficulties"] == {order[0]: first}
+
+    saved_again = client.put(
+        f"/games/{game_id}/ai-difficulty",
+        json={"difficulty": second, "faction_id": order[1]},
+    )
+    assert saved_again.status_code == 200, saved_again.text
+    assert saved_again.json()["ai_faction_difficulties"] == {order[0]: first, order[1]: second}
+    again = client.get(f"/games/{game_id}/meta").json()
+    assert again["ai_difficulty"] == meta["ai_difficulty"]
+    assert again["ai_faction_difficulties"][order[0]] == first
+    assert again["ai_faction_difficulties"][order[1]] == second
+
+
 def test_non_admin_cannot_create_test_mode(make_client, players):
     _admin, user = players
     client = make_client(user)

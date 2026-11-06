@@ -1082,6 +1082,8 @@ export interface GameMeta {
   ai_factions?: string[];
   /** Computer strength stored with this game. The id matches one admin level. */
   ai_difficulty?: string;
+  /** Per-faction computer level. Factions omitted here use ai_difficulty. */
+  ai_faction_difficulties?: Record<string, string>;
   /** Computer policy stored with this game (heuristic or mcts). */
   ai_algorithm?: string;
   /** Easiest first. Names and order come from the admin AI tab. */
@@ -1596,10 +1598,13 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ factions }),
     }),
-  updateAiDifficulty: (gameId: string, difficulty: string) =>
-    fetchJson<{ ai_difficulty: string }>(`/games/${gameId}/ai-difficulty`, {
+  updateAiDifficulty: (gameId: string, difficulty: string, factionId?: string) =>
+    fetchJson<{ ai_difficulty: string; ai_faction_difficulties?: Record<string, string> }>(`/games/${gameId}/ai-difficulty`, {
       method: 'PUT',
-      body: JSON.stringify({ difficulty }),
+      body: JSON.stringify({
+        difficulty,
+        ...(factionId != null ? { faction_id: factionId } : {}),
+      }),
     }),
   listGames: (status?: 'active' | 'finished' | 'all') => {
     const qs = new URLSearchParams({ _: String(Date.now()) });
