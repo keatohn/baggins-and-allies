@@ -685,7 +685,7 @@ function factionAssetUrl(filename: string | null | undefined): string | undefine
 
 function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   const GAME_ID = gameIdProp ?? DEFAULT_GAME_ID;
-  const { holdScroll, revealScroll } = useMenuScroll();
+  const { holdScroll, revealScroll, showCoverReload } = useMenuScroll();
   // Backend state (use initialState from navigation when we just created this game)
   const [definitions, setDefinitions] = useState<Definitions | null>(null);
   const [backendState, setBackendState] = useState<ApiGameState | null>(initialStateProp ?? null);
@@ -702,7 +702,18 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   const [canAct, setCanAct] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [mapBackdropSettled, setMapBackdropSettled] = useState(false);
   const heldForLoadRef = useRef(false);
+  /** Set when the map image fails. Blocks the success path from opening the scroll. */
+  const mapBackdropFailedRef = useRef(false);
+  const handleMapBackdropSettled = useCallback(() => {
+    if (mapBackdropFailedRef.current) return;
+    setMapBackdropSettled(true);
+  }, []);
+  const handleMapBackdropFailed = useCallback(() => {
+    mapBackdropFailedRef.current = true;
+    showCoverReload();
+  }, [showCoverReload]);
 
   // UI state
   const [selectedTerritory, setSelectedTerritory] = useState<string | null>(null);
@@ -1831,6 +1842,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   useEffect(() => {
     async function init() {
       setLoading(true);
+      setMapBackdropSettled(false);
+      mapBackdropFailedRef.current = false;
       // Hold the scroll closed while the game loads so "Loading game…" isn't revealed.
       heldForLoadRef.current = true;
       holdScroll();
@@ -1912,12 +1925,26 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     init();
   }, [addLogEntry, GAME_ID, holdScroll]);
 
+  // Open only once game JSON and the map raster are both ready. A failed image
+  // never settles: the scroll stays closed and offers Reload.
   useEffect(() => {
-    if (!loading && heldForLoadRef.current) {
+    if (loading || !heldForLoadRef.current || mapBackdropFailedRef.current) return;
+    // No map is mounted on the error / missing-data screens, so nothing will settle the backdrop.
+    if (error || mapBackdropSettled || !definitions || !backendState) {
       heldForLoadRef.current = false;
       revealScroll();
     }
-  }, [loading, revealScroll]);
+  }, [loading, error, mapBackdropSettled, definitions, backendState, revealScroll]);
+
+  useEffect(() => {
+    if (loading || !heldForLoadRef.current) return;
+    const t = window.setTimeout(() => {
+      if (!heldForLoadRef.current || mapBackdropFailedRef.current) return;
+      if (mapBackdropSettled) return;
+      showCoverReload();
+    }, 5000);
+    return () => window.clearTimeout(t);
+  }, [loading, mapBackdropSettled, showCoverReload]);
 
   // Poll game state only in multiplayer (2s default; 1s while spectating a battle for faster combat sync)
   const isMultiplayer = gameMeta?.is_multiplayer ?? Boolean(gameMeta?.game_code);
@@ -4685,6 +4712,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
               territorySignals={isMultiplayer ? territorySignals : {}}
               animCues={mapAnimCues}
               mapOverrides={mapOverrides}
+              onMapBackdropSettled={handleMapBackdropSettled}
+              onMapBackdropFailed={handleMapBackdropFailed}
               onTerritorySelect={handleTerritorySelect}
               onSeaZoneStackClick={isMovementPhase ? handleSeaZoneStackClick : undefined}
               onUnitSelect={handleUnitSelect}

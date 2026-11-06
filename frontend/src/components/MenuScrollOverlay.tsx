@@ -10,7 +10,8 @@ import './MenuScrollOverlay.css'
  */
 export default function MenuScrollOverlay() {
   const { pathname } = useLocation()
-  const { phase } = useMenuScroll()
+  const { phase, coverReload } = useMenuScroll()
+  const showReload = phase === 'covering' && coverReload
 
   let stateClass = ''
   if (phase === 'closing' || phase === 'covering') {
@@ -22,7 +23,7 @@ export default function MenuScrollOverlay() {
   }
 
   return (
-    <div className={`menu-scroll-overlay${stateClass}`} aria-hidden="true">
+    <div className={`menu-scroll-overlay${stateClass}`} aria-hidden={showReload ? undefined : true}>
       <svg className="menu-scroll-overlay__filters" aria-hidden="true">
         <filter id="scroll-paper-ruffle" x="-8%" y="-8%" width="116%" height="116%">
           <feTurbulence type="fractalNoise" baseFrequency="0.012 0.02" numOctaves="3" seed="7" result="warp" />
@@ -45,6 +46,15 @@ export default function MenuScrollOverlay() {
           <div className="menu-scroll-panel__paper" />
         </div>
       </div>
+      {showReload && (
+        <button
+          type="button"
+          className="menu-scroll-overlay__reload"
+          onClick={() => window.location.reload()}
+        >
+          Reload
+        </button>
+      )}
     </div>
   )
 }

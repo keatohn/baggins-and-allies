@@ -67,6 +67,10 @@ interface MenuScrollContextValue {
   holdScroll: () => void
   /** Reveal after a hold: opens to edges (menu) or exits off-screen (game). */
   revealScroll: () => void
+  /** True while a covering hold has failed in a way waiting will not fix. */
+  coverReload: boolean
+  /** Show a Reload control on the closed scroll. No-op unless the scroll is covering. */
+  showCoverReload: () => void
 }
 
 const MenuScrollContext = createContext<MenuScrollContextValue | null>(null)
@@ -90,6 +94,7 @@ export function MenuScrollProvider({ children }: { children: ReactNode }) {
   const pendingToMenuRef = useRef<boolean | null>(null)
   /** True once a destination page has called holdScroll() for the current covering. */
   const holdClaimedRef = useRef(false)
+  const [coverReload, setCoverReload] = useState(false)
 
   const clearTimer = useCallback((ref: React.MutableRefObject<number | null>) => {
     if (ref.current !== null) {
@@ -126,6 +131,7 @@ export function MenuScrollProvider({ children }: { children: ReactNode }) {
     const toMenu = pendingToMenuRef.current ?? true
     pendingToMenuRef.current = null
     holdClaimedRef.current = false
+    setCoverReload(false)
     applyPhase(toMenu ? 'opening' : 'exiting')
     scheduleSettle()
   }, [applyPhase, scheduleSettle, clearTimer])
@@ -139,6 +145,7 @@ export function MenuScrollProvider({ children }: { children: ReactNode }) {
     (runUnderCover: () => void, toMenu: boolean) => {
       pendingToMenuRef.current = toMenu
       holdClaimedRef.current = false
+      setCoverReload(false)
       runUnderCover()
       applyPhase('covering')
       autoRevealTimerRef.current = window.setTimeout(() => {
@@ -162,6 +169,11 @@ export function MenuScrollProvider({ children }: { children: ReactNode }) {
     if (phaseRef.current !== 'covering') return
     proceedToReveal()
   }, [proceedToReveal])
+
+  const showCoverReload = useCallback(() => {
+    if (phaseRef.current !== 'covering') return
+    setCoverReload(true)
+  }, [])
 
   const navigateWithScroll = useCallback(
     (to: string, opts?: NavigateOptions, scroll?: { force?: boolean }) => {
@@ -210,6 +222,8 @@ export function MenuScrollProvider({ children }: { children: ReactNode }) {
     withScrollTransition,
     holdScroll,
     revealScroll,
+    coverReload,
+    showCoverReload,
   }
 
   return (

@@ -587,6 +587,13 @@ interface GameMapProps {
     positions: Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number }; center?: { x: number; y: number } }>;
     hints: SvgHintAnchorsByTerritory;
   }) => void;
+  /**
+   * Fires once the base map raster has decoded.
+   * The game view holds the scroll closed until this so a half-loaded map is not revealed.
+   */
+  onMapBackdropSettled?: () => void;
+  /** Map image failed. Waiting will not recover it; the closed scroll offers Reload. */
+  onMapBackdropFailed?: () => void;
 }
 
 const MAX_SCALE = 3;
@@ -1086,6 +1093,8 @@ function GameMap({
   mapOverrides = null,
   openingAttacks = [],
   onSpotsCalculated,
+  onMapBackdropSettled,
+  onMapBackdropFailed,
 }: GameMapProps) {
   // Backend stores override points as [x,y] arrays; normalize once so every consumer
   // (hint anchors, position merge, landscape) sees {x,y} objects.
@@ -1298,21 +1307,74 @@ function GameMap({
   const svgFallbackUrl = `${publicBase}/${mapBase}.svg`;
   const [pngFailedForMap, setPngFailedForMap] = useState<string | null>(null);
   const [mapOverlayRasterHidden, setMapOverlayRasterHidden] = useState(false);
+  // Null until a plain Image() preload succeeds. SVG <image> that 404s is what Safari
+  // paints as a full-map blue box with a white question mark, and its error event is
+  // unreliable under the pan/zoom CSS transform — so a miss never enters the SVG.
+  const [decorSrc, setDecorSrc] = useState<string | null>(null);
+  const [overlaySrc, setOverlaySrc] = useState<string | null>(null);
+  const onMapBackdropSettledRef = useRef(onMapBackdropSettled);
+  onMapBackdropSettledRef.current = onMapBackdropSettled;
+  const onMapBackdropFailedRef = useRef(onMapBackdropFailed);
+  onMapBackdropFailedRef.current = onMapBackdropFailed;
+  const backdropSettledRef = useRef(false);
+  const notifyBackdropSettled = useCallback(() => {
+    if (backdropSettledRef.current) return;
+    backdropSettledRef.current = true;
+    onMapBackdropSettledRef.current?.();
+  }, []);
+  const notifyBackdropFailed = useCallback(() => {
+    if (backdropSettledRef.current) return;
+    backdropSettledRef.current = true;
+    onMapBackdropFailedRef.current?.();
+  }, []);
   useEffect(() => {
     setPngFailedForMap(null);
     setMapOverlayRasterHidden(false);
-  }, [mapBase]);
-  const handleBgImageError = useCallback(
-    (e: React.SyntheticEvent<HTMLImageElement | SVGImageElement>) => {
-      const el = e.currentTarget;
-      const src =
-        el instanceof HTMLImageElement
-          ? el.currentSrc || el.src
-          : (el as SVGImageElement).href?.baseVal ?? '';
-      if (src.includes(`${mapBase}.png`)) setPngFailedForMap(mapBase);
-    },
-    [mapBase]
-  );
+    setDecorSrc(null);
+    setOverlaySrc(null);
+    backdropSettledRef.current = false;
+    let cancelled = false;
+    const decorUrl = `/${mapBase}.png?v=1`;
+    const overlayUrl = `/${mapBase}_overlay.png?v=1`;
+    const decor = new Image();
+    const overlay = new Image();
+    decor.onload = () => {
+      if (!cancelled) setDecorSrc(decorUrl);
+    };
+    decor.onerror = () => {
+      if (cancelled) return;
+      setPngFailedForMap(mapBase);
+      notifyBackdropFailed();
+    };
+    overlay.onload = () => {
+      if (!cancelled) setOverlaySrc(overlayUrl);
+    };
+    decor.src = decorUrl;
+    overlay.src = overlayUrl;
+    return () => {
+      cancelled = true;
+    };
+  }, [mapBase, notifyBackdropFailed]);
+  const handleBgImageError = useCallback(() => {
+    setDecorSrc(null);
+    setPngFailedForMap(mapBase);
+    notifyBackdropFailed();
+  }, [mapBase, notifyBackdropFailed]);
+  // Cached SVG images sometimes skip the React onLoad listener. If the preload
+  // already succeeded and no error arrived, open the scroll on the next frame.
+  useEffect(() => {
+    if (!decorSrc) return;
+    let cancelled = false;
+    const frame = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        if (!cancelled) notifyBackdropSettled();
+      });
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [decorSrc, notifyBackdropSettled]);
   /** PNG when available; full-map SVG only as fallback if the PNG fails to load. */
   const imageUrl = pngFailedForMap === mapBase ? svgFallbackUrl : pngUrl;
 
@@ -4475,25 +4537,26 @@ function GameMap({
                         </marker>
                       </defs>
                       {/* Raster lives inside this SVG (after territory paths) so paint order is correct in Chrome/WebKit. HTML <img> as a sibling of <svg> can composite under filtered paths on sea-heavy crops (e.g. MotW) — there is no separate WOTR-only stacking path; WOTR just tripped the bug less often. */}
-                      {pngFailedForMap !== mapBase && (
+                      {decorSrc && pngFailedForMap !== mapBase && (
                         <image
                           key={`map-decor-${mapBase}`}
                           className="map-svg-decor-image"
-                          href={`/${mapBase}.png?v=1`}
+                          href={decorSrc}
                           x={0}
                           y={0}
                           width={SVG_VIEWBOX.width}
                           height={SVG_VIEWBOX.height}
                           preserveAspectRatio="none"
                           pointerEvents="none"
+                          onLoad={notifyBackdropSettled}
                           onError={handleBgImageError}
                         />
                       )}
-                      {!mapOverlayRasterHidden && pngFailedForMap !== mapBase && (
+                      {overlaySrc && !mapOverlayRasterHidden && pngFailedForMap !== mapBase && (
                         <image
                           key={`map-overlay-${mapBase}`}
                           className="map-svg-overlay-image"
-                          href={`/${mapBase}_overlay.png?v=1`}
+                          href={overlaySrc}
                           x={0}
                           y={0}
                           width={SVG_VIEWBOX.width}
