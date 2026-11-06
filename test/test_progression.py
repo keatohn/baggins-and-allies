@@ -205,6 +205,32 @@ def test_fold_events_counts_enemy_strongholds_only():
     assert stats["by_faction"]["mordor"]["strongholds_captured"] == 1
 
 
+def test_fold_events_counts_debug_only_stronghold_captures():
+    stats = {"by_faction": {}}
+    fold_events(
+        stats,
+        [
+            {
+                "type": "territory_captured",
+                "payload": {
+                    "territory": "barad_dur",
+                    "old_owner": "mordor",
+                    "new_owner": "gondor",
+                    "debug_only": True,
+                },
+            },
+            {
+                "type": "phase_changed",
+                "payload": {"debug_only": True},
+            },
+        ],
+        {"barad_dur"},
+        original_owners={"barad_dur": "mordor"},
+        alliances={"gondor": "good", "mordor": "evil"},
+    )
+    assert stats["by_faction"]["gondor"]["strongholds_captured"] == 1
+
+
 def test_score_applies_multiplier_cap_rounds_and_forfeit():
     rules = _rules()
     by = {"gondor": {

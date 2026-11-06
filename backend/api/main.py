@@ -1012,6 +1012,14 @@ def get_game(game_id: str, db: Session | None = None) -> GameState:
 EVENT_LOG_MAX = 5000
 
 
+def _keep_event_for_log(event_dict: dict) -> bool:
+    """Drop debug-only noise, but keep captures. Profile stats recount those from the log."""
+    if event_dict.get("type") == "territory_captured":
+        return True
+    payload = event_dict.get("payload")
+    return not (isinstance(payload, dict) and payload.get("debug_only") is True)
+
+
 def save_game(
     game_id: str,
     state: GameState,
@@ -1044,17 +1052,14 @@ def save_game(
                 for e in events:
                     if isinstance(e, GameEvent):
                         event_dict = e.to_dict()
-                        payload = event_dict.get("payload")
-                        if isinstance(payload, dict) and payload.get("debug_only") is True:
-                            continue
-                        log.append(event_dict)
-                        accepted.append(event_dict)
                     elif isinstance(e, dict):
-                        payload = e.get("payload") if isinstance(e, dict) else None
-                        if isinstance(payload, dict) and payload.get("debug_only") is True:
-                            continue
-                        log.append(e)
-                        accepted.append(e)
+                        event_dict = e
+                    else:
+                        continue
+                    if not _keep_event_for_log(event_dict):
+                        continue
+                    log.append(event_dict)
+                    accepted.append(event_dict)
                 if len(log) > EVENT_LOG_MAX:
                     log = log[-EVENT_LOG_MAX:]
                 config["event_log"] = log

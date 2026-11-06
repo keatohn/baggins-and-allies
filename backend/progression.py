@@ -769,7 +769,7 @@ def fold_events(
         stats["by_faction"] = by
     for event in events:
         etype, payload = _event_parts(event)
-        if payload.get("debug_only") is True:
+        if payload.get("debug_only") is True and etype != "territory_captured":
             continue
         if etype == "territory_captured":
             owner = str(payload.get("new_owner") or "").strip()
