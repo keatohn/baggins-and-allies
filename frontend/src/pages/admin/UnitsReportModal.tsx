@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../services/api';
-import type { AdminSetupListItem, CatalogSpecial } from '../../services/api';
+import type { AdminSetupBundle, AdminSetupListItem, CatalogSpecial } from '../../services/api';
 import { previewStatsFromBundle } from './previewStats';
 
 type Props = {
   setups: AdminSetupListItem[];
   specials: CatalogSpecial[];
   onClose: () => void;
+  /** Called after stat edits land so an open setup editor keeps the new values. */
+  onSaved?: (setupId: string, units: Record<string, unknown>) => void;
 };
 
 type StatKey = 'cost' | 'attack' | 'defense' | 'dice' | 'movement' | 'health';
@@ -138,7 +140,66 @@ function withSpans(rows: UnitSource[]): UnitRow[] {
   });
 }
 
-export function UnitsReportModal({ setups, specials, onClose }: Props) {
+type LoadedSetup = { setup: AdminSetupListItem; bundle: AdminSetupBundle };
+
+function flattenUnits(loaded: LoadedSetup[], specials: CatalogSpecial[]): UnitSource[] {
+  const flat: UnitSource[] = [];
+  for (const { setup, bundle } of loaded) {
+    const preview = previewStatsFromBundle(bundle, { specials });
+    if (!preview) continue;
+    const scenario = setup.display_name?.trim() || setup.id;
+    for (const units of Object.values(preview.unitsByFaction)) {
+      for (const unit of units) {
+        const keys = [...new Set(unit.specials.map(specialKey))];
+        flat.push({
+          icon: unit.icon,
+          setupId: setup.id,
+          scenario,
+          unitId: unit.id,
+          cost: unit.cost,
+          purchasable: unit.purchasable,
+          attack: unit.attack,
+          defense: unit.defense,
+          dice: unit.dice,
+          movement: unit.movement,
+          health: unit.health,
+          specials: unit.specials.length ? unit.specials.join(', ') : '',
+          specialKeys: keys,
+        });
+      }
+    }
+  }
+  flat.sort((a, b) => (
+    a.icon.localeCompare(b.icon)
+    || a.scenario.localeCompare(b.scenario)
+    || a.setupId.localeCompare(b.setupId)
+    || a.unitId.localeCompare(b.unitId)
+  ));
+  return flat;
+}
+
+/** Pending edits are tracked per unit within a scenario. */
+function pendingKey(row: UnitSource): string {
+  return `${row.setupId}|${row.unitId}`;
+}
+
+function statMin(key: StatKey): number {
+  return key === 'dice' ? 1 : 0;
+}
+
+/** Write one stat back into a unit document; cost may be a number or {power: n}. */
+function applyStat(unit: Record<string, unknown>, key: StatKey, value: number): void {
+  if (key === 'cost') {
+    const cost = unit.cost;
+    unit.cost = cost !== null && typeof cost === 'object' && !Array.isArray(cost)
+      ? { ...(cost as Record<string, unknown>), power: value }
+      : value;
+  } else {
+    unit[key] = value;
+  }
+}
+
+export function UnitsReportModal({ setups, specials, onClose, onSaved }: Props) {
   const listed = useMemo(() => setups.filter(isListedScenario), [setups]);
   const [sources, setSources] = useState<UnitSource[]>([]);
   const [loading, setLoading] = useState(listed.length > 0);
@@ -148,6 +209,11 @@ export function UnitsReportModal({ setups, specials, onClose }: Props) {
   const [selectedSpecials, setSelectedSpecials] = useState<string[]>([]);
   const [specialsOpen, setSpecialsOpen] = useState(false);
   const specialsMenuRef = useRef<HTMLDivElement>(null);
+  const bundlesRef = useRef<Record<string, AdminSetupBundle>>({});
+  const [pending, setPending] = useState<Map<string, Partial<Record<StatKey, number>>>>(new Map());
+  const [editing, setEditing] = useState<{ key: string; stat: StatKey } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!specialsOpen) return;
@@ -161,44 +227,26 @@ export function UnitsReportModal({ setups, specials, onClose }: Props) {
   }, [specialsOpen]);
 
   useEffect(() => {
+    if (!editing) return;
+    const onDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('[data-unit-stat-edit]')) return;
+      setEditing(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [editing]);
+
+  useEffect(() => {
     if (listed.length === 0) return;
     let cancelled = false;
     Promise.all(listed.map((setup) => api.adminGetSetup(setup.id).then((bundle) => ({ setup, bundle }))))
       .then((loaded) => {
         if (cancelled) return;
-        const flat: UnitSource[] = [];
-        for (const { setup, bundle } of loaded) {
-          const preview = previewStatsFromBundle(bundle, { specials });
-          if (!preview) continue;
-          const scenario = setup.display_name?.trim() || setup.id;
-          for (const units of Object.values(preview.unitsByFaction)) {
-            for (const unit of units) {
-              const keys = [...new Set(unit.specials.map(specialKey))];
-              flat.push({
-                icon: unit.icon,
-                setupId: setup.id,
-                scenario,
-                unitId: unit.id,
-                cost: unit.cost,
-                purchasable: unit.purchasable,
-                attack: unit.attack,
-                defense: unit.defense,
-                dice: unit.dice,
-                movement: unit.movement,
-                health: unit.health,
-                specials: unit.specials.length ? unit.specials.join(', ') : '',
-                specialKeys: keys,
-              });
-            }
-          }
-        }
-        flat.sort((a, b) => (
-          a.icon.localeCompare(b.icon)
-          || a.scenario.localeCompare(b.scenario)
-          || a.setupId.localeCompare(b.setupId)
-          || a.unitId.localeCompare(b.unitId)
-        ));
-        setSources(flat);
+        const byId: Record<string, AdminSetupBundle> = {};
+        for (const { setup, bundle } of loaded) byId[setup.id] = bundle;
+        bundlesRef.current = byId;
+        setSources(flattenUnits(loaded, specials));
         setError(null);
       })
       .catch((e) => {
@@ -260,10 +308,10 @@ export function UnitsReportModal({ setups, specials, onClose }: Props) {
     }
     return out;
   }, [sources]);
-  const statOffMode = (row: UnitRow, key: StatKey) => {
+  const statOffMode = (row: UnitRow, key: StatKey, value: number) => {
     if (key === 'cost' && !row.purchasable) return false;
     const mode = modes.get(row.icon)?.[key];
-    return mode == null || row[key] !== mode;
+    return mode == null || value !== mode;
   };
   const filtersActive = query.trim() !== ''
     || selectedSpecials.length > 0
@@ -286,8 +334,183 @@ export function UnitsReportModal({ setups, specials, onClose }: Props) {
     setSpecialsOpen(false);
   };
 
+  const pendingCount = useMemo(() => {
+    let count = 0;
+    for (const patch of pending.values()) count += Object.keys(patch).length;
+    return count;
+  }, [pending]);
+
+  const rebuildSources = () => {
+    const loaded: LoadedSetup[] = [];
+    for (const setup of listed) {
+      const bundle = bundlesRef.current[setup.id];
+      if (bundle) loaded.push({ setup, bundle });
+    }
+    setSources(flattenUnits(loaded, specials));
+  };
+
+  const stepStat = (row: UnitSource, stat: StatKey, delta: number) => {
+    if (saving) return;
+    const key = pendingKey(row);
+    const current = pending.get(key)?.[stat] ?? row[stat];
+    const next = Math.max(statMin(stat), current + delta);
+    if (next === current) return;
+    setPending((prev) => {
+      const updated = new Map(prev);
+      const patch = { ...(updated.get(key) ?? {}) };
+      if (next === row[stat]) delete patch[stat];
+      else patch[stat] = next;
+      if (Object.keys(patch).length === 0) updated.delete(key);
+      else updated.set(key, patch);
+      return updated;
+    });
+  };
+
+  const cancelChanges = () => {
+    setPending(new Map());
+    setEditing(null);
+    setSaveError(null);
+  };
+
+  const saveChanges = async () => {
+    if (pending.size === 0 || saving) return;
+    setSaving(true);
+    setSaveError(null);
+    const bySetup = new Map<string, { unitId: string; stat: StatKey; value: number }[]>();
+    for (const [key, patch] of pending) {
+      const sep = key.indexOf('|');
+      const setupId = key.slice(0, sep);
+      const unitId = key.slice(sep + 1);
+      const edits = bySetup.get(setupId) ?? [];
+      for (const stat of STATS) {
+        const value = patch[stat.key];
+        if (value !== undefined) edits.push({ unitId, stat: stat.key, value });
+      }
+      bySetup.set(setupId, edits);
+    }
+    const failures: string[] = [];
+    for (const [setupId, edits] of bySetup) {
+      const bundle = bundlesRef.current[setupId];
+      const setup = listed.find((s) => s.id === setupId);
+      const label = setup?.display_name?.trim() || setupId;
+      if (!bundle) {
+        failures.push(`${label}: scenario could not be loaded`);
+        continue;
+      }
+      const units = JSON.parse(JSON.stringify(bundle.units)) as Record<string, unknown>;
+      const patched: Record<string, unknown> = {};
+      for (const { unitId, stat, value } of edits) {
+        const raw = units[unitId];
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+        const next = { ...(raw as Record<string, unknown>) };
+        applyStat(next, stat, value);
+        units[unitId] = next;
+        patched[unitId] = next;
+      }
+      try {
+        await api.adminPutSetup(setupId, {
+          manifest: { ...(bundle.manifest as Record<string, unknown>), id: setupId },
+          units,
+          territories: bundle.territories,
+          factions: bundle.factions,
+          camps: bundle.camps,
+          ports: bundle.ports,
+          starting_setup: bundle.starting_setup,
+        });
+        bundlesRef.current = { ...bundlesRef.current, [setupId]: { ...bundle, units } };
+        setPending((prev) => {
+          const updated = new Map(prev);
+          for (const key of [...updated.keys()]) {
+            if (key.startsWith(`${setupId}|`)) updated.delete(key);
+          }
+          return updated;
+        });
+        onSaved?.(setupId, patched);
+      } catch (e) {
+        failures.push(`${label}: ${e instanceof Error ? e.message : 'Save failed'}`);
+      }
+    }
+    rebuildSources();
+    setSaveError(failures.length > 0 ? failures.join(' · ') : null);
+    setSaving(false);
+  };
+
+  const requestClose = () => {
+    if (saving) return;
+    if (pending.size > 0) {
+      const discard = window.confirm(
+        `Discard ${pendingCount} unsaved stat change${pendingCount === 1 ? '' : 's'}?`,
+      );
+      if (!discard) return;
+    }
+    onClose();
+  };
+
+  const renderStatCell = (row: UnitRow, stat: { key: StatKey; label: string; title: string }) => {
+    const key = pendingKey(row);
+    const patch = pending.get(key);
+    const value = patch?.[stat.key] ?? row[stat.key];
+    const dirty = patch?.[stat.key] !== undefined;
+    const isEditing = editing?.key === key && editing.stat === stat.key;
+    const editable = stat.key !== 'cost' || row.purchasable;
+    const off = statOffMode(row, stat.key, value);
+    const classNames = [
+      'stats-col-num',
+      off ? ' units-across__off' : '',
+      dirty ? ' units-across__pending' : '',
+      isEditing ? ' units-across__editing' : '',
+    ].filter(Boolean).join(' ');
+    return (
+      <td
+        key={stat.key}
+        className={classNames}
+        data-unit-stat-edit={isEditing ? '' : undefined}
+        title={editable ? `${stat.title}${dirty ? ` (${row[stat.key]} → ${value}, unsaved)` : ''}` : undefined}
+        onClick={editable
+          ? () => setEditing((cur) => (cur && cur.key === key && cur.stat === stat.key ? null : { key, stat: stat.key }))
+          : undefined}
+      >
+        {isEditing ? (
+          <span className="units-across__stepper">
+            <span className="units-across__step-value">{value}</span>
+            <span className="units-across__step-arrows">
+              <button
+                type="button"
+                className="units-across__step-btn"
+                disabled={saving}
+                aria-label={`Increase ${stat.title} for ${row.unitId}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  stepStat(row, stat.key, 1);
+                }}
+              >
+                ▲
+              </button>
+              <button
+                type="button"
+                className="units-across__step-btn"
+                disabled={saving}
+                aria-label={`Decrease ${stat.title} for ${row.unitId}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  stepStat(row, stat.key, -1);
+                }}
+              >
+                ▼
+              </button>
+            </span>
+          </span>
+        ) : editable ? (
+          value
+        ) : (
+          '–'
+        )}
+      </td>
+    );
+  };
+
   return (
-    <div className="admin-modal-overlay" role="presentation" onClick={onClose}>
+    <div className="admin-modal-overlay" role="presentation" onClick={requestClose}>
       <div
         className="admin-modal admin-modal--units"
         role="dialog"
@@ -306,9 +529,29 @@ export function UnitsReportModal({ setups, specials, onClose }: Props) {
                 : `${rows.length} of ${sources.length} units from scenarios set to Yes or Admin only.`}
             </p>
           </div>
-          <button type="button" className="admin-page__btn" onClick={onClose}>
-            Close
-          </button>
+          <div className="units-across__header-actions">
+            {pendingCount > 0 ? (
+              <>
+                <span className="admin-form__micro">
+                  {pendingCount} unsaved {pendingCount === 1 ? 'change' : 'changes'}
+                </span>
+                <button type="button" className="admin-page__btn" disabled={saving} onClick={cancelChanges}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="admin-page__btn admin-page__btn--primary"
+                  disabled={saving}
+                  onClick={saveChanges}
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+              </>
+            ) : null}
+            <button type="button" className="admin-page__btn" disabled={saving} onClick={requestClose}>
+              Close
+            </button>
+          </div>
         </div>
         <div className="units-across__filters">
           <label className="units-across__search">
@@ -382,6 +625,7 @@ export function UnitsReportModal({ setups, specials, onClose }: Props) {
           A unit is kept when each filled minimum and maximum includes its stat, and it has every selected special.
         </p>
         {error ? <p className="admin-page__error games-report__error">{error}</p> : null}
+        {saveError ? <p className="admin-page__error games-report__error">{saveError}</p> : null}
         <div className="games-report__table-scroll unit-stats-modal units-across">
           {loading ? <p className="admin-form__micro">Loading units…</p> : null}
           {!loading && sources.length === 0 ? <p className="admin-form__micro">No units in active scenarios.</p> : null}
@@ -433,12 +677,7 @@ export function UnitsReportModal({ setups, specials, onClose }: Props) {
                       </td>
                     ) : null}
                     <td className="units-across__id">{row.unitId}</td>
-                    <td className={`stats-col-num${statOffMode(row, 'cost') ? ' units-across__off' : ''}`}>{row.purchasable ? row.cost : '–'}</td>
-                    <td className={`stats-col-num${statOffMode(row, 'attack') ? ' units-across__off' : ''}`}>{row.attack}</td>
-                    <td className={`stats-col-num${statOffMode(row, 'defense') ? ' units-across__off' : ''}`}>{row.defense}</td>
-                    <td className={`stats-col-num${statOffMode(row, 'dice') ? ' units-across__off' : ''}`}>{row.dice}</td>
-                    <td className={`stats-col-num${statOffMode(row, 'movement') ? ' units-across__off' : ''}`}>{row.movement}</td>
-                    <td className={`stats-col-num${statOffMode(row, 'health') ? ' units-across__off' : ''}`}>{row.health}</td>
+                    {STATS.map((stat) => renderStatCell(row, stat))}
                     <td className="stats-col-num stats-col-specials">{row.specials}</td>
                   </tr>
                 ))}
@@ -447,7 +686,7 @@ export function UnitsReportModal({ setups, specials, onClose }: Props) {
           ) : null}
         </div>
         <p className="unit-stats-modal-key">
-          P = Power cost | A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points | SP = Specials. A red number is not that icon’s usual value.
+          P = Power cost | A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points | SP = Specials. A red number is not that icon’s usual value. Click a stat to adjust it, then Save or Cancel.
         </p>
       </div>
     </div>
