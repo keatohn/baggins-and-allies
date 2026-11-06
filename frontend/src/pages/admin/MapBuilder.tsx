@@ -26,24 +26,27 @@ type BuilderDoc = {
 type Tool = 'select' | 'pen' | 'pencil' | 'label';
 type Selection = { kind: 'joint' | 'border' | 'label'; id: string } | null;
 
-const STORAGE_KEY = 'admin_map_builder_doc_v1';
+const LEGACY_STORAGE_KEY = 'admin_map_builder_doc_v1';
+const DRAFTS_KEY = 'admin_map_builder_drafts_v1';
 const SNAP_PX = 10;
 const HIT_PX = 7;
 const JOINT_R_PX = 5;
 const MAX_HISTORY = 100;
 const PENCIL_MIN_PX = 4;
 const RDP_EPS_PX = 1.5;
-const CLICK_PX = 5;
+const CLICK_PX = 8;
 const AREA_EPS = 1e-6;
 const TID_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 const MIN_DIM = 100;
 const MAX_DIM = 50000;
+const DEFAULT_W = 3500;
+const DEFAULT_H = 2600;
 
 const TOOL_HINTS: Record<Tool, string> = {
   select: 'Drag joints to move them · click a border to select · Delete removes · drag the background to pan',
-  pen: 'Click to place points (endpoints snap onto joints or split borders they land on) · Enter or click the first point finishes · Esc cancels',
+  pen: 'Click to place points (endpoints snap onto joints or split borders they land on) · drag to pan · Enter or click the first point finishes · Esc cancels',
   pencil: 'Drag to draw a freehand border · ends snap and join the shared graph',
-  label: 'Click inside a closed region to name it · click an existing label to edit',
+  label: 'Click inside a closed region to name it · click an existing label to edit · drag to pan',
 };
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -74,27 +77,78 @@ function defaultFrame(width: number, height: number): BuilderDoc {
   };
 }
 
-function loadSaved(): BuilderDoc | null {
+function isBuilderDoc(d: unknown): d is BuilderDoc {
+  const doc = d as BuilderDoc | null | undefined;
+  return !!(
+    doc &&
+    typeof doc.width === 'number' &&
+    typeof doc.height === 'number' &&
+    doc.joints &&
+    typeof doc.joints === 'object' &&
+    doc.borders &&
+    typeof doc.borders === 'object' &&
+    doc.labels &&
+    typeof doc.labels === 'object'
+  );
+}
+
+type Draft = { id: string; name: string; updated: number; doc: BuilderDoc };
+type DraftStore = { currentId: string; drafts: Draft[] };
+
+function makeDraft(name: string, doc: BuilderDoc): Draft {
+  return { id: `d_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`, name, updated: Date.now(), doc };
+}
+
+function defaultStore(): DraftStore {
+  const draft = makeDraft('Draft 1', defaultFrame(DEFAULT_W, DEFAULT_H));
+  return { currentId: draft.id, drafts: [draft] };
+}
+
+function loadStore(): DraftStore {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const d = JSON.parse(raw) as BuilderDoc;
-    if (
-      typeof d?.width === 'number' &&
-      typeof d?.height === 'number' &&
-      d.joints &&
-      typeof d.joints === 'object' &&
-      d.borders &&
-      typeof d.borders === 'object' &&
-      d.labels &&
-      typeof d.labels === 'object'
-    ) {
-      return d;
+    const raw = localStorage.getItem(DRAFTS_KEY);
+    if (raw) {
+      const s = JSON.parse(raw) as DraftStore;
+      if (
+        s &&
+        typeof s.currentId === 'string' &&
+        Array.isArray(s.drafts) &&
+        s.drafts.length > 0 &&
+        s.drafts.every(
+          (d) => d && typeof d.id === 'string' && typeof d.name === 'string' && isBuilderDoc(d.doc),
+        )
+      ) {
+        if (!s.drafts.some((d) => d.id === s.currentId)) s.currentId = s.drafts[0].id;
+        return s;
+      }
     }
   } catch {
-    /* fall through to a fresh frame */
+    /* fall through */
   }
-  return null;
+  // Migrate the legacy single-document key.
+  try {
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (raw) {
+      const legacy = JSON.parse(raw) as BuilderDoc;
+      if (isBuilderDoc(legacy)) {
+        const draft = makeDraft('Draft 1', legacy);
+        const store: DraftStore = { currentId: draft.id, drafts: [draft] };
+        saveStore(store);
+        return store;
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+  return defaultStore();
+}
+
+function saveStore(s: DraftStore): void {
+  try {
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(s));
+  } catch {
+    /* storage full/blocked — ignore */
+  }
 }
 
 function downloadText(filename: string, text: string, mime: string): void {
@@ -323,18 +377,28 @@ function addBorder(doc: BuilderDoc, a: string, b: string): void {
 // --- component ----------------------------------------------------------------
 
 export function MapBuilder() {
-  const [doc, setDoc] = useState<BuilderDoc>(() => loadSaved() ?? defaultFrame(3500, 2600));
+  const [boot] = useState(loadStore);
+  const [doc, setDoc] = useState<BuilderDoc>(
+    () => boot.drafts.find((d) => d.id === boot.currentId)?.doc ?? defaultFrame(DEFAULT_W, DEFAULT_H),
+  );
+  const [currentId, setCurrentId] = useState<string>(boot.currentId);
+  const [draftMeta, setDraftMeta] = useState(() =>
+    boot.drafts.map((d) => ({ id: d.id, name: d.name, updated: d.updated })),
+  );
   const [past, setPast] = useState<BuilderDoc[]>([]);
   const [future, setFuture] = useState<BuilderDoc[]>([]);
   const [tool, setTool] = useState<Tool>('select');
   const [selection, setSelection] = useState<Selection>(null);
   const [view, setView] = useState({ x: 0, y: 0, scale: 1 });
-  const [sizeDraft, setSizeDraft] = useState({ w: '3500', h: '2600' });
+  const [sizeDraft, setSizeDraft] = useState({ w: String(doc.width), h: String(doc.height) });
   const [status, setStatus] = useState<string | null>(null);
   const [cursor, setCursor] = useState<Pt | null>(null);
   const [pencilPts, setPencilPts] = useState<Pt[] | null>(null);
   const [svgModal, setSvgModal] = useState<{ svg: string; warnings: string[] } | null>(null);
   const [jsonModal, setJsonModal] = useState<{ mode: 'export' | 'import'; text: string; error: string | null } | null>(null);
+  const [confirmBox, setConfirmBox] = useState<{ title: string; message: string; onConfirm: () => void } | null>(
+    null,
+  );
   const [labelDialog, setLabelDialog] = useState<{
     x: number;
     y: number;
@@ -346,6 +410,7 @@ export function MapBuilder() {
   } | null>(null);
   const [converting, setConverting] = useState(false);
 
+  const storeRef = useRef<DraftStore>(boot);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const docRef = useRef(doc);
   const pastRef = useRef(past);
@@ -374,22 +439,29 @@ export function MapBuilder() {
     toolRef.current = tool;
   }, [tool]);
 
-  // Autosave (debounced).
+  // Autosave the open draft (debounced), then refresh sidebar timestamps.
   useEffect(() => {
     const t = window.setTimeout(() => {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(doc));
-      } catch {
-        /* storage full/blocked — ignore */
+      const s = storeRef.current;
+      const cur = s.drafts.find((d) => d.id === currentId);
+      let changed = false;
+      if (cur && cur.doc !== doc) {
+        cur.doc = doc;
+        cur.updated = Date.now();
+        changed = true;
+      }
+      saveStore(s);
+      if (changed) {
+        setDraftMeta(s.drafts.map((d) => ({ id: d.id, name: d.name, updated: d.updated })));
       }
     }, 400);
     return () => window.clearTimeout(t);
-  }, [doc]);
+  }, [currentId, doc]);
 
-  // Keep the size inputs in sync when the doc changes from import/clear/undo.
+  // Keep the size inputs in sync when the doc changes from import/clear/undo/draft switch.
   useEffect(() => {
     setSizeDraft({ w: String(doc.width), h: String(doc.height) });
-  }, [doc.width, doc.height]);
+  }, [doc.width, doc.height, currentId]);
 
   const fitView = useCallback((which?: BuilderDoc) => {
     const el = wrapRef.current;
@@ -429,7 +501,10 @@ export function MapBuilder() {
         setView(next);
         return;
       }
-      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      // Delta-based zoom: one mouse notch (~100 units) ≈ ×1.1, but trackpad
+      // pinch storms (many tiny deltas) no longer compound into hypersensitivity.
+      const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+      const factor = clamp(Math.exp(-dy * 0.001), 0.4, 2.5);
       const ns = clamp(v.scale * factor, 0.02, 8);
       const wx = (mx - v.x) / v.scale;
       const wy = (my - v.y) / v.scale;
@@ -599,9 +674,15 @@ export function MapBuilder() {
       if (res.jointId !== stroke.joints[stroke.joints.length - 1]) {
         addBorder(d, stroke.joints[stroke.joints.length - 1], res.jointId);
         stroke.joints.push(res.jointId);
+        docRef.current = d;
+        setDoc(d);
+        setStatus(
+          `Pen: ${stroke.joints.length} points · Enter or click the first point to finish · Esc cancels`,
+        );
+        return;
       }
-      docRef.current = d;
-      setDoc(d);
+      // Snapped onto the live endpoint: resolvePoint made no change, so skip setDoc.
+      setStatus('Pen: that is the point you are already on — click a new spot (or the first point to finish)');
     },
     [finishPen],
   );
@@ -712,11 +793,37 @@ export function MapBuilder() {
       } catch {
         /* ignore */
       }
+      return;
     }
-    // pen / label act on pointer-up (click detection).
+
+    // pen / label act on pointer-up (click detection) — capture so the
+    // click still lands when the pointer is released slightly outside.
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    // pen / label: a drag past the click threshold becomes a pan instead of a silent no-op.
+    const downForPan = downRef.current;
+    if (
+      !panRef.current &&
+      downForPan &&
+      e.pointerId === downForPan.id &&
+      (toolRef.current === 'pen' || toolRef.current === 'label') &&
+      Math.hypot(e.clientX - downForPan.x, e.clientY - downForPan.y) > CLICK_PX
+    ) {
+      panRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        vx: viewRef.current.x,
+        vy: viewRef.current.y,
+        id: e.pointerId,
+      };
+    }
+
     const pan = panRef.current;
     if (pan && e.pointerId === pan.id) {
       const next = {
@@ -764,6 +871,7 @@ export function MapBuilder() {
     const pan = panRef.current;
     if (pan && e.pointerId === pan.id) {
       panRef.current = null;
+      downRef.current = null;
       try {
         e.currentTarget.releasePointerCapture(e.pointerId);
       } catch {
@@ -853,11 +961,12 @@ export function MapBuilder() {
       ) {
         return;
       }
-      if (labelDialog || jsonModal || svgModal) {
+      if (labelDialog || jsonModal || svgModal || confirmBox) {
         if (e.key === 'Escape') {
           setLabelDialog(null);
           setJsonModal(null);
           setSvgModal(null);
+          setConfirmBox(null);
         }
         return;
       }
@@ -894,7 +1003,7 @@ export function MapBuilder() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [cancelStroke, deleteSelection, finishPen, jsonModal, labelDialog, redo, selection, svgModal, undo]);
+  }, [cancelStroke, confirmBox, deleteSelection, finishPen, jsonModal, labelDialog, redo, selection, svgModal, undo]);
 
   // --- header actions ---------------------------------------------------------
 
@@ -989,13 +1098,14 @@ export function MapBuilder() {
     }
   };
 
-  const buildSvg = async () => {
+  const buildSvg = async (source?: { doc: BuilderDoc; name?: string }) => {
     setConverting(true);
     try {
-      const r = await api.adminConvertMapBuilder(docRef.current);
+      const r = await api.adminConvertMapBuilder(source?.doc ?? docRef.current);
       setSvgModal({ svg: r.svg, warnings: r.warnings ?? [] });
       setStatus(
-        `SVG built: ${r.stats.labelled}/${r.stats.regions} regions labelled · ${r.stats.borders} borders (${r.stats.pruned_borders} dangling pruned)`,
+        `SVG built${source?.name ? ` from “${source.name}”` : ''}: ` +
+          `${r.stats.labelled}/${r.stats.regions} regions labelled · ${r.stats.borders} borders (${r.stats.pruned_borders} dangling pruned)`,
       );
     } catch (err) {
       setStatus(`Convert failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -1041,6 +1151,125 @@ export function MapBuilder() {
     setStatus(null);
   };
 
+  // --- drafts -----------------------------------------------------------------
+
+  const refreshMeta = () =>
+    setDraftMeta(storeRef.current.drafts.map((d) => ({ id: d.id, name: d.name, updated: d.updated })));
+
+  // Write the live doc into its draft immediately (bypasses the debounce).
+  const flushDraft = () => {
+    const s = storeRef.current;
+    const cur = s.drafts.find((d) => d.id === s.currentId);
+    if (cur && cur.doc !== docRef.current) {
+      cur.doc = docRef.current;
+      cur.updated = Date.now();
+    }
+    saveStore(s);
+  };
+
+  const switchDraft = (id: string) => {
+    if (id === currentId) return;
+    cancelStroke(); // revert any in-progress pen/pencil stroke before saving
+    flushDraft();
+    const s = storeRef.current;
+    const target = s.drafts.find((d) => d.id === id);
+    if (!target) return;
+    s.currentId = id;
+    saveStore(s);
+    setCurrentId(id);
+    docRef.current = target.doc;
+    setDoc(target.doc);
+    setPast([]);
+    setFuture([]);
+    setSelection(null);
+    setStatus(`Switched to “${target.name}”`);
+    refreshMeta();
+    window.setTimeout(() => fitView(target.doc), 0);
+  };
+
+  const newDraft = () => {
+    cancelStroke(); // revert any in-progress pen/pencil stroke before saving
+    flushDraft();
+    const s = storeRef.current;
+    let n = s.drafts.length + 1;
+    const names = new Set(s.drafts.map((d) => d.name));
+    while (names.has(`Draft ${n}`)) n += 1;
+    const draft = makeDraft(`Draft ${n}`, defaultFrame(DEFAULT_W, DEFAULT_H));
+    s.drafts.push(draft);
+    s.currentId = draft.id;
+    saveStore(s);
+    setCurrentId(draft.id);
+    docRef.current = draft.doc;
+    setDoc(draft.doc);
+    setPast([]);
+    setFuture([]);
+    setSelection(null);
+    setStatus(`Created “${draft.name}”`);
+    refreshMeta();
+    window.setTimeout(() => fitView(draft.doc), 0);
+  };
+
+  const renameDraft = (id: string) => {
+    flushDraft();
+    const s = storeRef.current;
+    const d = s.drafts.find((x) => x.id === id);
+    if (!d) return;
+    const raw = window.prompt('Draft name:', d.name);
+    if (raw === null) return;
+    const name = raw.trim();
+    if (!name) return;
+    d.name = name;
+    d.updated = Date.now();
+    saveStore(s);
+    refreshMeta();
+    setStatus(`Renamed to “${name}”`);
+  };
+
+  const deleteDraft = (id: string) => {
+    const s = storeRef.current;
+    if (s.drafts.length <= 1) {
+      setStatus('Cannot delete the only draft — use Clear instead');
+      return;
+    }
+    const d = s.drafts.find((x) => x.id === id);
+    if (!d) return;
+    setConfirmBox({
+      title: 'Delete draft',
+      message: `Delete “${d.name}”? This cannot be undone.`,
+      onConfirm: () => {
+        cancelStroke(); // revert any in-progress pen/pencil stroke before saving
+        flushDraft();
+        const st = storeRef.current;
+        const idx = st.drafts.findIndex((x) => x.id === id);
+        if (idx < 0) return;
+        const wasCurrent = st.currentId === id;
+        st.drafts.splice(idx, 1);
+        if (wasCurrent) {
+          const next = st.drafts[Math.min(idx, st.drafts.length - 1)];
+          st.currentId = next.id;
+          docRef.current = next.doc;
+          setDoc(next.doc);
+          setCurrentId(next.id);
+          setPast([]);
+          setFuture([]);
+          setSelection(null);
+          window.setTimeout(() => fitView(next.doc), 0);
+        }
+        saveStore(st);
+        refreshMeta();
+        setStatus(`Deleted “${d.name}”`);
+      },
+    });
+  };
+
+  const buildSvgForDraft = (id: string) => {
+    const s = storeRef.current;
+    const d = s.drafts.find((x) => x.id === id);
+    if (!d) return;
+    // Build from the live doc when it is the open draft (unsaved edits included).
+    void buildSvg(id === currentId ? { doc: docRef.current, name: d.name } : { doc: d.doc, name: d.name });
+  };
+
   // --- render -----------------------------------------------------------------
 
   const k = 1 / view.scale;
@@ -1050,217 +1279,333 @@ export function MapBuilder() {
 
   return (
     <div className="mapbuilder">
-      <div className="mapbuilder__toolbar" role="toolbar" aria-label="Map builder tools">
-        <label className="mapbuilder__size">
-          Size
-          <input
-            className="admin-form__input admin-form__input--narrow"
-            type="number"
-            min={MIN_DIM}
-            max={MAX_DIM}
-            value={sizeDraft.w}
-            aria-label="Map width in px"
-            onChange={(e) => setSizeDraft((s) => ({ ...s, w: e.target.value }))}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') applySize();
-            }}
-          />
-          ×
-          <input
-            className="admin-form__input admin-form__input--narrow"
-            type="number"
-            min={MIN_DIM}
-            max={MAX_DIM}
-            value={sizeDraft.h}
-            aria-label="Map height in px"
-            onChange={(e) => setSizeDraft((s) => ({ ...s, h: e.target.value }))}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') applySize();
-            }}
-          />
-          <button type="button" className="admin-page__btn" onClick={applySize}>
-            Apply
+      <aside className="mapbuilder__drafts" aria-label="Map drafts">
+        <div className="mapbuilder__drafts-head">
+          <span className="mapbuilder__drafts-title">Drafts</span>
+          <button type="button" className="admin-page__btn" onClick={newDraft} title="Start a new blank draft">
+            New
           </button>
-        </label>
-
-        <div className="admin-mapview__toggle" role="group" aria-label="Drawing tool">
-          {(
-            [
-              ['select', 'Select'],
-              ['pen', 'Pen'],
-              ['pencil', 'Pencil'],
-              ['label', 'Label'],
-            ] as const
-          ).map(([t, label]) => (
-            <button
-              key={t}
-              type="button"
-              className={`admin-mapview__toggle-btn${tool === t ? ' admin-mapview__toggle-btn--active' : ''}`}
-              aria-pressed={tool === t}
-              onClick={() => setToolAndCancel(t)}
+        </div>
+        <ul className="mapbuilder__draft-list">
+          {draftMeta.map((d) => (
+            <li
+              key={d.id}
+              className={`mapbuilder__draft${d.id === currentId ? ' mapbuilder__draft--active' : ''}`}
             >
-              {label}
-            </button>
+              <button
+                type="button"
+                className="mapbuilder__draft-open"
+                aria-current={d.id === currentId ? 'true' : undefined}
+                onClick={() => switchDraft(d.id)}
+                title={`Open ${d.name}`}
+              >
+                <span className="mapbuilder__draft-name">{d.name}</span>
+                <span className="mapbuilder__draft-time">
+                  {new Date(d.updated).toLocaleString(undefined, {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </span>
+              </button>
+              <span className="mapbuilder__draft-tools">
+                <button
+                  type="button"
+                  className="admin-page__btn"
+                  onClick={() => buildSvgForDraft(d.id)}
+                  disabled={converting}
+                  title={`Build SVG from ${d.name} without opening it`}
+                >
+                  SVG
+                </button>
+                <button
+                  type="button"
+                  className="admin-page__btn"
+                  onClick={() => renameDraft(d.id)}
+                  title={`Rename ${d.name}`}
+                >
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  className="admin-page__btn admin-page__btn--danger"
+                  onClick={() => deleteDraft(d.id)}
+                  title={`Delete ${d.name}`}
+                >
+                  Del
+                </button>
+              </span>
+            </li>
           ))}
+        </ul>
+        <p className="admin-form__micro mapbuilder__drafts-note">
+          Drafts auto-save to this browser. Switch freely — each keeps its own drawing, size and labels.
+        </p>
+      </aside>
+
+      <div className="mapbuilder__main">
+        <div className="mapbuilder__toolbar" role="toolbar" aria-label="Map builder tools">
+          <label className="mapbuilder__size">
+            Size
+            <input
+              className="admin-form__input admin-form__input--narrow"
+              type="number"
+              min={MIN_DIM}
+              max={MAX_DIM}
+              value={sizeDraft.w}
+              aria-label="Map width in px"
+              onChange={(e) => setSizeDraft((s) => ({ ...s, w: e.target.value }))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') applySize();
+              }}
+            />
+            ×
+            <input
+              className="admin-form__input admin-form__input--narrow"
+              type="number"
+              min={MIN_DIM}
+              max={MAX_DIM}
+              value={sizeDraft.h}
+              aria-label="Map height in px"
+              onChange={(e) => setSizeDraft((s) => ({ ...s, h: e.target.value }))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') applySize();
+              }}
+            />
+            <button type="button" className="admin-page__btn" onClick={applySize}>
+              Apply
+            </button>
+          </label>
+
+          <div className="admin-mapview__toggle" role="group" aria-label="Drawing tool">
+            {(
+              [
+                ['select', 'Select'],
+                ['pen', 'Pen'],
+                ['pencil', 'Pencil'],
+                ['label', 'Label'],
+              ] as const
+            ).map(([t, label]) => (
+              <button
+                key={t}
+                type="button"
+                className={`admin-mapview__toggle-btn${tool === t ? ' admin-mapview__toggle-btn--active' : ''}`}
+                aria-pressed={tool === t}
+                onClick={() => setToolAndCancel(t)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="mapbuilder__actions">
+            <button type="button" className="admin-page__btn" onClick={undo} disabled={!past.length} title="Ctrl+Z">
+              Undo
+            </button>
+            <button
+              type="button"
+              className="admin-page__btn"
+              onClick={redo}
+              disabled={!future.length}
+              title="Ctrl+Shift+Z"
+            >
+              Redo
+            </button>
+            <button type="button" className="admin-page__btn" onClick={() => fitView()}>
+              Fit
+            </button>
+            <button
+              type="button"
+              className="admin-page__btn admin-page__btn--danger"
+              onClick={() =>
+                setConfirmBox({
+                  title: 'Clear everything?',
+                  message:
+                    'This resets the open draft to a bare outer frame — all borders, strokes and labels are removed. Undo (Ctrl+Z) still works afterwards.',
+                  onConfirm: clearAll,
+                })
+              }
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              className="admin-page__btn"
+              onClick={openExport}
+              title="Download or copy the whole drawing as JSON — back it up or move it to another browser"
+            >
+              Export JSON
+            </button>
+            <button
+              type="button"
+              className="admin-page__btn"
+              onClick={() => setJsonModal({ mode: 'import', text: '', error: null })}
+              title="Paste exported JSON to replace the current drawing"
+            >
+              Import JSON
+            </button>
+            <button
+              type="button"
+              className="admin-page__btn admin-page__btn--primary"
+              onClick={() => void buildSvg()}
+              disabled={converting}
+              title="Send the drawing to the converter and show the generated SVG source"
+            >
+              {converting ? 'Building…' : 'Build SVG'}
+            </button>
+          </div>
+
+          <span className="mapbuilder__stats" aria-live="polite">
+            {jointList.length} joints · {borderList.length} borders · {regions} regions · {labelled} labelled
+          </span>
         </div>
 
-        <div className="mapbuilder__actions">
-          <button type="button" className="admin-page__btn" onClick={undo} disabled={!past.length} title="Ctrl+Z">
-            Undo
-          </button>
-          <button
-            type="button"
-            className="admin-page__btn"
-            onClick={redo}
-            disabled={!future.length}
-            title="Ctrl+Shift+Z"
-          >
-            Redo
-          </button>
-          <button type="button" className="admin-page__btn" onClick={() => fitView()}>
-            Fit
-          </button>
-          <button type="button" className="admin-page__btn admin-page__btn--danger" onClick={clearAll}>
-            Clear
-          </button>
-          <button type="button" className="admin-page__btn" onClick={openExport}>
-            Export JSON
-          </button>
-          <button
-            type="button"
-            className="admin-page__btn"
-            onClick={() => setJsonModal({ mode: 'import', text: '', error: null })}
-          >
-            Import JSON
-          </button>
-          <button
-            type="button"
-            className="admin-page__btn admin-page__btn--primary"
-            onClick={() => void buildSvg()}
-            disabled={converting}
-          >
-            {converting ? 'Building…' : 'Build SVG…'}
-          </button>
-        </div>
-
-        <span className="mapbuilder__stats" aria-live="polite">
-          {jointList.length} joints · {borderList.length} borders · {regions} regions · {labelled} labelled
-        </span>
-      </div>
-
-      <div
-        ref={wrapRef}
-        className={`mapbuilder__viewport mapbuilder__viewport--${tool}`}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerCancel}
-      >
         <div
-          className="mapbuilder__world"
-          style={{
-            width: doc.width,
-            height: doc.height,
-            transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
-          }}
+          ref={wrapRef}
+          className={`mapbuilder__viewport mapbuilder__viewport--${tool}`}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerCancel}
         >
-          <svg
-            className="mapbuilder__svg"
-            viewBox={`0 0 ${doc.width} ${doc.height}`}
-            width={doc.width}
-            height={doc.height}
+          <div
+            className="mapbuilder__world"
+            style={{
+              width: doc.width,
+              height: doc.height,
+              transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
+            }}
           >
-            {/* Borders — each stored once, shared by both neighbouring regions. */}
-            {borderList.map(([bid, b]) => {
-              const A = doc.joints[b.a];
-              const B = doc.joints[b.b];
-              if (!A || !B) return null;
-              const selectedBorder = selection?.kind === 'border' && selection.id === bid;
-              const inPen = penJoints.includes(b.a) && penJoints.includes(b.b);
-              return (
-                <line
-                  key={bid}
-                  x1={A.x}
-                  y1={A.y}
-                  x2={B.x}
-                  y2={B.y}
-                  className={`mapbuilder__border${selectedBorder ? ' mapbuilder__border--selected' : ''}${
-                    inPen ? ' mapbuilder__border--pen' : ''
-                  }`}
-                  strokeWidth={selectedBorder || inPen ? 3 * k : 1.5 * k}
-                />
-              );
-            })}
-
-            {/* Pen preview: last point → cursor. */}
-            {tool === 'pen' && penJoints.length > 0 && cursor ? (
-              (() => {
-                const last = doc.joints[penJoints[penJoints.length - 1]];
-                if (!last) return null;
+            <svg
+              className="mapbuilder__svg"
+              viewBox={`0 0 ${doc.width} ${doc.height}`}
+              width={doc.width}
+              height={doc.height}
+            >
+              {/* Borders — each stored once, shared by both neighbouring regions. */}
+              {borderList.map(([bid, b]) => {
+                const A = doc.joints[b.a];
+                const B = doc.joints[b.b];
+                if (!A || !B) return null;
+                const selectedBorder = selection?.kind === 'border' && selection.id === bid;
+                const inPen = penJoints.includes(b.a) && penJoints.includes(b.b);
                 return (
                   <line
-                    className="mapbuilder__preview"
-                    x1={last.x}
-                    y1={last.y}
-                    x2={cursor.x}
-                    y2={cursor.y}
-                    strokeWidth={1.5 * k}
+                    key={bid}
+                    x1={A.x}
+                    y1={A.y}
+                    x2={B.x}
+                    y2={B.y}
+                    className={`mapbuilder__border${selectedBorder ? ' mapbuilder__border--selected' : ''}${
+                      inPen ? ' mapbuilder__border--pen' : ''
+                    }`}
+                    strokeWidth={selectedBorder || inPen ? 3 * k : 1.5 * k}
                   />
                 );
-              })()
-            ) : null}
+              })}
 
-            {/* Pencil preview polyline. */}
-            {pencilPts && pencilPts.length > 1 ? (
-              <polyline
-                className="mapbuilder__preview"
-                points={pencilPts.map((p) => `${p.x},${p.y}`).join(' ')}
-                fill="none"
-                strokeWidth={2 * k}
-              />
-            ) : null}
+              {/* Pen preview: last point → cursor. */}
+              {tool === 'pen' && penJoints.length > 0 && cursor ? (
+                (() => {
+                  const last = doc.joints[penJoints[penJoints.length - 1]];
+                  if (!last) return null;
+                  return (
+                    <line
+                      className="mapbuilder__preview"
+                      x1={last.x}
+                      y1={last.y}
+                      x2={cursor.x}
+                      y2={cursor.y}
+                      strokeWidth={1.5 * k}
+                    />
+                  );
+                })()
+              ) : null}
 
-            {/* Territory labels (anchor = click point inside the region). */}
-            {Object.entries(doc.labels).map(([tid, lab]) => {
-              const sel = selection?.kind === 'label' && selection.id === tid;
-              return (
-                <g key={tid} className={`mapbuilder__label${sel ? ' mapbuilder__label--selected' : ''}`}>
-                  <circle cx={lab.x} cy={lab.y} r={3 * k} />
-                  <text x={lab.x + 8 * k} y={lab.y + 4 * k} fontSize={14 * k}>
-                    {lab.display_name}
-                  </text>
-                </g>
-              );
-            })}
-
-            {/* Joints */}
-            {jointList.map(([jid, j]) => {
-              const sel = selection?.kind === 'joint' && selection.id === jid;
-              const inPen = penJoints.includes(jid);
-              return (
-                <circle
-                  key={jid}
-                  cx={j.x}
-                  cy={j.y}
-                  r={(sel || inPen ? JOINT_R_PX + 2 : JOINT_R_PX) * k}
-                  className={`mapbuilder__joint${sel ? ' mapbuilder__joint--selected' : ''}${
-                    inPen ? ' mapbuilder__joint--pen' : ''
-                  }`}
+              {/* Pencil preview polyline. */}
+              {pencilPts && pencilPts.length > 1 ? (
+                <polyline
+                  className="mapbuilder__preview"
+                  points={pencilPts.map((p) => `${p.x},${p.y}`).join(' ')}
+                  fill="none"
+                  strokeWidth={2 * k}
                 />
-              );
-            })}
-          </svg>
+              ) : null}
+
+              {/* Territory labels (anchor = click point inside the region). */}
+              {Object.entries(doc.labels).map(([tid, lab]) => {
+                const sel = selection?.kind === 'label' && selection.id === tid;
+                return (
+                  <g key={tid} className={`mapbuilder__label${sel ? ' mapbuilder__label--selected' : ''}`}>
+                    <circle cx={lab.x} cy={lab.y} r={3 * k} />
+                    <text x={lab.x + 8 * k} y={lab.y + 4 * k} fontSize={14 * k}>
+                      {lab.display_name}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* Joints */}
+              {jointList.map(([jid, j]) => {
+                const sel = selection?.kind === 'joint' && selection.id === jid;
+                const inPen = penJoints.includes(jid);
+                return (
+                  <circle
+                    key={jid}
+                    cx={j.x}
+                    cy={j.y}
+                    r={(sel || inPen ? JOINT_R_PX + 2 : JOINT_R_PX) * k}
+                    className={`mapbuilder__joint${sel ? ' mapbuilder__joint--selected' : ''}${
+                      inPen ? ' mapbuilder__joint--pen' : ''
+                    }`}
+                  />
+                );
+              })}
+            </svg>
+          </div>
+        </div>
+
+        <div className="mapbuilder__status" role="status">
+          <span className="mapbuilder__hint">{status ?? TOOL_HINTS[tool]}</span>
+          {selection ? (
+            <span className="mapbuilder__sel">
+              {selection.kind}: {selection.id} · Delete to remove
+            </span>
+          ) : null}
         </div>
       </div>
 
-      <div className="mapbuilder__status" role="status">
-        <span className="mapbuilder__hint">{status ?? TOOL_HINTS[tool]}</span>
-        {selection ? (
-          <span className="mapbuilder__sel">
-            {selection.kind}: {selection.id} · Delete to remove
-          </span>
-        ) : null}
-      </div>
+      {confirmBox ? (
+        <div className="admin-modal-overlay" role="presentation" onClick={() => setConfirmBox(null)}>
+          <div
+            className="admin-modal admin-modal--small"
+            role="dialog"
+            aria-modal="true"
+            aria-label={confirmBox.title}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="admin-modal__title">{confirmBox.title}</h3>
+            <p className="admin-form__micro">{confirmBox.message}</p>
+            <div className="admin-modal__actions">
+              <button
+                type="button"
+                className="admin-page__btn admin-page__btn--danger"
+                onClick={() => {
+                  const fn = confirmBox.onConfirm;
+                  setConfirmBox(null);
+                  fn();
+                }}
+              >
+                Yes
+              </button>
+              <button type="button" className="admin-page__btn" onClick={() => setConfirmBox(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {labelDialog ? (
         <div className="admin-modal-overlay" role="presentation" onClick={() => setLabelDialog(null)}>
@@ -1339,6 +1684,11 @@ export function MapBuilder() {
             <h3 className="admin-modal__title">
               {jsonModal.mode === 'export' ? 'Export JSON' : 'Import JSON'}
             </h3>
+            <p className="admin-form__micro">
+              {jsonModal.mode === 'export'
+                ? 'Saves the whole drawing (size, joints, borders, labels) as text. Copy or download it to back up your draft or move it to another browser — drafts themselves live only in this browser.'
+                : 'Replaces the open draft with a previously exported JSON drawing. The current drawing stays in undo history (Ctrl+Z) if you change your mind.'}
+            </p>
             <textarea
               className="mapbuilder__textarea admin-form__textarea admin-form__textarea--json"
               value={jsonModal.text}

@@ -3806,8 +3806,109 @@ body:has(.combat-sim-modal-overlay) {
   min-width: 0;
   min-height: 0;
   display: flex;
+  flex-direction: row;
+  gap: 0.65rem;
+}
+
+.mapbuilder__main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+/* --- Drafts sidebar (left) --- */
+
+.mapbuilder__drafts {
+  flex: 0 0 13rem;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.mapbuilder__drafts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.mapbuilder__drafts-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.mapbuilder__draft-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--ink-faded);
+  border-radius: 8px;
+  background: #fffef8;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.mapbuilder__draft {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+.mapbuilder__draft--active {
+  border-color: var(--gold-dark, #8b7355);
+  background: rgba(139, 115, 85, 0.14);
+}
+
+.mapbuilder__draft-open {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.05rem;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--ink);
+}
+
+.mapbuilder__draft-name {
+  font-weight: 700;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.mapbuilder__draft-time {
+  font-size: 0.72rem;
+  color: var(--ink-faded);
+}
+
+.mapbuilder__draft-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.mapbuilder__draft-tools .admin-page__btn {
+  padding: 0.12rem 0.4rem;
+  font-size: 0.7rem;
+}
+
+.mapbuilder__drafts-note {
+  margin: 0;
 }
 
 .mapbuilder__toolbar {
@@ -3835,6 +3936,11 @@ body:has(.combat-sim-modal-overlay) {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
+}
+
+.mapbuilder__actions .admin-page__btn {
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .mapbuilder__stats {
@@ -3973,4 +4079,25 @@ body:has(.combat-sim-modal-overlay) {
   padding-left: 1.1rem;
   color: #9a3412;
   font-size: 0.88rem;
+}
+
+/* Narrow screens: drafts move above the canvas instead of beside it. */
+@media (max-width: 767px) {
+  .mapbuilder {
+    flex-direction: column;
+  }
+
+  .mapbuilder__drafts {
+    flex: 0 0 auto;
+  }
+
+  .mapbuilder__draft-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+    max-height: 9rem;
+  }
+
+  .mapbuilder__draft {
+    flex: 1 1 10rem;
+  }
 }
