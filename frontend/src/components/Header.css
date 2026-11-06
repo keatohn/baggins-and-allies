@@ -1545,9 +1545,9 @@
     flex-shrink: 0;
   }
 
-  /* Horizontal scrollbar slightly visible (Firefox + Chrome; iOS may still overlay until drag) */
+  /* Slim horizontal scrollbar so the row can slide without a tall band under the icons */
   .header-scroll::-webkit-scrollbar {
-    height: 5px;
+    height: 3px;
   }
 
   .header-scroll::-webkit-scrollbar-track {
@@ -1924,6 +1924,22 @@
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-x: contain;
     touch-action: pan-x;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(139, 115, 85, 0.95) rgba(61, 41, 20, 0.1);
+  }
+
+  .header-scroll::-webkit-scrollbar {
+    height: 3px;
+  }
+
+  .header-scroll::-webkit-scrollbar-track {
+    background: rgba(61, 41, 20, 0.1);
+    border-radius: 999px;
+  }
+
+  .header-scroll::-webkit-scrollbar-thumb {
+    background: rgba(139, 115, 85, 0.75);
+    border-radius: 999px;
   }
 
   .header-scroll > * {
