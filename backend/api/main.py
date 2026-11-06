@@ -5417,11 +5417,25 @@ def do_move(
                 move_type="sail",
                 load_onto_boat_instance_id=None,
                 sail_to_offload_land_territory_id=to_territory,
+                avoid_forced_naval_combat=bool(request.avoid_forced_naval_combat),
+                ring_id=request.ring_id,
+                ring_ids=request.ring_ids,
             )
             val_sail = validate_action(state, sail_action, ud, td, fd, cd, port_d)
             if not val_sail.valid:
                 raise HTTPException(status_code=400, detail=val_sail.error)
+            pending_count_before_sail = len(state.pending_moves)
             state_after_sail, events_sail = apply_action(state, sail_action, ud, td, fd, cd, port_d)
+            # The sail declaration claims rings onto its own pending move; the ring must
+            # land with the offload (final territory), not strand at the staging sea.
+            sail_pending = (
+                state_after_sail.pending_moves[pending_count_before_sail]
+                if len(state_after_sail.pending_moves) > pending_count_before_sail
+                else None
+            )
+            carried_ring_ids = list(getattr(sail_pending, "ring_ids", None) or []) if sail_pending else []
+            if sail_pending is not None:
+                sail_pending.ring_ids = []
             # Simulate applying the sail so we can validate offload (units in offload_from_sea)
             state_simulated = get_state_after_pending_moves(
                 state_after_sail, state.phase, ud, td, fd
@@ -5434,6 +5448,8 @@ def do_move(
                 charge_through=None,
                 move_type="offload",
                 load_onto_boat_instance_id=None,
+                ring_id=request.ring_id,
+                ring_ids=request.ring_ids,
             )
             val_offload = validate_action(state_simulated, offload_action, ud, td, fd, cd, port_d)
             if not val_offload.valid:
@@ -5450,6 +5466,7 @@ def do_move(
                 phase=state.phase,
                 move_type="offload",
                 primary_unit_id=primary_unit_id,
+                ring_ids=carried_ring_ids,
             )
             state_after_sail.pending_moves = list(state_after_sail.pending_moves) + [offload_pending]
             save_game(game_id, state_after_sail, db, events_sail)

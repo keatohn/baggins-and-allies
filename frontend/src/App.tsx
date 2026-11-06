@@ -753,6 +753,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     to: string;
     unitInstanceIds: string[];
     validSeaZones: string[];
+    ringIds?: string[];
   } | null>(null);
   /** Pending camp placement (drag or click on territory); confirm/cancel like unit mobilization. */
   const [pendingCampPlacement, setPendingCampPlacement] = useState<{ campIndex: number; territoryId: string } | null>(null);
@@ -3282,10 +3283,11 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       // Sea->land with chosen sea zone: backend does sail + offload in one request.
       const needsSailThenOffload = (isSeaRaid || isOffload) && valid(storedTo) && toSea && destination !== fromStr;
       if (needsSailThenOffload) {
+        // Avoid-forced applies to the sail leg (origin sea -> staging sea), not the land drop.
         const avoidForced = shouldSendAvoidForcedNavalCombat(
           gameState.phase,
           fromStr,
-          storedTo,
+          destination,
           unitInstanceIds,
           currentTerritoryData,
           backendState.territories,
@@ -3301,6 +3303,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           undefined,
           destination,
           avoidForced,
+          pendingMoveConfirm.ringIds,
         );
         if (result.need_offload_sea_choice && result.valid_offload_sea_zones?.length) {
           setPendingOffloadSeaChoice({
@@ -3308,6 +3311,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
             to: storedTo,
             unitInstanceIds,
             validSeaZones: sortSeaZoneIdsByNumericSuffix([...result.valid_offload_sea_zones]),
+            ringIds: pendingMoveConfirm.ringIds,
           });
           setBackendState(result.state);
           if (result.can_act !== undefined) setCanAct(result.can_act);
@@ -3397,6 +3401,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           to: destination,
           unitInstanceIds,
           validSeaZones: sortSeaZoneIdsByNumericSuffix([...result.valid_offload_sea_zones]),
+          ringIds: pendingMoveConfirm.ringIds,
         });
         setBackendState(result.state);
         if (result.can_act !== undefined) setCanAct(result.can_act);
@@ -3560,7 +3565,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
 
   const handleChooseOffloadSeaZone = useCallback(async (chosenSeaZoneId: string) => {
     if (!pendingOffloadSeaChoice || !chosenSeaZoneId) return;
-    const { from, to, unitInstanceIds: ids } = pendingOffloadSeaChoice;
+    const { from, to, unitInstanceIds: ids, ringIds } = pendingOffloadSeaChoice;
     setPendingOffloadSeaChoice(null);
     try {
       const avoidForcedOffload = shouldSendAvoidForcedNavalCombat(
@@ -3582,6 +3587,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         undefined,
         chosenSeaZoneId,
         avoidForcedOffload,
+        ringIds,
       );
       setBackendState(result.state);
       if (result.can_act !== undefined) setCanAct(result.can_act);
