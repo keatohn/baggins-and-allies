@@ -3834,7 +3834,8 @@ body:has(.combat-sim-modal-overlay) {
 /* --- Drafts sidebar (left) --- */
 
 .mapbuilder__drafts {
-  flex: 0 0 13rem;
+  flex: 0 0 16rem;
+  overflow: auto;
   min-height: 0;
   display: flex;
   flex-direction: column;

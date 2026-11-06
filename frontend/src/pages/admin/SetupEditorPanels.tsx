@@ -1222,6 +1222,45 @@ function RingFields({
   );
 }
 
+function MapAssetField({
+  manifest,
+  onManifestChange,
+}: {
+  manifest: Record<string, unknown>;
+  onManifestChange: (next: Record<string, unknown>) => void;
+}) {
+  const [maps, setMaps] = useState<string[]>([]);
+  useEffect(() => {
+    const load = () => {
+      api
+        .adminListMaps()
+        .then((r) => setMaps(Array.isArray(r.maps) ? r.maps.filter((m) => typeof m === 'string') : []))
+        .catch(() => setMaps([]));
+    };
+    load();
+    window.addEventListener('admin-maps-changed', load);
+    return () => window.removeEventListener('admin-maps-changed', load);
+  }, []);
+  return (
+    <>
+      <input
+        type="text"
+        className="admin-form__input"
+        list="admin-map-assets"
+        placeholder="e.g. wotr_map_1.1"
+        value={String(manifest.map_asset ?? '')}
+        onChange={(e) => onManifestChange({ ...manifest, map_asset: e.target.value })}
+      />
+      <datalist id="admin-map-assets">
+        {maps.map((id) => (
+          <option key={id} value={id} />
+        ))}
+      </datalist>
+      <p className="admin-form__micro">Built-in maps and maps saved from the map builder.</p>
+    </>
+  );
+}
+
 export function ManifestPanel({
   setupId,
   manifest,
@@ -1250,16 +1289,7 @@ export function ManifestPanel({
           onChange={(e) => onManifestChange({ ...manifest, display_name: e.target.value })}
         />,
       )}
-      {fieldRow(
-        'Map asset',
-        <input
-          type="text"
-          className="admin-form__input"
-          placeholder="e.g. wotr_map_1.1"
-          value={String(manifest.map_asset ?? '')}
-          onChange={(e) => onManifestChange({ ...manifest, map_asset: e.target.value })}
-        />,
-      )}
+      {fieldRow('Map asset', <MapAssetField manifest={manifest} onManifestChange={onManifestChange} />)}
       {fieldRow(
         'Timeline image',
         <>

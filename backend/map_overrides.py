@@ -651,7 +651,7 @@ def _mirror_terrain_files(map_base: str, terrain: dict[str, str]) -> None:
 
 def list_map_bases(db: Session | None) -> list[str]:
     """Distinct map asset names (sorted): setup map_asset values, stored override keys,
-    and the known-map fallback list."""
+    saved map-builder drawings, and the known-map fallback list."""
     bases = set(KNOWN_MAP_BASES)
     for map_base, _tids in _iter_setup_maps(db):
         bases.add(map_base)
@@ -660,9 +660,15 @@ def list_map_bases(db: Session | None) -> list[str]:
 
         for (stored_base,) in db.query(MapOverride.map_base).all():
             bases.add(stored_base)
+        from backend.map_assets import stored_map_bases
+
+        bases.update(stored_map_bases(db))
     elif MAPS_DIR.is_dir():
         for d in MAPS_DIR.iterdir():
-            if d.is_dir():
+            if not d.is_dir():
+                continue
+            # An empty folder left after deleting a drawing is not a map.
+            if any((d / name).is_file() for name in ("builder.json", "map.svg", "overrides.json")):
                 bases.add(d.name)
     return sorted(bases)
 

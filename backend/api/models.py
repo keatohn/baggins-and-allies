@@ -113,6 +113,23 @@ class MapOverride(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class MapAsset(Base):
+    """Admin map-builder drawing and the territory SVG generated from it.
+
+    Built-in maps stay in frontend/public. A row here adds a map, or replaces the
+    built-in SVG of the same id, for setups and the icon/landscape editor.
+    builder_json is the shared-border document (width, height, joints, borders, labels).
+    """
+
+    __tablename__ = "map_assets"
+
+    map_base = Column(String(64), primary_key=True)
+    display_name = Column(String(120), nullable=False)
+    builder_json = Column(Text, nullable=False)
+    svg_text = Column(Text, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class GameResult(Base):
     """One denormalized row per human participant per finished game.
 

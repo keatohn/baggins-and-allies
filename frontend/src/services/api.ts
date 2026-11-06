@@ -1515,6 +1515,73 @@ export const api = {
         body: JSON.stringify(overrides),
       },
     ),
+  /** Admin: turn a closed-path territory SVG into the builder's shared-border graph. */
+  adminImportMapSvg: (body: { svg: string; tolerance?: number }) =>
+    fetchJson<{
+      ok: boolean;
+      doc: {
+        width: number;
+        height: number;
+        joints: Record<string, { x: number; y: number }>;
+        borders: Record<string, { a: string; b: string }>;
+        labels: Record<string, { display_name: string; x: number; y: number }>;
+      };
+      warnings: string[];
+      stats: {
+        territories: number;
+        joints: number;
+        borders: number;
+        shared_borders: number;
+        source_paths: number;
+        tolerance: number;
+      };
+    }>('/admin/maps/builder/import', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  /** Admin: saved map-builder drawings. */
+  adminListMapBuilder: () =>
+    fetchJson<{
+      maps: {
+        map_base: string;
+        display_name: string;
+        width: number;
+        height: number;
+        territories: number;
+        updated_at: string | null;
+      }[];
+    }>('/admin/maps/builder'),
+  adminGetMapBuilder: (mapBase: string) =>
+    fetchJson<{
+      map_base: string;
+      display_name: string;
+      updated_at: string | null;
+      doc: {
+        width: number;
+        height: number;
+        joints: Record<string, { x: number; y: number }>;
+        borders: Record<string, { a: string; b: string }>;
+        labels: Record<string, { display_name: string; x: number; y: number }>;
+      };
+    }>(`/admin/maps/builder/${encodeURIComponent(mapBase)}`),
+  adminSaveMapBuilder: (
+    mapBase: string,
+    body: {
+      display_name: string;
+      doc: unknown;
+    },
+  ) =>
+    fetchJson<{ ok: boolean; map_base: string; display_name: string }>(
+      `/admin/maps/builder/${encodeURIComponent(mapBase)}`,
+      { method: 'PUT', body: JSON.stringify(body) },
+    ),
+  adminCopyMapBuilder: (mapBase: string, body: { map_base: string; display_name: string }) =>
+    fetchJson<{ ok: boolean; map_base: string; display_name: string }>(
+      `/admin/maps/builder/${encodeURIComponent(mapBase)}/copy`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  adminDeleteMapBuilder: (mapBase: string) =>
+    fetchJson<{ ok: boolean }>(`/admin/maps/builder/${encodeURIComponent(mapBase)}`, { method: 'DELETE' }),
   /** Admin: convert the map builder's shared-border graph into SVG territory paths. */
   adminConvertMapBuilder: (body: unknown) =>
     fetchJson<{

@@ -1,4 +1,26 @@
+import { getResolvedApiBase } from '../../services/api';
+
 export type TerritoryPathData = { d: string; transform?: string };
+
+/**
+ * Saved map-builder SVGs are served by the API and win over a built-in file of the
+ * same name. A 404 falls through to `frontend/public/<mapBase>.svg`.
+ */
+export async function fetchMapSvgText(mapBase: string): Promise<string> {
+  const base = getResolvedApiBase();
+  try {
+    const res = await fetch(`${base}/maps/${encodeURIComponent(mapBase)}/svg`, { cache: 'no-store' });
+    if (res.ok) {
+      const text = await res.text();
+      if (text.includes('<svg')) return text;
+    }
+  } catch {
+    /* built-in file next */
+  }
+  const res = await fetch(`/${mapBase}.svg`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(String(res.status));
+  return res.text();
+}
 
 export const DEFAULT_MAP_BASE = 'wotr_map_1.2';
 
@@ -67,17 +89,12 @@ export async function loadTerritorySvgPaths(
   mapBase: string,
 ): Promise<{ paths: Map<string, TerritoryPathData>; viewBox: { width: number; height: number } }> {
   const fallback = viewBoxForMap(mapBase);
-  const tryUrl = async (url: string) => {
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) throw new Error(String(res.status));
-    return res.text();
-  };
   let svgText: string;
   try {
-    svgText = await tryUrl(`/${mapBase}.svg`);
+    svgText = await fetchMapSvgText(mapBase);
   } catch {
     if (mapBase === DEFAULT_MAP_BASE) throw new Error('Map SVG not found');
-    svgText = await tryUrl(`/${DEFAULT_MAP_BASE}.svg`);
+    svgText = await fetchMapSvgText(DEFAULT_MAP_BASE);
   }
   const parser = new DOMParser();
   const svgDoc = parser.parseFromString(svgText, 'image/svg+xml');

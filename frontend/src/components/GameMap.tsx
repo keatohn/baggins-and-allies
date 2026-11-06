@@ -7,6 +7,7 @@ import type { GameState, SelectedUnit, MapTransform, PendingMove, MapOverridesDa
 import { normalizeMapOverrides } from '../types/game';
 import type { TerritorySignalMap } from '../territorySignals';
 import { landscapeSrc, terrainEmojiSuppressed } from '../pages/admin/landscape';
+import { fetchMapSvgText } from '../pages/admin/territoryGraph';
 import DraggableUnit from './DraggableUnit';
 import DragOverlay, { type BulkDragOverlayStack } from './DragOverlay';
 import MobilizationTray from './MobilizationTray';
@@ -1294,7 +1295,6 @@ function GameMap({
 
   const mapBase = toMapBase(gameState.map_asset);
   const mapConfig = getMapConfig(mapBase);
-  const pathsUrl = `/${mapBase}.svg`;
   // Use dimensions read from the loaded SVG when available so overlay matches the file exactly
   const SVG_VIEWBOX = loadedSvgDimensions?.viewBox ?? mapConfig.viewBox;
   const IMG_DIMENSIONS = loadedSvgDimensions?.dimensions ?? mapConfig.dimensions;
@@ -1401,10 +1401,8 @@ function GameMap({
     setSvgPaths(new Map());
     setSvgHintAnchors({});
     setLoadedSvgDimensions(null);
-    const loadSvg = (url: string) =>
-      fetch(url, { cache: 'no-store' })
-        .then((res) => (res.ok ? res.text() : Promise.reject(new Error(`${res.status}`))))
-        .then((svgText) => {
+    const loadSvg = (base: string) =>
+      fetchMapSvgText(base).then((svgText) => {
           const parser = new DOMParser();
           const svgDoc = parser.parseFromString(svgText, 'image/svg+xml');
           const root = svgDoc.querySelector('svg');
@@ -1494,10 +1492,10 @@ function GameMap({
           setSvgHintAnchors(hintAnchors);
           setSvgPaths(pathMap);
         });
-    loadSvg(pathsUrl).catch(() => {
-      if (pathsUrl !== `/${DEFAULT_MAP_BASE}.svg`) loadSvg(`/${DEFAULT_MAP_BASE}.svg`);
+    loadSvg(mapBase).catch(() => {
+      if (mapBase !== DEFAULT_MAP_BASE) loadSvg(DEFAULT_MAP_BASE);
     });
-  }, [pathsUrl, mapConfig.viewBox, mapConfig.dimensions]);
+  }, [mapBase, mapConfig.viewBox, mapConfig.dimensions]);
 
   /**
    * In-SVG hint anchors with map-level override points layered on top (unit/number/icons/logo).

@@ -20,7 +20,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -183,7 +183,16 @@ from backend.setup_data import (
     try_scenario_display,
 )
 from backend.catalog import CatalogError, load_catalog, rule_descriptions, save_catalog, specials_for_units
+from backend.map_assets import (
+    copy_map_asset,
+    delete_map_asset,
+    list_map_assets,
+    load_map_asset,
+    load_map_svg,
+    save_map_asset,
+)
 from backend.map_builder import MapBuilderError, convert_map_builder
+from backend.map_svg_import import import_territory_svg
 from backend.map_overrides import (
     MapOverridesError,
     list_map_bases,
@@ -2216,6 +2225,121 @@ def admin_convert_map_builder(
         return convert_map_builder(body)
     except MapBuilderError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/admin/maps/builder/import")
+def admin_import_map_builder(
+    body: dict[str, Any],
+    _admin: Player = Depends(get_current_admin),
+):
+    """Turn an SVG of closed territory paths into the builder's shared-border graph.
+
+    Neighbouring paths are welded within ``tolerance`` (px) so each border is stored
+    once. The drawing is not saved; the client saves it under a map id.
+    """
+    svg = body.get("svg") if isinstance(body, dict) else None
+    tolerance = body.get("tolerance", 4) if isinstance(body, dict) else 4
+    try:
+        return import_territory_svg(svg if isinstance(svg, str) else "", tolerance)
+    except MapBuilderError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/admin/maps/builder")
+def admin_list_map_builder(
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Saved map-builder drawings (id, name, size, territory count)."""
+    return {"maps": list_map_assets(db)}
+
+
+@app.get("/admin/maps/builder/{map_base}")
+def admin_get_map_builder(
+    map_base: str,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    try:
+        return load_map_asset(db, map_base)
+    except MapBuilderError as e:
+        status = 404 if "no saved map" in str(e) else 400
+        raise HTTPException(status_code=status, detail=str(e)) from e
+
+
+@app.put("/admin/maps/builder/{map_base}")
+def admin_put_map_builder(
+    map_base: str,
+    body: dict[str, Any],
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Save a shared-border drawing and the territory SVG generated from it.
+
+    The SVG is what the game, setups, and the icon/landscape editor load for this
+    map id. It replaces a built-in ``frontend/public`` file of the same name.
+    """
+    try:
+        return save_map_asset(db, map_base, body)
+    except MapBuilderError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/admin/maps/builder/{map_base}/copy")
+def admin_copy_map_builder(
+    map_base: str,
+    body: dict[str, Any],
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Copy a saved map to a new id and display name."""
+    new_base = body.get("map_base") if isinstance(body, dict) else None
+    display_name = body.get("display_name") if isinstance(body, dict) else None
+    try:
+        return copy_map_asset(
+            db,
+            map_base,
+            new_base if isinstance(new_base, str) else "",
+            display_name if isinstance(display_name, str) else None,
+        )
+    except MapBuilderError as e:
+        status = 404 if "no saved map" in str(e) else 400
+        raise HTTPException(status_code=status, detail=str(e)) from e
+
+
+@app.delete("/admin/maps/builder/{map_base}")
+def admin_delete_map_builder(
+    map_base: str,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Delete a saved drawing. A built-in file of the same id is left in place."""
+    try:
+        delete_map_asset(db, map_base)
+    except MapBuilderError as e:
+        status = 404 if "no saved map" in str(e) else 400
+        raise HTTPException(status_code=status, detail=str(e)) from e
+    return {"ok": True, "map_base": map_base}
+
+
+@app.get("/maps/{map_base}/svg")
+def get_map_svg(
+    map_base: str,
+    db: Session = Depends(get_db),
+):
+    """Saved territory SVG. Clients fall back to the built-in public file on 404.
+
+    When a saved drawing exists it wins over ``frontend/public/<map_base>.svg``, so
+    an edited copy of a shipped map is what setups and the icon/landscape editor use.
+    """
+    svg = load_map_svg(db, map_base)
+    if not svg:
+        raise HTTPException(status_code=404, detail="No saved map SVG")
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/admin/formulas")

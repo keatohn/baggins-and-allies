@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { api } from '../../services/api';
+import { fetchMapSvgText } from './territoryGraph';
 
 /**
  * Admin Map Builder (Maps editor → Builder pill).
  *
  * Draws territory borders as a planar graph of shared line segments (each border
- * stored once and reused by both neighbours), then hands the graph to the backend
- * converter (POST /admin/maps/builder/convert) which traces enclosed regions and
- * emits an SVG matching the maps in frontend/public.
+ * stored once and reused by both neighbours). Closed-path SVGs (including the
+ * built-in maps) import into that graph. Saving stores the drawing and the
+ * generated territory SVG with the other map data; that SVG is what setups and
+ * the icon/landscape editor load, ahead of a built-in file of the same id.
  */
 
 type Pt = { x: number; y: number };
@@ -37,6 +39,7 @@ const RDP_EPS_PX = 1.5;
 const CLICK_PX = 8;
 const AREA_EPS = 1e-6;
 const TID_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+const MAP_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const MIN_DIM = 100;
 const MAX_DIM = 50000;
 const DEFAULT_W = 3500;
@@ -92,7 +95,15 @@ function isBuilderDoc(d: unknown): d is BuilderDoc {
   );
 }
 
-type Draft = { id: string; name: string; updated: number; doc: BuilderDoc };
+type Draft = { id: string; name: string; updated: number; doc: BuilderDoc; mapBase?: string | null };
+type SavedMap = {
+  map_base: string;
+  display_name: string;
+  width: number;
+  height: number;
+  territories: number;
+  updated_at: string | null;
+};
 type DraftStore = { currentId: string; drafts: Draft[] };
 
 function makeDraft(name: string, doc: BuilderDoc): Draft {
@@ -383,7 +394,7 @@ export function MapBuilder() {
   );
   const [currentId, setCurrentId] = useState<string>(boot.currentId);
   const [draftMeta, setDraftMeta] = useState(() =>
-    boot.drafts.map((d) => ({ id: d.id, name: d.name, updated: d.updated })),
+    boot.drafts.map((d) => ({ id: d.id, name: d.name, updated: d.updated, mapBase: d.mapBase ?? null })),
   );
   const [past, setPast] = useState<BuilderDoc[]>([]);
   const [future, setFuture] = useState<BuilderDoc[]>([]);
@@ -409,6 +420,21 @@ export function MapBuilder() {
     error: string | null;
   } | null>(null);
   const [converting, setConverting] = useState(false);
+  const [savedMaps, setSavedMaps] = useState<SavedMap[]>([]);
+  const [knownMaps, setKnownMaps] = useState<string[]>([]);
+  const [bringIn, setBringIn] = useState('');
+  const [tolerance, setTolerance] = useState('4');
+  const [saveBox, setSaveBox] = useState<{
+    mode: 'save' | 'copy';
+    sourceId: string | null;
+    id: string;
+    name: string;
+    error: string | null;
+  } | null>(null);
+  const [noteBox, setNoteBox] = useState<{ title: string; lines: string[] } | null>(null);
+  const svgFileRef = useRef<HTMLInputElement | null>(null);
+  // Id to offer in the Save dialog after converting a built-in map that is not saved yet.
+  const importHintRef = useRef<string | null>(null);
 
   const storeRef = useRef<DraftStore>(boot);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -452,7 +478,7 @@ export function MapBuilder() {
       }
       saveStore(s);
       if (changed) {
-        setDraftMeta(s.drafts.map((d) => ({ id: d.id, name: d.name, updated: d.updated })));
+        setDraftMeta(s.drafts.map((d) => ({ id: d.id, name: d.name, updated: d.updated, mapBase: d.mapBase ?? null })));
       }
     }, 400);
     return () => window.clearTimeout(t);
@@ -1154,7 +1180,202 @@ export function MapBuilder() {
   // --- drafts -----------------------------------------------------------------
 
   const refreshMeta = () =>
-    setDraftMeta(storeRef.current.drafts.map((d) => ({ id: d.id, name: d.name, updated: d.updated })));
+    setDraftMeta(
+      storeRef.current.drafts.map((d) => ({ id: d.id, name: d.name, updated: d.updated, mapBase: d.mapBase ?? null })),
+    );
+
+  const reloadLibrary = useCallback(() => {
+    api
+      .adminListMapBuilder()
+      .then((r) => setSavedMaps(Array.isArray(r.maps) ? r.maps : []))
+      .catch(() => setSavedMaps([]));
+    api
+      .adminListMaps()
+      .then((r) => {
+        const list = Array.isArray(r.maps) ? r.maps.filter((m) => typeof m === 'string' && m) : [];
+        setKnownMaps(list);
+        setBringIn((prev) => prev || list[0] || '');
+      })
+      .catch(() => setKnownMaps([]));
+  }, []);
+
+  useEffect(() => {
+    reloadLibrary();
+  }, [reloadLibrary]);
+
+  const notifyMapsChanged = () => {
+    reloadLibrary();
+    window.dispatchEvent(new Event('admin-maps-changed'));
+  };
+
+  const loadDoc = (next: BuilderDoc, name: string, mapBase: string | null, message: string) => {
+    const snapshot = docRef.current;
+    docRef.current = next;
+    setDoc(next);
+    pushHistory(snapshot);
+    const s = storeRef.current;
+    const cur = s.drafts.find((d) => d.id === s.currentId);
+    if (cur) {
+      cur.doc = next;
+      cur.name = name;
+      cur.mapBase = mapBase;
+      cur.updated = Date.now();
+      saveStore(s);
+      refreshMeta();
+    }
+    importHintRef.current = mapBase;
+    setSelection(null);
+    clearStroke();
+    setStatus(message);
+    window.setTimeout(() => fitView(next), 0);
+  };
+
+  const importSvgText = async (svg: string, label: string) => {
+    const tol = Number(tolerance);
+    if (!Number.isFinite(tol) || tol < 0 || tol > 40) {
+      setStatus('Snap tolerance must be between 0 and 40 px');
+      return;
+    }
+    setConverting(true);
+    try {
+      const r = await api.adminImportMapSvg({ svg, tolerance: tol });
+      loadDoc(
+        r.doc,
+        label,
+        null,
+        `Imported ${r.stats.territories} territories · ${r.stats.shared_borders} shared borders. Save it to use the map.`,
+      );
+      if (MAP_ID_RE.test(label)) importHintRef.current = label;
+      if (r.warnings?.length) setNoteBox({ title: 'Import notes', lines: r.warnings });
+    } catch (err) {
+      setStatus(`Import failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setConverting(false);
+    }
+  };
+
+  const onSvgFile = (file: File | undefined) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = typeof reader.result === 'string' ? reader.result : '';
+      void importSvgText(text, file.name.replace(/\.svg$/i, '') || 'Imported map');
+    };
+    reader.onerror = () => setStatus('Could not read that SVG file');
+    reader.readAsText(file);
+  };
+
+  const openKnownMap = async (mapBase: string) => {
+    if (!mapBase) return;
+    setConverting(true);
+    try {
+      try {
+        const saved = await api.adminGetMapBuilder(mapBase);
+        loadDoc(saved.doc, saved.display_name || mapBase, saved.map_base, `Opened saved map “${saved.display_name}”`);
+        return;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '';
+        if (!/no saved map/i.test(message)) throw err;
+      }
+      const svg = await fetchMapSvgText(mapBase);
+      const tol = Number(tolerance);
+      const r = await api.adminImportMapSvg({ svg, tolerance: Number.isFinite(tol) ? tol : 4 });
+      loadDoc(
+        r.doc,
+        mapBase,
+        null,
+        `Converted built-in “${mapBase}” into shared borders (${r.stats.shared_borders} shared). Save as a new id, or save over “${mapBase}” to replace the built-in file.`,
+      );
+      importHintRef.current = mapBase;
+      if (r.warnings?.length) setNoteBox({ title: `Imported ${mapBase}`, lines: r.warnings });
+    } catch (err) {
+      setStatus(`Could not open ${mapBase}: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setConverting(false);
+    }
+  };
+
+  const currentMapBase = () => storeRef.current.drafts.find((d) => d.id === storeRef.current.currentId)?.mapBase ?? null;
+
+  const openSaveBox = (mode: 'save' | 'copy', sourceId: string | null) => {
+    const cur = storeRef.current.drafts.find((d) => d.id === storeRef.current.currentId);
+    const id = mode === 'copy' ? '' : sourceId || cur?.mapBase || importHintRef.current || '';
+    const name = mode === 'copy' ? '' : cur?.name || '';
+    setSaveBox({ mode, sourceId, id, name, error: null });
+  };
+
+  const commitSave = async () => {
+    if (!saveBox) return;
+    const id = saveBox.id.trim();
+    const name = saveBox.name.trim();
+    if (!MAP_ID_RE.test(id)) {
+      setSaveBox({ ...saveBox, error: 'Id must be 1–64 chars: letters, digits, _ . -' });
+      return;
+    }
+    if (!name) {
+      setSaveBox({ ...saveBox, error: 'Display name is required' });
+      return;
+    }
+    const exists = savedMaps.some((m) => m.map_base === id);
+    if (exists && saveBox.mode === 'copy') {
+      setSaveBox({ ...saveBox, error: `“${id}” already exists` });
+      return;
+    }
+    setConverting(true);
+    try {
+      if (saveBox.mode === 'copy' && saveBox.sourceId) {
+        await api.adminCopyMapBuilder(saveBox.sourceId, { map_base: id, display_name: name });
+        setStatus(`Copied to “${name}” (${id})`);
+      } else {
+        flushDraft();
+        await api.adminSaveMapBuilder(id, { display_name: name, doc: docRef.current });
+        const s = storeRef.current;
+        const cur = s.drafts.find((d) => d.id === s.currentId);
+        if (cur) {
+          cur.mapBase = id;
+          cur.name = name;
+          cur.updated = Date.now();
+          saveStore(s);
+          refreshMeta();
+        }
+        setStatus(
+          knownMaps.includes(id) && !savedMaps.some((m) => m.map_base === id)
+            ? `Saved “${name}”. It now replaces the built-in ${id} SVG.`
+            : `Saved “${name}” (${id})`,
+        );
+      }
+      setSaveBox(null);
+      notifyMapsChanged();
+    } catch (err) {
+      setSaveBox((box) => (box ? { ...box, error: err instanceof Error ? err.message : String(err) } : box));
+    } finally {
+      setConverting(false);
+    }
+  };
+
+  const deleteSaved = (mapBase: string, name: string) => {
+    setConfirmBox({
+      title: 'Delete saved map',
+      message: knownMaps.includes(mapBase)
+        ? `Delete the saved drawing “${name}” (${mapBase})? The built-in file of that id, if there is one, is what the game will use again.`
+        : `Delete “${name}” (${mapBase})? Setups that name this map will no longer have an SVG.`,
+      onConfirm: () => {
+        void api
+          .adminDeleteMapBuilder(mapBase)
+          .then(() => {
+            const s = storeRef.current;
+            for (const d of s.drafts) {
+              if (d.mapBase === mapBase) d.mapBase = null;
+            }
+            saveStore(s);
+            refreshMeta();
+            setStatus(`Deleted saved map ${mapBase}`);
+            notifyMapsChanged();
+          })
+          .catch((err) => setStatus(`Delete failed: ${err instanceof Error ? err.message : String(err)}`));
+      },
+    });
+  };
 
   // Write the live doc into its draft immediately (bypasses the debounce).
   const flushDraft = () => {
@@ -1279,7 +1500,82 @@ export function MapBuilder() {
 
   return (
     <div className="mapbuilder">
-      <aside className="mapbuilder__drafts" aria-label="Map drafts">
+      <aside className="mapbuilder__drafts" aria-label="Maps and drafts">
+        <div className="mapbuilder__drafts-head">
+          <span className="mapbuilder__drafts-title">Bring in</span>
+        </div>
+        <label className="mapbuilder__field admin-form__label">
+          Map
+          <select
+            className="admin-page__select"
+            aria-label="Existing map to open"
+            value={bringIn}
+            onChange={(e) => setBringIn(e.target.value)}
+          >
+            {knownMaps.length === 0 ? <option value="">No maps</option> : null}
+            {knownMaps.map((id) => (
+              <option key={id} value={id}>
+                {id}
+                {savedMaps.some((m) => m.map_base === id) ? ' (saved)' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          className="admin-page__btn"
+          disabled={!bringIn || converting}
+          onClick={() => void openKnownMap(bringIn)}
+        >
+          Open
+        </button>
+        <p className="admin-form__micro mapbuilder__drafts-note">
+          A saved drawing opens as shared borders. A built-in map is converted from its SVG. Snap tolerance is on the toolbar.
+        </p>
+
+        <div className="mapbuilder__drafts-head">
+          <span className="mapbuilder__drafts-title">Saved maps</span>
+        </div>
+        {savedMaps.length === 0 ? (
+          <p className="admin-form__micro mapbuilder__drafts-note">None yet. Import or draw, then Save.</p>
+        ) : (
+          <ul className="mapbuilder__draft-list">
+            {savedMaps.map((m) => (
+              <li key={m.map_base} className="mapbuilder__draft">
+                <button
+                  type="button"
+                  className="mapbuilder__draft-open"
+                  onClick={() => void openKnownMap(m.map_base)}
+                  title={`Open ${m.display_name}`}
+                >
+                  <span className="mapbuilder__draft-name">{m.display_name}</span>
+                  <span className="mapbuilder__draft-time">
+                    {m.map_base} · {m.territories} territories
+                  </span>
+                </button>
+                <span className="mapbuilder__draft-tools">
+                  <button
+                    type="button"
+                    className="admin-page__btn"
+                    onClick={() => openSaveBox('copy', m.map_base)}
+                    title={`Copy ${m.display_name} to a new id`}
+                  >
+                    Copy
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-page__btn admin-page__btn--danger"
+                    onClick={() => deleteSaved(m.map_base, m.display_name)}
+                    title={`Delete ${m.display_name}`}
+                  >
+                    Del
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+
         <div className="mapbuilder__drafts-head">
           <span className="mapbuilder__drafts-title">Drafts</span>
           <button type="button" className="admin-page__btn" onClick={newDraft} title="Start a new blank draft">
@@ -1340,7 +1636,9 @@ export function MapBuilder() {
           ))}
         </ul>
         <p className="admin-form__micro mapbuilder__drafts-note">
-          Drafts auto-save to this browser. Switch freely — each keeps its own drawing, size and labels.
+          Drafts stay in this browser. Save writes the map on the server: the database in production, or
+          backend/data/maps/&lt;id&gt;/ when the server is running from files. Setups and the icon and landscape
+          editors use that SVG ahead of a built-in file with the same id.
         </p>
       </aside>
 
@@ -1428,6 +1726,49 @@ export function MapBuilder() {
               }
             >
               Clear
+            </button>
+            <label className="mapbuilder__size">
+              Snap
+              <input
+                className="admin-form__input admin-form__input--narrow"
+                type="number"
+                min={0}
+                max={40}
+                step={0.5}
+                value={tolerance}
+                aria-label="Snap tolerance in px"
+                title="How far apart a double-drawn border can be and still become one shared border"
+                onChange={(e) => setTolerance(e.target.value)}
+              />
+              px
+            </label>
+            <input
+              ref={svgFileRef}
+              type="file"
+              accept=".svg,image/svg+xml"
+              hidden
+              onChange={(e) => {
+                onSvgFile(e.target.files?.[0]);
+                e.target.value = '';
+              }}
+            />
+            <button
+              type="button"
+              className="admin-page__btn"
+              disabled={converting}
+              onClick={() => svgFileRef.current?.click()}
+              title="Upload an SVG whose paths are one closed shape per territory"
+            >
+              Import SVG
+            </button>
+            <button
+              type="button"
+              className="admin-page__btn admin-page__btn--primary"
+              disabled={converting}
+              onClick={() => openSaveBox('save', currentMapBase())}
+              title="Save this drawing and its territory SVG under a map id"
+            >
+              Save
             </button>
             <button
               type="button"
@@ -1672,6 +2013,87 @@ export function MapBuilder() {
         </div>
       ) : null}
 
+      {saveBox ? (
+        <div className="admin-modal-overlay" role="presentation" onClick={() => setSaveBox(null)}>
+          <div
+            className="admin-modal admin-modal--small"
+            role="dialog"
+            aria-modal="true"
+            aria-label={saveBox.mode === 'copy' ? 'Copy map' : 'Save map'}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="admin-modal__title">{saveBox.mode === 'copy' ? 'Copy map' : 'Save map'}</h3>
+            <p className="admin-form__micro">
+              {saveBox.mode === 'copy'
+                ? 'Writes a new map id with its own name. The drawing is the saved source, not unsaved edits in the open draft.'
+                : 'Stores the shared-border drawing and the territory SVG. Using an existing built-in id replaces that map for setups and the icon and landscape editors.'}
+            </p>
+            <label className="mapbuilder__field admin-form__label">
+              Map id
+              <input
+                className="admin-form__input"
+                value={saveBox.id}
+                autoFocus
+                placeholder="e.g. wotr_map_1.3"
+                onChange={(e) => setSaveBox((b) => (b ? { ...b, id: e.target.value, error: null } : b))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void commitSave();
+                }}
+              />
+            </label>
+            <label className="mapbuilder__field admin-form__label">
+              Display name
+              <input
+                className="admin-form__input"
+                value={saveBox.name}
+                onChange={(e) => setSaveBox((b) => (b ? { ...b, name: e.target.value, error: null } : b))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void commitSave();
+                }}
+              />
+            </label>
+            {saveBox.error ? <p className="admin-page__error">{saveBox.error}</p> : null}
+            <div className="admin-modal__actions">
+              <button
+                type="button"
+                className="admin-page__btn admin-page__btn--primary"
+                disabled={converting}
+                onClick={() => void commitSave()}
+              >
+                {saveBox.mode === 'copy' ? 'Copy' : 'Save'}
+              </button>
+              <button type="button" className="admin-page__btn" onClick={() => setSaveBox(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {noteBox ? (
+        <div className="admin-modal-overlay" role="presentation" onClick={() => setNoteBox(null)}>
+          <div
+            className="admin-modal admin-modal--small"
+            role="dialog"
+            aria-modal="true"
+            aria-label={noteBox.title}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="admin-modal__title">{noteBox.title}</h3>
+            <ul className="mapbuilder__warnings">
+              {noteBox.lines.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+            <div className="admin-modal__actions">
+              <button type="button" className="admin-page__btn" onClick={() => setNoteBox(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {jsonModal ? (
         <div className="admin-modal-overlay" role="presentation" onClick={() => setJsonModal(null)}>
           <div
@@ -1686,7 +2108,7 @@ export function MapBuilder() {
             </h3>
             <p className="admin-form__micro">
               {jsonModal.mode === 'export'
-                ? 'Saves the whole drawing (size, joints, borders, labels) as text. Copy or download it to back up your draft or move it to another browser — drafts themselves live only in this browser.'
+                ? 'Saves the whole drawing (size, joints, borders, labels) as text. Saved maps on the server are separate — use Save for those.'
                 : 'Replaces the open draft with a previously exported JSON drawing. The current drawing stays in undo history (Ctrl+Z) if you change your mind.'}
             </p>
             <textarea

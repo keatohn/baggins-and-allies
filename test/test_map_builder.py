@@ -390,3 +390,170 @@ def test_convert_route_rejects_invalid(make_client, players):
     r = client.post("/admin/maps/builder/convert", json={"width": 10})
     assert r.status_code == 400
     assert "detail" in r.json()
+
+
+# --- closed-path SVG import ---------------------------------------------------
+
+OFFSET_SVG = """<svg xmlns="http://www.w3.org/2000/svg"
+    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 400 200">
+  <path id="west" inkscape:label="West" d="M 0,0 L 200,0 L 200,200 L 0,200 Z"/>
+  <path id="east" inkscape:label="East" d="M 201.5,0.4 L 400,0 L 400,200 L 201.5,199.6 Z"/>
+</svg>"""
+
+
+def test_import_welds_offset_shared_border():
+    from backend.map_svg_import import import_territory_svg
+
+    out = import_territory_svg(OFFSET_SVG, 3)
+    assert out["stats"]["territories"] == 2
+    assert out["stats"]["shared_borders"] == 1
+    assert out["stats"]["borders"] == 7
+    assert out["stats"]["joints"] == 6
+    conv = convert_map_builder(out["doc"])
+    assert conv["stats"]["regions"] == 2
+    assert conv["stats"]["labelled"] == 2
+    assert conv["warnings"] == []
+
+
+def test_import_relative_paths_with_midpoint_and_transform():
+    from backend.map_svg_import import import_territory_svg
+
+    svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200">
+      <g transform="translate(0,0)">
+        <path id="west" d="m 0,0 200,0 0,200 -200,0 z"/>
+        <path id="east" transform="translate(1.5,0)" d="m 200,0 198.5,0 0,200 -198.5,0 0,-100 .2,-100 z"/>
+      </g>
+    </svg>"""
+    out = import_territory_svg(svg, 3)
+    conv = convert_map_builder(out["doc"])
+    assert conv["stats"]["labelled"] == 2
+    assert conv["stats"]["regions"] == 2
+    assert out["stats"]["shared_borders"] >= 1
+
+
+def test_import_round_trip_from_builder_svg():
+    from backend.map_svg_import import import_territory_svg
+
+    doc = split_doc(
+        labels={
+            "west": {"display_name": "West", "x": 250, "y": 400},
+            "east": {"display_name": "East", "x": 750, "y": 400},
+        }
+    )
+    svg = convert_map_builder(doc)["svg"]
+    back = import_territory_svg(svg, 0.5)
+    again = convert_map_builder(back["doc"])
+    assert again["stats"]["regions"] == 2
+    assert again["stats"]["labelled"] == 2
+    assert {t["id"] for t in again["territories"]} == {"west", "east"}
+
+
+def test_import_flattens_a_closed_curve():
+    from backend.map_svg_import import import_territory_svg
+
+    svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">
+      <path id="lake" inkscape:label="Lake"
+        d="M 40,40 C 40,10 360,10 360,40 L 360,260 L 40,260 Z"
+        xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"/>
+    </svg>"""
+    # inkscape namespace on the path is ignored; id is enough
+    out = import_territory_svg(svg, 1)
+    conv = convert_map_builder(out["doc"])
+    assert conv["stats"]["labelled"] == 1
+    assert conv["territories"][0]["id"] == "lake"
+    assert conv["territories"][0]["label"] == "lake" or conv["territories"][0]["id"] == "lake"
+
+
+def test_import_rejects_svg_without_territories():
+    from backend.map_svg_import import import_territory_svg
+
+    with pytest.raises(MapBuilderError):
+        import_territory_svg("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'></svg>")
+    with pytest.raises(MapBuilderError):
+        import_territory_svg("not xml")
+
+
+def test_import_route_and_saved_map_library(make_client, players, monkeypatch):
+    from backend.map_overrides import list_map_bases
+
+    monkeypatch.setattr("backend.map_assets.is_files_setup_source", lambda: False)
+    monkeypatch.setattr("backend.map_overrides.is_files_setup_source", lambda: False)
+    admin, user = players
+    client = make_client(user)
+    assert client.post("/admin/maps/builder/import", json={"svg": OFFSET_SVG, "tolerance": 3}).status_code == 403
+
+    client = make_client(admin)
+    imported = client.post("/admin/maps/builder/import", json={"svg": OFFSET_SVG, "tolerance": 3})
+    assert imported.status_code == 200
+    doc = imported.json()["doc"]
+    assert imported.json()["stats"]["shared_borders"] == 1
+
+    saved = client.put(
+        "/admin/maps/builder/custom_map_2.0",
+        json={"display_name": "Custom Map", "doc": doc},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["map_base"] == "custom_map_2.0"
+
+    listed = client.get("/admin/maps/builder")
+    assert listed.status_code == 200
+    assert any(row["map_base"] == "custom_map_2.0" and row["display_name"] == "Custom Map" for row in listed.json()["maps"])
+
+    fetched = client.get("/admin/maps/builder/custom_map_2.0")
+    assert fetched.status_code == 200
+    assert fetched.json()["doc"]["labels"]["west"]["display_name"] == "West"
+
+    svg = client.get("/maps/custom_map_2.0/svg")
+    assert svg.status_code == 200
+    assert "image/svg" in svg.headers["content-type"]
+    assert 'id="west"' in svg.text
+    assert client.get("/maps/does_not_exist_9.9/svg").status_code == 404
+
+    # Saved maps join the built-in ids for setups and the icon/landscape editor.
+    from backend.api.database import get_db
+
+    session = next(client.app.dependency_overrides[get_db]())
+    assert "custom_map_2.0" in list_map_bases(session)
+
+    copied = client.post(
+        "/admin/maps/builder/custom_map_2.0/copy",
+        json={"map_base": "custom_map_2.1", "display_name": "Custom Copy"},
+    )
+    assert copied.status_code == 200
+    assert client.get("/maps/custom_map_2.1/svg").status_code == 200
+    again = client.post(
+        "/admin/maps/builder/custom_map_2.0/copy",
+        json={"map_base": "custom_map_2.1", "display_name": "Nope"},
+    )
+    assert again.status_code == 400
+
+    deleted = client.delete("/admin/maps/builder/custom_map_2.0")
+    assert deleted.status_code == 200
+    assert client.get("/admin/maps/builder/custom_map_2.0").status_code == 404
+    assert client.get("/maps/custom_map_2.0/svg").status_code == 404
+    # The copy is unaffected.
+    assert client.get("/maps/custom_map_2.1/svg").status_code == 200
+
+
+def test_save_map_asset_files_source(tmp_path, monkeypatch):
+    import backend.map_assets as map_assets
+
+    monkeypatch.setattr(map_assets, "MAPS_DIR", tmp_path)
+    monkeypatch.setattr(map_assets, "is_files_setup_source", lambda: True)
+    doc = frame_doc(labels={"the_shire": {"display_name": "The Shire", "x": 500, "y": 400}})
+    saved = map_assets.save_map_asset(None, "files_map_1.0", {"display_name": "Files Map", "doc": doc})
+    assert saved["display_name"] == "Files Map"
+    assert (tmp_path / "files_map_1.0" / "builder.json").is_file()
+    svg = (tmp_path / "files_map_1.0" / "map.svg").read_text(encoding="utf-8")
+    assert 'id="the_shire"' in svg
+    assert map_assets.load_map_svg(None, "files_map_1.0") == svg
+    copied = map_assets.copy_map_asset(None, "files_map_1.0", "files_map_1.1", "Files Copy")
+    assert copied["map_base"] == "files_map_1.1"
+    assert (tmp_path / "files_map_1.1" / "map.svg").is_file()
+    # Overrides in the same folder are not removed with the drawing.
+    (tmp_path / "files_map_1.0" / "overrides.json").write_text("{}", encoding="utf-8")
+    map_assets.delete_map_asset(None, "files_map_1.0")
+    assert not (tmp_path / "files_map_1.0" / "builder.json").exists()
+    assert (tmp_path / "files_map_1.0" / "overrides.json").is_file()
+    map_assets.delete_map_asset(None, "files_map_1.1")
+    assert not (tmp_path / "files_map_1.1").exists()

@@ -323,8 +323,21 @@ export function MapOverridesPane({
         setErr(e instanceof Error ? e.message : 'Failed to list maps');
         setLoading(false);
       });
+    const onLibrary = () => {
+      api
+        .adminListMaps()
+        .then((r) => {
+          if (cancelled) return;
+          const list = Array.isArray(r?.maps) ? r.maps.filter((m) => typeof m === 'string' && m) : [];
+          setMaps(list);
+          setMapBase((prev) => (prev && list.includes(prev) ? prev : prev || list[0] || ''));
+        })
+        .catch(() => undefined);
+    };
+    window.addEventListener('admin-maps-changed', onLibrary);
     return () => {
       cancelled = true;
+      window.removeEventListener('admin-maps-changed', onLibrary);
     };
   }, []);
 

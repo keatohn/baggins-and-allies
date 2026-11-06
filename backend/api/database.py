@@ -273,6 +273,7 @@ def init_db():
         Game,
         GameInvite,
         GameResult,
+        MapAsset,
         MapOverride,
         Player,
         PlayerAchievement,
@@ -294,6 +295,7 @@ def init_db():
         from backend.audio_gains import seed_audio_gains_if_empty
         from backend.avatar import seed_profile_defaults_if_empty
         from backend.catalog import seed_catalog_if_empty
+        from backend.map_assets import seed_map_assets_if_empty
         from backend.map_overrides import seed_map_overrides_if_empty, seed_map_terrain_if_missing
         from backend.setup_data import seed_setups_if_empty
         from backend.progression import seed_progression_if_empty
@@ -306,6 +308,7 @@ def init_db():
         seed_signals_if_empty(db)
         seed_unit_formulas_if_empty(db)
         seed_map_overrides_if_empty(db)
+        seed_map_assets_if_empty(db)
         seed_map_terrain_if_missing(db)
         seed_progression_if_empty(db)
         seed_profile_defaults_if_empty(db)
