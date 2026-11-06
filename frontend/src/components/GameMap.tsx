@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type CSSProperties } from 'react';
+import { Fragment, useState, useEffect, useRef, useCallback, useMemo, useId, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type CSSProperties } from 'react';
 import { DndContext, useDroppable, rectIntersection, pointerWithin, closestCenter, useSensors, useSensor, PointerSensor } from '@dnd-kit/core';
 import type { CollisionDetection, DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { useDraggable } from '@dnd-kit/core';
@@ -21,6 +21,7 @@ import './GameMap.css';
 import './MapTooltip.css';
 import { sortSeaZoneIdsByNumericSuffix, seaZonesReachableBySailFrom } from '../seaZoneSort';
 import { isRiverTerrain, isWaterTerrain } from '../waterTerrain';
+import { MAP_TEXTURE_CONFIG } from '../mapTexture';
 import { createWheelNavIntentResolver, wheelZoomScaleMultiplier } from '../utils/wheelNavIntent';
 import {
   directFordOnlyLandPair,
@@ -803,6 +804,7 @@ function DroppableTerritory({
   shadowed = false,
   keyStronghold = false,
   conquestFadeColor,
+  texturePatternId,
   onClick,
 }: {
   territoryId: string;
@@ -821,6 +823,8 @@ function DroppableTerritory({
   keyStronghold?: boolean;
   /** Conquest: old owner color rendered over the fill and faded out (cross-fade to new owner). */
   conquestFadeColor?: string;
+  /** Shared parchment pattern. Omitted for water and when the texture is off. */
+  texturePatternId?: string | null;
   onClick: (e: React.MouseEvent) => void;
 }) {
   const tid = typeof territoryId === 'string' ? territoryId : (territoryId != null && typeof territoryId === 'object' && 'id' in (territoryId as object) ? String((territoryId as { id: string }).id) : (territoryId != null && typeof territoryId === 'object' && 'territoryId' in (territoryId as object) ? String((territoryId as { territoryId: string }).territoryId) : String(territoryId ?? '')));
@@ -866,6 +870,16 @@ function DroppableTerritory({
           className={`${pathClass} territory-path-fill`}
           onClick={onClick}
         />
+        {texturePatternId ? (
+          <path
+            d={pathData.d}
+            transform={pathData.transform}
+            fill={`url(#${texturePatternId})`}
+            opacity={MAP_TEXTURE_CONFIG.opacity}
+            pointerEvents="none"
+            className="territory-path-texture"
+          />
+        ) : null}
         {shadowed ? (
           <path
             d={pathData.d}
@@ -1169,6 +1183,8 @@ function GameMap({
     [animCues],
   );
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const textureUid = useId().replace(/:/g, '');
+  const texturePatternId = MAP_TEXTURE_CONFIG.enabled ? `land-parchment-${textureUid}` : null;
   const svgRef = useRef<SVGSVGElement>(null);
   const [svgPaths, setSvgPaths] = useState<Map<string, TerritoryPathData>>(new Map());
   const [svgHintAnchors, setSvgHintAnchors] = useState<SvgHintAnchorsByTerritory>({});
@@ -4523,6 +4539,12 @@ function GameMap({
                               shadowed={shadowedTerritories?.has(territoryId) === true}
                               keyStronghold={isKeyStronghold}
                               conquestFadeColor={conquestFadeByTerritory.get(territoryId)}
+                              texturePatternId={
+                                texturePatternId &&
+                                !(MAP_TEXTURE_CONFIG.applyToLandOnly && (isSeaZone || isRiverZone))
+                                  ? texturePatternId
+                                  : null
+                              }
                               onClick={(e) => handleTerritoryClick(territoryId, e)}
                             />
                           );
@@ -4598,6 +4620,25 @@ function GameMap({
                               re-rasterizing patternTransform; CSS transform on pattern is poorly
                               implemented per SVG2/MDN, so keep SMIL as the attribute-channel fallback.
                             Animating children inside the tile rasterizes once and never moves. */}
+                        {texturePatternId ? (
+                          <pattern
+                            id={texturePatternId}
+                            patternUnits="userSpaceOnUse"
+                            x="0"
+                            y="0"
+                            width={MAP_TEXTURE_CONFIG.tileSize}
+                            height={MAP_TEXTURE_CONFIG.tileSize}
+                          >
+                            <image
+                              href={MAP_TEXTURE_CONFIG.src}
+                              x="0"
+                              y="0"
+                              width={MAP_TEXTURE_CONFIG.tileSize}
+                              height={MAP_TEXTURE_CONFIG.tileSize}
+                              preserveAspectRatio="none"
+                            />
+                          </pattern>
+                        ) : null}
                         <pattern
                           id="sea-wave-pattern"
                           className="wave-pattern-sea"

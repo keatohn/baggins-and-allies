@@ -124,6 +124,13 @@
   filter: none;
 }
 
+/* Grain sits on the fill. Multiply keeps faction colors; pointer-events stay on the fill. */
+.territory-path-texture {
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  fill-opacity: 1;
+}
+
 /* Stroke-only layer. Land paths use native SVG filter (attribute) so Safari shows glow; sea uses CSS. */
 .territory-path-stroke:not(.territory-path--svg-glow) {
   filter: drop-shadow(0 0 3px var(--territory-glow-rgba, rgba(0, 0, 0, 0.35))) drop-shadow(0 0 7px var(--territory-glow-rgba-soft, rgba(0, 0, 0, 0.25)));
