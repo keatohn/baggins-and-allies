@@ -5586,11 +5586,6 @@ def do_move(
     from_territory = resolve_territory_key_in_state(state, from_territory, td)
     to_territory = resolve_territory_key_in_state(state, to_territory, td)
     move_rel = water_transport_relation(td.get(from_territory), td.get(to_territory))
-    if move_rel == "cross":
-        raise HTTPException(
-            status_code=400,
-            detail="Ships cannot enter river zones, and river units cannot enter sea zones",
-        )
     from_sea = move_rel in ("offload", "sail")
     to_sea = move_rel in ("load", "sail")
     from_terr = state.territories.get(from_territory)
@@ -5599,6 +5594,13 @@ def do_move(
     if from_terr and req_ids:
         rs = set(req_ids)
         moving_units = [u for u in from_terr.units if u.instance_id in rs]
+    if move_rel == "cross" and not (
+        moving_units and all(is_aerial_unit(ud.get(u.unit_id)) for u in moving_units)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Ships cannot enter river zones, and river units cannot enter sea zones",
+        )
     sea_to_land_all_aerial = bool(
         ud
         and from_sea

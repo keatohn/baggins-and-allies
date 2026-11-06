@@ -1115,8 +1115,6 @@ def _handle_move_units(
     from_def_m = territory_defs.get(from_id)
     to_def_m = territory_defs.get(to_id)
     _move_rel = water_transport_relation(from_def_m, to_def_m)
-    if _move_rel == "cross":
-        raise ValueError("Ships cannot enter river zones, and river units cannot enter sea zones")
     sea_to_land_move = _move_rel == "offload"
     sea_to_sea_move = _move_rel == "sail"
 
@@ -1147,6 +1145,12 @@ def _handle_move_units(
             raise ValueError(f"Unit {instance_id} does not belong to {faction_id}")
         units_to_move.append(unit)
         units_by_id[unit.instance_id] = unit
+
+    if _move_rel == "cross" and not (
+        units_to_move
+        and all(is_aerial_unit(unit_defs.get(u.unit_id)) for u in units_to_move)
+    ):
+        raise ValueError("Ships cannot enter river zones, and river units cannot enter sea zones")
 
     charge_through = action.payload.get("charge_through")
     if charge_through is not None and not isinstance(charge_through, list):
@@ -1474,14 +1478,17 @@ def _handle_move_units(
         from_domain_mt = "sea"
     if to_domain_mt is None and isinstance(to_id, str) and "sea_zone" in to_id.lower():
         to_domain_mt = "sea"
-    if from_domain_mt and to_domain_mt and from_domain_mt != to_domain_mt:
-        raise ValueError("Ships cannot enter river zones, and river units cannot enter sea zones")
     from_sea_mt = from_domain_mt is not None
     to_sea_mt = to_domain_mt is not None
     all_aerial_movers = bool(units_to_move) and all(
         is_aerial_unit(unit_defs.get(u.unit_id)) for u in units_to_move
     )
-    if not from_sea_mt and to_sea_mt and all_aerial_movers:
+    cross_domains = bool(from_domain_mt and to_domain_mt and from_domain_mt != to_domain_mt)
+    if cross_domains and not all_aerial_movers:
+        raise ValueError("Ships cannot enter river zones, and river units cannot enter sea zones")
+    if cross_domains and all_aerial_movers:
+        move_type = "aerial"
+    elif not from_sea_mt and to_sea_mt and all_aerial_movers:
         move_type = "aerial"
     elif from_sea_mt and not to_sea_mt and all_aerial_movers:
         # Sea→land with only flyers: not naval offload (pending move must not show as offload).
