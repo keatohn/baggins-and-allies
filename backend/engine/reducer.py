@@ -2126,11 +2126,7 @@ def _apply_pending_moves(
                 bud = unit_defs.get(u.unit_id)
                 if not _is_water_craft(bud):
                     continue
-                if any(
-                    getattr(p, "loaded_onto", None) == u.instance_id
-                    for p in from_territory.units
-                    if p.instance_id != u.instance_id
-                ):
+                if not _is_transport_boat_for_zone(bud, from_def_exp):
                     continue
                 if empty_sea_zone_valid_for_combat_move_sail_then_load_raid(
                     state,
@@ -2143,6 +2139,25 @@ def _apply_pending_moves(
                     faction_defs,
                     phase,
                 ):
+                    idle_naval_sail_ids.append(u.instance_id)
+                elif (
+                    (getattr(bud, "transport_capacity", 0) or 0) > 0
+                    and remaining_load_slots_on_boat(
+                        state,
+                        from_id,
+                        u.instance_id,
+                        faction_id,
+                        unit_defs,
+                        territory_defs,
+                        phase,
+                        faction_defs,
+                    )
+                    <= 0
+                ):
+                    # Full boat (no free slots): the staging gate can never pass, but a
+                    # repositioning sail into a non-hostile sea still owes a follow-up
+                    # (raid/offload/battle) — audit M7 bypass 2. Chain sails clear when
+                    # the API attaches their offload pending in the same batch.
                     idle_naval_sail_ids.append(u.instance_id)
         # Move each unit and deduct movement cost
         # Deferred sea raid: passengers stay aboard in the staging sea zone (issue #92).
