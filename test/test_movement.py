@@ -15,7 +15,8 @@ from backend.engine.actions import move_units, end_phase
 from backend.engine.reducer import apply_action
 from backend.engine.utils import initialize_game_state, print_game_state
 from backend.engine.queries import validate_action
-from backend.engine.movement import get_reachable_territories_for_unit
+from backend.engine.movement import get_reachable_territories_for_unit, path_traversable_for_charging
+from backend.engine.state import Unit
 
 
 def test_non_combat_reaches_territory_with_pending_capture_owner():
@@ -329,6 +330,123 @@ def test_sail_charges_hostility_aware_distance_hostile_sea():
     )
 
 
+def _board(faction: str, phase: str):
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(setup_id="wotr_1.1")
+    starting = load_starting_setup(setup_id="wotr_1.1")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=starting,
+        camp_defs=camp_defs,
+    )
+    state.current_faction = faction
+    state.phase = phase
+    return state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs
+
+
+def test_non_combat_cannot_cross_neutral_land():
+    """Neutral land is not a non-combat corridor: empty or enemy-held.
+
+    Grey Havens -> Tower Hills (empty ownable) -> The Shire must not be offered
+    when a 1-move unit has the Marching Orders second point. An adjacent empty
+    unownable is still a place to stop, and movement does not continue past it.
+    """
+    state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs = _board(
+        "freepeoples", "non_combat_move"
+    )
+    origin = "grey_havens"
+    warrior = next(u for u in state.territories[origin].units if u.unit_id == "rivendell_warrior")
+    warrior.remaining_movement = 2
+
+    reachable, _ = get_reachable_territories_for_unit(
+        warrior, origin, state, unit_defs, territory_defs, faction_defs, "non_combat_move",
+    )
+    assert "tower_hills" not in reachable
+    assert "the_shire" not in reachable
+    assert "forlindon" in reachable  # friendly, still in range
+
+    action = move_units("freepeoples", origin, "the_shire", [warrior.instance_id])
+    rejected = validate_action(
+        state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs
+    )
+    assert not rejected.valid
+
+    # Hostile neutral (goblins in Carrock) is the same wall, not only empty neutrals.
+    state.current_faction = "freepeoples"
+    elves = [u for u in state.territories["rivendell"].units if u.unit_id == "rivendell_warrior"]
+    assert elves
+    elf = elves[0]
+    elf.remaining_movement = 2
+    state.territories["gundabad"].owner = "freepeoples"
+    state.territories["gundabad"].units = []
+    reachable, _ = get_reachable_territories_for_unit(
+        elf, "rivendell", state, unit_defs, territory_defs, faction_defs, "non_combat_move",
+    )
+    assert "carrock" not in reachable
+    assert "gundabad" not in reachable
+
+    # Adjacent empty unownable land: stop there, do not step through to the far side.
+    gate = territory_defs["minas_morgul"]
+    previous_ownable = gate.ownable
+    try:
+        gate.ownable = False
+        state.current_faction = "gondor"
+        state.territories["minas_morgul"].owner = None
+        state.territories["minas_morgul"].units = []
+        state.territories["cirith_ungol"].owner = "gondor"
+        state.territories["cirith_ungol"].units = []
+        ranger = next(u for u in state.territories["north_ithilien"].units if u.remaining_movement >= 1)
+        ranger.remaining_movement = 2
+        reachable, _ = get_reachable_territories_for_unit(
+            ranger, "north_ithilien", state, unit_defs, territory_defs, faction_defs, "non_combat_move",
+        )
+        assert reachable.get("minas_morgul") == 1
+        assert "cirith_ungol" not in reachable
+    finally:
+        gate.ownable = previous_ownable
+
+
+def test_non_combat_charge_does_not_treat_neutral_land_as_a_shortcut():
+    state, unit_defs, territory_defs, faction_defs, _, _ = _board("freepeoples", "non_combat_move")
+    warrior = next(u for u in state.territories["grey_havens"].units if u.unit_id == "rivendell_warrior")
+    path = ["grey_havens", "tower_hills", "the_shire"]
+    assert path_traversable_for_charging(
+        path, state, [warrior], unit_defs, territory_defs, faction_defs, "freepeoples", "non_combat_move",
+    ) is False
+    assert path_traversable_for_charging(
+        path, state, [warrior], unit_defs, territory_defs, faction_defs, "freepeoples", "combat_move",
+    ) is True
+
+
+def test_aerial_non_combat_still_crosses_neutral_land():
+    """Flyers keep their corridor over neutral land. Ground units in the same spot do not."""
+    state, unit_defs, territory_defs, faction_defs, _, _ = _board("mordor", "non_combat_move")
+    state.territories["north_ithilien"].owner = "mordor"
+    state.territories["minas_morgul"].owner = None
+    state.territories["minas_morgul"].units = [
+        Unit("mordor_orc_wall", "orc_warrior", 1, 1, 1, 1, None)
+    ]
+    state.territories["cirith_ungol"].owner = "mordor"
+    state.territories["cirith_ungol"].units = []
+    nazgul_def = unit_defs["nazgul"]
+    nazgul = Unit(
+        "mordor_nazgul_t", "nazgul",
+        2, nazgul_def.health, 2, nazgul_def.health, None,
+    )
+    state.territories["north_ithilien"].units.append(nazgul)
+    origin_def = territory_defs["north_ithilien"]
+    saved_aerial = list(getattr(origin_def, "aerial_adjacent", []) or [])
+    try:
+        # Drop the direct fly-over so Cirith Ungol is two steps, across Minas Morgul.
+        origin_def.aerial_adjacent = []
+        reachable, _ = get_reachable_territories_for_unit(
+            nazgul, "north_ithilien", state, unit_defs, territory_defs, faction_defs, "non_combat_move",
+        )
+    finally:
+        origin_def.aerial_adjacent = saved_aerial
+    assert reachable.get("cirith_ungol") == 2
+    assert "minas_morgul" not in reachable
+
+
 def main():
     test_land_combat_move()
     test_non_combat_move()
@@ -336,6 +454,9 @@ def main():
     test_move_charges_hostility_aware_distance_enemy_land_shortcut()
     test_move_charges_hostility_aware_distance_water_shortcut()
     test_sail_charges_hostility_aware_distance_hostile_sea()
+    test_non_combat_cannot_cross_neutral_land()
+    test_non_combat_charge_does_not_treat_neutral_land_as_a_shortcut()
+    test_aerial_non_combat_still_crosses_neutral_land()
     print("\n" + "=" * 60)
     print("All movement tests passed.")
     print("=" * 60)

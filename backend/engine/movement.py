@@ -1154,8 +1154,8 @@ def get_reachable_territories_for_unit(
     - BFS up to remaining_movement
     - Cavalry (charging): can pass through empty enemy, empty unowned, or empty friendly/allied territory in combat_move; enemy/unowned are conquered, friendly/allied are not.
     - Aerial: can pass through any enemy/neutral in both phases.
-    - Empty unownable: can be passed through in combat_move to reach an enemy in 2 moves; not valid as final destination (filtered out).
-    - Empty/friendly neutral: enqueued for all units.
+    - Empty unownable: can be passed through in combat_move to reach an enemy in 2 moves; not valid as a combat_move destination. In non_combat_move it is a valid stop and is not a corridor.
+    - Non-combat move: neutral land is never a corridor, whether or not it holds enemy units. Friendly and allied land still is. Sea zones are unchanged.
     - Land ford: ford_adjacent edges require ford_crosser or remaining escort capacity (transport_capacity pooled).
     """
     unit_def = unit_defs.get(unit.unit_id)
@@ -1344,10 +1344,25 @@ def get_reachable_territories_for_unit(
                 can_pass = False
             if is_neutral and phase == "combat_move" and neutral_has_enemies and not is_aerial:
                 can_pass = False
+            # Non-combat: neutral land is a wall. Empty or enemy-held, ownable or not — do not
+            # step through it. An adjacent empty unownable is still a place to stop (recorded below).
+            neutral_land = is_neutral and not _is_water_zone(adj_def)
+            if neutral_land and phase == "non_combat_move" and not is_aerial:
+                can_pass = False
             if can_pass:
                 if adj_key not in visited or new_distance < visited[adj_key]:
                     visited[adj_key] = new_distance
                     queue.append((adjacent_id, new_distance, new_charge, new_fu))
+            elif (
+                phase == "non_combat_move"
+                and not is_aerial
+                and neutral_land
+                and not neutral_has_enemies
+                and not adjacent_ownable
+                and new_distance <= max_move
+            ):
+                if adjacent_id not in reachable or new_distance < reachable[adjacent_id]:
+                    reachable[adjacent_id] = new_distance
             elif phase == "combat_move" and not is_aerial and new_distance <= max_move:
                 if (is_enemy_territory and not is_allied_territory) or (is_neutral and neutral_has_enemies):
                     if adjacent_id not in reachable or new_distance < reachable[adjacent_id]:
@@ -1944,6 +1959,7 @@ def path_traversable_for_charging(
     territory_defs: dict[str, TerritoryDefinition],
     faction_defs: dict[str, FactionDefinition],
     acting_faction_id: str | None,
+    phase: str | None = None,
 ) -> bool:
     """
     True when every unit in `units` can pass through the intermediate hexes of `path`
@@ -1954,6 +1970,8 @@ def path_traversable_for_charging(
       hostile units (land units and aerials cannot expand from water hexes either);
     - land corridor hexes cannot be enemy-owned unless every mover is aerial, or a
       cavalry charging through an empty hex; hostile-neutral hexes are aerial-only;
+    - in non_combat_move, neutral land (empty or occupied) is not a corridor for
+      ground units. Sea zones are unchanged;
     - movers cannot drive over land, and cannot use aerial-only shortcuts or ford-only
       edges without a ford crosser (escort capacity is pathfinding's call).
 
@@ -2017,7 +2035,9 @@ def path_traversable_for_charging(
                         )
                         if not cavalry or territory.units:
                             return False
-                elif neutral and hostile_here and not aerial:
+                elif neutral and not aerial and (
+                    hostile_here or phase == "non_combat_move"
+                ):
                     return False
 
     # Edge rules: aerial shortcuts are unavailable to ground movers, and ford-only

@@ -1919,7 +1919,7 @@ def _apply_pending_moves(
         per_unit_distance: dict[str, int] = {}
         if charge_through:
             if payer_units and move_faction and not path_traversable_for_charging(
-                charge_path, state, payer_units, unit_defs, territory_defs, faction_defs, move_faction
+                charge_path, state, payer_units, unit_defs, territory_defs, faction_defs, move_faction, phase
             ):
                 # Declared charge route is not a free corridor right now: re-verify each
                 # payer's pathfinding still offers it (declare-time checked the same rule).
@@ -1939,7 +1939,7 @@ def _apply_pending_moves(
                 and payer_units
                 and move_faction
                 and path_traversable_for_charging(
-                    geometric_path, state, payer_units, unit_defs, territory_defs, faction_defs, move_faction
+                    geometric_path, state, payer_units, unit_defs, territory_defs, faction_defs, move_faction, phase
                 )
             )
             if payer_units and not geometric_ok:
