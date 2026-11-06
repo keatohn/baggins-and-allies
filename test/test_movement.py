@@ -207,10 +207,135 @@ def test_move_requires_destination():
     print(f"  OK: Validation rejects missing destination: {v_bad.error}")
 
 
+def test_move_charges_hostility_aware_distance_enemy_land_shortcut():
+    """Issue #50 M5: geometric shortest path cuts through enemy land; charge the
+    hostility-aware reachability distance (4), not the pure-graph distance (3)."""
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(setup_id="wotr_1.1")
+    starting = load_starting_setup(setup_id="wotr_1.1")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=starting,
+        camp_defs=camp_defs,
+    )
+    state.current_faction = "gondor"
+    state.phase = "combat_move"
+
+    origin, dest = "north_ithilien", "west_rhun"
+    u = next(x for x in state.territories[origin].units if x.unit_id == "ithilien_ranger")
+    u.remaining_movement = 4
+
+    # Geometric path north_ithilien -> dagorlad (neutral) -> rhun_hills (enemy) -> west_rhun
+    # costs 3; pathfinding must detour via friendly land for a total of 4.
+    reachable, _ = get_reachable_territories_for_unit(
+        u, origin, state, unit_defs, territory_defs, faction_defs, "combat_move",
+    )
+    assert reachable.get(dest) == 4, f"expected hostility-aware distance 4, got {reachable.get(dest)}"
+
+    action = move_units("gondor", origin, dest, [u.instance_id], move_type="land")
+    v = validate_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert v.valid, v.error
+    state, _ = apply_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert len(state.pending_moves) == 1
+    state, _ = apply_action(state, end_phase("gondor"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+
+    moved = next(x for x in state.territories[dest].units if x.instance_id == u.instance_id)
+    # Charged 4 of 4: geometric charging would leave 1 movement remaining.
+    assert moved.remaining_movement == 0, (
+        f"expected charge of 4 (remaining 0), got remaining={moved.remaining_movement}"
+    )
+
+
+def test_move_charges_hostility_aware_distance_water_shortcut():
+    """Issue #50 M5: land unit's geometric path crosses a sea zone it cannot enter;
+    charge the reachability detour (4), not the geometric distance (2)."""
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(setup_id="wotr_1.1")
+    starting = load_starting_setup(setup_id="wotr_1.1")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=starting,
+        camp_defs=camp_defs,
+    )
+    state.current_faction = "gondor"
+    state.phase = "combat_move"
+
+    origin, dest = "west_osgiliath", "harondor"
+    u = next(x for x in state.territories[origin].units if x.unit_id == "gondor_soldier")
+    u.remaining_movement = 4
+
+    # Geometric path west_osgiliath -> sea_zone_12 -> harondor costs 2 but a land unit
+    # cannot enter the water hex; the land detour costs 4.
+    reachable, _ = get_reachable_territories_for_unit(
+        u, origin, state, unit_defs, territory_defs, faction_defs, "combat_move",
+    )
+    assert reachable.get(dest) == 4, f"expected hostility-aware distance 4, got {reachable.get(dest)}"
+
+    action = move_units("gondor", origin, dest, [u.instance_id], move_type="land")
+    v = validate_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert v.valid, v.error
+    state, _ = apply_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert len(state.pending_moves) == 1
+    state, _ = apply_action(state, end_phase("gondor"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+
+    moved = next(x for x in state.territories[dest].units if x.instance_id == u.instance_id)
+    # Charged 4 of 4: geometric charging would leave 2 movement remaining.
+    assert moved.remaining_movement == 0, (
+        f"expected charge of 4 (remaining 0), got remaining={moved.remaining_movement}"
+    )
+
+
+def test_sail_charges_hostility_aware_distance_hostile_sea():
+    """Issue #50 M5: NCM sail whose geometric path crosses a hostile sea zone;
+    charge the reachability detour (3), not the geometric distance (2).
+    Checked on the simulated post-pending state — leaving NCM resets movement."""
+    from backend.engine.reducer import get_state_after_pending_moves
+    from backend.engine.state import Unit
+
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(setup_id="wotr_1.1")
+    starting = load_starting_setup(setup_id="wotr_1.1")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=starting,
+        camp_defs=camp_defs,
+    )
+    state.current_faction = "gondor"
+    state.phase = "non_combat_move"
+
+    origin, dest = "sea_zone_2", "sea_zone_5"
+    ship_def = unit_defs["gondor_ship"]
+    ship = Unit("gondor_ship_t2", "gondor_ship", ship_def.movement, ship_def.health, ship_def.movement, ship_def.health, None)
+    ship.remaining_movement = 3
+    state.territories[origin].units.append(ship)
+    enemy = Unit("mordor_black_ship_t2", "black_ship", 3, 3, 3, 3, None)
+    state.territories["sea_zone_3"].units.append(enemy)
+
+    # Geometric path sea_zone_2 -> sea_zone_3 (hostile ship) -> sea_zone_5 costs 2;
+    # the ship must detour around sea_zone_3 for a total of 3.
+    reachable, _ = get_reachable_territories_for_unit(
+        ship, origin, state, unit_defs, territory_defs, faction_defs, "non_combat_move",
+    )
+    assert reachable.get(dest) == 3, f"expected hostility-aware distance 3, got {reachable.get(dest)}"
+
+    action = move_units("gondor", origin, dest, [ship.instance_id], move_type="sail")
+    v = validate_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert v.valid, v.error
+    state, _ = apply_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert len(state.pending_moves) == 1
+
+    sim = get_state_after_pending_moves(state, "non_combat_move", unit_defs, territory_defs, faction_defs)
+    moved = next(x for x in sim.territories[dest].units if x.instance_id == ship.instance_id)
+    # Charged 3 of 3: geometric charging would leave 1 movement remaining.
+    assert moved.remaining_movement == 0, (
+        f"expected charge of 3 (remaining 0), got remaining={moved.remaining_movement}"
+    )
+
+
 def main():
     test_land_combat_move()
     test_non_combat_move()
     test_move_requires_destination()
+    test_move_charges_hostility_aware_distance_enemy_land_shortcut()
+    test_move_charges_hostility_aware_distance_water_shortcut()
+    test_sail_charges_hostility_aware_distance_hostile_sea()
     print("\n" + "=" * 60)
     print("All movement tests passed.")
     print("=" * 60)

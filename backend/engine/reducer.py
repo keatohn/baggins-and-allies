@@ -60,9 +60,9 @@ from backend.engine.combat import (
 )
 from backend.engine.movement import (
     get_reachable_territories_for_unit,
-    calculate_movement_cost,
     movement_cost_along_path,
     get_shortest_path,
+    path_traversable_for_charging,
     ford_shortcut_requires_escort_lead,
     land_move_ford_escort_cost_for_instances,
     pending_ford_crosser_lead_move_from_origin,
@@ -1866,14 +1866,96 @@ def _apply_pending_moves(
                 state, from_id, faction_id, unit_defs, faction_defs, territory_defs
             )
         if charge_through:
-            path = [from_id] + list(charge_through) + [to_id]
-            distance = movement_cost_along_path(path, territory_defs, is_aerial=any_aerial)
+            charge_path = [from_id] + list(charge_through) + [to_id]
+            distance = movement_cost_along_path(charge_path, territory_defs, is_aerial=any_aerial)
             if distance is None:
                 raise ValueError(
                     f"Charge path from {from_id} through {charge_through} to {to_id} is invalid (non-adjacent steps)"
                 )
         else:
-            distance = calculate_movement_cost(from_id, to_id, territory_defs, is_aerial=any_aerial)
+            distance = None  # set below from the geometric path / reachability
+
+        # Movement charge (issue #50 audit M5): charge the hostility-aware route the stack
+        # actually validated against (what pathfinding / available-actions report as `cost`),
+        # not the pure-graph shortest path — the geometric shortcut can cut through enemy
+        # land, hostile seas, or water a land unit cannot cross, undercharging the move.
+        # `per_unit_distance` holds each distance-paying mover's charge; when the geometric
+        # path is a free corridor for every payer its length equals the reachability
+        # distance, so the common case charges exactly as before without a pathfinding pass.
+        move_faction = faction_id or (state.current_faction or "") or None
+
+        def _pays_distance(unit: Unit) -> bool:
+            if move_type in ("load", "offload"):
+                return False  # fixed costs (0 / 1) applied below
+            ud = unit_defs.get(unit.unit_id)
+            if move_type == "sail":
+                if not ud:
+                    return False
+                if _purchase_kind(ud) in ("naval", "river"):
+                    return True
+                return is_aerial_unit(ud)
+            return True
+
+        payer_units = [u for u in moving_units if _pays_distance(u)]
+        ford_exclude = set(unit_instance_ids)
+        same_move_has_ford_crosser = any(
+            has_unit_special(unit_defs.get(u.unit_id), "ford_crosser") for u in moving_units
+        )
+
+        def _reachability_for(unit: Unit):
+            return get_reachable_territories_for_unit(
+                unit,
+                from_id,
+                state,
+                unit_defs,
+                territory_defs,
+                faction_defs,
+                phase,
+                None,
+                ford_exclude,
+                same_move_has_ford_crosser,
+            )
+
+        per_unit_distance: dict[str, int] = {}
+        if charge_through:
+            if payer_units and move_faction and not path_traversable_for_charging(
+                charge_path, state, payer_units, unit_defs, territory_defs, faction_defs, move_faction
+            ):
+                # Declared charge route is not a free corridor right now: re-verify each
+                # payer's pathfinding still offers it (declare-time checked the same rule).
+                for unit in payer_units:
+                    reachable, charge_routes = _reachability_for(unit)
+                    if to_id in reachable and charge_through not in charge_routes.get(to_id, []):
+                        raise ValueError(
+                            f"Invalid charge_through for {to_id}: unit {unit.instance_id} cannot traverse "
+                            f"the declared charge path {charge_through!r}"
+                        )
+            per_unit_distance = {u.instance_id: distance for u in payer_units}
+        else:
+            geometric_path = get_shortest_path(from_id, to_id, territory_defs, is_aerial=any_aerial)
+            distance = len(geometric_path) - 1 if geometric_path else None
+            geometric_ok = bool(
+                geometric_path
+                and payer_units
+                and move_faction
+                and path_traversable_for_charging(
+                    geometric_path, state, payer_units, unit_defs, territory_defs, faction_defs, move_faction
+                )
+            )
+            if payer_units and not geometric_ok:
+                # Geometric shortcut is not fully traversable (or no geometric path):
+                # charge each payer its hostility-aware reachability distance.
+                for unit in payer_units:
+                    reachable, _ = _reachability_for(unit)
+                    r = reachable.get(to_id)
+                    if r is not None:
+                        per_unit_distance[unit.instance_id] = r
+                    elif distance is not None:
+                        per_unit_distance[unit.instance_id] = distance
+                if distance is None and per_unit_distance:
+                    distance = max(per_unit_distance.values())
+            elif geometric_ok:
+                per_unit_distance = {u.instance_id: distance for u in payer_units}
         # Offload / aerial sea→land: single step; BFS can return None if only one side lists the edge.
         if (
             distance is None
@@ -1906,6 +1988,7 @@ def _apply_pending_moves(
                     "avoid_forced_naval_combat requires adjacent sea zones (1 hex); pending move is invalid"
                 )
             distance = 1
+            per_unit_distance = {iid: 1 for iid in per_unit_distance}
 
         # Per-unit movement cost for sea transport
         if move_type == "load":
@@ -1935,7 +2018,7 @@ def _apply_pending_moves(
                 continue  # deferred sea-raid passengers do not move yet, so they pay no offload cost
             if move_type == "sail":
                 ud = unit_defs.get(unit.unit_id)
-                unit_cost = distance if _is_driver(ud) else 0
+                unit_cost = per_unit_distance.get(instance_id, distance) if _is_driver(ud) else 0
             elif move_type == "offload":
                 ud = unit_defs.get(unit.unit_id)
                 unit_cost = (
@@ -1944,7 +2027,7 @@ def _apply_pending_moves(
                     else 0
                 )
             else:
-                unit_cost = cost_per_unit
+                unit_cost = per_unit_distance.get(instance_id, cost_per_unit)
             if unit_cost > unit.remaining_movement:
                 raise ValueError(
                     f"Move from {from_id} to {to_id}: unit {instance_id} has remaining_movement={unit.remaining_movement}, need {unit_cost}"
@@ -2070,11 +2153,11 @@ def _apply_pending_moves(
                     from_territory.units.remove(unit)
                     if move_type == "sail":
                         ud = unit_defs.get(unit.unit_id)
-                        unit_cost = distance if _is_driver(ud) else 0
+                        unit_cost = per_unit_distance.get(instance_id, distance) if _is_driver(ud) else 0
                     elif move_type == "offload":
                         unit_cost = 1  # ids_to_move are land passengers only
                     else:
-                        unit_cost = cost_per_unit
+                        unit_cost = per_unit_distance.get(instance_id, cost_per_unit)
                     unit.remaining_movement -= unit_cost
                     to_territory.units.append(unit)
 
