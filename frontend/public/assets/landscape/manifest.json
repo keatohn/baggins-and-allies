@@ -15,9 +15,16 @@
     "mountain_ridge.png",
     "mountain_snow.png"
   ],
-  "volcano": ["volcano.png"],
-  "hills": ["hills.png"],
-  "anywhere": ["bridge.png", "ford.png"],
+  "volcano": [
+    "volcano.png"
+  ],
+  "hills": [
+    "hills.png"
+  ],
+  "anywhere": [
+    "bridge.png",
+    "ford.png"
+  ],
   "landmarks": [
     "amon_lanc.png",
     "annuminas.png",
@@ -30,6 +37,7 @@
     "edoras.png",
     "elven_halls.png",
     "erebor.png",
+    "gray_havens.png",
     "helms_deep.png",
     "isengard.png",
     "lothlorien.png",
