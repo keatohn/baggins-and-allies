@@ -121,6 +121,8 @@ interface SidebarProps {
   bulkMoveConfirm?: BulkMoveConfirmState | null;
   onConfirmBulkMove?: () => void;
   onCancelBulkMove?: () => void;
+  /** Bulk "All" charge prompt: pick a shared charge route (only when every stack can charge). */
+  onChooseBulkChargePath?: (path: string[]) => void;
   onDecideBulkRingCarry?: (ringIds: string[]) => void;
   onCancelPendingMove?: (moveId: string) => void;
   pendingMobilization?: PendingMobilization | null;
@@ -577,6 +579,7 @@ function Sidebar({
   bulkMoveConfirm,
   onConfirmBulkMove,
   onCancelBulkMove,
+  onChooseBulkChargePath,
   onDecideBulkRingCarry,
   onCancelPendingMove,
   bulkMobilizeConfirm,
@@ -897,6 +900,65 @@ function Sidebar({
                         onDecide={(ringIds) => onDecideBulkRingCarry?.(ringIds)}
                         onCancel={() => onCancelBulkMove?.()}
                       />
+                    );
+                  }
+                  // Charge route prompt (issue #113): shared options only; one button = nothing to choose.
+                  const chargeOptions = (() => {
+                    if (!bulkMoveConfirm.chargePathOptions || bulkMoveConfirm.chargePathOptions.length < 2) {
+                      return [];
+                    }
+                    const toId = bulkMoveConfirm.toTerritory;
+                    const fromId = bulkMoveConfirm.fromTerritory;
+                    const fromAdjacent = territoryData[fromId]?.adjacent?.includes(toId);
+                    const seen = new Set<string>();
+                    return bulkMoveConfirm.chargePathOptions
+                      .map((path) => path.filter((tid) => tid !== toId))
+                      .filter((path) => {
+                        if (path.length > 0) return true;
+                        return !!fromAdjacent;
+                      })
+                      .filter((path) => {
+                        const key = JSON.stringify(path);
+                        if (seen.has(key)) return false;
+                        seen.add(key);
+                        return true;
+                      });
+                  })();
+                  if (chargeOptions.length > 1) {
+                    return (
+                      <>
+                        <p className="move-details">
+                          <span className="unit-name">All units</span>
+                          <br />
+                          <span className="move-route">
+                            {territoryData[bulkMoveConfirm.fromTerritory]?.name || bulkMoveConfirm.fromTerritory}
+                            {' → '}
+                            {territoryData[bulkMoveConfirm.toTerritory]?.name || bulkMoveConfirm.toTerritory}
+                          </span>
+                        </p>
+                        <p className="charge-path-prompt">Choose route:</p>
+                        <div className="charge-path-options">
+                          {chargeOptions.map((path, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              className="charge-path-btn"
+                              onClick={() => onChooseBulkChargePath?.(path)}
+                            >
+                              {path.length === 0
+                                ? 'Direct'
+                                : `Via ${path.map((tid) => territoryData[tid]?.name || tid).join(', ')}`}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          className="cancel-move-btn"
+                          onClick={() => onCancelBulkMove?.()}
+                        >
+                          Cancel
+                        </button>
+                      </>
                     );
                   }
                   return (

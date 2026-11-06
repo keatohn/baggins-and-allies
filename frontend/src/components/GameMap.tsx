@@ -13,6 +13,7 @@ import MobilizationTray from './MobilizationTray';
 import NavalTray, { type BoatInTray, type NavalTrayBoatTapMovePayload } from './NavalTray';
 import { applyPassengerReassignToAllocation } from '../utils/navalTrayAllocation';
 import { compareUnitStacksByMapOrder } from '../utils/unitStackSort';
+import { pickDefaultChargePath } from '../utils/chargePath';
 import { TERRITORY_UNIT_PIXEL_NUDGE } from './mapSpotNudge';
 import { ringHostUnitId, ringIconSrc, ringsOnUnit, type RingView } from '../ringsDisplay';
 import './GameMap.css';
@@ -438,6 +439,8 @@ interface MoveableUnit {
   destinationCosts?: Record<string, number>;
   /** Cavalry: destination_id -> list of charge_through paths. */
   charge_routes?: Record<string, string[][]>;
+  /** destination_id -> prompt the charge-route chooser (only when a route conquers a via). */
+  charge_route_prompts?: Record<string, boolean>;
 }
 
 interface GameMapProps {
@@ -3380,8 +3383,15 @@ function GameMap({
           : undefined;
         const rawPaths = match?.charge_routes && typeof match.charge_routes === 'object' ? match.charge_routes[effectiveToTerritory] : undefined;
         const paths = Array.isArray(rawPaths) ? rawPaths : [];
-        const singlePath = paths.length === 1 ? paths[0] : undefined;
-        const chargeThrough = singlePath?.length ? singlePath : (paths[0]?.length ? paths[0] : undefined);
+        const promptMap =
+          match?.charge_route_prompts && typeof match.charge_route_prompts === 'object'
+            ? match.charge_route_prompts
+            : undefined;
+        // Prompt only when the choice matters (a route conquers an intermediate). A missing
+        // flag (old backend) keeps today's prompt; otherwise auto-pick the shortest route.
+        const shouldPromptChargePath =
+          paths.length > 1 && (!promptMap || promptMap[effectiveToTerritory] !== false);
+        const chargeThrough = shouldPromptChargePath ? undefined : pickDefaultChargePath(paths);
         const useInstanceIds = unitForDrop.instanceIds;
         // Land: only instance IDs still in this hex, not on a pending move, and able to reach this drop (backend moveable_units).
         const availableLandInstanceIds =
@@ -3626,8 +3636,8 @@ function GameMap({
           unitDef: unitForDrop.unitDef,
           maxCount: moveMaxCount,
           count: moveCount,
-          chargeThrough: paths.length <= 1 ? chargeThrough : undefined,
-          chargePathOptions: paths.length > 1 ? paths : undefined,
+          chargeThrough,
+          chargePathOptions: shouldPromptChargePath ? paths : undefined,
           ...(instanceIdsToUse && instanceIdsToUse.length > 0 ? { instanceIds: instanceIdsToUse } : {}),
           ...(boatOptions && boatOptions.length > 1 ? { boatOptions } : {}),
           ...(navalBoatStacks && navalBoatStacks.length > 1 ? { navalBoatStacks } : {}),
