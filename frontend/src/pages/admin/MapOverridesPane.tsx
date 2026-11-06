@@ -233,6 +233,7 @@ export function MapOverridesPane({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [editorTab, setEditorTab] = useState<'icon' | 'landscape' | 'builder'>('icon');
   const [terrainTypes, setTerrainTypes] = useState<string[]>([]);
   const [manifest, setManifest] = useState<LandscapeManifest>({});
@@ -279,6 +280,8 @@ export function MapOverridesPane({
   } | null>(null);
   const selectDragRef = useRef<{ x: number; y: number; id: number } | null>(null);
   const paintLastRef = useRef<Pt | null>(null);
+  /** Pointer that owns the current paint stroke. Null means the button is up, so hover must not stamp. */
+  const paintPointerRef = useRef<number | null>(null);
   const copyDragRef = useRef<{ id: number; sx: number; sy: number; x1: number; y1: number } | null>(null);
   const bulkDragRef = useRef<{
     id: number;
@@ -582,6 +585,11 @@ export function MapOverridesPane({
         setCopyOpen(false);
         return;
       }
+      if (e.key === 'Escape' && clearConfirmOpen) {
+        e.stopPropagation();
+        setClearConfirmOpen(false);
+        return;
+      }
       if (e.key === 'Escape' && band) {
         e.stopPropagation();
         selectDragRef.current = null;
@@ -614,7 +622,7 @@ export function MapOverridesPane({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [discardOpen, saving, dirty, onClose, placing, band, multiSel, copyOpen, editorTab]);
+  }, [discardOpen, saving, dirty, onClose, placing, band, multiSel, copyOpen, clearConfirmOpen, editorTab]);
 
   const changeMap = (next: string) => {
     if (!next || next === mapBase) return;
@@ -692,16 +700,16 @@ export function MapOverridesPane({
     if (landscape && cursorMode === 'paint') {
       const el = wrapRef.current;
       if (!el) return;
+      paintPointerRef.current = e.pointerId;
       paintLastRef.current = null;
       try {
         e.currentTarget.setPointerCapture(e.pointerId);
       } catch {
         /* ignore */
       }
-      // Stamp immediately at the press point, then again along the drag.
+      // Stamp at the press point, then only along this pointer while it stays down.
       paintStampAt(e.clientX, e.clientY);
-      const vb = viewportToViewBox(e.clientX, e.clientY);
-      paintLastRef.current = vb;
+      paintLastRef.current = viewportToViewBox(e.clientX, e.clientY);
       return;
     }
     dragRef.current = { x: e.clientX, y: e.clientY, tx: transform.x, ty: transform.y, id: e.pointerId };
@@ -724,12 +732,14 @@ export function MapOverridesPane({
       return;
     }
     if (editorTab === 'landscape' && cursorMode === 'paint') {
-      if (!placing) return;
-      const vb = viewportToViewBox(e.clientX, e.clientY);
-      if (!vb) return;
+      // Hover used to stamp because a missing last point skipped the spacing check.
+      // Only the pointer that pressed down, and only while that button is held, paints.
+      if (!placing || paintPointerRef.current !== e.pointerId || (e.buttons & 1) === 0) return;
       const last = paintLastRef.current;
+      const vb = viewportToViewBox(e.clientX, e.clientY);
+      if (!last || !vb) return;
       const step = Math.max(PAINT_STAMP_SPACING, paintRadius);
-      if (last && Math.hypot(vb.x - last.x, vb.y - last.y) < step) return;
+      if (Math.hypot(vb.x - last.x, vb.y - last.y) < step) return;
       paintStampAt(e.clientX, e.clientY);
       paintLastRef.current = vb;
       return;
@@ -818,12 +828,15 @@ export function MapOverridesPane({
       return;
     }
     if (editorTab === 'landscape' && cursorMode === 'paint') {
-      try {
-        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
-      } catch {
-        /* ignore */
+      if (paintPointerRef.current === e.pointerId) {
+        try {
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+        } catch {
+          /* ignore */
+        }
+        paintPointerRef.current = null;
+        paintLastRef.current = null;
       }
-      paintLastRef.current = null;
       return;
     }
     if (editorTab === 'landscape' && cursorMode === 'select') {
@@ -1963,6 +1976,7 @@ export function MapOverridesPane({
                         setMultiSel(new Set());
                         selectDragRef.current = null;
                         paintLastRef.current = null;
+                        paintPointerRef.current = null;
                         bulkDragRef.current = null;
                       }}
                     >
@@ -1992,7 +2006,7 @@ export function MapOverridesPane({
                   type="button"
                   className="admin-page__btn admin-page__btn--danger"
                   disabled={landscapeCount === 0}
-                  onClick={clearAllLandscape}
+                  onClick={() => setClearConfirmOpen(true)}
                 >
                   Clear all
                 </button>
@@ -2038,7 +2052,7 @@ export function MapOverridesPane({
                 ? 'Select mode: drag a rectangle to select pieces · shift adds · ctrl removes · drag a selected piece to move the group · Esc clears'
                 : cursorMode === 'paint'
                   ? placing
-                    ? `Paint mode: drag to stamp ${placing.img}${paintRadius ? ` in a ${paintRadius}-unit brush` : ' along the cursor'}${borderMode ? ' on borders' : ' inside territories'} · pick another image below to switch`
+                    ? `Paint mode: drag to stamp ${placing.img}${paintRadius ? ` in a ${paintRadius}-unit brush` : ' along the drag'}${borderMode ? ' on borders' : ' inside territories'} · pick another image below to switch`
                     : 'Paint mode: pick an image below, then drag on the map to stamp.'
                   : placing
                     ? `Click the map to place ${placing.img}${borderMode ? ' on the territory border' : ' inside the territory'} · Esc to cancel`
@@ -2405,7 +2419,7 @@ export function MapOverridesPane({
                   )}
                   <label
                     className="mapov-brush__scale"
-                    title="Brush radius in map units (0 = stamp a single line along the cursor)"
+                    title="Brush radius in map units (0 = stamp a single line along the drag)"
                   >
                     Thickness
                     <input
@@ -2617,6 +2631,43 @@ export function MapOverridesPane({
                   onClick={applyCopy}
                 >
                   {copyPlan?.items.length ? `Copy ${copyPlan.items.length} pieces` : 'Copy'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {clearConfirmOpen ? (
+          <div
+            className="admin-modal-overlay admin-graph__confirm"
+            role="presentation"
+            onClick={() => setClearConfirmOpen(false)}
+          >
+            <div
+              className="admin-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="admin-mapov-clear-title"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 id="admin-mapov-clear-title" className="admin-modal__title">
+                Clear all landscape?
+              </h2>
+              <p className="admin-form__micro">
+                This removes every landscape placement on this map ({landscapeCount} placed).
+              </p>
+              <div className="admin-modal__actions">
+                <button
+                  type="button"
+                  className="admin-page__btn admin-page__btn--danger"
+                  onClick={() => {
+                    setClearConfirmOpen(false);
+                    clearAllLandscape();
+                  }}
+                >
+                  Yes
+                </button>
+                <button type="button" className="admin-page__btn" onClick={() => setClearConfirmOpen(false)}>
+                  Cancel
                 </button>
               </div>
             </div>
