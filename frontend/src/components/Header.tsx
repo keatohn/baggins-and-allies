@@ -330,7 +330,7 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
           </div>
         )}
 
-        {/* Title to the right of stronghold bar (left-aligned group) so it doesn’t overlap faction logos on narrow screens */}
+        {/* Centered on the header: brand, scenario, and game name */}
         <div className="header-center-title">
           <span className="header-center-title-brand">Baggins & Allies</span>
           {(setupDisplayName || gameName) && (

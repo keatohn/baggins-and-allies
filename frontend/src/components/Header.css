@@ -14,6 +14,7 @@
 }
 
 .header-scroll {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -29,18 +30,23 @@
   box-shadow: 0 2px 8px var(--shadow);
 }
 
-/* Title: grow with viewport; min-width floors the brand so it never ellipsizes
-   on fullscreen laptops once the turn/phase/power cluster left the header */
+/* Title sits on the header midline. Taken out of the flex row so the buttons
+   and turn ticker do not shove it left. */
 .header-center-title {
-  flex: 1 1 120px;
-  min-width: min(13rem, 30vw);
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
   display: flex;
   flex-direction: column;
+  align-items: center;
   justify-content: center;
   gap: 0.08rem;
-  margin-left: clamp(0.12rem, 0.65vw, 0.32rem);
+  width: max-content;
+  max-width: min(46rem, 46%);
+  text-align: center;
   pointer-events: none;
-  max-width: min(46rem, calc(26vw + 14rem));
 }
 
 .header-center-title-brand {
@@ -53,22 +59,23 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
 }
 
-/* Second line: setup (left) · game name (right) */
+/* Second line: scenario and game name centered together */
 .header-center-title-subrow {
   display: flex;
   align-items: baseline;
+  justify-content: center;
   gap: 0.35rem;
   min-width: 0;
+  max-width: 100%;
   line-height: 1.2;
 }
 
 .header-center-title-setup {
   flex: 0 1 auto;
   min-width: 0;
-  /* Game name must keep at least half the subrow (setup names can be long) */
-  max-width: 50%;
   font-family: var(--font-parchment);
   font-size: clamp(0.72rem, 0.55vw + 0.58rem, 0.95rem);
   color: var(--ink-light);
@@ -86,8 +93,9 @@
 }
 
 .header-center-title-game {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
+  text-align: center;
   font-family: var(--font-parchment);
   font-size: clamp(0.72rem, 0.55vw + 0.58rem, 0.95rem);
   color: var(--ink-light);
@@ -1134,23 +1142,23 @@
   color: var(--ink-faded);
 }
 
-/* Stronghold bar — compact on laptop; scales up slightly on very wide screens */
+/* Stronghold bar — wider and taller than the icon row so the counts read at a glance */
 .header-stronghold-bar-wrap {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.1rem;
-  width: clamp(68px, 9vw, 118px);
-  min-width: 64px;
-  max-width: 132px;
+  gap: 0.15rem;
+  width: clamp(132px, 16vw, 220px);
+  min-width: 120px;
+  max-width: 240px;
 }
 
 @media (min-width: 1600px) {
   .header-stronghold-bar-wrap {
-    width: clamp(80px, 8vw, 150px);
-    max-width: 168px;
-    gap: 0.12rem;
+    width: clamp(168px, 14vw, 260px);
+    max-width: 280px;
+    gap: 0.18rem;
   }
 }
 
@@ -1489,22 +1497,25 @@
   }
 
   .header-stronghold-bar-wrap {
-    width: clamp(64px, 11vw, 100px);
-    min-width: 60px;
+    width: clamp(120px, 18vw, 180px);
+    min-width: 110px;
   }
 }
 
 /* Tablet / small laptop: keep title + chart readable */
 @media (max-width: 900px) {
   .header-center-title {
+    position: static;
+    transform: none;
     flex: 1 1 120px;
     min-width: min(10rem, 36vw);
     max-width: min(36rem, calc(42vw + 8rem));
+    width: auto;
   }
 
   .header-stronghold-bar-wrap {
-    width: clamp(64px, 22vw, 140px);
-    min-width: 60px;
+    width: clamp(120px, 28vw, 190px);
+    min-width: 110px;
   }
 }
 
@@ -1622,22 +1633,25 @@
 
   .header-stronghold-bar-wrap {
     flex: 0 0 auto;
-    width: clamp(84px, 30vw, 176px);
-    min-width: 84px;
+    width: clamp(128px, 38vw, 210px);
+    min-width: 120px;
     margin-left: 0.18rem;
     margin-right: 0.18rem;
   }
 
   .header-stronghold-bar-wrap .stronghold-alliance-bar__segments {
-    height: 0.95rem;
+    height: 1.25rem;
   }
 
   .header-stronghold-bar-wrap .stronghold-alliance-bar__label {
-    font-size: 0.52rem;
+    font-size: 0.72rem;
   }
 
   .header-center-title {
+    position: static;
+    transform: none;
     flex: 0 0 auto;
+    width: auto;
     min-width: min(11rem, 42vw);
     max-width: 12rem;
     margin-left: 0.14rem;
@@ -1954,17 +1968,17 @@
   }
 
   .header-stronghold-bar-wrap {
-    width: 148px;
+    width: 190px;
     margin-left: 0.28rem;
     margin-right: 0.28rem;
   }
 
   .header-stronghold-bar-wrap .stronghold-alliance-bar__segments {
-    height: 0.95rem;
+    height: 1.25rem;
   }
 
   .header-stronghold-bar-wrap .stronghold-alliance-bar__label {
-    font-size: 0.52rem;
+    font-size: 0.72rem;
   }
 
   .header-turn-ticker {
