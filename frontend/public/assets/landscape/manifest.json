@@ -17,5 +17,6 @@
   ],
   "volcano": ["volcano.png"],
   "hills": ["hills.png"],
-  "anywhere": ["bridge.png", "ford.png"]
+  "anywhere": ["bridge.png", "ford.png"],
+  "landmarks": []
 }

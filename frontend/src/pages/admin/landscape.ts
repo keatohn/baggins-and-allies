@@ -5,6 +5,9 @@ export type LandscapeManifest = Record<string, string[]>;
 /** Manifest key for art that may be placed on any territory, independent of terrain. */
 export const LANDSCAPE_FREE_CATEGORY = 'anywhere';
 
+/** Named places (Minas Tirith, Barad-dûr). Hand-placed on any territory; never auto-scattered. */
+export const LANDSCAPE_LANDMARK_CATEGORY = 'landmarks';
+
 export const LANDSCAPE_ASSET_BASE = '/assets/landscape';
 
 export function landscapeSrc(placement: Pick<LandscapePlacement, 'img'>): string {
@@ -30,8 +33,8 @@ export async function loadLandscapeManifest(): Promise<LandscapeManifest> {
 
 /**
  * Categories of landscape art that may be placed on a territory with this terrain type.
- * The free category (`anywhere`) is included unless `includeFree` is false — auto-generate
- * skips it so bridges and fords stay hand-placed.
+ * The free category (`anywhere`) and `landmarks` are included unless `includeFree` is false.
+ * Auto-generate skips both so bridges, fords, and named places stay hand-placed.
  */
 export function landscapeCategoriesForTerrain(
   terrainType: string | undefined,
@@ -42,12 +45,10 @@ export function landscapeCategoriesForTerrain(
   const cats: string[] = [];
   if (manifest[t]?.length) cats.push(t);
   const includeFree = opts?.includeFree !== false;
-  if (
-    includeFree &&
-    manifest[LANDSCAPE_FREE_CATEGORY]?.length &&
-    !cats.includes(LANDSCAPE_FREE_CATEGORY)
-  ) {
-    cats.push(LANDSCAPE_FREE_CATEGORY);
+  if (includeFree) {
+    for (const hand of [LANDSCAPE_FREE_CATEGORY, LANDSCAPE_LANDMARK_CATEGORY]) {
+      if (manifest[hand]?.length && !cats.includes(hand)) cats.push(hand);
+    }
   }
   return cats;
 }
