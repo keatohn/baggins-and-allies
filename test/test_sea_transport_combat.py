@@ -2916,3 +2916,84 @@ def test_full_boat_chain_sail_with_attached_offload_ends_phase(wotr_defs):
         landed = next((u for u in state.territories["harondor"].units if u.instance_id == p.instance_id), None)
         assert landed is not None, "passenger must offload onto harondor"
         assert getattr(landed, "loaded_onto", None) is None
+
+
+def test_empty_land_sea_raid_conquer_clears_staging(wotr_defs):
+    """
+    Naval audit L9: the empty-land conquer branch of _handle_initiate_combat returns before
+    _resolve_combat_end, so it must pop the raid-staging records itself — otherwise
+    territory_sea_raid_from/faction/passengers for the conquered land persist indefinitely.
+    """
+    (state, ship, raider, unit_defs, territory_defs,
+     faction_defs, camp_defs, port_defs) = _hostile_staging_offload_state(
+        wotr_defs, enemy_ship=False, defenders=False
+    )
+    state = get_state_after_pending_moves(
+        state, "combat_move", unit_defs, territory_defs, faction_defs
+    )
+    # Unhostile staging: passengers landed and staging was recorded by the offload apply.
+    assert raider.instance_id in {
+        u.instance_id for u in state.territories["harondor"].units
+    }
+    assert state.territory_sea_raid_from.get("harondor") == "sea_zone_11"
+    assert state.territory_sea_raid_faction.get("harondor") == "harad"
+    assert raider.instance_id in (
+        state.territory_sea_raid_passenger_instance_ids.get("harondor") or []
+    )
+    state.phase = "combat"
+    state.current_faction = "harad"
+
+    state, events = apply_action(
+        state,
+        initiate_combat(
+            "harad", "harondor",
+            dice_rolls={"attacker": [1], "defender": []},
+            sea_zone_id="sea_zone_11",
+        ),
+        unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    conquer = [e for e in events if e.type == "combat_ended"]
+    assert conquer and conquer[0].payload.get("outcome") == "conquer"
+    # Capture still pending (flushed at combat-phase end), but staging is spent now.
+    assert state.pending_captures.get("harondor") == "harad"
+    assert "harondor" not in (state.territory_sea_raid_from or {})
+    assert "harondor" not in (state.territory_sea_raid_faction or {})
+    assert "harondor" not in (state.territory_sea_raid_passenger_instance_ids or {})
+
+
+def test_stale_sea_raid_staging_cleared_at_combat_phase_end(wotr_defs):
+    """
+    Naval audit L9: raid staging must not outlive the combat phase. An empty-land offload
+    never lists a battle (get_contested_territories skips defender-less hexes), so the
+    capture flushes at phase end and the leftover territory_sea_raid_* entries are stale —
+    they must be cleared with the pending captures.
+    """
+    (state, ship, raider, unit_defs, territory_defs,
+     faction_defs, camp_defs, port_defs) = _hostile_staging_offload_state(
+        wotr_defs, enemy_ship=False, defenders=False
+    )
+    state = get_state_after_pending_moves(
+        state, "combat_move", unit_defs, territory_defs, faction_defs
+    )
+    assert state.territory_sea_raid_from.get("harondor") == "sea_zone_11"
+    assert state.territory_sea_raid_faction.get("harondor") == "harad"
+    assert state.territory_sea_raid_passenger_instance_ids.get("harondor"), (
+        "test preconditions: staging must be recorded before phase end"
+    )
+    state.phase = "combat"
+    state.current_faction = "harad"
+    # Empty land: no battle listed, so the phase may end.
+    assert get_contested_territories(
+        state, "harad", faction_defs, unit_defs, territory_defs
+    ) == []
+
+    state, _events = apply_action(
+        state, end_phase("harad"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    assert state.phase == "non_combat_move"
+    # Capture flushed...
+    assert state.territories["harondor"].owner == "harad"
+    # ...and no raid staging survives past the combat phase.
+    assert state.territory_sea_raid_from == {}
+    assert state.territory_sea_raid_faction == {}
+    assert state.territory_sea_raid_passenger_instance_ids == {}

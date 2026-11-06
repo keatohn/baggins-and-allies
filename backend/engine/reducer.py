@@ -314,6 +314,18 @@ def _pop_sea_raid_passenger_instance_ids(state: GameState, land_tid: str) -> Non
         pm.pop(land_tid, None)
 
 
+def _pop_sea_raid_staging(state: GameState, land_tid: str) -> None:
+    """Drop every raid-staging record for land_tid (from-zone, faction metadata, passengers)."""
+    for attr in (
+        "territory_sea_raid_from",
+        "territory_sea_raid_faction",
+        "territory_sea_raid_passenger_instance_ids",
+    ):
+        m = getattr(state, attr, None)
+        if m:
+            m.pop(land_tid, None)
+
+
 def _build_round_unit_display(
     unit: Unit,
     unit_def: UnitDefinition | None,
@@ -2831,6 +2843,9 @@ def _handle_initiate_combat(
                 state, landed, attacker_faction, unit_defs, faction_defs
             )
             state.pending_captures[territory_id] = capture_owner
+            # Raid resolved without battle: staging records are spent here (this branch
+            # returns before _resolve_combat_end, which pops them for real battles).
+            _pop_sea_raid_staging(state, territory_id)
             landed_ids = [u.instance_id for u in landed]
             events.append(combat_started(territory_id, attacker_faction, landed_ids, territory.owner or "neutral", []))
             events.append(combat_ended(
@@ -5243,6 +5258,17 @@ def _handle_end_phase(
         # Clear pending captures. conquered_this_turn keeps the capturer for this turn's non-combat move.
         state.conquered_this_turn = conquered_this_turn
         state.pending_captures = {}
+        # Raid staging never outlives the combat phase: every entry still present is stale
+        # (empty-land raids just captured above; defended raids must already have resolved —
+        # get_contested_territories blocks this phase end until they do).
+        for attr in (
+            "territory_sea_raid_from",
+            "territory_sea_raid_faction",
+            "territory_sea_raid_passenger_instance_ids",
+        ):
+            m = getattr(state, attr, None)
+            if m:
+                m.clear()
 
     # Only reset remaining_health (and movement) when leaving non_combat_move — never between combat rounds.
     # Combat damage must persist across rounds until the combat phase is over.
