@@ -154,9 +154,10 @@
   align-items: center;
   gap: 1rem;
   padding: 1rem 1.25rem;
-  background: var(--parchment-dark, #e8e0d0);
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  border-radius: 8px;
+  background: var(--parchment);
+  border: 2px solid var(--gold-dark, #8b7355);
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 2px rgba(139, 115, 85, 0.2);
   cursor: pointer;
   text-align: left;
   width: 100%;
@@ -164,8 +165,10 @@
 }
 
 .game-list__card:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   border-color: var(--gold-dark, #8b7355);
+  box-shadow:
+    inset 0 0 0 2px rgba(139, 115, 85, 0.2),
+    0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 .game-list__card-main {
