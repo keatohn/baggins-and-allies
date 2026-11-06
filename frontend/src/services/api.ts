@@ -1503,6 +1503,12 @@ export const api = {
     setMenuMusicFiles(r.menu_music);
     return r;
   },
+  getMapTexture: () => fetchJson<{ opacity: number }>('/map-texture'),
+  adminPutMapTexture: (opacity: number) =>
+    fetchJson<{ ok: boolean; opacity: number }>('/admin/map-texture', {
+      method: 'PUT',
+      body: JSON.stringify({ opacity }),
+    }),
   getSignals: () => fetchJson<{ presets: SignalPreset[] }>('/signals'),
   getCatalog: () => fetchJson<Catalog>('/catalog'),
   /** Public read: icon/location overrides for a map (every client renders with them). */

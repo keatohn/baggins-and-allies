@@ -21,7 +21,7 @@ import './GameMap.css';
 import './MapTooltip.css';
 import { sortSeaZoneIdsByNumericSuffix, seaZonesReachableBySailFrom } from '../seaZoneSort';
 import { isRiverTerrain, isWaterTerrain } from '../waterTerrain';
-import { MAP_TEXTURE_CONFIG } from '../mapTexture';
+import { MAP_TEXTURE_CONFIG, getMapTextureOpacity, refreshMapTextureOpacity, subscribeMapTextureOpacity } from '../mapTexture';
 import { createWheelNavIntentResolver, wheelZoomScaleMultiplier } from '../utils/wheelNavIntent';
 import {
   directFordOnlyLandPair,
@@ -805,6 +805,7 @@ function DroppableTerritory({
   keyStronghold = false,
   conquestFadeColor,
   texturePatternId,
+  textureOpacity,
   onClick,
 }: {
   territoryId: string;
@@ -825,6 +826,8 @@ function DroppableTerritory({
   conquestFadeColor?: string;
   /** Shared parchment pattern. Omitted for water and when the texture is off. */
   texturePatternId?: string | null;
+  /** Multiply strength of the parchment grain. */
+  textureOpacity: number;
   onClick: (e: React.MouseEvent) => void;
 }) {
   const tid = typeof territoryId === 'string' ? territoryId : (territoryId != null && typeof territoryId === 'object' && 'id' in (territoryId as object) ? String((territoryId as { id: string }).id) : (territoryId != null && typeof territoryId === 'object' && 'territoryId' in (territoryId as object) ? String((territoryId as { territoryId: string }).territoryId) : String(territoryId ?? '')));
@@ -875,7 +878,7 @@ function DroppableTerritory({
             d={pathData.d}
             transform={pathData.transform}
             fill={`url(#${texturePatternId})`}
-            opacity={MAP_TEXTURE_CONFIG.opacity}
+            opacity={textureOpacity}
             pointerEvents="none"
             className="territory-path-texture"
           />
@@ -1184,6 +1187,7 @@ function GameMap({
   );
   const wrapperRef = useRef<HTMLDivElement>(null);
   const textureUid = useId().replace(/:/g, '');
+  const textureOpacity = useSyncExternalStore(subscribeMapTextureOpacity, getMapTextureOpacity, getMapTextureOpacity);
   const texturePatternId = MAP_TEXTURE_CONFIG.enabled ? `land-parchment-${textureUid}` : null;
   const svgRef = useRef<SVGSVGElement>(null);
   const [svgPaths, setSvgPaths] = useState<Map<string, TerritoryPathData>>(new Map());
@@ -1192,6 +1196,9 @@ function GameMap({
   useEffect(() => {
     spotsCallbackRef.current = onSpotsCalculated;
   }, [onSpotsCalculated]);
+  useEffect(() => {
+    void refreshMapTextureOpacity();
+  }, []);
   const [loadedSvgDimensions, setLoadedSvgDimensions] = useState<{
     viewBox: { width: number; height: number };
     dimensions: { width: number; height: number };
@@ -4545,6 +4552,7 @@ function GameMap({
                                   ? texturePatternId
                                   : null
                               }
+                              textureOpacity={textureOpacity}
                               onClick={(e) => handleTerritoryClick(territoryId, e)}
                             />
                           );

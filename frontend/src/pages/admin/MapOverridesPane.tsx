@@ -11,6 +11,7 @@ import type {
   MapSpotKind,
 } from '../../types/game';
 import { normalizeMapOverrides } from '../../types/game';
+import { MapTextureSlider } from './MapTextureSlider';
 import {
   autoGenerateForTerritory,
   isPointInTerritoryPath,
@@ -1953,6 +1954,7 @@ export function MapOverridesPane({
                 ))}
               </select>
             </label>
+            <MapTextureSlider />
           </div>
           <div className="admin-graph__header-actions">
             {editorTab === 'landscape' ? (

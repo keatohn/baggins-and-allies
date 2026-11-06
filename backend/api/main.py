@@ -157,6 +157,7 @@ from backend.engine.special_rules import (
     territory_current_power,
 )
 from backend.audio_gains import load_audio_gains, load_menu_music, save_audio_settings
+from backend.map_texture import load_map_texture_opacity, save_map_texture_opacity
 from backend.signals import (
     SignalPresetError,
     apply_territory_signal,
@@ -2096,6 +2097,27 @@ def admin_put_audio(
     """Replace the global per-file audio mix and (when sent) the menu music playlist."""
     gains, menu_music = save_audio_settings(db, body.gains, body.menu_music)
     return {"ok": True, "gains": gains, "menu_music": menu_music}
+
+
+@app.get("/map-texture")
+def get_map_texture(db: Session = Depends(get_db)):
+    """Parchment grain strength (0–1) painted over land on every map."""
+    return {"opacity": load_map_texture_opacity(db)}
+
+
+class AdminMapTextureBody(BaseModel):
+    opacity: float
+
+
+@app.put("/admin/map-texture")
+def admin_put_map_texture(
+    body: AdminMapTextureBody,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Set the global parchment grain strength."""
+    opacity = save_map_texture_opacity(db, body.opacity)
+    return {"ok": True, "opacity": opacity}
 
 
 class AdminProfileDefaultsBody(BaseModel):
