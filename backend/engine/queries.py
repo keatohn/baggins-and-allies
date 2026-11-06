@@ -934,8 +934,6 @@ def _validate_move(
     origin_def_chk = territory_defs.get(origin)
     dest_def_chk = territory_defs.get(destination)
     _move_rel = water_transport_relation(origin_def_chk, dest_def_chk)
-    if _move_rel == "cross":
-        return ValidationResult(False, "Ships cannot enter river zones, and river units cannot enter sea zones")
     sea_to_land_ctx = _move_rel == "offload"
     sea_to_sea_ctx = _move_rel == "sail"
     units_in_stack = []
@@ -955,6 +953,12 @@ def _validate_move(
         if not unit:
             return ValidationResult(False, f"Unit {instance_id} not found for move from {origin}")
         units_in_stack.append(unit)
+
+    if _move_rel == "cross" and not (
+        units_in_stack
+        and all(is_aerial_unit(unit_defs.get(u.unit_id)) for u in units_in_stack)
+    ):
+        return ValidationResult(False, "Ships cannot enter river zones, and river units cannot enter sea zones")
 
     # Sea→land offload must run *before* reachability. Passengers still on land (pending load) would be
     # pathfound from the sea hex incorrectly → no "drivers" → spurious "At least one unit must reach" errors.

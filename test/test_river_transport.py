@@ -1,5 +1,7 @@
 """River zones use the ship transport path with a separate hull and a shared bank power pool."""
 
+import pytest
+
 from backend.engine.actions import initiate_combat, mobilize_units, move_units, purchase_units
 from backend.engine.definitions import (
     CampDefinition,
@@ -22,7 +24,7 @@ from backend.engine.queries import (
     river_mobilization_capacity_total,
     validate_action,
 )
-from backend.engine.reducer import _apply_pending_mobilizations, apply_action
+from backend.engine.reducer import _apply_pending_mobilizations, _apply_pending_moves, apply_action
 from backend.engine.state import GameState, PendingMobilization, PendingMove, TerritoryState, Unit, UnitStack
 from backend.signals import classify_territory_for_signal
 
@@ -238,6 +240,80 @@ def test_cross_domain_move_is_rejected():
     assert not boat_move.valid
     assert "river" in (boat_move.error or "")
     assert not ship_move.valid
+    with pytest.raises(ValueError, match="river"):
+        apply_action(
+            state,
+            move_units("gondor", "river_anduin", "sea_bay", ["boat_1"]),
+            unit_defs,
+            territory_defs,
+            faction_defs,
+            camps,
+            ports,
+        )
+
+
+def test_aerial_can_cross_from_river_to_sea():
+    state, unit_defs, territory_defs, faction_defs, camps, ports = _board()
+    eagle = _piece("eagle_1", "eagle")
+    state.territories["river_anduin"].units.append(eagle)
+
+    targets, _routes = get_unit_move_targets(
+        state, "eagle_1", unit_defs, territory_defs, faction_defs,
+    )
+    assert "sea_bay" in targets
+
+    move = move_units("gondor", "river_anduin", "sea_bay", ["eagle_1"])
+    vr = validate_action(state, move, unit_defs, territory_defs, faction_defs, camps, ports)
+    assert vr.valid, vr.error
+
+    new_state, _events = apply_action(
+        state, move, unit_defs, territory_defs, faction_defs, camps, ports,
+    )
+    assert len(new_state.pending_moves) == 1
+    assert new_state.pending_moves[0].move_type == "aerial"
+
+    moved_state, move_events = _apply_pending_moves(
+        new_state, "non_combat_move", unit_defs, territory_defs, faction_defs,
+    )
+    assert any(u.instance_id == "eagle_1" for u in moved_state.territories["sea_bay"].units)
+    assert not any(u.instance_id == "eagle_1" for u in moved_state.territories["river_anduin"].units)
+    assert any(getattr(e, "type", None) == "units_moved" for e in move_events)
+
+
+def test_aerial_can_cross_from_sea_to_river():
+    state, unit_defs, territory_defs, faction_defs, camps, ports = _board()
+    eagle = _piece("eagle_1", "eagle")
+    state.territories["sea_bay"].units.append(eagle)
+
+    move = move_units("gondor", "sea_bay", "river_anduin", ["eagle_1"])
+    vr = validate_action(state, move, unit_defs, territory_defs, faction_defs, camps, ports)
+    assert vr.valid, vr.error
+
+    new_state, _events = apply_action(
+        state, move, unit_defs, territory_defs, faction_defs, camps, ports,
+    )
+    assert len(new_state.pending_moves) == 1
+    assert new_state.pending_moves[0].move_type == "aerial"
+
+    moved_state, _move_events = _apply_pending_moves(
+        new_state, "non_combat_move", unit_defs, territory_defs, faction_defs,
+    )
+    assert any(u.instance_id == "eagle_1" for u in moved_state.territories["river_anduin"].units)
+    assert not any(u.instance_id == "eagle_1" for u in moved_state.territories["sea_bay"].units)
+
+
+def test_cross_domain_with_non_aerial_in_stack_is_rejected():
+    state, unit_defs, territory_defs, faction_defs, camps, ports = _board()
+    boat = _piece("boat_1", "boat")
+    eagle = _piece("eagle_1", "eagle")
+    state.territories["river_anduin"].units.extend([boat, eagle])
+
+    move = move_units("gondor", "river_anduin", "sea_bay", ["boat_1", "eagle_1"])
+    vr = validate_action(state, move, unit_defs, territory_defs, faction_defs, camps, ports)
+    assert not vr.valid
+    assert "river" in (vr.error or "")
+    with pytest.raises(ValueError, match="river"):
+        apply_action(state, move, unit_defs, territory_defs, faction_defs, camps, ports)
 
 
 def test_river_mobilization_uses_turn_start_banks_and_shared_power():
