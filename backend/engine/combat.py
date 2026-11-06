@@ -140,6 +140,7 @@ def get_siegework_attacker_rolling_units(
     Bomb carriers roll in siegeworks only when paired with a bombikazi and fuse_bomb is True.
     Unpaired bombs never roll here (0 dice in siegeworks). When fuse_bomb is False, paired bombs
     are omitted too (same as an unpaired bombikazi: no siegework participation).
+    Bombikazi units never roll here regardless of archetype (docs: no siegework participation).
     """
     ram_ok = (
         defender_territory_is_stronghold
@@ -158,6 +159,11 @@ def get_siegework_attacker_rolling_units(
             # Paired fused bomb rolls here vs stronghold HP; must not depend on archetype
             # (some setups mis-typed bomb as non-siegework).
             out.append(u)
+            continue
+        if _has_special(ud, "bombikazi"):
+            # L3: bombikazi has no siegework participation — even if mis-typed as
+            # siegework archetype it must not roll its own dice here (the paired
+            # bomb rolls instead; bombikazi rolls only in standard combat).
             continue
         if _is_siegework_unit(ud) and has_unit_special(ud, SIEGEWORK_SPECIAL_LADDER):
             continue

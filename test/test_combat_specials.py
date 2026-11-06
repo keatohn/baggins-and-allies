@@ -4,6 +4,7 @@ from dataclasses import replace
 import pytest
 from backend.engine.combat import (
     compute_leader_stat_modifiers,
+    get_siegework_attacker_rolling_units,
     get_siegework_dice_counts,
     get_terror_reroll_targets,
     siegework_dice_round_applies,
@@ -298,6 +299,63 @@ def test_paired_bomb_siegework_dice_when_bomb_not_siegework_archetype():
         fuse_bomb=True,
     )
     assert att_dice == unit_defs["bomb"].dice
+
+
+def test_siegework_archetype_bombikazi_does_not_roll_in_siegeworks():
+    """
+    L3: bombikazi has no siegework participation. A bombikazi unit mis-typed with
+    archetype=siegework must not contribute its own dice in the siegeworks round —
+    only the paired bomb rolls. (Shipped berserker is infantry; this guards data.)
+    """
+    unit_defs, *_ = load_static_definitions(setup_id="motw_1.0")
+    if "bomb" not in unit_defs or "berserker" not in unit_defs:
+        pytest.skip("motw_1.0 needs bomb and berserker")
+    ud = dict(unit_defs)
+    # Mis-type the bombikazi as siegework archetype (the latent data bug L3 guards).
+    ud["berserker"] = replace(unit_defs["berserker"], archetype="siegework")
+
+    # Paired: only the bomb's dice count.
+    att_paired, def_units = stacks_to_synthetic_units(
+        [
+            {"unit_id": "berserker", "count": 1},
+            {"unit_id": "bomb", "count": 1},
+        ],
+        [{"unit_id": "gondor_soldier", "count": 1}],
+    )
+    att_dice, _ = get_siegework_dice_counts(
+        att_paired,
+        def_units,
+        ud,
+        defender_territory_is_stronghold=True,
+        defender_stronghold_hp=4,
+        fuse_bomb=True,
+    )
+    assert att_dice == unit_defs["bomb"].dice, (
+        "paired bombikazi (even as siegework) must not add siegework dice"
+    )
+
+    # Unpaired: bombikazi alone contributes 0 (no siegework participation).
+    att_unpaired, _ = stacks_to_synthetic_units(
+        [{"unit_id": "berserker", "count": 1}],
+        [{"unit_id": "gondor_soldier", "count": 1}],
+    )
+    att_dice_unpaired, _ = get_siegework_dice_counts(
+        att_unpaired,
+        def_units,
+        ud,
+        defender_territory_is_stronghold=True,
+        defender_stronghold_hp=4,
+        fuse_bomb=True,
+    )
+    assert att_dice_unpaired == 0, "unpaired bombikazi must roll 0 siegework dice"
+
+    # Rolling-unit list excludes the bombikazi but keeps the paired bomb.
+    rolling = get_siegework_attacker_rolling_units(
+        att_paired, ud, True, defender_stronghold_hp=4, fuse_bomb=True,
+    )
+    unit_ids = [u.unit_id for u in rolling]
+    assert "bomb" in unit_ids
+    assert "berserker" not in unit_ids
 
 
 def test_defending_battering_ram_no_siegework_defender_dice(defs):
