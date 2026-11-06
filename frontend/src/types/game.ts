@@ -151,6 +151,8 @@ export interface LandscapePlacement {
   layer: LandscapeLayer;
   /** Display scale (default 1, clamped 0.25–4). */
   s?: number;
+  /** Mountain darkness: 0 = original art, 1 = near black. */
+  darkness?: number;
   /** Clockwise rotation in degrees (omitted when 0). */
   r?: number;
   /** Placed by Auto-generate — re-generated on the next auto pass; manual ones are preserved. */

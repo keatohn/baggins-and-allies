@@ -21,6 +21,7 @@ import {
   pointInsideTerritory,
   landscapeCategoriesForTerrain,
   landscapeRotation,
+  landscapeFilter,
   landscapeSrc,
   loadLandscapeManifest,
   nearestPointOnOutline,
@@ -342,6 +343,7 @@ export function MapOverridesPane({
   const [manifest, setManifest] = useState<LandscapeManifest>({});
   const [placing, setPlacing] = useState<{ cat: string; img: string } | null>(null);
   const [borderMode, setBorderMode] = useState(false);
+  const [freePlacement, setFreePlacement] = useState(false);
   const [artMode, setArtMode] = useState<'landscape' | 'landmarks'>('landscape');
   const [selectedPlacement, setSelectedPlacement] = useState<{ tid: string; index: number } | null>(null);
   const [autoBusy, setAutoBusy] = useState(false);
@@ -350,6 +352,7 @@ export function MapOverridesPane({
   const [multiSel, setMultiSel] = useState<Set<string>>(() => new Set());
   const [paintRadius, setPaintRadius] = useState(0);
   const [paintScale, setPaintScale] = useState(1);
+  const [mountainDarkness, setMountainDarkness] = useState(0);
   const [paletteHeight, setPaletteHeight] = useState(42);
   // Copy-from-another-map dialog: source map preview + optional region filter.
   const [copyOpen, setCopyOpen] = useState(false);
@@ -1544,7 +1547,7 @@ export function MapOverridesPane({
   const tryPlaceLandscape = useCallback(
     (clientX: number, clientY: number) => {
       if (!placing) return false;
-      const tid = territoryIdFromPoint(clientX, clientY);
+      const tid = territoryIdFromPoint(clientX, clientY) ?? (freePlacement ? selected : null);
       if (!tid) return false;
       const vb = viewportToViewBox(clientX, clientY);
       if (!vb) return false;
@@ -1558,7 +1561,7 @@ export function MapOverridesPane({
         if (!snapped) return false;
         x = snapped.x;
         y = snapped.y;
-      } else {
+      } else if (!freePlacement) {
         const pathEl = territoryPathEl(tid);
         if (pathEl && !isPointInTerritoryPath(pathEl, x, y)) return false;
       }
@@ -1569,6 +1572,7 @@ export function MapOverridesPane({
         x: Math.round(x * 100) / 100,
         y: Math.round(y * 100) / 100,
         layer: snapBorder ? 'border' : 'interior',
+        ...(placing.cat === 'mountains' && mountainDarkness ? { darkness: mountainDarkness } : {}),
       };
       updateLandscape((prev) => {
         const map = { ...(prev?.territories ?? {}) };
@@ -1581,7 +1585,7 @@ export function MapOverridesPane({
       setSelectedPlacement({ tid: key, index: (current?.landscape?.territories?.[key]?.length ?? 0) });
       return true;
     },
-    [placing, artMode, borderMode, viewportToViewBox, current, updateLandscape],
+    [placing, mountainDarkness, artMode, freePlacement, selected, borderMode, viewportToViewBox, current, updateLandscape],
   );
 
   /**
@@ -1593,10 +1597,10 @@ export function MapOverridesPane({
   const paintStampAt = useCallback(
     (clientX: number, clientY: number) => {
       if (!placing) return;
-      const tid = territoryIdFromPoint(clientX, clientY);
+      const tid = territoryIdFromPoint(clientX, clientY) ?? (freePlacement ? selected : null);
       if (!tid) return;
       const pathEl = territoryPathEl(tid);
-      if (!pathEl) return;
+      if (!pathEl && !freePlacement) return;
       const vb = viewportToViewBox(clientX, clientY);
       if (!vb) return;
       const radius = paintRadius;
@@ -1619,14 +1623,14 @@ export function MapOverridesPane({
       for (const o of offsets) {
         let x = vb.x + o.x;
         let y = vb.y + o.y;
-        if (snapBorder) {
+        if (snapBorder && pathEl) {
           const snapped = nearestPointOnOutline(pathEl, x, y);
           if (!snapped) continue;
           // In brush mode only keep outline points within reach of the cursor.
           if (radius > 0 && Math.hypot(snapped.x - vb.x, snapped.y - vb.y) > radius) continue;
           x = snapped.x;
           y = snapped.y;
-        } else if (!isPointInTerritoryPath(pathEl, x, y)) {
+        } else if (!freePlacement && pathEl && !isPointInTerritoryPath(pathEl, x, y)) {
           continue;
         }
         accepted.push({ x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 });
@@ -1645,7 +1649,7 @@ export function MapOverridesPane({
           if (list.length >= 50) break;
           const tooClose = list.some((q) => (q.x - p.x) ** 2 + (q.y - p.y) ** 2 < minD2);
           if (tooClose) continue;
-          list.push({ cat, img, x: p.x, y: p.y, layer, s: paintScale });
+          list.push({ cat, img, x: p.x, y: p.y, layer, s: paintScale, ...(cat === 'mountains' && mountainDarkness ? { darkness: mountainDarkness } : {}) });
         }
         if (list.length === before) return prev;
         map[key] = list;
@@ -1654,7 +1658,7 @@ export function MapOverridesPane({
       setSelected(tid);
       setSelectedPlacement(null);
     },
-    [placing, artMode, paintRadius, paintScale, borderMode, viewportToViewBox, updateLandscape],
+    [placing, mountainDarkness, artMode, freePlacement, selected, paintRadius, paintScale, borderMode, viewportToViewBox, updateLandscape],
   );
 
   const setFocus = (tid: string, focus: 'calculated' | 'override') => {
@@ -1846,7 +1850,7 @@ export function MapOverridesPane({
           let x = item.x + dx;
           let y = item.y + dy;
           const pathEl = territoryPathEl(item.tid);
-          if (item.layer === 'border') {
+          if (!freePlacement && item.layer === 'border') {
             if (pathEl) {
               const snapped = nearestPointOnOutline(pathEl, x, y);
               if (snapped) {
@@ -1854,11 +1858,13 @@ export function MapOverridesPane({
                 y = snapped.y;
               }
             }
-          } else if (pathEl && !isPointInTerritoryPath(pathEl, x, y)) {
+          } else if (!freePlacement && pathEl && !isPointInTerritoryPath(pathEl, x, y)) {
             continue; // interior pieces stay inside their territory
           }
-          x = Math.max(0, Math.min(viewBox.width, x));
-          y = Math.max(0, Math.min(viewBox.height, y));
+          if (!freePlacement) {
+            x = Math.max(0, Math.min(viewBox.width, x));
+            y = Math.max(0, Math.min(viewBox.height, y));
+          }
           if (!cloned.has(item.tid)) {
             map[item.tid] = [...list!];
             cloned.add(item.tid);
@@ -1884,7 +1890,7 @@ export function MapOverridesPane({
     let x = d.startPt.x + (vb.x - startVb.x);
     let y = d.startPt.y + (vb.y - startVb.y);
     const pathEl = territoryPathEl(d.tid);
-    if (d.layer === 'border') {
+    if (!freePlacement && d.layer === 'border') {
       if (pathEl) {
         const snapped = nearestPointOnOutline(pathEl, x, y);
         if (snapped) {
@@ -1892,7 +1898,7 @@ export function MapOverridesPane({
           y = snapped.y;
         }
       }
-    } else if (pathEl && !isPointInTerritoryPath(pathEl, x, y)) {
+    } else if (!freePlacement && pathEl && !isPointInTerritoryPath(pathEl, x, y)) {
       return; // interior drags stay inside the polygon
     }
     setPlacementAt(d.tid, d.index, { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 });
@@ -2132,6 +2138,7 @@ export function MapOverridesPane({
       };
       // Copied pieces are a deliberate import: keep them across the next auto pass.
       if (typeof p.s === 'number' && p.s !== 1) placement.s = Math.min(4, Math.max(0.25, p.s));
+      if (p.darkness != null) placement.darkness = p.darkness;
       const copiedRotation = landscapeRotation(p.r ?? 0);
       if (copiedRotation != null) placement.r = copiedRotation;
       items.push({ tid: key, placement });
@@ -2642,9 +2649,34 @@ export function MapOverridesPane({
                       <input
                         type="checkbox"
                         checked={borderMode}
-                        onChange={(e) => setBorderMode(e.target.checked)}
+                        onChange={(e) => {
+                          setBorderMode(e.target.checked);
+                          if (e.target.checked) setFreePlacement(false);
+                        }}
                       />
                       Border mode (snap to outline)
+                    </label>
+                  ) : null}
+                  <label className="admin-page__checkbox-label" title="Place and drag across territory boundaries. Select a territory first when placing outside territory shapes.">
+                    <input
+                      type="checkbox"
+                      checked={freePlacement}
+                      onChange={(e) => {
+                        setFreePlacement(e.target.checked);
+                        if (e.target.checked) setBorderMode(false);
+                      }}
+                    />
+                    Free placement
+                  </label>
+                  {freePlacement ? (
+                    <p className="admin-form__micro">Cross territory boundaries freely. In empty space, new pieces belong to the selected territory.</p>
+                  ) : null}
+                  {placing?.cat === 'mountains' ? (
+                    <label className="mapov-brush__scale">
+                      Mountain darkness
+                      <input type="range" min={0} max={1} step={0.05} value={mountainDarkness}
+                        onChange={(e) => setMountainDarkness(Number(e.target.value))} />
+                      <span>{Math.round(mountainDarkness * 100)}%</span>
                     </label>
                   ) : null}
                   <div className="mapov-art__images">
@@ -2884,6 +2916,15 @@ export function MapOverridesPane({
                                     ↻
                                   </button>
                                 </label>
+                                {p.cat === 'mountains' ? (
+                                  <label className="mapov-landscape__scale" title="Mountain darkness">
+                                    Darkness
+                                    <input type="range" min={0} max={1} step={0.05} value={p.darkness ?? 0}
+                                      onPointerDown={(e) => { e.stopPropagation(); armGesture('landscape'); }}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onChange={(e) => setPlacementAt(selected, index, { darkness: Number(e.target.value) })} />
+                                  </label>
+                                ) : null}
                                 <label className="mapov-landscape__scale" title="Scale">
                                   <span className="visually-hidden">Scale</span>
                                   <input
@@ -3170,6 +3211,7 @@ export function MapOverridesPane({
                     <img
                       className="mapov-brush__thumb"
                       src={landscapeSrc(placing)}
+                      style={{ filter: landscapeFilter({ ...placing, darkness: mountainDarkness }) }}
                       alt={placing.img}
                       title={`${placing.cat} · ${placing.img}`}
                     />
@@ -3206,7 +3248,12 @@ export function MapOverridesPane({
                 </div>
               ) : null}
               {editorTab === 'landscape' ? (
-                <div className="mapov-dots mapov-landscape-markers">
+                <div
+                  className="mapov-dots mapov-landscape-markers"
+                  style={{
+                    clipPath: `polygon(${transform.x}px ${transform.y}px, ${transform.x + viewBox.width * transform.scale}px ${transform.y}px, ${transform.x + viewBox.width * transform.scale}px ${transform.y + viewBox.height * transform.scale}px, ${transform.x}px ${transform.y + viewBox.height * transform.scale}px)`,
+                  }}
+                >
                   {landscapeMarkers.map((row) => {
                     const isActive =
                       selectedPlacement?.tid === row.tid && selectedPlacement?.index === row.index;
@@ -3238,7 +3285,7 @@ export function MapOverridesPane({
                           }
                         }}
                       >
-                        <img src={landscapeSrc(row.placement)} alt="" draggable={false} />
+                        <img src={landscapeSrc(row.placement)} style={{ filter: landscapeFilter(row.placement) }} alt="" draggable={false} />
                       </div>
                     );
                   })}

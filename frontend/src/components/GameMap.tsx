@@ -6,7 +6,7 @@ import { CSS } from '@dnd-kit/utilities';
 import type { GameState, SelectedUnit, MapTransform, PendingMove, MapOverridesData, MapSpotKind, LandscapePlacement } from '../types/game';
 import { normalizeMapOverrides } from '../types/game';
 import type { TerritorySignalMap } from '../territorySignals';
-import { landscapeSrc, terrainEmojiSuppressed } from '../pages/admin/landscape';
+import { landscapeFilter, landscapeSrc, terrainEmojiSuppressed } from '../pages/admin/landscape';
 import { fetchMapSvgText } from '../pages/admin/territoryGraph';
 import DraggableUnit from './DraggableUnit';
 import DragOverlay, { type BulkDragOverlayStack } from './DragOverlay';
@@ -4883,17 +4883,17 @@ function GameMap({
                     <div className="territory-landscape-layer">
                       {landscapeRows.map(({ tid, placement }, i) => {
                         const screenPos = svgToScreen(placement.x, placement.y);
-                        const clamped = clampToMap(screenPos);
+                        // Preserve editor coordinates; the landscape layer clips art at the map edge.
                         const size = Math.round(40 * (placement.s ?? 1));
                         const rotation = placement.r ? `translate(-50%, -50%) rotate(${placement.r}deg)` : undefined;
                         return (
                           <div
                             key={`${tid}|${i}|${placement.img}`}
                             className={`territory-landscape territory-landscape--${placement.cat}${placement.layer === 'border' ? ' territory-landscape--border' : ''}`}
-                            style={{ left: clamped.x, top: clamped.y, width: size, height: size, transform: rotation }}
+                            style={{ left: screenPos.x, top: screenPos.y, width: size, height: size, transform: rotation }}
                             aria-hidden
                           >
-                            <img src={landscapeSrc(placement)} alt="" draggable={false} />
+                            <img src={landscapeSrc(placement)} style={{ filter: landscapeFilter(placement) }} alt="" draggable={false} />
                             {placement.cat === 'volcano' ? (
                               <>
                                 <span className="territory-landscape__smoke" />

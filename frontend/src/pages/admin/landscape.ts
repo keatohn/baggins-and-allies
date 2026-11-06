@@ -272,3 +272,10 @@ export function autoGenerateForTerritory(
     return [];
   }
 }
+
+/** Tint mountain art without affecting its transparent background. */
+export function landscapeFilter(placement: Pick<LandscapePlacement, 'cat' | 'darkness'>): string | undefined {
+  if (placement.cat !== 'mountains' || !placement.darkness) return undefined;
+  const darkness = Math.min(1, Math.max(0, placement.darkness));
+  return `grayscale(${darkness}) brightness(${1 - darkness * 0.95})`;
+}

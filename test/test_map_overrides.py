@@ -665,3 +665,36 @@ def test_apply_map_graph_overrides_definition(db_session):
     apply_map_graph(defs, "wotr_map_1.2", db_session)
     assert defs["the_shire"].adjacent == ["bree"]
 
+
+
+@pytest.mark.parametrize("darkness", [0, 0.5, 1])
+def test_mountain_darkness_survives_normalization(darkness):
+    from backend.map_overrides import normalize_map_overrides
+
+    raw = {"landscape": {"territories": {"mordor": [
+        {"cat": "mountains", "img": "mountain.png", "x": 0, "y": 0, "darkness": darkness}
+    ]}}}
+    cleaned = normalize_map_overrides(raw)
+    assert cleaned["landscape"]["territories"]["mordor"][0]["darkness"] == darkness
+    assert normalize_map_overrides(cleaned) == cleaned
+
+
+@pytest.mark.parametrize("darkness", [-0.1, 1.1, True, "invalid", float("nan"), float("inf")])
+def test_invalid_mountain_darkness_is_rejected(darkness):
+    from backend.map_overrides import _clean_placement
+
+    assert _clean_placement({"cat": "mountains", "img": "mountain.png", "x": 0, "y": 0,
+                             "darkness": darkness}) is None
+
+
+def test_mountain_darkness_saved_and_publicly_readable(make_client, players):
+    admin, _ = players
+    client = make_client(admin)
+    payload = {"landscape": {"territories": {"mordor": [
+        {"cat": "mountains", "img": "mountain.png", "x": 5, "y": 6, "darkness": 0.95}
+    ]}}}
+    saved = client.put("/admin/maps/wotr_map_1.2/overrides", json=payload)
+    assert saved.status_code == 200
+    public = client.get("/maps/wotr_map_1.2/overrides")
+    assert public.status_code == 200
+    assert public.json()["overrides"]["landscape"]["territories"]["mordor"][0]["darkness"] == 0.95
