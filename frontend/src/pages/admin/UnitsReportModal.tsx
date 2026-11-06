@@ -87,6 +87,11 @@ function specialKey(label: string): string {
   return label;
 }
 
+/** Filename of a unit image, including the extension (`galadhrim_sentinel.png`). */
+function iconFileName(icon: string): string {
+  return (icon.split('/').pop() ?? icon).toLowerCase();
+}
+
 function bound(raw: string): number | null {
   const text = raw.trim();
   if (!text) return null;
@@ -218,7 +223,12 @@ export function UnitsReportModal({ setups, specials, onClose }: Props) {
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return sources.filter((row) => {
-      if (needle && !row.unitId.toLowerCase().includes(needle) && !row.scenario.toLowerCase().includes(needle)) {
+      if (
+        needle
+        && !row.unitId.toLowerCase().includes(needle)
+        && !iconFileName(row.icon).includes(needle)
+        && !row.scenario.toLowerCase().includes(needle)
+      ) {
         return false;
       }
       if (selectedSpecials.some((name) => !row.specialKeys.includes(name))) return false;
@@ -306,7 +316,7 @@ export function UnitsReportModal({ setups, specials, onClose }: Props) {
             <input
               className="admin-form__input"
               value={query}
-              placeholder="Unit id or scenario"
+              placeholder="Unit id, icon, or scenario"
               onChange={(e) => setQuery(e.target.value)}
             />
           </label>
