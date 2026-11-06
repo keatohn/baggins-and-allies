@@ -341,6 +341,34 @@ def _sea_zone_has_hostile_enemy_boats(
     return False
 
 
+def water_combat_unit_side(
+    unit: Unit,
+    attacker_faction: str,
+    unit_defs: dict[str, UnitDefinition],
+    faction_defs: dict[str, FactionDefinition],
+) -> str | None:
+    """
+    Sea and river combat. Allied boats do not fight each other.
+
+    attacker = the acting faction and its subfactions.
+    defender = a different alliance.
+    Another faction on the same alliance is a bystander: sailing into a water
+    zone that holds only allied boats is a normal move, not an attack.
+    """
+    uo = get_unit_faction(unit, unit_defs)
+    if uo is None:
+        return None
+    if faction_acts_as(faction_defs, uo, attacker_faction):
+        return "attacker"
+    ufd = faction_defs.get(uo) if faction_defs else None
+    afd = faction_defs.get(attacker_faction) if faction_defs else None
+    their = getattr(ufd, "alliance", None) if ufd else None
+    ours = getattr(afd, "alliance", None) if afd else None
+    if their and ours and their == ours:
+        return None
+    return "defender"
+
+
 def get_forced_naval_combat_instance_ids(
     state: GameState,
     faction_id: str,

@@ -864,14 +864,30 @@ function Sidebar({
                   const isLoad = !fromSea && toSea && !allMovingAerial;
                   const isOffload =
                     fromSea && !toSea && gameState.phase === 'non_combat_move' && !allMovingAerial;
-                  const isSail = fromSea && toSea;
+                  const toIdRaw =
+                    typeof bulkMoveConfirm.toTerritory === 'string'
+                      ? bulkMoveConfirm.toTerritory.trim()
+                      : '';
+                  const combatNavalAttack =
+                    gameState.phase === 'combat_move' &&
+                    fromSea &&
+                    toSea &&
+                    Boolean(toIdRaw) &&
+                    destinationSeaHasHostileEnemyNaval(
+                      toIdRaw,
+                      gameState.current_faction,
+                      territoryUnits,
+                      unitDefs,
+                      factionData,
+                    );
+                  const isSail = fromSea && toSea && !combatNavalAttack;
                   const isAttack =
                     gameState.phase === 'combat_move' &&
                     !isLoad &&
                     ((!fromSea && !toSea) ||
                       (fromSea && !toSea) ||
                       (!fromSea && toSea && allMovingAerial) ||
-                      (fromSea && toSea));
+                      combatNavalAttack);
                   const isNavalMove = isLoad || isOffload || isSail;
                   const buttonLabel = isLoad ? 'Load' : isOffload ? 'Offload' : isSail ? 'Sail' : isAttack ? 'Attack' : 'Move';
                   const confirmBtnClass = isAttack

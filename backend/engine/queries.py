@@ -29,6 +29,7 @@ from backend.engine.movement import (
     _is_transport_boat_for_zone,
     _is_water_zone,
     _sea_zone_has_hostile_enemy_boats,
+    water_combat_unit_side,
     are_sea_zones_directly_adjacent,
     empty_sea_zone_valid_for_combat_move_sail_then_load_raid,
     get_forced_naval_combat_instance_ids,
@@ -1501,14 +1502,19 @@ def _validate_initiate_combat(
                 )
 
     # Find attacker and defender units (normal combat: both in same territory).
-    # Defenders = every factioned unit that is not part of the attacking force, including
-    # garrisons from an allied faction (they defend the territory).
+    # Land: every other factioned unit defends, including an allied garrison.
+    # Sea and river: same-alliance boats are bystanders, not defenders.
     attacker_units = []
     defender_units = []
     for unit in territory.units:
-        side = _land_combat_unit_side_for_queries(
-            unit, attacker_faction, attacker_alliance, unit_defs, faction_defs
-        )
+        if combat_territory_is_water:
+            side = water_combat_unit_side(
+                unit, attacker_faction, unit_defs, faction_defs
+            )
+        else:
+            side = _land_combat_unit_side_for_queries(
+                unit, attacker_faction, attacker_alliance, unit_defs, faction_defs
+            )
         if side == "attacker":
             attacker_units.append(unit)
         elif side == "defender":
@@ -2866,9 +2872,14 @@ def get_contested_territories(
             ud = unit_defs.get(unit.unit_id)
             if is_water and not participates_in_sea_hex_naval_combat(unit, ud):
                 continue
-            side = _land_combat_unit_side_for_queries(
-                unit, faction_id, attacker_alliance, unit_defs, faction_defs
-            )
+            if is_water:
+                side = water_combat_unit_side(
+                    unit, faction_id, unit_defs, faction_defs
+                )
+            else:
+                side = _land_combat_unit_side_for_queries(
+                    unit, faction_id, attacker_alliance, unit_defs, faction_defs
+                )
             if side == "attacker":
                 attacker_units.append(unit)
             elif side == "defender":

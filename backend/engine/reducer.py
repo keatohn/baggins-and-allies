@@ -77,6 +77,7 @@ from backend.engine.movement import (
     _is_water_craft,
     water_transport_relation,
     _sea_zone_has_hostile_enemy_boats,
+    water_combat_unit_side,
     are_sea_zones_directly_adjacent,
     empty_sea_zone_valid_for_combat_move_sail_then_load_raid,
     expand_sea_offload_instance_ids,
@@ -2868,8 +2869,12 @@ def _handle_initiate_combat(
                 unit, unit_defs.get(unit.unit_id)
             ):
                 continue  # Sea combat: ships only; passengers (loaded_onto) do not fight
-            side = _land_combat_unit_side(
-                unit, attacker_faction, attacker_alliance, unit_defs, faction_defs,
+            side = (
+                water_combat_unit_side(unit, attacker_faction, unit_defs, faction_defs)
+                if is_naval_combat
+                else _land_combat_unit_side(
+                    unit, attacker_faction, attacker_alliance, unit_defs, faction_defs,
+                )
             )
             if side == "attacker":
                 attacker_units.append(deepcopy(unit))
@@ -3788,18 +3793,26 @@ def _handle_continue_combat(
     else:
         _normalize_unit_health_for_combat(attacker_territory.units, unit_defs)
         _normalize_unit_health_for_combat(territory.units, unit_defs)
+        water_battle = _is_water_zone(territory_defs.get(combat.territory_id))
+
+        def _side(u: Unit) -> str | None:
+            if water_battle:
+                return water_combat_unit_side(u, attacker_faction, unit_defs, faction_defs)
+            return _land_combat_unit_side(
+                u, attacker_faction, attacker_alliance, unit_defs, faction_defs,
+            )
+
         attacker_units = sorted(
             [
                 deepcopy(u) for u in attacker_territory.units
-                if u.instance_id in surviving_attacker_ids
-                and _land_combat_unit_side(u, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "attacker"
+                if u.instance_id in surviving_attacker_ids and _side(u) == "attacker"
             ],
             key=lambda u: u.instance_id,
         )
         defender_units = sorted(
             [
                 deepcopy(u) for u in territory.units
-                if _land_combat_unit_side(u, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "defender"
+                if _side(u) == "defender"
             ],
             key=lambda u: u.instance_id,
         )
@@ -5026,11 +5039,16 @@ def _resolve_combat_end(
             # (participates_in_sea_hex_naval_combat) but must stay with a boat that survived the battle.
             aa = getattr(faction_defs.get(attacker_faction), "alliance", None)
             surv_def_set = set(round_result.surviving_defender_ids or [])
+            water_keep = _is_water_zone(territory_defs.get(territory_id))
             kept: list[Unit] = []
             for u in territory.units:
                 uid = u.instance_id
                 carrier = getattr(u, "loaded_onto", None)
-                side = _land_combat_unit_side(u, attacker_faction, aa, unit_defs, faction_defs)
+                side = (
+                    water_combat_unit_side(u, attacker_faction, unit_defs, faction_defs)
+                    if water_keep
+                    else _land_combat_unit_side(u, attacker_faction, aa, unit_defs, faction_defs)
+                )
                 if side == "defender":
                     if uid in surv_def_set or (carrier is not None and carrier in surv_def_set):
                         kept.append(u)
