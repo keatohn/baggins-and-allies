@@ -12,8 +12,13 @@ from copy import deepcopy
 from itertools import groupby
 from typing import TYPE_CHECKING
 
-from backend.engine.state import Unit, CombatRoundResult
+from backend.engine.state import Unit, CombatRoundResult, GameState, ActiveCombat
 from backend.engine.definitions import UnitDefinition
+from backend.engine.rings import (
+    combat_boosts,
+    hp_shield_from_boosts,
+    merge_ring_stat_mods,
+)
 from backend.engine.utils import (
     can_conquer_territory_as_attacker,
     has_unit_special,
@@ -1350,6 +1355,89 @@ def get_attacker_effective_dice_and_bombikazi_self_destruct(
         if use_paired_fused_siegework_rules else []
     )
     return effective_dice, self_destruct_ids, effective_attack_override
+
+
+@dataclass
+class StandardRoundCombatInputs:
+    """Pure per-round inputs shared by reducer.resolve continue and API dice generation."""
+
+    attacker_mods: dict[str, int]
+    defender_mods: dict[str, int]
+    ring_att_boosts: dict[str, tuple[int, int, int, int]]
+    ring_def_boosts: dict[str, tuple[int, int, int, int]]
+    fresh_ring_hp_shield: dict[str, int]
+    # Fuse-aware attacker effective dice BEFORE merge_ring_dice (the reducer merges).
+    effective_dice: dict[str, int]
+    attack_override: dict[str, int]
+    self_destruct: list[str]
+    ladder_ids: list[str]
+
+
+def compute_standard_round_combat_inputs(
+    state: GameState,
+    attacker_units: list[Unit],
+    defender_units: list[Unit],
+    unit_defs: dict[str, UnitDefinition],
+    territory_def: "TerritoryDefinition | None",
+    combat: ActiveCombat,
+) -> StandardRoundCombatInputs:
+    """Compute the standard-round combat inputs shared by both sides of the dice contract.
+
+    Terrain + anti-cavalry + captain + sea-raider + ring stat modifiers, fuse-aware
+    attacker effective dice (derived from combat_log + fuse_bomb, never the persisted
+    value), and a fresh ladder assignment (ladder equipment can be destroyed between
+    rounds). Pure: no state mutation — callers keep their own bookkeeping side effects
+    (ring_hp_shield persistence, ladder id persistence, dice expansion/merge, sorting).
+    """
+    terrain_att, terrain_def = compute_terrain_stat_modifiers(
+        territory_def, attacker_units, defender_units, unit_defs
+    )
+    anticav_att, anticav_def = compute_anti_cavalry_stat_modifiers(
+        attacker_units, defender_units, unit_defs
+    )
+    captain_att, captain_def = compute_captain_stat_modifiers(
+        attacker_units, defender_units, unit_defs
+    )
+    sea_raider_att, _ = compute_sea_raider_stat_modifiers(
+        attacker_units,
+        unit_defs,
+        is_sea_raid=bool(getattr(combat, "sea_zone_id", None)),
+    )
+    attacker_mods = merge_stat_modifiers(terrain_att, anticav_att, captain_att, sea_raider_att)
+    defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
+    attacker_ids = {unit.instance_id for unit in attacker_units}
+    ring_att_boosts = combat_boosts(
+        state, attacker_units, unit_defs, combat.territory_id, attacker_ids
+    )
+    ring_def_boosts = combat_boosts(
+        state, defender_units, unit_defs, combat.territory_id, attacker_ids
+    )
+    attacker_mods = merge_ring_stat_mods(attacker_mods, ring_att_boosts, attacking=True)
+    defender_mods = merge_ring_stat_mods(defender_mods, ring_def_boosts, attacking=False)
+
+    fuse_bomb = getattr(combat, "fuse_bomb", True)
+    if not isinstance(fuse_bomb, bool):
+        fuse_bomb = True
+    had_siegeworks_in_battle = any(
+        getattr(r, "is_siegeworks_round", False) for r in (combat.combat_log or [])
+    )
+    effective_dice, self_destruct, attack_override = get_attacker_effective_dice_and_bombikazi_self_destruct(
+        attacker_units,
+        unit_defs,
+        use_paired_fused_siegework_rules=(not had_siegeworks_in_battle) or fuse_bomb,
+    )
+    ladder_ids = get_ladder_infantry_instance_ids(attacker_units, unit_defs)
+    return StandardRoundCombatInputs(
+        attacker_mods=attacker_mods,
+        defender_mods=defender_mods,
+        ring_att_boosts=ring_att_boosts,
+        ring_def_boosts=ring_def_boosts,
+        fresh_ring_hp_shield=hp_shield_from_boosts({**ring_att_boosts, **ring_def_boosts}),
+        effective_dice=effective_dice,
+        attack_override=attack_override,
+        self_destruct=self_destruct,
+        ladder_ids=ladder_ids,
+    )
 
 
 def get_eff_def_per_flat_index(
