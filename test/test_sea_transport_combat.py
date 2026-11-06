@@ -18,6 +18,7 @@ from backend.engine.actions import (
     continue_combat,
     end_phase,
     retreat,
+    cancel_move,
 )
 import backend.engine.reducer as reducer_mod
 from backend.engine.reducer import apply_action, get_state_after_pending_moves
@@ -2662,3 +2663,256 @@ def test_ai_initiate_combat_skips_blocked_sea_raid(wotr_defs):
         f"AI must skip the blocked raid, got {action.payload}"
     )
     assert not action.payload.get("sea_zone_id")
+
+
+# ---------------------------------------------------------------------------
+# M7 (issue #50 audit item 7): idle-sail obligation bypasses.
+# A combat_move sail into a non-hostile sea must be tracked in
+# combat_move_naval_idle_sail_instance_ids unless it is an avoid_forced escape
+# or the destination is a hostile sea (battle = follow-through), regardless of
+# whether the boat already carries passengers (old loaded-boat exemption) or is
+# completely full (old empty_sea_zone_valid gate can never pass for it).
+# ---------------------------------------------------------------------------
+
+def _gondor_staging_sail_state(wotr_defs, embarked: int):
+    """Gondor ship in sea_zone_9 ready to sail into the staging sea_zone_12.
+
+    belfalas (adjacent to sea_zone_12) holds one gondor soldier so the staging
+    gate sees a friendly passenger source; harondor (neutral ownable) is the raid
+    target. embarked=0: empty boat; 1: bypass-1 loaded boat; 2: full boat.
+    """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    ship_def = unit_defs.get("gondor_ship")
+    if ship_def is not None:
+        setattr(ship_def, "transport_capacity", 2)
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    state.territories["sea_zone_9"].units.clear()
+    state.territories["sea_zone_12"].units.clear()
+    belf = state.territories["belfalas"]
+    belf.units = [u for u in belf.units if u.unit_id == "gondor_soldier"][:1]
+    if not belf.units:
+        belf.units.append(_make_unit(state, "gondor", "gondor_soldier", unit_defs))
+    ship = _make_unit(state, "gondor", "gondor_ship", unit_defs)
+    state.territories["sea_zone_9"].units.append(ship)
+    pax = []
+    for _ in range(embarked):
+        p = _make_unit(state, "gondor", "gondor_soldier", unit_defs)
+        p.loaded_onto = ship.instance_id
+        pax.append(p)
+        state.territories["sea_zone_9"].units.append(p)
+    state.current_faction = "gondor"
+    state.phase = "combat_move"
+    return state, ship, pax, (unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+
+
+def _harad_forced_full_sail_state(wotr_defs, avoid_forced: bool = False):
+    """Harad full black_ship (2 embarked corsairs) sharing sea_zone_11 with a
+    gondor intruder boat tagged as a mobilization intruder — the boat is forced
+    to fight or flee (dist-1 forced reach, no staging gate)."""
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    ship_def = unit_defs.get("black_ship")
+    if ship_def is not None:
+        setattr(ship_def, "transport_capacity", 2)
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    state.territories["sea_zone_11"].units.clear()
+    state.territories["sea_zone_10"].units.clear()
+    ship = _make_unit(state, "harad", "black_ship", unit_defs)
+    pax = []
+    for _ in range(2):
+        p = _make_unit(state, "harad", "corsair_of_umbar", unit_defs)
+        p.loaded_onto = ship.instance_id
+        pax.append(p)
+    enemy = _make_unit(state, "gondor", "gondor_ship", unit_defs)
+    state.territories["sea_zone_11"].units.extend([ship, *pax, enemy])
+    state.naval_mobilization_intruder_instance_ids = [enemy.instance_id]
+    state.current_faction = "harad"
+    state.phase = "combat_move"
+    return state, ship, pax, (unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+
+
+def test_empty_boat_staging_sail_tracked_and_blocks_phase_end(wotr_defs):
+    """Baseline control: an EMPTY boat staging sail is tracked and blocks phase end
+    (behavior that already existed; guards against regressing the whole mechanism)."""
+    state, ship, pax, defs = _gondor_staging_sail_state(wotr_defs, embarked=0)
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = defs
+    sail = move_units("gondor", "sea_zone_9", "sea_zone_12", [ship.instance_id], move_type="sail")
+    v = validate_action(state, sail, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert v.valid, v.error
+    state, _ = apply_action(state, sail, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+
+    sim = get_state_after_pending_moves(state, "combat_move", unit_defs, territory_defs, faction_defs)
+    assert ship.instance_id in (getattr(sim, "combat_move_naval_idle_sail_instance_ids", None) or []), (
+        "empty-boat staging sail must be tracked as an idle sail"
+    )
+    ve = validate_action(state, end_phase("gondor"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert not ve.valid and "Unresolved boats" in (ve.error or ""), ve.error
+    with pytest.raises(ValueError, match="Unresolved boats"):
+        apply_action(state, end_phase("gondor"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+
+
+def test_loaded_boat_staging_sail_tracked_and_blocks_phase_end(wotr_defs):
+    """M7 bypass 1: a boat with embarked passengers sailing into a staging sea must
+    still be tracked. The old loaded-boat exemption let it end the combat_move phase
+    with no follow-up (raid/offload/battle/load) at all."""
+    state, ship, pax, defs = _gondor_staging_sail_state(wotr_defs, embarked=1)
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = defs
+    stack = [ship.instance_id, pax[0].instance_id]
+    sail = move_units("gondor", "sea_zone_9", "sea_zone_12", stack, move_type="sail")
+    v = validate_action(state, sail, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert v.valid, v.error
+    state, _ = apply_action(state, sail, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+
+    sim = get_state_after_pending_moves(state, "combat_move", unit_defs, territory_defs, faction_defs)
+    assert ship.instance_id in (getattr(sim, "combat_move_naval_idle_sail_instance_ids", None) or []), (
+        "loaded boat staging sail must be tracked as an idle sail (loaded-boat exemption removed)"
+    )
+    ve = validate_action(state, end_phase("gondor"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert not ve.valid and "Unresolved boats" in (ve.error or ""), ve.error
+    with pytest.raises(ValueError, match="Unresolved boats"):
+        apply_action(state, end_phase("gondor"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+
+    # Recovery (no softlock): cancel the sail, then the phase may end normally.
+    state, _ = apply_action(state, cancel_move("gondor", 0), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    ve2 = validate_action(state, end_phase("gondor"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert ve2.valid, ve2.error
+    state, _ = apply_action(state, end_phase("gondor"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert ship.instance_id in [u.instance_id for u in state.territories["sea_zone_9"].units]
+
+
+def test_full_boat_forced_sail_tracked_and_blocks_phase_end(wotr_defs):
+    """M7 bypass 2: a full boat (no free load slots) repositioning out of a forced
+    standoff into an empty friendly sea must be tracked — the staging gate can never
+    pass for a full boat, so the old check skipped it entirely and the phase could
+    end with no follow-up obligation."""
+    state, ship, pax, defs = _harad_forced_full_sail_state(wotr_defs)
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = defs
+    stack = [ship.instance_id, pax[0].instance_id, pax[1].instance_id]
+    sail = move_units("harad", "sea_zone_11", "sea_zone_10", stack, move_type="sail")
+    v = validate_action(state, sail, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert v.valid, v.error
+    state, _ = apply_action(state, sail, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+
+    sim = get_state_after_pending_moves(state, "combat_move", unit_defs, territory_defs, faction_defs)
+    assert ship.instance_id in (getattr(sim, "combat_move_naval_idle_sail_instance_ids", None) or []), (
+        "full boat forced reposition sail must be tracked as an idle sail"
+    )
+    ve = validate_action(state, end_phase("harad"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert not ve.valid and "Unresolved boats" in (ve.error or ""), ve.error
+    with pytest.raises(ValueError, match="Unresolved boats"):
+        apply_action(state, end_phase("harad"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+
+    # Recovery (no softlock): cancel and redeclare with the intended avoid_forced payload.
+    state, _ = apply_action(state, cancel_move("harad", 0), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    sail2 = move_units(
+        "harad", "sea_zone_11", "sea_zone_10", stack,
+        move_type="sail", avoid_forced_naval_combat=True,
+    )
+    v2 = validate_action(state, sail2, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert v2.valid, v2.error
+    state, _ = apply_action(state, sail2, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    ve2 = validate_action(state, end_phase("harad"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert ve2.valid, ve2.error
+    state, _ = apply_action(state, end_phase("harad"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert ship.instance_id in [u.instance_id for u in state.territories["sea_zone_10"].units]
+
+
+def test_avoid_forced_full_boat_sail_not_tracked(wotr_defs):
+    """The avoid_forced_naval_combat standoff escape must stay exempt from idle-sail
+    tracking (it is itself the sanctioned follow-up for a forced boat)."""
+    state, ship, pax, defs = _harad_forced_full_sail_state(wotr_defs)
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = defs
+    stack = [ship.instance_id, pax[0].instance_id, pax[1].instance_id]
+    sail = move_units(
+        "harad", "sea_zone_11", "sea_zone_10", stack,
+        move_type="sail", avoid_forced_naval_combat=True,
+    )
+    v = validate_action(state, sail, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert v.valid, v.error
+    state, _ = apply_action(state, sail, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+
+    sim = get_state_after_pending_moves(state, "combat_move", unit_defs, territory_defs, faction_defs)
+    assert getattr(sim, "combat_move_naval_idle_sail_instance_ids", None) == [], (
+        "avoid_forced sail must never be tracked as an idle sail"
+    )
+    ve = validate_action(state, end_phase("harad"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert ve.valid, ve.error
+
+
+def test_full_boat_chain_sail_without_offload_pending_blocks_phase_end(wotr_defs):
+    """M7 bypass 2 (chain route): a chain sail declared without its offload follow-up
+    (engine-level call — no server-attached offload pending) must be tracked and block
+    phase end; the chain payload alone is not a follow-through."""
+    state, ship, pax, defs = _gondor_staging_sail_state(wotr_defs, embarked=2)
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = defs
+    stack = [ship.instance_id, pax[0].instance_id, pax[1].instance_id]
+    sail = move_units(
+        "gondor", "sea_zone_9", "sea_zone_12", stack,
+        move_type="sail", sail_to_offload_land_territory_id="harondor",
+    )
+    v = validate_action(state, sail, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert v.valid, v.error
+    state, _ = apply_action(state, sail, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+
+    sim = get_state_after_pending_moves(state, "combat_move", unit_defs, territory_defs, faction_defs)
+    assert ship.instance_id in (getattr(sim, "combat_move_naval_idle_sail_instance_ids", None) or []), (
+        "chain sail without an attached offload pending must be tracked"
+    )
+    ve = validate_action(state, end_phase("gondor"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert not ve.valid and "Unresolved boats" in (ve.error or ""), ve.error
+
+
+def test_full_boat_chain_sail_with_attached_offload_ends_phase(wotr_defs):
+    """API chain contract: chain sail + server-attached offload pending must clear the
+    idle obligation within the same batch (regression guard — the M7 tracking must not
+    break the normal chain flow used by /games/{id}/move)."""
+    state, ship, pax, defs = _gondor_staging_sail_state(wotr_defs, embarked=2)
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = defs
+    stack = [ship.instance_id, pax[0].instance_id, pax[1].instance_id]
+    sail = move_units(
+        "gondor", "sea_zone_9", "sea_zone_12", stack,
+        move_type="sail", sail_to_offload_land_territory_id="harondor",
+    )
+    v = validate_action(state, sail, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert v.valid, v.error
+    state, _ = apply_action(state, sail, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+
+    # Mirror backend/api/main.py do_move chain: validate the offload against the
+    # simulated state (boat already at the staging sea), then attach the pending
+    # directly — validation against the live state would not resolve the boat yet.
+    state_simulated = get_state_after_pending_moves(
+        state, "combat_move", unit_defs, territory_defs, faction_defs
+    )
+    offload = move_units("gondor", "sea_zone_12", "harondor", stack, move_type="offload")
+    vo = validate_action(state_simulated, offload, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert vo.valid, vo.error
+    state.pending_moves = list(state.pending_moves) + [
+        PendingMove(
+            from_territory="sea_zone_12",
+            to_territory="harondor",
+            unit_instance_ids=list(stack),
+            phase="combat_move",
+            move_type="offload",
+            primary_unit_id="gondor_ship",
+        )
+    ]
+
+    ve = validate_action(state, end_phase("gondor"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert ve.valid, ve.error
+    state, _ = apply_action(state, end_phase("gondor"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert ship.instance_id in [u.instance_id for u in state.territories["sea_zone_12"].units], (
+        "boat must stay in the staging sea after the chain"
+    )
+    for p in pax:
+        landed = next((u for u in state.territories["harondor"].units if u.instance_id == p.instance_id), None)
+        assert landed is not None, "passenger must offload onto harondor"
+        assert getattr(landed, "loaded_onto", None) is None
