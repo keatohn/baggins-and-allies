@@ -533,3 +533,112 @@ def test_apply_map_terrain_overrides_definition(db_session):
     }
     apply_map_terrain(defs, "wotr_map_1.2", db_session)
     assert defs["the_shire"].terrain_type == "hills"
+
+
+def _graph_setup(setup_id: str, map_base: str, adjacent: dict[str, list[str]]) -> Setup:
+    territories = {
+        tid: {
+            "id": tid,
+            "display_name": tid,
+            "terrain_type": "plains",
+            "adjacent": neighbors,
+            "aerial_adjacent": [],
+            "ford_adjacent": [],
+            "produces": {"power": 0},
+        }
+        for tid, neighbors in adjacent.items()
+    }
+    return Setup(
+        id=setup_id,
+        manifest_json=json.dumps({"id": setup_id, "map_asset": map_base}),
+        units_json="{}",
+        territories_json=json.dumps(territories),
+        factions_json="{}",
+        camps_json="{}",
+        ports_json="{}",
+        starting_setup_json="{}",
+        specials_json="{}",
+    )
+
+
+def test_graph_sibling_is_not_a_territory_id(make_client, players):
+    admin, _ = players
+    client = make_client(admin)
+    r = client.put(
+        "/admin/maps/wotr_map_1.2/overrides",
+        json={"graph": {"adjacent": {"the_shire": ["bree"]}}},
+    )
+    assert r.status_code == 200
+    body = r.json()["overrides"]
+    assert body["territories"] == {}
+    assert body["graph"]["adjacent"]["the_shire"] == ["bree"]
+    assert body["graph"]["aerial_adjacent"] == {}
+    assert body["graph"]["ford_adjacent"] == {}
+
+
+def test_put_graph_rejects_self_edge(make_client, players):
+    admin, _ = players
+    client = make_client(admin)
+    r = client.put(
+        "/admin/maps/wotr_map_1.2/overrides",
+        json={"graph": {"adjacent": {"the_shire": ["the_shire"]}}},
+    )
+    assert r.status_code == 400
+
+
+def test_put_graph_mirrors_setups_on_the_same_map(make_client, players, db_session):
+    admin, _ = players
+    db_session.add(_graph_setup("wotr_1.1", "wotr_map_1.2", {"the_shire": ["bree"], "bree": ["the_shire"]}))
+    db_session.add(_graph_setup("wotr_2.0", "wotr_map_1.2", {"the_shire": ["bree"], "bree": ["the_shire"]}))
+    db_session.add(_graph_setup("motw_1.0", "motw_map_1.2", {"the_shire": ["bree"]}))
+    db_session.commit()
+    client = make_client(admin)
+    r = client.put(
+        "/admin/maps/wotr_map_1.2/overrides",
+        json={"territories": {}, "graph": {"adjacent": {"the_shire": ["mordor"], "bree": []}}},
+    )
+    assert r.status_code == 200
+    for setup_id in ("wotr_1.1", "wotr_2.0"):
+        row = db_session.query(Setup).filter(Setup.id == setup_id).one()
+        territories = json.loads(row.territories_json)
+        assert territories["the_shire"]["adjacent"] == ["mordor"]
+        assert territories["bree"]["adjacent"] == []
+    other = json.loads(db_session.query(Setup).filter(Setup.id == "motw_1.0").one().territories_json)
+    assert other["the_shire"]["adjacent"] == ["bree"]
+
+
+def test_get_graph_fills_agreed_edges_and_skips_conflicts(make_client, players, db_session):
+    admin, _ = players
+    db_session.add(_graph_setup("wotr_1.1", "wotr_map_1.2", {"the_shire": ["bree"], "mordor": ["gorgoroth"]}))
+    db_session.add(_graph_setup("wotr_2.0", "wotr_map_1.2", {"the_shire": ["bree"], "mordor": ["nurn"]}))
+    db_session.commit()
+    client = make_client(admin)
+    body = client.get("/maps/wotr_map_1.2/overrides").json()["overrides"]
+    assert body["graph"]["adjacent"]["the_shire"] == ["bree"]
+    assert "mordor" not in body["graph"]["adjacent"]
+
+
+def test_apply_map_graph_overrides_definition(db_session):
+    from backend.map_overrides import apply_map_graph
+
+    db_session.add(
+        MapOverride(
+            map_base="wotr_map_1.2",
+            overrides_json=json.dumps(
+                {"territories": {}, "graph": {"adjacent": {"the_shire": ["bree"]}, "aerial_adjacent": {}, "ford_adjacent": {}}}
+            ),
+        )
+    )
+    db_session.commit()
+    defs = {
+        "the_shire": TerritoryDefinition(
+            id="the_shire",
+            display_name="The Shire",
+            terrain_type="plains",
+            adjacent=["hobbiton"],
+            produces={"power": 1},
+        )
+    }
+    apply_map_graph(defs, "wotr_map_1.2", db_session)
+    assert defs["the_shire"].adjacent == ["bree"]
+

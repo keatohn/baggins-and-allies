@@ -6,6 +6,7 @@ import type {
   GameState,
   LandscapeOverrides,
   LandscapePlacement,
+  MapGraph,
   MapOverridePoint,
   MapOverridesData,
   MapSpotKind,
@@ -22,7 +23,19 @@ import {
   territoryPathEl,
   type LandscapeManifest,
 } from './landscape';
-import { loadTerritorySvgPaths, sameTerritoryId, toMapBase, type TerritoryPathData } from './territoryGraph';
+import {
+  adjacencyEdges,
+  computePathCentroids,
+  loadTerritorySvgPaths,
+  lookupCentroid,
+  resolveTerritoryKey,
+  sameTerritoryId,
+  territoriesWithEdgeEdits,
+  toMapBase,
+  type TerritoryEdgeEdit,
+  type TerritoryEdgeField,
+  type TerritoryPathData,
+} from './territoryGraph';
 import { MapBuilder } from './MapBuilder';
 
 type Pt = { x: number; y: number };
@@ -137,13 +150,63 @@ function stableJson(value: unknown): string {
   );
 }
 
-/** Copy a map document, replacing only the fields in the patch. Sibling terrain/landscape stay. */
+const GRAPH_FIELDS: TerritoryEdgeField[] = ['adjacent', 'aerial_adjacent', 'ford_adjacent'];
+
+const EDGE_TYPES: { field: TerritoryEdgeField; label: string; kind: 'land' | 'aerial' | 'ford' }[] = [
+  { field: 'adjacent', label: 'Land', kind: 'land' },
+  { field: 'aerial_adjacent', label: 'Aerial', kind: 'aerial' },
+  { field: 'ford_adjacent', label: 'Ford', kind: 'ford' },
+];
+
+function emptyGraph(): MapGraph {
+  return { adjacent: {}, aerial_adjacent: {}, ford_adjacent: {} };
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
+}
+
+function offsetEdge(pa: Pt, pb: Pt, dist: number): { a: Pt; b: Pt } {
+  const dx = pb.x - pa.x;
+  const dy = pb.y - pa.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ox = (-dy / len) * dist;
+  const oy = (dx / len) * dist;
+  return {
+    a: { x: pa.x + ox, y: pa.y + oy },
+    b: { x: pb.x + ox, y: pb.y + oy },
+  };
+}
+
+/** Map adjacency wins over the setup copy for territories stored on the graph. */
+function withGraph(defs: Dict, graph: MapGraph | undefined): Dict {
+  if (!graph) return defs;
+  const ids = new Set<string>();
+  for (const field of GRAPH_FIELDS) {
+    for (const id of Object.keys(graph[field] ?? {})) ids.add(id);
+  }
+  if (!ids.size) return defs;
+  const out: Dict = { ...defs };
+  for (const id of ids) {
+    const key = resolveTerritoryKey(out, id) ?? id;
+    const base = { ...(out[key] ?? {}) };
+    for (const field of GRAPH_FIELDS) {
+      const table = graph[field];
+      if (table && Object.prototype.hasOwnProperty.call(table, id)) base[field] = table[id];
+    }
+    out[key] = base;
+  }
+  return out;
+}
+
+/** Copy a map document, replacing only the fields in the patch. Sibling terrain/landscape/graph stay. */
 function nextOverrides(
   base: MapOverridesData,
   patch: {
     territories?: MapOverridesData['territories'];
     landscape?: LandscapeOverrides | null;
     terrain?: Record<string, string> | null;
+    graph?: MapGraph | null;
   },
 ): MapOverridesData {
   const data: MapOverridesData = { territories: patch.territories ?? base.territories };
@@ -151,6 +214,8 @@ function nextOverrides(
   if (landscape) data.landscape = landscape;
   const terrain = patch.terrain === undefined ? base.terrain : patch.terrain ?? undefined;
   if (terrain) data.terrain = terrain;
+  const graph = patch.graph === undefined ? base.graph : patch.graph ?? undefined;
+  if (graph) data.graph = graph;
   return data;
 }
 
@@ -235,7 +300,8 @@ export function MapOverridesPane({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
-  const [editorTab, setEditorTab] = useState<'icon' | 'landscape' | 'builder'>('icon');
+  const [editorTab, setEditorTab] = useState<'icon' | 'landscape' | 'builder' | 'graph'>('icon');
+  const [edgeField, setEdgeField] = useState<TerritoryEdgeField>('adjacent');
   const [terrainTypes, setTerrainTypes] = useState<string[]>([]);
   const [manifest, setManifest] = useState<LandscapeManifest>({});
   const [placing, setPlacing] = useState<{ cat: string; img: string } | null>(null);
@@ -305,6 +371,15 @@ export function MapOverridesPane({
     }
     return out;
   }, [territoryDefs, current]);
+
+  const graphShown = useMemo(
+    () => withGraph(terrainBackedDefs, current?.graph),
+    [terrainBackedDefs, current?.graph],
+  );
+  const centroids = useMemo(
+    () => (editorTab === 'graph' ? computePathCentroids(paths, viewBox, mapBase) : {}),
+    [editorTab, paths, viewBox, mapBase],
+  );
 
   // --- data loading -------------------------------------------------------
 
@@ -764,6 +839,49 @@ export function MapOverridesPane({
     }));
   };
 
+  const listsNeighbor = (from: string, to: string, field: TerritoryEdgeField) =>
+    stringList(graphShown[from]?.[field]).some((id) => sameTerritoryId(id, to));
+
+  const toggleGraphEdge = (source: string, neighbor: string) => {
+    if (!current) return;
+    const sourceKey = resolveTerritoryKey(graphShown, source);
+    const neighborKey = resolveTerritoryKey(graphShown, neighbor);
+    if (!sourceKey || !neighborKey || sameTerritoryId(sourceKey, neighborKey)) return;
+    const turningOn = !listsNeighbor(sourceKey, neighborKey, edgeField);
+    const batch: TerritoryEdgeEdit[] = [];
+    const add = (field: TerritoryEdgeField, on: boolean) =>
+      batch.push({ source: sourceKey, neighbor: neighborKey, field, on, seq: batch.length });
+    add(edgeField, turningOn);
+    if (turningOn && edgeField === 'adjacent') {
+      for (const other of ['aerial_adjacent', 'ford_adjacent'] as const) {
+        if (listsNeighbor(sourceKey, neighborKey, other) || listsNeighbor(neighborKey, sourceKey, other)) add(other, false);
+      }
+    } else if (turningOn && (edgeField === 'aerial_adjacent' || edgeField === 'ford_adjacent')) {
+      if (listsNeighbor(sourceKey, neighborKey, 'adjacent') || listsNeighbor(neighborKey, sourceKey, 'adjacent')) {
+        add('adjacent', false);
+      }
+    }
+    const edited = territoriesWithEdgeEdits(
+      {
+        [sourceKey]: graphShown[sourceKey] ?? {},
+        [neighborKey]: graphShown[neighborKey] ?? {},
+      },
+      batch,
+    );
+    const graph = current.graph
+      ? {
+          adjacent: { ...current.graph.adjacent },
+          aerial_adjacent: { ...current.graph.aerial_adjacent },
+          ford_adjacent: { ...current.graph.ford_adjacent },
+        }
+      : emptyGraph();
+    for (const id of [sourceKey, neighborKey]) {
+      for (const field of GRAPH_FIELDS) graph[field][id] = stringList(edited[id]?.[field]);
+    }
+    setDraft(nextOverrides(current, { graph }));
+    setSaveError(null);
+  };
+
   const viewportToViewBox = useCallback(
     (clientX: number, clientY: number): Pt | null => {
       const el = wrapRef.current;
@@ -864,6 +982,12 @@ export function MapOverridesPane({
       return;
     }
     const tid = territoryIdFromPoint(e.clientX, e.clientY);
+    if (editorTab === 'graph') {
+      if (!tid) return;
+      if (selected && !sameTerritoryId(tid, selected)) toggleGraphEdge(selected, tid);
+      else setSelected(tid);
+      return;
+    }
     if (tid) {
       setSelected(tid);
       setActiveKind('unit');
@@ -1875,9 +1999,43 @@ export function MapOverridesPane({
     return out;
   }, [selected, selectedEntry, terrainBackedDefs]);
 
+  const landEdges = useMemo(
+    () => (editorTab === 'graph' ? adjacencyEdges(graphShown, 'adjacent') : []),
+    [editorTab, graphShown],
+  );
+  const aerialEdges = useMemo(
+    () => (editorTab === 'graph' ? adjacencyEdges(graphShown, 'aerial_adjacent') : []),
+    [editorTab, graphShown],
+  );
+  const fordEdges = useMemo(
+    () => (editorTab === 'graph' ? adjacencyEdges(graphShown, 'ford_adjacent') : []),
+    [editorTab, graphShown],
+  );
+  const selectedGraphKey = selected ? resolveTerritoryKey(graphShown, selected) : null;
+  const neighborIds = (field: TerritoryEdgeField) =>
+    selectedGraphKey ? stringList(graphShown[selectedGraphKey]?.[field]) : [];
+  const landNeighborIds = neighborIds('adjacent');
+  const aerialNeighborIds = neighborIds('aerial_adjacent');
+  const fordNeighborIds = neighborIds('ford_adjacent');
+  const isNeighbor = (tid: string, ids: string[]) => ids.some((id) => sameTerritoryId(id, tid));
+  const neighborPathClass = (tid: string) => {
+    if (editorTab !== 'graph') return '';
+    const land = isNeighbor(tid, landNeighborIds);
+    const aerial = isNeighbor(tid, aerialNeighborIds);
+    const ford = isNeighbor(tid, fordNeighborIds);
+    if (ford && aerial) return ' admin-graph__path--neighbor-ford';
+    if (land && aerial) return ' admin-graph__path--neighbor-both';
+    if (land) return ' admin-graph__path--neighbor-land';
+    if (ford) return ' admin-graph__path--neighbor-ford';
+    if (aerial) return ' admin-graph__path--neighbor-aerial';
+    return '';
+  };
+
   const description =
     editorTab === 'builder'
       ? 'Draw border lines once — neighbours share the same line. Set the map size, sketch with Pen/Pencil, then Label each enclosed region; Build SVG converts the graph into closed territory paths (saved work autosaves in this browser).'
+      : editorTab === 'graph'
+      ? 'Choose a territory, then click another to toggle that border. Land replaces aerial and ford. Aerial and ford can both stay. Save writes both sides onto this map and every setup that uses it.'
       : editorTab === 'landscape'
       ? 'Place terrain art constrained by each territory’s type. The type is stored on this map and saved with it. Auto-generate fills interiors; Border mode snaps to outlines. Save applies to every setup using this map.'
       : spots
@@ -1937,6 +2095,22 @@ export function MapOverridesPane({
               >
                 Builder
               </button>
+              <button
+                type="button"
+                className={`admin-mapview__toggle-btn${editorTab === 'graph' ? ' admin-mapview__toggle-btn--active' : ''}`}
+                aria-pressed={editorTab === 'graph'}
+                onClick={() => {
+                  setEditorTab('graph');
+                  setPlacing(null);
+                  setSelectedPlacement(null);
+                  setCursorMode('navigate');
+                  setBand(null);
+                  setMultiSel(new Set());
+                  setEdgeField('adjacent');
+                }}
+              >
+                Graph
+              </button>
             </div>
             <label className="admin-graph__prop">
               Map
@@ -1957,6 +2131,21 @@ export function MapOverridesPane({
             <MapTextureSlider />
           </div>
           <div className="admin-graph__header-actions">
+            {editorTab === 'graph' ? (
+              <div className="admin-graph__types" role="group" aria-label="Adjacency type">
+                {EDGE_TYPES.map((type) => (
+                  <button
+                    key={type.field}
+                    type="button"
+                    className={`admin-graph__type admin-graph__type--${type.kind}${edgeField === type.field ? ' admin-graph__type--active' : ''}`}
+                    aria-pressed={edgeField === type.field}
+                    onClick={() => setEdgeField(type.field)}
+                  >
+                    {type.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             {editorTab === 'landscape' ? (
               <>
                 <div className="admin-mapview__toggle" role="group" aria-label="Cursor mode">
@@ -2041,6 +2230,21 @@ export function MapOverridesPane({
                   {row.label}
                 </li>
               ))}
+            </ul>
+          ) : editorTab === 'graph' ? (
+            <ul className="admin-graph__key" aria-label="Edge colors">
+              <li>
+                <span className="admin-graph__key-swatch admin-graph__key-swatch--land" aria-hidden />
+                Adjacent
+              </li>
+              <li>
+                <span className="admin-graph__key-swatch admin-graph__key-swatch--aerial" aria-hidden />
+                Aerial adjacent
+              </li>
+              <li>
+                <span className="admin-graph__key-swatch admin-graph__key-swatch--ford" aria-hidden />
+                Ford adjacent
+              </li>
             </ul>
           ) : editorTab === 'builder' ? (
             <p className="admin-form__micro mapov-landscape-hint">
@@ -2140,7 +2344,7 @@ export function MapOverridesPane({
                           Override
                         </button>
                       </div>
-                    ) : (
+                    ) : editorTab === 'landscape' ? (
                       <select
                         className="admin-page__select mapov-inspector__terrain"
                         aria-label="Terrain type"
@@ -2157,9 +2361,19 @@ export function MapOverridesPane({
                           </option>
                         ))}
                       </select>
-                    )}
+                    ) : null}
                   </div>
-                  {editorTab === 'landscape' ? (
+                  {editorTab === 'graph' ? (
+                    <p className="admin-form__micro">
+                      {EDGE_TYPES.find((type) => type.field === edgeField)?.label ?? 'Land'}:{' '}
+                      {(edgeField === 'adjacent'
+                        ? landNeighborIds
+                        : edgeField === 'aerial_adjacent'
+                          ? aerialNeighborIds
+                          : fordNeighborIds
+                      ).join(', ') || 'none'}
+                    </p>
+                  ) : editorTab === 'landscape' ? (
                     selectedCategories.length ? (
                       <div className="mapov-landscape">
                         <div className="mapov-landscape__modes">
@@ -2359,9 +2573,83 @@ export function MapOverridesPane({
                       data-tid={tid}
                       d={pathData.d}
                       transform={pathData.transform}
-                      className={`admin-graph__path${selected && sameTerritoryId(tid, selected) ? ' admin-graph__path--selected' : ''}`}
+                      className={`admin-graph__path${selected && sameTerritoryId(tid, selected) ? ' admin-graph__path--selected' : ''}${neighborPathClass(tid)}`}
                     />
                   ))}
+                  {editorTab === 'graph'
+                    ? landEdges.map(({ a, b }) => {
+                        const pa = lookupCentroid(centroids, a);
+                        const pb = lookupCentroid(centroids, b);
+                        if (!pa || !pb) return null;
+                        const hot =
+                          selectedGraphKey != null &&
+                          (sameTerritoryId(a, selectedGraphKey) || sameTerritoryId(b, selectedGraphKey));
+                        return (
+                          <line
+                            key={`land|${a}|${b}`}
+                            x1={pa.x}
+                            y1={pa.y}
+                            x2={pb.x}
+                            y2={pb.y}
+                            className={`admin-graph__edge admin-graph__edge--land${hot ? ' admin-graph__edge--hot' : ''}`}
+                            pointerEvents="none"
+                          />
+                        );
+                      })
+                    : null}
+                  {editorTab === 'graph'
+                    ? aerialEdges.map(({ a, b }) => {
+                        if (
+                          fordEdges.some(
+                            (edge) =>
+                              (sameTerritoryId(edge.a, a) && sameTerritoryId(edge.b, b)) ||
+                              (sameTerritoryId(edge.a, b) && sameTerritoryId(edge.b, a)),
+                          )
+                        ) {
+                          return null;
+                        }
+                        const pa = lookupCentroid(centroids, a);
+                        const pb = lookupCentroid(centroids, b);
+                        if (!pa || !pb) return null;
+                        const pts = offsetEdge(pa, pb, 7);
+                        const hot =
+                          selectedGraphKey != null &&
+                          (sameTerritoryId(a, selectedGraphKey) || sameTerritoryId(b, selectedGraphKey));
+                        return (
+                          <line
+                            key={`aerial|${a}|${b}`}
+                            x1={pts.a.x}
+                            y1={pts.a.y}
+                            x2={pts.b.x}
+                            y2={pts.b.y}
+                            className={`admin-graph__edge admin-graph__edge--aerial${hot ? ' admin-graph__edge--hot' : ''}`}
+                            pointerEvents="none"
+                          />
+                        );
+                      })
+                    : null}
+                  {editorTab === 'graph'
+                    ? fordEdges.map(({ a, b }) => {
+                        const pa = lookupCentroid(centroids, a);
+                        const pb = lookupCentroid(centroids, b);
+                        if (!pa || !pb) return null;
+                        const pts = offsetEdge(pa, pb, -7);
+                        const hot =
+                          selectedGraphKey != null &&
+                          (sameTerritoryId(a, selectedGraphKey) || sameTerritoryId(b, selectedGraphKey));
+                        return (
+                          <line
+                            key={`ford|${a}|${b}`}
+                            x1={pts.a.x}
+                            y1={pts.a.y}
+                            x2={pts.b.x}
+                            y2={pts.b.y}
+                            className={`admin-graph__edge admin-graph__edge--ford${hot ? ' admin-graph__edge--hot' : ''}`}
+                            pointerEvents="none"
+                          />
+                        );
+                      })
+                    : null}
                 </svg>
               </div>
               {band ? (
@@ -2471,7 +2759,7 @@ export function MapOverridesPane({
                     );
                   })}
                 </div>
-              ) : (
+              ) : editorTab === 'graph' ? null : (
                 <div className="mapov-dots">
                   {dots.map((d) => {
                     const isActive = d.tid === selected && d.kind === activeKind;
@@ -2512,6 +2800,10 @@ export function MapOverridesPane({
             ? selected
               ? `${territoryLabel(selected, territoryDefs)} · ${selectedTerrainType || 'land'} · ${selectedPlacements.length} placed${landscapeCount ? ` · ${landscapeCount} total` : ''}`
               : 'No territory selected'
+            : editorTab === 'graph'
+            ? selectedGraphKey
+              ? `${territoryLabel(selectedGraphKey, graphShown)} · ${EDGE_TYPES.find((type) => type.field === edgeField)?.label ?? 'Land'}: ${(edgeField === 'adjacent' ? landNeighborIds : edgeField === 'aerial_adjacent' ? aerialNeighborIds : fordNeighborIds).join(', ') || 'none'}`
+              : 'Choose a territory'
             : selected
               ? `${territoryLabel(selected, territoryDefs)} · ${KIND_LABEL[activeKind]}${
                   selectedFocus === 'override' ? ' · override' : ' · calculated'

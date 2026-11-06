@@ -265,9 +265,11 @@ def get_admin_setup_bundle(db: Session, setup_id: str) -> dict[str, Any] | None:
         return None
     p = _row_to_parsed(row)
     map_base = p["manifest"].get("map_asset") if isinstance(p["manifest"], dict) else None
-    from backend.map_overrides import apply_map_terrain
+    from backend.map_overrides import apply_map_graph, apply_map_terrain
 
-    apply_map_terrain(p["territories"], map_base if isinstance(map_base, str) and map_base else row.id, db)
+    resolved_map = map_base if isinstance(map_base, str) and map_base else row.id
+    apply_map_terrain(p["territories"], resolved_map, db)
+    apply_map_graph(p["territories"], resolved_map, db)
     return {
         "id": row.id,
         "manifest": p["manifest"],
@@ -575,9 +577,11 @@ def try_load_static_definitions(setup_id: str, db: Session | None):
         defs = load_static_definitions_from_files(setup_id=setup_id)
     setup = try_load_setup(setup_id, db)
     map_base = (setup or {}).get("map_asset") or setup_id
-    from backend.map_overrides import apply_map_terrain
+    from backend.map_overrides import apply_map_graph, apply_map_terrain
 
-    apply_map_terrain(defs[1], map_base if isinstance(map_base, str) else setup_id, db)
+    resolved_map = map_base if isinstance(map_base, str) else setup_id
+    apply_map_terrain(defs[1], resolved_map, db)
+    apply_map_graph(defs[1], resolved_map, db)
     return defs
 
 

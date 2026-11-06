@@ -1,6 +1,6 @@
 """
 Map-level data shared by every setup that uses the same map asset: icon anchor points,
-landscape art, and territory terrain types.
+landscape art, territory terrain types, and the adjacency graph.
 
 Positions are in the map SVG's viewBox coordinate space (the same space the in-SVG
 ``hint_<tid>_<kind>`` circles live in). A territory entry is either ``calculated``
@@ -60,6 +60,11 @@ MAX_LANDSCAPE_TOTAL = 2500
 MAX_TERRAIN_ENTRIES = 500
 _TERRAIN_RE = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
 
+# Adjacency lives on the map, same as terrain. Each field maps a territory id to its neighbors.
+GRAPH_FIELDS = ("adjacent", "aerial_adjacent", "ford_adjacent")
+MAX_GRAPH_TERRITORIES = 500
+MAX_GRAPH_NEIGHBORS = 80
+
 _MAP_BASE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _TID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _LANDSCAPE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -86,7 +91,7 @@ def _entries_source(raw: Any) -> Any:
     if isinstance(raw, dict):
         if "territories" in raw:
             return raw.get("territories")
-        if "landscape" in raw or "terrain" in raw:
+        if "landscape" in raw or "terrain" in raw or "graph" in raw:
             return {}
     return raw
 
@@ -253,6 +258,76 @@ def _validate_terrain(raw: Any) -> None:
             )
 
 
+def _clean_neighbor_list(raw: Any, *, strict: bool = False) -> list[str] | None:
+    """Neighbor ids. Lenient reads drop junk; strict saves reject it."""
+    if not isinstance(raw, list):
+        return None
+    if strict and len(raw) > MAX_GRAPH_NEIGHBORS:
+        return None
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, str) or not _TID_RE.match(item):
+            if strict:
+                return None
+            continue
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+        if not strict and len(out) >= MAX_GRAPH_NEIGHBORS:
+            break
+    return out
+
+
+def _clean_graph_field(raw: Any) -> dict[str, list[str]]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, list[str]] = {}
+    for tid, neighbors in raw.items():
+        if not isinstance(tid, str) or not _TID_RE.match(tid):
+            continue
+        cleaned = _clean_neighbor_list(neighbors)
+        if cleaned is None:
+            continue
+        out[tid] = [n for n in cleaned if n != tid]
+        if len(out) >= MAX_GRAPH_TERRITORIES:
+            break
+    return out
+
+
+def _clean_graph(raw: Any) -> dict[str, dict[str, list[str]]]:
+    src = raw if isinstance(raw, dict) else {}
+    return {field: _clean_graph_field(src.get(field)) for field in GRAPH_FIELDS}
+
+
+def _validate_graph(raw: Any) -> None:
+    if raw is None:
+        return
+    if not isinstance(raw, dict):
+        raise MapOverridesError(
+            "Graph must be an object with adjacent, aerial_adjacent, and ford_adjacent maps."
+        )
+    for field in GRAPH_FIELDS:
+        if field not in raw:
+            continue
+        table = raw.get(field)
+        if not isinstance(table, dict):
+            raise MapOverridesError(f"Graph {field} must be an object mapping territory ids to neighbor lists.")
+        if len(table) > MAX_GRAPH_TERRITORIES:
+            raise MapOverridesError(f"At most {MAX_GRAPH_TERRITORIES} territories in graph {field}.")
+        for tid, neighbors in table.items():
+            if not isinstance(tid, str) or not _TID_RE.match(tid):
+                raise MapOverridesError(f"Invalid graph territory id: {tid!r}.")
+            cleaned = _clean_neighbor_list(neighbors, strict=True)
+            if cleaned is None:
+                raise MapOverridesError(
+                    f"Graph {field} for {tid} must be a list of at most {MAX_GRAPH_NEIGHBORS} territory ids."
+                )
+            if tid in cleaned:
+                raise MapOverridesError(f"Graph {field} for {tid} cannot list itself.")
+
+
 def normalize_map_overrides(raw: Any) -> dict[str, Any]:
     """Lenient parse for reads/seed: drop anything malformed, always return the canonical shape."""
     source = _entries_source(raw)
@@ -271,6 +346,8 @@ def normalize_map_overrides(raw: Any) -> dict[str, Any]:
         out["landscape"] = {"territories": landscape}
     if isinstance(raw, dict) and "terrain" in raw:
         out["terrain"] = _clean_terrain(raw.get("terrain"))
+    if isinstance(raw, dict) and "graph" in raw:
+        out["graph"] = _clean_graph(raw.get("graph"))
     return out
 
 
@@ -310,6 +387,8 @@ def validate_map_overrides(raw: Any) -> dict[str, Any]:
     _validate_landscape_section(_raw_landscape_section(raw))
     if isinstance(raw, dict):
         _validate_terrain(raw.get("terrain"))
+        if "graph" in raw:
+            _validate_graph(raw.get("graph"))
     return normalize_map_overrides(raw)
 
 
@@ -398,8 +477,9 @@ def _stored_raw(db: Session | None, map_base: str) -> Any:
 def load_map_overrides(db: Session | None, map_base: str) -> dict[str, Any]:
     """Stored overrides for a map; ``{"territories": {}}`` when none exist.
 
-    When the stored document has no ``terrain`` key yet, terrain is filled from the
-    setups that use this map (only where they agree). That fill is not written here.
+    When the stored document has no ``terrain`` or ``graph`` key yet, that section is
+    filled from the setups that use this map (only where they agree). That fill is not
+    written here.
     """
     raw = _stored_raw(db, map_base)
     data = normalize_map_overrides(raw)
@@ -407,6 +487,10 @@ def load_map_overrides(db: Session | None, map_base: str) -> dict[str, Any]:
         filled = agreed_terrain_for_map(db, map_base)
         if filled:
             data["terrain"] = filled
+    if not (isinstance(raw, dict) and "graph" in raw):
+        filled_graph = agreed_graph_for_map(db, map_base)
+        if filled_graph:
+            data["graph"] = filled_graph
     return data
 
 
@@ -429,12 +513,15 @@ def save_map_overrides(db: Session | None, map_base: str, raw: Any) -> dict[str,
     data = validate_map_overrides(raw)
     terrain = data.get("terrain") or {}
     _require_known_terrain(db, terrain)
+    graph = data.get("graph") or {}
     if is_files_setup_source() or db is None:
         _write_file(map_base, data)
         _mirror_terrain_files(map_base, terrain)
+        _mirror_graph_files(map_base, graph)
         return data
     _write_row(db, map_base, data)
     _mirror_terrain_db(db, map_base, terrain)
+    _mirror_graph_db(db, map_base, graph)
     db.commit()
     return data
 
@@ -458,6 +545,29 @@ def apply_map_terrain(territories: dict[str, Any] | None, map_base: str | None, 
             record["terrain_type"] = name
         elif hasattr(record, "terrain_type"):
             record.terrain_type = name
+
+
+def apply_map_graph(territories: dict[str, Any] | None, map_base: str | None, db: Session | None) -> None:
+    """Copy this map's adjacency onto territory records. Territories missing from the graph stay."""
+    if not territories or not isinstance(map_base, str) or not map_base:
+        return
+    try:
+        base = validate_map_base(map_base)
+    except MapOverridesError:
+        return
+    graph = load_map_overrides(db, base).get("graph") or {}
+    if not isinstance(graph, dict) or not any(graph.get(field) for field in GRAPH_FIELDS):
+        return
+    for tid, record in territories.items():
+        if not any(isinstance(graph.get(field), dict) and tid in graph[field] for field in GRAPH_FIELDS):
+            continue
+        for field in GRAPH_FIELDS:
+            table = graph.get(field) if isinstance(graph.get(field), dict) else {}
+            nxt = list(table.get(tid, []))
+            if isinstance(record, dict):
+                record[field] = nxt
+            elif hasattr(record, field):
+                setattr(record, field, nxt)
 
 
 def publish_setup_terrain(db: Session | None, map_base: str | None, territories: dict[str, Any] | None) -> None:
@@ -644,6 +754,135 @@ def _mirror_terrain_files(map_base: str, terrain: dict[str, str]) -> None:
                 record["terrain_type"] = name
                 touched = True
         if touched:
+            with open(d / "territories.json", "w", encoding="utf-8") as f:
+                json.dump(territories, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+
+
+def _same_neighbors(left: Any, right: list[str]) -> bool:
+    if not isinstance(left, list):
+        return not right
+    return sorted(item for item in left if isinstance(item, str)) == sorted(right)
+
+
+def _graph_from_setup_territories(territories: Any) -> dict[str, dict[str, list[str]]]:
+    fields: dict[str, dict[str, list[str]]] = {field: {} for field in GRAPH_FIELDS}
+    if not isinstance(territories, dict):
+        return fields
+    for tid, row in territories.items():
+        if not isinstance(tid, str) or not _TID_RE.match(tid) or not isinstance(row, dict):
+            continue
+        for field in GRAPH_FIELDS:
+            cleaned = _clean_neighbor_list(row.get(field) or [])
+            fields[field][tid] = [] if cleaned is None else [n for n in cleaned if n != tid]
+    return fields
+
+
+def _graph_signature(graph: dict[str, dict[str, list[str]]], tid: str) -> tuple[tuple[str, ...], ...]:
+    return tuple(tuple(sorted(graph[field].get(tid, []))) for field in GRAPH_FIELDS)
+
+
+def _iter_setup_graph(db: Session | None) -> Iterator[tuple[str, dict[str, dict[str, list[str]]]]]:
+    """(map_base, graph) for every setup. DB rows when the DB is the source."""
+    if db is not None and not is_files_setup_source():
+        from backend.api.models import Setup
+
+        rows = db.query(Setup.id, Setup.manifest_json, Setup.territories_json).all()
+        for setup_id, manifest_json, territories_json in rows:
+            map_base, _tids = _entry_from(setup_id, manifest_json, territories_json)
+            yield map_base, _graph_from_setup_territories(_decode_territories(territories_json))
+        return
+    if not SETUPS_DIR.is_dir():
+        return
+    for d in sorted(SETUPS_DIR.iterdir()):
+        if not d.is_dir():
+            continue
+        manifest = _read_json(d / "manifest.json")
+        territories = _read_json(d / "territories.json")
+        map_base, _tids = _entry_from(d.name, manifest if isinstance(manifest, dict) else None, territories)
+        yield map_base, _graph_from_setup_territories(territories)
+
+
+def agreed_graph(db: Session | None) -> dict[str, dict[str, dict[str, list[str]]]]:
+    """Adjacency per map. A territory is kept only when every setup that has it agrees."""
+    grouped: dict[str, list[dict[str, dict[str, list[str]]]]] = {}
+    for map_base, graph in _iter_setup_graph(db):
+        grouped.setdefault(map_base, []).append(graph)
+    out: dict[str, dict[str, dict[str, list[str]]]] = {}
+    for map_base, graphs in grouped.items():
+        tids: set[str] = set()
+        for one in graphs:
+            tids.update(one["adjacent"])
+        agreed: dict[str, dict[str, list[str]]] = {field: {} for field in GRAPH_FIELDS}
+        for tid in tids:
+            sigs = {_graph_signature(one, tid) for one in graphs if tid in one["adjacent"]}
+            if len(sigs) != 1:
+                continue
+            exemplar = next(one for one in graphs if tid in one["adjacent"])
+            for field in GRAPH_FIELDS:
+                agreed[field][tid] = list(exemplar[field].get(tid, []))
+        if agreed["adjacent"]:
+            out[map_base] = agreed
+    return out
+
+
+def agreed_graph_for_map(db: Session | None, map_base: str) -> dict[str, dict[str, list[str]]]:
+    return agreed_graph(db).get(map_base) or {}
+
+
+def _apply_graph_lists(territories: dict[str, Any], graph: dict[str, Any]) -> bool:
+    tids: set[str] = set()
+    for field in GRAPH_FIELDS:
+        table = graph.get(field)
+        if isinstance(table, dict):
+            tids.update(table)
+    touched = False
+    for tid in tids:
+        record = territories.get(tid)
+        if not isinstance(record, dict):
+            continue
+        for field in GRAPH_FIELDS:
+            table = graph.get(field) if isinstance(graph.get(field), dict) else {}
+            nxt = list(table.get(tid, []))
+            if not _same_neighbors(record.get(field), nxt):
+                record[field] = nxt
+                touched = True
+    return touched
+
+
+def _mirror_graph_db(db: Session, map_base: str, graph: dict[str, Any]) -> None:
+    """Copy map adjacency onto each setup row that uses this map. Does not commit."""
+    if not any(isinstance(graph.get(field), dict) and graph[field] for field in GRAPH_FIELDS):
+        return
+    from backend.api.models import Setup
+
+    for row in db.query(Setup).all():
+        base, _tids = _entry_from(row.id, row.manifest_json, row.territories_json)
+        if base != map_base:
+            continue
+        territories = _decode_territories(row.territories_json)
+        if not isinstance(territories, dict):
+            continue
+        if _apply_graph_lists(territories, graph):
+            row.territories_json = json.dumps(territories, ensure_ascii=False)
+            row.updated_at = datetime.utcnow()
+
+
+def _mirror_graph_files(map_base: str, graph: dict[str, Any]) -> None:
+    """Files-source only. Production reads the database and never takes this path."""
+    if not any(isinstance(graph.get(field), dict) and graph[field] for field in GRAPH_FIELDS):
+        return
+    if not SETUPS_DIR.is_dir():
+        return
+    for d in sorted(SETUPS_DIR.iterdir()):
+        if not d.is_dir():
+            continue
+        manifest = _read_json(d / "manifest.json")
+        territories = _read_json(d / "territories.json")
+        base, _tids = _entry_from(d.name, manifest if isinstance(manifest, dict) else None, territories)
+        if base != map_base or not isinstance(territories, dict):
+            continue
+        if _apply_graph_lists(territories, graph):
             with open(d / "territories.json", "w", encoding="utf-8") as f:
                 json.dump(territories, f, indent=2, ensure_ascii=False)
                 f.write("\n")

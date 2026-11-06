@@ -159,11 +159,19 @@ export interface LandscapeOverrides {
   territories: Record<string, LandscapePlacement[]>;
 }
 
+export interface MapGraph {
+  adjacent: Record<string, string[]>;
+  aerial_adjacent: Record<string, string[]>;
+  ford_adjacent: Record<string, string[]>;
+}
+
 export interface MapOverridesData {
   territories: Record<string, MapOverrideTerritoryEntry>;
   landscape?: LandscapeOverrides;
   /** Territory id → catalog terrain id. Map-level; shared by every setup on this map. */
   terrain?: Record<string, string>;
+  /** Adjacency for this map. Shared by every setup that uses it. */
+  graph?: MapGraph;
 }
 
 /** Accept `[x, y]` or `{ x, y }`; anything else → null. */
@@ -258,6 +266,42 @@ function attachTerrain(result: MapOverridesData, rec: Record<string, unknown>): 
   return result;
 }
 
+function normalizeNeighborList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string' || !TERRAIN_TID_RE.test(item) || out.includes(item)) continue;
+    out.push(item);
+  }
+  return out;
+}
+
+function normalizeGraphField(raw: unknown): Record<string, string[]> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [tid, neighbors] of Object.entries(raw as Record<string, unknown>)) {
+    if (!TERRAIN_TID_RE.test(tid)) continue;
+    out[tid] = normalizeNeighborList(neighbors).filter((id) => id !== tid);
+  }
+  return out;
+}
+
+/** A present graph key is kept even when every list is empty. */
+function normalizeGraph(raw: unknown): MapGraph {
+  const rec = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  return {
+    adjacent: normalizeGraphField(rec.adjacent),
+    aerial_adjacent: normalizeGraphField(rec.aerial_adjacent),
+    ford_adjacent: normalizeGraphField(rec.ford_adjacent),
+  };
+}
+
+function attachGraph(result: MapOverridesData, rec: Record<string, unknown>): MapOverridesData {
+  if (!Object.prototype.hasOwnProperty.call(rec, 'graph')) return result;
+  result.graph = normalizeGraph(rec.graph);
+  return result;
+}
+
 /** Lenient read of a server payload into the canonical shape (drops malformed entries). */
 export function normalizeMapOverrides(raw: unknown): MapOverridesData {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return emptyMapOverrides();
@@ -266,7 +310,7 @@ export function normalizeMapOverrides(raw: unknown): MapOverridesData {
   if (!source || typeof source !== 'object' || Array.isArray(source)) {
     const landscapeOnly = normalizeLandscapeSection(rec.landscape);
     const base: MapOverridesData = landscapeOnly ? { territories: {}, landscape: landscapeOnly } : emptyMapOverrides();
-    return attachTerrain(base, rec);
+    return attachGraph(attachTerrain(base, rec), rec);
   }
   const out: Record<string, MapOverrideTerritoryEntry> = {};
   for (const [tid, entryRaw] of Object.entries(source as Record<string, unknown>)) {
@@ -291,7 +335,7 @@ export function normalizeMapOverrides(raw: unknown): MapOverridesData {
   const result: MapOverridesData = { territories: out };
   const landscape = normalizeLandscapeSection(rec.landscape);
   if (landscape) result.landscape = landscape;
-  return attachTerrain(result, rec);
+  return attachGraph(attachTerrain(result, rec), rec);
 }
 
 // Event types for logging (backend-enriched events include payload with turn_number, phase, faction, message)
