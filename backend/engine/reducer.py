@@ -3041,6 +3041,10 @@ def _handle_initiate_combat(
             attackers_remaining=len(attacker_units),
             defenders_remaining=len(defender_units),
             is_stealth_prefire=True,
+            attacker_dice=_combat_dice_log_jsonable(attacker_dice_grouped_stealth)
+            if attacker_dice_grouped_stealth else None,
+            attacker_units_at_start=attacker_units_at_start_stealth,
+            defender_units_at_start=defender_units_at_start_stealth,
         )
         events.append(combat_round_resolved(
             territory_id, 0,
@@ -3319,6 +3323,8 @@ def _handle_initiate_combat(
             attacker_dice=_ad_sw if isinstance(_ad_sw, dict) else None,
             defender_dice=_dd_sw if isinstance(_dd_sw, dict) else None,
             attacker_dice_siegework_split=_sp_sw if isinstance(_sp_sw, dict) else None,
+            attacker_units_at_start=attacker_units_at_start_sw,
+            defender_units_at_start=defender_units_at_start_sw,
         )
         combat_log_prefix = [siege_log_entry]
 
@@ -3407,18 +3413,6 @@ def _handle_initiate_combat(
             defender_archer_units, prefire_defender_rolls, unit_defs, is_attacker=False,
             stat_modifiers=archer_stat_modifiers,
         )
-        prefire_log_entry = CombatRoundResult(
-            round_number=0,
-            attacker_rolls=[],
-            defender_rolls=prefire_defender_rolls,
-            attacker_hits=0,
-            defender_hits=round_result.defender_hits,
-            attacker_casualties=round_result.attacker_casualties,
-            defender_casualties=[],
-            attackers_remaining=len(round_result.surviving_attacker_ids),
-            defenders_remaining=len(defender_units),  # no defender casualties in prefire
-            is_archer_prefire=True,
-        )
         spec_archer_prefire = compute_battle_specials_and_modifiers(
             attacker_units,
             defender_units,
@@ -3460,6 +3454,22 @@ def _handle_initiate_combat(
             )
             for u in defender_units
         ]
+        prefire_log_entry = CombatRoundResult(
+            round_number=0,
+            attacker_rolls=[],
+            defender_rolls=prefire_defender_rolls,
+            attacker_hits=0,
+            defender_hits=round_result.defender_hits,
+            attacker_casualties=round_result.attacker_casualties,
+            defender_casualties=[],
+            attackers_remaining=len(round_result.surviving_attacker_ids),
+            defenders_remaining=len(defender_units),  # no defender casualties in prefire
+            is_archer_prefire=True,
+            defender_dice=_combat_dice_log_jsonable(defender_dice_grouped)
+            if defender_dice_grouped else None,
+            attacker_units_at_start=attacker_units_at_start_prefire,
+            defender_units_at_start=defender_units_at_start_prefire,
+        )
         events.append(combat_round_resolved(
             territory_id, 0,
             {}, defender_dice_grouped,
@@ -3656,6 +3666,8 @@ def _handle_initiate_combat(
         defenders_remaining=len(round_result.surviving_defender_ids),
         attacker_dice=_ad1 if isinstance(_ad1, dict) else None,
         defender_dice=_dd1 if isinstance(_dd1, dict) else None,
+        attacker_units_at_start=attacker_units_at_start_init,
+        defender_units_at_start=defender_units_at_start_init,
     )
 
     events.append(combat_round_resolved(
@@ -4134,6 +4146,8 @@ def _handle_continue_combat(
             attacker_dice=_ad_sc if isinstance(_ad_sc, dict) else None,
             defender_dice=_dd_sc if isinstance(_dd_sc, dict) else None,
             attacker_dice_siegework_split=_sp_sc if isinstance(_sp_sc, dict) else None,
+            attacker_units_at_start=attacker_units_at_start_siege_evt,
+            defender_units_at_start=defender_units_at_start_siege_evt,
         )
         combat.combat_log.append(siege_log_entry)
         combat.cumulative_hits_received_by_attacker += round_result.defender_hits
@@ -4204,18 +4218,6 @@ def _handle_continue_combat(
             defender_archer_units_continue, prefire_defender_rolls_c, unit_defs, is_attacker=False,
             stat_modifiers=archer_stat_modifiers_c,
         )
-        prefire_log_entry_ar = CombatRoundResult(
-            round_number=0,
-            attacker_rolls=[],
-            defender_rolls=prefire_defender_rolls_c,
-            attacker_hits=0,
-            defender_hits=round_result_ar.defender_hits,
-            attacker_casualties=round_result_ar.attacker_casualties,
-            defender_casualties=[],
-            attackers_remaining=len(round_result_ar.surviving_attacker_ids),
-            defenders_remaining=len(defender_units),
-            is_archer_prefire=True,
-        )
         spec_archer_c = compute_battle_specials_and_modifiers(
             attacker_units,
             defender_units,
@@ -4253,6 +4255,22 @@ def _handle_continue_combat(
             )
             for u in defender_units
         ]
+        prefire_log_entry_ar = CombatRoundResult(
+            round_number=0,
+            attacker_rolls=[],
+            defender_rolls=prefire_defender_rolls_c,
+            attacker_hits=0,
+            defender_hits=round_result_ar.defender_hits,
+            attacker_casualties=round_result_ar.attacker_casualties,
+            defender_casualties=[],
+            attackers_remaining=len(round_result_ar.surviving_attacker_ids),
+            defenders_remaining=len(defender_units),
+            is_archer_prefire=True,
+            defender_dice=_combat_dice_log_jsonable(defender_dice_grouped_ar)
+            if defender_dice_grouped_ar else None,
+            attacker_units_at_start=attacker_units_at_start_ar,
+            defender_units_at_start=defender_units_at_start_ar,
+        )
         events.append(combat_round_resolved(
             combat.territory_id, 0,
             {}, defender_dice_grouped_ar,
@@ -4356,6 +4374,8 @@ def _handle_continue_combat(
         defenders_remaining=len(round_result.surviving_defender_ids),
         attacker_dice=_adn if isinstance(_adn, dict) else None,
         defender_dice=_ddn if isinstance(_ddn, dict) else None,
+        attacker_units_at_start=attacker_units_at_start,
+        defender_units_at_start=defender_units_at_start,
     )
 
     # Emit round resolved event with full payload for UI (dice, hits, casualties, units at start)

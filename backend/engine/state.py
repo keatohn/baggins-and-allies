@@ -409,6 +409,10 @@ class CombatRoundResult:
     attacker_dice: dict[str, Any] | None = None
     defender_dice: dict[str, Any] | None = None
     attacker_dice_siegework_split: dict[str, Any] | None = None
+    # Optional: same shape as combat_round_resolved *_units_at_start, so spectators shelf units
+    # with the exact effective stats this round's dice used (live state drifts after the round).
+    attacker_units_at_start: list[dict[str, Any]] | None = None
+    defender_units_at_start: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -434,6 +438,10 @@ class CombatRoundResult:
             out["defender_dice"] = self.defender_dice
         if self.attacker_dice_siegework_split:
             out["attacker_dice_siegework_split"] = self.attacker_dice_siegework_split
+        if self.attacker_units_at_start:
+            out["attacker_units_at_start"] = self.attacker_units_at_start
+        if self.defender_units_at_start:
+            out["defender_units_at_start"] = self.defender_units_at_start
         return out
 
     @classmethod
@@ -451,6 +459,8 @@ class CombatRoundResult:
             return bool(v) if v is not None else d
         def _opt_dice(v: Any) -> dict[str, Any] | None:
             return v if isinstance(v, dict) and v else None
+        def _opt_units(v: Any) -> list[dict[str, Any]] | None:
+            return v if isinstance(v, list) and v and all(isinstance(x, dict) for x in v) else None
         return cls(
             round_number=_int(data.get("round_number"), 0),
             attacker_rolls=_list(data.get("attacker_rolls"), []),
@@ -467,6 +477,8 @@ class CombatRoundResult:
             attacker_dice=_opt_dice(data.get("attacker_dice")),
             defender_dice=_opt_dice(data.get("defender_dice")),
             attacker_dice_siegework_split=_opt_dice(data.get("attacker_dice_siegework_split")),
+            attacker_units_at_start=_opt_units(data.get("attacker_units_at_start")),
+            defender_units_at_start=_opt_units(data.get("defender_units_at_start")),
         )
 
 
