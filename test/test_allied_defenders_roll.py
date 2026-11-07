@@ -142,7 +142,7 @@ def test_contested_territories_excludes_attacker_allied_garrison():
 
 @pytest.mark.parametrize("owner", [None, "gondor"])
 def test_allied_bystander_does_not_block_undefended_capture(owner):
-    from backend.engine.actions import move_units
+    from backend.engine.actions import move_units, end_phase
 
     state, ud, td, fd = _load()
     origin = next(tid for tid in td[TID].adjacent if td[tid].terrain_type not in ("sea", "river"))
@@ -154,6 +154,7 @@ def test_allied_bystander_does_not_block_undefended_capture(owner):
     state.current_faction = "mordor"
     state.phase = "combat_move"
     state, _ = apply_action(state, move_units("mordor", origin, TID, [attacker.instance_id]), ud, td, fd)
+    state, _ = apply_action(state, end_phase("mordor"), ud, td, fd)
     assert state.pending_captures[TID] == "mordor"
     assert ally.instance_id in [u.instance_id for u in state.territories[TID].units]
     assert get_contested_territories(state, "mordor", fd, ud, td) == []

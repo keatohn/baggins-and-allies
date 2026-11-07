@@ -3661,7 +3661,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     } catch (err) {
       addLogEntry(`Failed to cancel move: ${err instanceof Error ? err.message : 'Unknown error'}`, 'error');
     }
-  }, [addLogEntry, addBackendEvents]);
+  }, [GAME_ID, addLogEntry, addBackendEvents]);
 
   const handleCancelMobilization = useCallback(async (mobilizationIndex: number) => {
     try {
@@ -3674,7 +3674,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     } catch (err) {
       addLogEntry(`Failed to cancel mobilization: ${err instanceof Error ? err.message : 'Unknown error'}`, 'error');
     }
-  }, [addLogEntry, addBackendEvents]);
+  }, [GAME_ID, addLogEntry, addBackendEvents]);
 
   // Clicking a battle (red button) only opens the combat modal; no backend call until "Start" is pressed
   const handleOpenCombat = useCallback((battle: DeclaredBattle) => {

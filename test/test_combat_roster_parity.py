@@ -87,6 +87,9 @@ def test_allied_cooccupation_is_not_contested_and_cannot_start_battle(
     territory.units = [_u("attacker_x", attacking_unit, ud), _u("ally_x", allied_unit, ud)]
     assert get_contested_territories(state, attacker, fd, ud, td) == []
     assert validate_action(state, end_phase(attacker), ud, td, fd, cd, ports).valid
+    ended, _ = apply_action(state, end_phase(attacker), ud, td, fd, cd, ports)
+    assert ended.phase == "non_combat_move"
+    assert ended.territories["minas_tirith"].owner == ally
     action = initiate_combat(attacker, "minas_tirith", {})
     validation = validate_action(state, action, ud, td, fd, cd, ports)
     assert not validation.valid
