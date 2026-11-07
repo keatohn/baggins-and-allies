@@ -370,8 +370,6 @@ interface CombatDisplayProps {
   retreatOptions: RetreatOption[];
   /** False after archer prefire until round 1 is run; retreat button is disabled. */
   canRetreat?: boolean;
-  /** True when active combat is a sea raid (attackers staged from sea); retreat is never allowed. */
-  seaRaidCombat?: boolean;
   /** True when the next round to run is the dedicated siegeworks round (only siegework units roll). */
   siegeworksPending?: boolean;
   /** True when the next round is defender archer prefire (after siegeworks if both apply). */
@@ -1529,7 +1527,6 @@ function CombatDisplay({
   defender,
   retreatOptions,
   canRetreat = true,
-  seaRaidCombat = false,
   siegeworksPending = false,
   archerPrefirePending = false,
   siegeworksAttackerInstanceIds,
@@ -2596,9 +2593,7 @@ function CombatDisplay({
                   disabled={!canRetreat}
                   title={
                     !canRetreat
-                      ? seaRaidCombat
-                        ? 'Retreat is not available during a sea raid'
-                        : 'Retreat unavailable (click Continue first after archer prefire, or no adjacent allied/neutral territory)'
+                      ? 'Retreat unavailable (click Continue first after archer prefire, or no adjacent allied/neutral territory)'
                       : undefined
                   }
                 >

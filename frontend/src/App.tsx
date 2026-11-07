@@ -4317,13 +4317,11 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       attackers_have_rolled?: boolean;
       casualty_order_attacker?: string;
       must_conquer?: boolean;
-      sea_zone_id?: string | null;
     } | undefined;
-    const seaRaidCombat = Boolean(acForRetreat?.sea_zone_id);
+    // Sea-raid retreat is allowed (backend: adjacent allied land only; empty options disable the button).
     const canRetreat =
       (acForRetreat ? acForRetreat.attackers_have_rolled !== false : true) &&
-      retreatOptions.length > 0 &&
-      !seaRaidCombat;
+      retreatOptions.length > 0;
 
     const territoryDefenderOrder = (backendState?.territory_defender_casualty_order ?? {})[effectiveCombat.territory] ?? 'best_unit';
 
@@ -4445,7 +4443,6 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       initialDefenderUnits,
       retreatOptions,
       canRetreat,
-      seaRaidCombat,
       siegeworksPending,
       archerPrefirePending,
       siegeworksAttackerInstanceIds,
@@ -5038,7 +5035,6 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           }}
           retreatOptions={combatDisplayProps.retreatOptions}
           canRetreat={combatDisplayProps.canRetreat}
-          seaRaidCombat={combatDisplayProps.seaRaidCombat}
           siegeworksPending={combatDisplayProps.siegeworksPending}
           archerPrefirePending={combatDisplayProps.archerPrefirePending}
           siegeworksAttackerInstanceIds={combatDisplayProps.siegeworksAttackerInstanceIds}
