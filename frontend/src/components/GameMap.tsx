@@ -2713,8 +2713,8 @@ function GameMap({
         const parts = s.unit_id.split('_');
         const factionFromId = parts.find((p) => factionData[p]);
         const defFaction = unitDefs[s.unit_id]?.faction;
-        const uf = factionFromId ?? defFaction ?? parts[0];
-        return uf === currentFaction;
+        const uf = defFaction ?? factionFromId ?? parts[0];
+        return unitCommandedByCurrent(uf, currentFaction, factionData);
       });
       const sortedFriendly = [...friendlyStacks].sort((a, b) =>
         compareUnitStacksByMapOrder(a, b, unitDefs, factionData),
@@ -2805,6 +2805,13 @@ function GameMap({
             bulkTargets = next;
           }
         }
+      }
+      // The confirmation builds eligible stacks for this destination. A slower ground
+      // stack must not hide destinations that an aerial (or faster) stack can reach.
+      // Keep ford-escort destinations computed above, then add every individual target.
+      if (bulkTargets === null) bulkTargets = new Set<string>();
+      for (const targets of targetsByUnitId.values()) {
+        for (const target of targets) bulkTargets.add(target);
       }
       const stacks: BulkDragOverlayStack[] = movableStacks.map((s) => {
         const parts = s.unit_id.split('_');
@@ -5888,8 +5895,8 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                           const parts = unit_id.split('_');
                           const factionFromId = parts.find((p) => factionData[p]);
                           const defFaction = unitDefs[unit_id]?.faction;
-                          const unitFaction = factionFromId ?? defFaction ?? parts[0];
-                          if (unitFaction !== gameState.current_faction) return false;
+                          const unitFaction = defFaction ?? factionFromId ?? parts[0];
+                          if (!unitCommandedByCurrent(unitFaction, gameState.current_faction, factionData)) return false;
                           return getValidTargets(territoryId, unit_id).size > 0;
                         });
                         const canShowAllDrag =

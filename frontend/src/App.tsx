@@ -2559,7 +2559,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       }
     }
     return out;
-  }, [backendState?.pending_moves, gameState.phase, currentTerritoryData, territoryUnitsFull, waterCraftUnitIds]);
+  }, [pendingMoveConfirm, bulkMoveConfirm, pendingOffloadSeaChoice, backendState?.pending_moves, gameState.phase, currentTerritoryData, territoryUnitsFull, waterCraftUnitIds]);
 
   // Pending load: instance IDs we're loading (when load into 2+ boats, for tray allocation)
   const pendingLoadPassengerInstanceIds = useMemo(() => {
@@ -3010,6 +3010,10 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   }, [GAME_ID, purchaseDraftUnits, purchaseDraftCamps, purchaseDraftRepairs, addBackendEvents]);
 
   const handleEndPhase = useCallback(async () => {
+    if (pendingMoveConfirm || bulkMoveConfirm || pendingOffloadSeaChoice) {
+      addLogEntry('Confirm or cancel the pending move before ending this phase.', 'error');
+      return;
+    }
     const pendingCombatMovesCount =
       (backendState?.pending_moves ?? []).filter((m) => m.phase === 'combat_move').length;
     const pendingNonCombatMovesCount =
@@ -3170,6 +3174,11 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
 
   const handleConfirmMove = useCallback(async (overrideToTerritory?: string) => {
     if (!pendingMoveConfirm || !backendState) return;
+    if (gameState.phase !== 'combat_move' && gameState.phase !== 'non_combat_move') {
+      setPendingMoveConfirm(null);
+      addLogEntry('This move confirmation has expired. Plan moves during a movement phase.', 'error');
+      return;
+    }
 
     const { fromTerritory, count, instanceIds, maxCount: pendingMaxCount } = pendingMoveConfirm;
     const toId = (v: unknown): string =>
@@ -3448,7 +3457,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     } catch (err) {
       addLogEntry(`Move failed: ${err instanceof Error ? err.message : 'Unknown error'}`, 'error');
     }
-  }, [pendingMoveConfirm, backendState, gameState.phase, currentTerritoryData, availableActions, definitions, addLogEntry, addBackendEvents]);
+  }, [GAME_ID, pendingMoveConfirm, backendState, gameState.phase, currentTerritoryData, availableActions, definitions, addLogEntry, addBackendEvents, setPendingMoveConfirm]);
 
   const handleBulkMoveDrop = useCallback(
     (fromTerritory: string, toTerritory: string) => {
@@ -4529,6 +4538,17 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     });
     return [...good.sort(), ...evil.sort()];
   }, [backendState, definitions?.factions]);
+
+  const moveContext = `${GAME_ID}:${gameState.turn_number}:${gameState.current_faction}:${gameState.phase}`;
+  const previousMoveContext = useRef(moveContext);
+  useEffect(() => {
+    if (previousMoveContext.current === moveContext) return;
+    previousMoveContext.current = moveContext;
+    setPendingMoveConfirm(null);
+    setBulkMoveConfirm(null);
+    setPendingOffloadSeaChoice(null);
+    setPendingEndPhaseConfirm(null);
+  }, [moveContext, setPendingMoveConfirm]);
 
   const gameOverWinner = backendState?.winner ?? null;
   const gameOverDisplay = useMemo(() => {

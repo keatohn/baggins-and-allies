@@ -5379,6 +5379,9 @@ def _handle_end_phase(
                 unit_def = unit_defs.get(unit.unit_id)
                 if not is_land_unit(unit_def) or _is_water_craft(unit_def):
                     continue
+                # Marching Orders extends mobility; it must not mobilize stationary pieces.
+                if unit.base_movement <= 0 or unit_def.movement <= 0:
+                    continue
                 unit_faction = get_unit_faction(unit, unit_defs)
                 if (
                     unit_faction is None

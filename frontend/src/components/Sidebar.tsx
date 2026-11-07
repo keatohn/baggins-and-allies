@@ -771,6 +771,13 @@ function Sidebar({
   const capitalOwner = currentFactionCapital ? territoryData[currentFactionCapital]?.owner : undefined;
   const capitalCaptured = !!currentFactionCapital && capitalOwner !== gameState.current_faction;
 
+  const moveConfirmationRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (canAct && pendingMoveConfirm && (gameState.phase === 'combat_move' || gameState.phase === 'non_combat_move')) {
+      moveConfirmationRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [canAct, pendingMoveConfirm, gameState.phase]);
+
   const currentFactionName = factionData[gameState.current_faction]?.name ?? '';
   const power = effectivePower ?? gameState.faction_resources[gameState.current_faction]?.power ?? 0;
 
@@ -1007,8 +1014,8 @@ function Sidebar({
             )}
 
             {/* Pending move confirmation with +/- controls */}
-            {pendingMoveConfirm && !pendingOffloadSeaChoice && !bulkMoveConfirm && (
-              <div className="move-confirm">
+            {pendingMoveConfirm && (gameState.phase === 'combat_move' || gameState.phase === 'non_combat_move') && !pendingOffloadSeaChoice && !bulkMoveConfirm && (
+              <div className="move-confirm" ref={moveConfirmationRef} aria-live="polite">
                 {pendingMoveConfirm.chargePathOptions && pendingMoveConfirm.chargePathOptions.length > 1 ? (
                   <>
                     <p className="move-details">
