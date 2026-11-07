@@ -1,6 +1,8 @@
 """Tests for the combat simulation engine."""
+from dataclasses import replace
+
 import pytest
-from backend.engine.definitions import load_static_definitions
+from backend.engine.definitions import UnitDefinition, load_static_definitions
 from backend.engine.combat import resolve_archer_prefire
 from backend.engine.combat_sim import (
     run_one_battle,
@@ -8,8 +10,9 @@ from backend.engine.combat_sim import (
     SimOptions,
     BattleOutcome,
     SimResult,
-    _stacks_to_units,
+    DEFAULT_MAX_ROUNDS,
 )
+from backend.engine.combat_specials import stacks_to_synthetic_units
 from backend.engine.utils import archer_prefire_eligible
 
 
@@ -121,8 +124,7 @@ def test_resolve_archer_prefire_returns_hits(defs):
         pytest.skip("wotr_exp_1.0 has no gondor_archer")
     att_stacks = [{"unit_id": "gondor_soldier", "count": 3}]
     def_stacks = [{"unit_id": "gondor_archer", "count": 2}]
-    attacker_units = _stacks_to_units(att_stacks, "att", unit_defs)
-    defender_units = _stacks_to_units(def_stacks, "def", unit_defs)
+    attacker_units, defender_units = stacks_to_synthetic_units(att_stacks, def_stacks, unit_defs)
     defender_archer_units = [u for u in defender_units if archer_prefire_eligible(unit_defs.get(u.unit_id))]
     assert len(defender_archer_units) > 0, "defender should have archer units"
     defender_rolls = [1, 1]
@@ -316,3 +318,88 @@ def test_siegework_hits_mean_only_for_sides_that_roll(defs):
     )
     assert res.attacker_siegework_hits_mean is not None
     assert res.defender_siegework_hits_mean is None
+
+
+def test_stronghold_default_hp_lets_ram_roll_in_siegeworks(defs):
+    """Without an explicit stronghold_initial_hp the sim soaks against the territory's
+    wall HP (live parity), so a non-siegework ram rolls in the dedicated round;
+    explicit 0 still means walls down (no ram roll)."""
+    unit_defs, territory_defs = defs
+    if "war_mumakil" not in unit_defs:
+        pytest.skip("need war_mumakil")
+    att = [{"unit_id": "war_mumakil", "count": 1}]
+    def_stacks = [{"unit_id": "morannon_orc", "count": 2}]
+    out = run_one_battle(
+        att, def_stacks, "minas_tirith", unit_defs, territory_defs,
+        options=SimOptions(), seed=1,
+    )
+    assert out.siegework_round_applicable is True
+    assert out.siegework_attacker_dice == 2  # ram rolls only while walls have HP
+
+    out_walls_down = run_one_battle(
+        att, def_stacks, "minas_tirith", unit_defs, territory_defs,
+        options=SimOptions(stronghold_initial_hp=0), seed=1,
+    )
+    assert out_walls_down.siegework_round_applicable is False
+    assert out_walls_down.siegework_attacker_dice == 0
+
+
+def test_stealth_cancels_siegeworks_round_in_sim(defs):
+    """All-stealth attackers open with stealth prefire: no dedicated siegeworks round
+    (same rule as live combat); the same matchup without stealth runs siegeworks."""
+    unit_defs, territory_defs = defs
+    if "war_mumakil" not in unit_defs:
+        pytest.skip("need war_mumakil")
+    stealth_ud = dict(unit_defs)
+    mumakil = stealth_ud["war_mumakil"]
+    stealth_ud["war_mumakil"] = replace(
+        mumakil, specials=[*(mumakil.specials or []), "stealth"],
+    )
+    att = [{"unit_id": "war_mumakil", "count": 1}]
+    def_stacks = [{"unit_id": "morannon_orc", "count": 2}]
+
+    out_stealth = run_one_battle(
+        att, def_stacks, "minas_tirith", stealth_ud, territory_defs,
+        options=SimOptions(), seed=2,
+    )
+    assert out_stealth.attacker_prefire_applicable is True
+    assert out_stealth.siegework_round_applicable is False, (
+        "stealth prefire must cancel the dedicated siegeworks round"
+    )
+
+    out_siege = run_one_battle(
+        att, def_stacks, "minas_tirith", unit_defs, territory_defs,
+        options=SimOptions(), seed=2,
+    )
+    assert out_siege.siegework_round_applicable is True
+    assert out_siege.siegework_attacker_dice == 2
+
+
+def test_max_rounds_cap_stops_degenerate_battles(defs):
+    """A 0-attack vs 0-attack battle can never resolve; the round cap ends it as a
+    defender hold instead of looping forever (None uses DEFAULT_MAX_ROUNDS)."""
+    unit_defs, territory_defs = defs
+    ud = dict(unit_defs)
+    ud["stub_unit"] = UnitDefinition(
+        id="stub_unit", display_name="Stub Unit", faction="neutral",
+        archetype="infantry", tags=["land"], attack=0, defense=0,
+        movement=0, health=5, cost={"power": 1}, dice=1, specials=[],
+    )
+    att = [{"unit_id": "stub_unit", "count": 1}]
+    def_stacks = [{"unit_id": "stub_unit", "count": 1}]
+
+    out = run_one_battle(
+        att, def_stacks, "pelennor", ud, territory_defs,
+        options=SimOptions(max_rounds=5), seed=0,
+    )
+    assert out.winner == "defender"
+    assert out.rounds == 5
+    assert out.attacker_survived and out.defender_survived
+    assert not out.retreat and not out.conquered
+
+    out_default = run_one_battle(
+        att, def_stacks, "pelennor", ud, territory_defs,
+        options=SimOptions(max_rounds=None), seed=0,
+    )
+    assert out_default.winner == "defender"
+    assert out_default.rounds == DEFAULT_MAX_ROUNDS

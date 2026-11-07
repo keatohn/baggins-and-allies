@@ -12,22 +12,23 @@ A **simulation engine** that runs many combat trials with the **same rules** as 
 
 1. **Setup**: Attacker units, defender units, territory (for terrain, stronghold, defender casualty order), optional sea_zone_id (sea raid).
 2. **Prefires** (order matters):
-   - **Stealth prefire**: If *all* attackers have stealth → attackers roll at attack−1, hits apply to defenders only. Can end combat before round 1.
-   - **Archer prefire**: If *any* defender is archer → defender archers roll (defense−1, or +0 if stronghold/fortress), hits apply to attackers only. Can end combat before round 1.
+   - **Stealth prefire**: If *all* attackers have stealth → attackers roll at attack−1, hits apply to defenders only. Can end combat before round 1. Cancels the dedicated siegeworks round and the defender archer prefire.
+   - **Dedicated siegeworks round**: siege units vs stronghold walls (skipped when stealth prefire ran).
+   - **Archer prefire**: If *any* defender is archer → defender archers roll (defense−1, or +0 if stronghold/fortress), hits apply to attackers only. Can end combat before round 1 (skipped when stealth prefire ran).
 3. **Round loop**: Each round:
    - Generate dice (per unit, from `generate_combat_rolls_for_units`).
    - Round 1 only: **Terror** can force defender re-rolls (up to cap); sim needs to model this with random re-rolls per trial.
    - **Bombikazi**: Paired bombikazi+bomb get effective dice and self-destruct after round; `get_attacker_effective_dice_and_bombikazi_self_destruct` already handles this.
-   - **Terrain / anti-cavalry / captain**: Modifiers from `compute_terrain_stat_modifiers`, `compute_anti_cavalry_stat_modifiers`, and captain logic (reducer).
+   - **Terrain / anti-cavalry / captain / sea raider / specials**: Effective stats and applied specials come from `combat_specials.compute_battle_specials_and_modifiers` (same helper the reducer uses each round).
    - `resolve_combat_round(...)` with casualty_order_attacker, casualty_order_defender, must_conquer, is_naval_combat_*.
    - Remove casualties; if one side eliminated → end.
 4. **Outcome**: Attacker wins = defenders eliminated and at least one attacker alive; **conquer** = attacker wins and at least one surviving attacker is a land unit and territory is ownable.
 
 Existing entry points the sim will **reuse** (no duplication of rules):
 
-- `combat.resolve_combat_round`, `resolve_archer_prefire`, `resolve_stealth_prefire`
+- `combat.resolve_combat_round`, `resolve_archer_prefire`, `resolve_stealth_prefire`, `resolve_siegeworks_round`
+- `combat_specials.compute_battle_specials_and_modifiers`, `stacks_to_synthetic_units`, `pending_combat_round`
 - `utils.generate_combat_rolls_for_units`
-- `combat.compute_terrain_stat_modifiers`, `compute_anti_cavalry_stat_modifiers`
 - `combat.get_attacker_effective_dice_and_bombikazi_self_destruct`
 - Definitions: `unit_defs`, `territory_defs` from setup (same as game)
 
