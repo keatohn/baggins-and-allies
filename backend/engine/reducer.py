@@ -185,6 +185,7 @@ from backend.engine.combat_specials import (
     BattleSpecialsResult,
     compute_battle_specials_and_modifiers,
     empty_round_special_payload,
+    pending_combat_round,
     specials_flags_for_round_payload,
 )
 from backend.engine.events import (
@@ -3968,19 +3969,17 @@ def _handle_continue_combat(
 
     # Dedicated siegeworks round: siegework (excl. ladder) + ram attackers vs stronghold; between prefire and round 1
     defender_territory_is_stronghold = bool(territory_def and getattr(territory_def, "is_stronghold", False))
-    siegework_att_dice, siegework_def_dice = get_siegework_dice_counts(
-        attacker_units, defender_units, unit_defs, defender_territory_is_stronghold,
+    pending = pending_combat_round(
+        combat.combat_log,
+        combat.round_number,
+        attacker_units,
+        defender_units,
+        unit_defs,
+        defender_territory_is_stronghold=defender_territory_is_stronghold,
         defender_stronghold_hp=defender_stronghold_hp_cur,
         fuse_bomb=fuse_bomb,
     )
-    siegeworks_pending = (
-        combat.round_number == 0
-        and not any(getattr(r, "is_siegeworks_round", False) for r in combat.combat_log)
-        and (
-            siegework_att_dice > 0
-            or siegework_def_dice > 0
-        )
-    )
+    siegeworks_pending = pending.siegeworks
     if siegeworks_pending:
         spec_siege_ram = compute_battle_specials_and_modifiers(
             attacker_units,
@@ -4185,12 +4184,7 @@ def _handle_continue_combat(
         u for u in defender_units
         if archer_prefire_eligible(unit_defs.get(u.unit_id))
     ]
-    archer_prefire_pending = (
-        combat.round_number == 0
-        and not any(getattr(r, "is_archer_prefire", False) for r in combat.combat_log)
-        and not any(getattr(r, "is_stealth_prefire", False) for r in combat.combat_log)
-        and bool(defender_archer_units_continue)
-    )
+    archer_prefire_pending = pending.archer_prefire
     if archer_prefire_pending:
         archer_prefire_penalty_c = archer_prefire_penalty_delta(_prefire_stat_delta(state), territory_def)
         prefire_defender_rolls_c = dice_rolls.get("defender", [])

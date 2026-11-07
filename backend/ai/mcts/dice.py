@@ -20,6 +20,7 @@ from backend.engine.combat import (
     get_siegework_defender_rolling_units,
     get_siegework_dice_counts,
 )
+from backend.engine.combat_specials import pending_combat_round
 from backend.engine.movement import _is_water_zone, water_combat_unit_side
 from backend.engine.queries import participates_in_sea_hex_naval_combat
 from backend.engine.utils import generate_dice_rolls_for_units, has_unit_special
@@ -275,21 +276,18 @@ def sample_dice_for_continue(
     fuse = _fuse_flag(combat)
     round_number = getattr(combat, "round_number", 0) or 0
 
-    sw_a, sw_d = get_siegework_dice_counts(
-        attackers, defenders, ud, def_sh, defender_stronghold_hp=def_sh_hp, fuse_bomb=fuse
+    pending = pending_combat_round(
+        combat_log,
+        round_number,
+        attackers,
+        defenders,
+        ud,
+        defender_territory_is_stronghold=def_sh,
+        defender_stronghold_hp=def_sh_hp,
+        fuse_bomb=fuse,
     )
-    siegeworks_pending = (
-        round_number == 0
-        and not any(getattr(r, "is_siegeworks_round", False) for r in combat_log)
-        and (sw_a > 0 or sw_d > 0)
-    )
-    archer_prefire_pending = (
-        round_number == 0
-        and not siegeworks_pending
-        and not any(getattr(r, "is_archer_prefire", False) for r in combat_log)
-        and not any(getattr(r, "is_stealth_prefire", False) for r in combat_log)
-        and any(has_unit_special(ud.get(u.unit_id), "archer") for u in defenders if ud.get(u.unit_id))
-    )
+    siegeworks_pending = pending.siegeworks
+    archer_prefire_pending = pending.archer_prefire
 
     if siegeworks_pending:
         att_rolling = get_siegework_attacker_rolling_units(

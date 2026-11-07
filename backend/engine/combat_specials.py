@@ -193,24 +193,31 @@ def empty_round_special_payload() -> dict[str, bool]:
 def stacks_to_synthetic_units(
     attacker_stacks: list[dict[str, Any]],  # [{"unit_id": str, "count": int}, ...]
     defender_stacks: list[dict[str, Any]],
+    unit_defs: dict[str, UnitDefinition],
 ) -> tuple[list[Unit], list[Unit]]:
     """
     Convert stack payloads to lists of Unit with synthetic instance_ids.
     Used by combat sim so we can run the same specials engine as real combat.
+
+    Health/movement mirror unit_defs so multi-HP units (trolls) keep their real HP;
+    unknown unit_ids are kept with the 1 HP / 0 movement fallback (never skipped).
     """
     attacker_units: list[Unit] = []
     idx = 0
     for s in attacker_stacks:
         unit_id = (s.get("unit_id") or "").strip()
         count = max(0, int(s.get("count") or 0))
+        ud = unit_defs.get(unit_id)
+        base_health = int(getattr(ud, "health", 1) or 1) if ud else 1
+        base_movement = int(getattr(ud, "movement", 0) or 0) if ud else 0
         for _ in range(count):
             attacker_units.append(Unit(
                 instance_id=f"att_{idx}_{unit_id}",
                 unit_id=unit_id,
-                remaining_movement=0,
-                remaining_health=1,
-                base_movement=0,
-                base_health=1,
+                remaining_movement=base_movement,
+                remaining_health=base_health,
+                base_movement=base_movement,
+                base_health=base_health,
             ))
             idx += 1
     defender_units: list[Unit] = []
@@ -218,17 +225,96 @@ def stacks_to_synthetic_units(
     for s in defender_stacks:
         unit_id = (s.get("unit_id") or "").strip()
         count = max(0, int(s.get("count") or 0))
+        ud = unit_defs.get(unit_id)
+        base_health = int(getattr(ud, "health", 1) or 1) if ud else 1
+        base_movement = int(getattr(ud, "movement", 0) or 0) if ud else 0
         for _ in range(count):
             defender_units.append(Unit(
                 instance_id=f"def_{idx}_{unit_id}",
                 unit_id=unit_id,
-                remaining_movement=0,
-                remaining_health=1,
-                base_movement=0,
-                base_health=1,
+                remaining_movement=base_movement,
+                remaining_health=base_health,
+                base_movement=base_movement,
+                base_health=base_health,
             ))
             idx += 1
     return attacker_units, defender_units
+
+
+@dataclass(frozen=True)
+class PendingCombatRound:
+    """Which dedicated round (if any) runs next for an active combat."""
+    siegeworks: bool = False
+    archer_prefire: bool = False
+    stealth_prefire: bool = False
+    siegework_attacker_dice: int = 0
+    siegework_defender_dice: int = 0
+
+
+def _log_flag(entry: Any, name: str) -> bool:
+    """Read a round flag from a combat_log entry (CombatRoundResult object or dict)."""
+    if isinstance(entry, dict):
+        return bool(entry.get(name))
+    return bool(getattr(entry, name, False))
+
+
+def pending_combat_round(
+    combat_log: list,
+    round_number: int,
+    attacker_units: list[Unit],
+    defender_units: list[Unit],
+    unit_defs: dict[str, UnitDefinition],
+    *,
+    defender_territory_is_stronghold: bool = False,
+    defender_stronghold_hp: int | None = None,
+    fuse_bomb: bool = True,
+) -> PendingCombatRound:
+    """
+    Single source of truth for "which dedicated round is pending" — used by reducer
+    continue_combat, API payloads, AI dice sampling, and the ram/stealth UI badges.
+
+    Predicates mirror the per-site rules exactly (all at round 0):
+    - siegeworks: no siegework round logged yet and siegework dice apply (stealth prefire
+      runs at combat open and does not suppress the siegeworks round).
+    - archer prefire: no siegeworks round pending, no archer/stealth prefire logged,
+      and at least one defender has the archer special.
+    - stealth prefire: no stealth prefire logged and every attacker has stealth.
+
+    combat_log entries may be CombatRoundResult objects or dicts (API serialization).
+    """
+    sa, sd = get_siegework_dice_counts(
+        attacker_units,
+        defender_units,
+        unit_defs,
+        defender_territory_is_stronghold,
+        defender_stronghold_hp=defender_stronghold_hp,
+        fuse_bomb=fuse_bomb,
+    )
+    siegeworks_pending = (
+        round_number == 0
+        and not any(_log_flag(r, "is_siegeworks_round") for r in combat_log)
+        and (sa > 0 or sd > 0)
+    )
+    archer_prefire_pending = (
+        round_number == 0
+        and not siegeworks_pending
+        and not any(_log_flag(r, "is_archer_prefire") for r in combat_log)
+        and not any(_log_flag(r, "is_stealth_prefire") for r in combat_log)
+        and any(has_unit_special(unit_defs.get(u.unit_id), "archer") for u in defender_units)
+    )
+    stealth_prefire_pending = (
+        round_number == 0
+        and bool(attacker_units)
+        and not any(_log_flag(r, "is_stealth_prefire") for r in combat_log)
+        and all(has_unit_special(unit_defs.get(u.unit_id), "stealth") for u in attacker_units)
+    )
+    return PendingCombatRound(
+        siegeworks=siegeworks_pending,
+        archer_prefire=archer_prefire_pending,
+        stealth_prefire=stealth_prefire_pending,
+        siegework_attacker_dice=sa,
+        siegework_defender_dice=sd,
+    )
 
 
 def ram_special_applicable_for_active_combat(
@@ -245,24 +331,20 @@ def ram_special_applicable_for_active_combat(
 ) -> bool:
     """
     True when the next combat round to resolve is the dedicated siegeworks round (UI ram badge on lobby poll).
-    Mirrors reducer continue_combat siegeworks_pending (round_number==0, no siegework in log yet, siege applies).
     """
-    if round_number != 0:
-        return False
-    if any(getattr(r, "is_siegeworks_round", False) for r in combat_log):
-        return False
     if territory_is_sea:
         return False
     defender_territory_is_stronghold = bool(territory_def and getattr(territory_def, "is_stronghold", False))
-    sa, sd = get_siegework_dice_counts(
+    return pending_combat_round(
+        combat_log,
+        round_number,
         attacker_units,
         defender_units,
         unit_defs,
-        defender_territory_is_stronghold,
+        defender_territory_is_stronghold=defender_territory_is_stronghold,
         defender_stronghold_hp=defender_stronghold_hp,
         fuse_bomb=fuse_bomb,
-    )
-    return sa > 0 or sd > 0
+    ).siegeworks
 
 
 def stealth_prefire_applicable_for_active_combat(
@@ -273,13 +355,12 @@ def stealth_prefire_applicable_for_active_combat(
 ) -> bool:
     """
     True when the next combat round to resolve is attacker stealth prefire (UI stealth badge on poll).
-    Stealth prefire only runs at combat open when every attacker has stealth; once logged, never again.
     """
-    if not attacker_units:
-        return False
-    if any(getattr(r, "is_stealth_prefire", False) for r in combat_log):
-        return False
-    if round_number != 0:
-        return False
-    return all(has_unit_special(unit_defs.get(u.unit_id), "stealth") for u in attacker_units)
+    return pending_combat_round(
+        combat_log,
+        round_number,
+        attacker_units,
+        [],
+        unit_defs,
+    ).stealth_prefire
 
