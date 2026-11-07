@@ -61,10 +61,10 @@ type UnitRow = UnitSource & {
 };
 
 /** The unique most common value. A tie for that count is not an outright mode. */
-function outrightMode(values: number[]): number | null {
-  const counts = new Map<number, number>();
+function outrightMode<T extends number | string>(values: T[]): T | null {
+  const counts = new Map<T, number>();
   for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
-  let bestValue = 0;
+  let bestValue: T | null = null;
   let bestCount = 0;
   let tied = false;
   for (const [value, count] of counts) {
@@ -320,15 +320,16 @@ export function UnitsReportModal({ setups, specials, onClose, onSaved }: Props) 
       if (list) list.push(row);
       else byIcon.set(row.icon, [row]);
     }
-    const out = new Map<string, Record<StatKey, number | null>>();
+    const out = new Map<string, Record<StatKey, number | null> & { specials: string | null }>();
     for (const [icon, list] of byIcon) {
-      const record = {} as Record<StatKey, number | null>;
+      const record = {} as Record<StatKey, number | null> & { specials: string | null };
       for (const stat of STATS) {
         const values = list
           .filter((row) => stat.key !== 'cost' || row.purchasable)
           .map((row) => row[stat.key]);
         record[stat.key] = outrightMode(values);
       }
+      record.specials = outrightMode(list.map((row) => JSON.stringify([...row.specialKeys].sort())));
       out.set(icon, record);
     }
     return out;
@@ -734,7 +735,9 @@ export function UnitsReportModal({ setups, specials, onClose, onSaved }: Props) 
                     ) : null}
                     <td className="units-across__id">{row.unitId}</td>
                     {STATS.map((stat) => renderStatCell(row, stat))}
-                    <td className="stats-col-num stats-col-specials">{row.specials}</td>
+                    <td className={`stats-col-num stats-col-specials${modes.get(row.icon)?.specials == null || modes.get(row.icon)?.specials !== JSON.stringify([...row.specialKeys].sort()) ? ' units-across__off' : ''}`}>
+                      {row.specials || '—'}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -742,7 +745,7 @@ export function UnitsReportModal({ setups, specials, onClose, onSaved }: Props) 
           ) : null}
         </div>
         <p className="unit-stats-modal-key">
-          P = Power cost | A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points | SP = Specials. A red number is not that icon’s usual value. Click a stat to adjust it, then Save or Cancel.
+          P = Power cost | A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points | SP = Specials. A red cell differs from that icon’s mode value, or has no unique mode. Specials are compared as sets. Click a stat to adjust it, then Save or Cancel.
         </p>
       </div>
     </div>
