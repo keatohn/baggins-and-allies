@@ -77,6 +77,7 @@ from backend.engine.movement import (
     _is_water_craft,
     water_transport_relation,
     _sea_zone_has_hostile_enemy_boats,
+    water_combat_unit_side,
     are_sea_zones_directly_adjacent,
     empty_sea_zone_valid_for_combat_move_sail_then_load_raid,
     expand_sea_offload_instance_ids,
@@ -248,19 +249,15 @@ def _land_combat_unit_side(
     unit_defs: dict[str, UnitDefinition],
     faction_defs: dict[str, FactionDefinition],
 ) -> str | None:
-    """
-    Land / sea-raid-land combat roster: must stay identical between initiate_combat and continue_combat
-    (including non-passenger attackers on the land hex, e.g. aerial joining the same assault).
-    attacker = the attacking force (attacking faction + its subfactions);
-    defender = every other factioned unit on the hex — including garrisons from an allied
-    faction, which defend the territory (roll and take hits) per the game rule;
-    None = non-participant only when the unit has no faction (missing/broken unit def).
-    """
+    """Acting faction/subfactions attack; enemies defend; allies are bystanders."""
     uo = get_unit_faction(unit, unit_defs)
     if uo is None:
         return None
     if faction_acts_as(faction_defs, uo, attacker_faction):
         return "attacker"
+    owner = faction_defs.get(uo)
+    if attacker_alliance and owner and owner.alliance == attacker_alliance:
+        return None
     return "defender"
 
 
@@ -2110,7 +2107,7 @@ def _apply_pending_moves(
                 if not hasattr(state, "territory_sea_raid_faction") or state.territory_sea_raid_faction is None:
                     state.territory_sea_raid_faction = {}
                 state.territory_sea_raid_from[to_id] = from_id
-                state.territory_sea_raid_faction[to_id] = faction_id
+                state.territory_sea_raid_faction[to_id] = state.current_faction or faction_id
                 _merge_sea_raid_passenger_instance_ids(state, to_id, list(ids_to_move))
             elif phase == "combat_move" and not ids_to_move:
                 boat_ids_in_move = {
@@ -2352,7 +2349,9 @@ def _apply_pending_moves(
                 defenders = [
                     u for u in to_territory.units
                     if u.instance_id not in unit_instance_ids
-                    and not faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), acting)
+                    and _land_combat_unit_side(
+                        u, acting, getattr(faction_defs.get(acting), "alliance", None), unit_defs, faction_defs
+                    ) == "defender"
                 ]
                 if not defenders:
                     state.pending_captures[to_id] = capture_owner_for_units(
@@ -2370,7 +2369,9 @@ def _apply_pending_moves(
                 if moving_alliance != owner_alliance:
                     enemy_units = [
                         u for u in to_territory.units
-                        if not faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), acting)
+                        if _land_combat_unit_side(
+                            u, acting, moving_alliance, unit_defs, faction_defs
+                        ) == "defender"
                     ]
                     if not enemy_units:
                         state.pending_captures[to_id] = capture_owner_for_units(
@@ -2869,8 +2870,12 @@ def _handle_initiate_combat(
                 unit, unit_defs.get(unit.unit_id)
             ):
                 continue  # Sea combat: ships only; passengers (loaded_onto) do not fight
-            side = _land_combat_unit_side(
-                unit, attacker_faction, attacker_alliance, unit_defs, faction_defs,
+            side = (
+                water_combat_unit_side(unit, attacker_faction, unit_defs, faction_defs)
+                if is_naval_combat
+                else _land_combat_unit_side(
+                    unit, attacker_faction, attacker_alliance, unit_defs, faction_defs,
+                )
             )
             if side == "attacker":
                 attacker_units.append(deepcopy(unit))
@@ -3789,18 +3794,26 @@ def _handle_continue_combat(
     else:
         _normalize_unit_health_for_combat(attacker_territory.units, unit_defs)
         _normalize_unit_health_for_combat(territory.units, unit_defs)
+        water_battle = _is_water_zone(territory_defs.get(combat.territory_id))
+
+        def _side(u: Unit) -> str | None:
+            if water_battle:
+                return water_combat_unit_side(u, attacker_faction, unit_defs, faction_defs)
+            return _land_combat_unit_side(
+                u, attacker_faction, attacker_alliance, unit_defs, faction_defs,
+            )
+
         attacker_units = sorted(
             [
                 deepcopy(u) for u in attacker_territory.units
-                if u.instance_id in surviving_attacker_ids
-                and _land_combat_unit_side(u, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "attacker"
+                if u.instance_id in surviving_attacker_ids and _side(u) == "attacker"
             ],
             key=lambda u: u.instance_id,
         )
         defender_units = sorted(
             [
                 deepcopy(u) for u in territory.units
-                if _land_combat_unit_side(u, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "defender"
+                if _side(u) == "defender"
             ],
             key=lambda u: u.instance_id,
         )
@@ -4789,7 +4802,7 @@ def _offload_sea_raid_survivors_after_naval_win(
 
     for lid in lands:
         staged_fac = tsfac.get(lid)
-        if staged_fac is not None and staged_fac != attacker_faction:
+        if staged_fac is not None and not faction_acts_as(faction_defs, staged_fac, attacker_faction):
             continue
         land_t = state.territories.get(lid)
         if not land_t:
@@ -4836,8 +4849,7 @@ def _offload_sea_raid_survivors_after_naval_win(
             )
         )
 
-        # Deferred capture: only when the land has no defenders left (allied garrisons
-        # defend the territory too) and is ownable.
+        # Deferred capture: only when the land has no enemy defenders left and is ownable.
         has_defenders = any(
             _land_combat_unit_side(
                 u, attacker_faction, attacker_alliance, unit_defs, faction_defs
@@ -5020,11 +5032,16 @@ def _resolve_combat_end(
             # (participates_in_sea_hex_naval_combat) but must stay with a boat that survived the battle.
             aa = getattr(faction_defs.get(attacker_faction), "alliance", None)
             surv_def_set = set(round_result.surviving_defender_ids or [])
+            water_keep = _is_water_zone(territory_defs.get(territory_id))
             kept: list[Unit] = []
             for u in territory.units:
                 uid = u.instance_id
                 carrier = getattr(u, "loaded_onto", None)
-                side = _land_combat_unit_side(u, attacker_faction, aa, unit_defs, faction_defs)
+                side = (
+                    water_combat_unit_side(u, attacker_faction, unit_defs, faction_defs)
+                    if water_keep
+                    else _land_combat_unit_side(u, attacker_faction, aa, unit_defs, faction_defs)
+                )
                 if side == "defender":
                     if uid in surv_def_set or (carrier is not None and carrier in surv_def_set):
                         kept.append(u)
@@ -5355,6 +5372,9 @@ def _handle_end_phase(
                     continue
                 unit_def = unit_defs.get(unit.unit_id)
                 if not is_land_unit(unit_def) or _is_water_craft(unit_def):
+                    continue
+                # Marching Orders extends mobility; it must not mobilize stationary pieces.
+                if unit.base_movement <= 0 or unit_def.movement <= 0:
                     continue
                 unit_faction = get_unit_faction(unit, unit_defs)
                 if (

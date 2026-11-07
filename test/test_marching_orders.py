@@ -471,3 +471,41 @@ def test_conquest_record_and_bonus_ids_follow_the_turn():
     state = _act(state, end_phase("gondor"), defs)  # mobilization -> next turn
     assert state.conquered_this_turn == {}
     assert state.marching_orders_bonus_ids == []
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_zero_movement_trebuchet_never_receives_marching_orders_bonus(enabled):
+    state, defs = _game("wotr_1.1", enabled, "gondor")
+    ud, td, fd, cd, ports = defs
+    trebuchet = _unit_in(state, "minas_tirith", "trebuchet")
+    ud[trebuchet.unit_id].movement = 0
+    trebuchet.base_movement = trebuchet.remaining_movement = 0
+    iid = trebuchet.instance_id
+    state = _to_non_combat_move(state, "gondor", defs)
+    stationary = _unit(state, iid)
+    assert stationary.remaining_movement == 0
+    assert iid not in state.marching_orders_bonus_ids
+    action = move_units("gondor", "minas_tirith", "pelennor", [iid])
+    assert not validate_action(state, action, ud, td, fd, cd, ports).valid
+
+
+def test_nazgul_can_attack_defended_south_ithilien_from_minas_morgul():
+    from backend.engine.state import Unit
+
+    state, defs = _game("wotr_1.1", True, "mordor")
+    ud, td, fd, cd, ports = defs
+    for territory in state.territories.values():
+        territory.units = []
+    nazgul = Unit("mordor_nazgul_regression", "nazgul", 4, 1, 4, 1)
+    defender = Unit("gondor_soldier_regression", "gondor_soldier", 1, 1, 1, 1)
+    state.territories["minas_morgul"].owner = "mordor"
+    state.territories["minas_morgul"].units = [nazgul]
+    state.territories["south_ithilien"].owner = "gondor"
+    state.territories["south_ithilien"].units = [defender]
+    targets, _ = get_unit_move_targets(state, nazgul.instance_id, ud, td, fd)
+    assert targets["south_ithilien"] == 2
+    action = move_units("mordor", "minas_morgul", "south_ithilien", [nazgul.instance_id])
+    assert validate_action(state, action, ud, td, fd, cd, ports).valid
+    state = _act(state, action, defs)
+    state = _act(state, end_phase("mordor"), defs)
+    assert nazgul.instance_id in [u.instance_id for u in state.territories["south_ithilien"].units]

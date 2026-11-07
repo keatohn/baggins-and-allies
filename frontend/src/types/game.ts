@@ -151,9 +151,11 @@ export interface LandscapePlacement {
   layer: LandscapeLayer;
   /** Display scale (default 1, clamped 0.25–4). */
   s?: number;
+  /** Mountain darkness: 0 = original art, 1 = near black. */
+  darkness?: number;
   /** Clockwise rotation in degrees (omitted when 0). */
   r?: number;
-  /** Placed by Auto-generate — re-generated on the next auto pass; manual ones are preserved. */
+  /** Placed by Auto-generate. Later generation preserves these placements. */
   auto?: boolean;
 }
 
@@ -220,6 +222,10 @@ export function normalizeLandscapePlacement(raw: unknown): LandscapePlacement | 
   const out: LandscapePlacement = { cat, img, x, y, layer };
   if (typeof rec.s === 'number' && Number.isFinite(rec.s)) {
     out.s = Math.min(LANDSCAPE_SCALE_MAX, Math.max(LANDSCAPE_SCALE_MIN, rec.s));
+  }
+  if (rec.darkness != null) {
+    if (typeof rec.darkness !== 'number' || !Number.isFinite(rec.darkness) || rec.darkness < 0 || rec.darkness > 1) return null;
+    out.darkness = rec.darkness;
   }
   if (rec.r != null) {
     if (typeof rec.r !== 'number' || !Number.isFinite(rec.r)) return null;

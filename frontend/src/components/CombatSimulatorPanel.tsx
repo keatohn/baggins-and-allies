@@ -746,19 +746,27 @@ function mergeSimOutcomes(
 
 export default function CombatSimulatorPanel({
   definitions,
-  territoryUnits = {},
+  territoryUnits: liveTerritoryUnits = {},
   unitDefs = {},
-  territoryData = {},
+  territoryData: liveTerritoryData = {},
   factionData = {},
   gameId = null,
   setupId = null,
-  territoryDefenderCasualtyOrder = {},
+  territoryDefenderCasualtyOrder: liveDefenderCasualtyOrder = {},
   heroesEnabled = true,
-  shadowedTerritories,
+  shadowedTerritories: liveShadowedTerritories,
   scenarioRings = [],
   onClose,
   embedded,
 }: CombatSimulatorPanelProps) {
+  // Board polling must not rewrite a simulation the user is editing. Refresh is explicit.
+  const [boardSnapshot, setBoardSnapshot] = useState(() => ({
+    territoryUnits: liveTerritoryUnits,
+    territoryData: liveTerritoryData,
+    shadowedTerritories: liveShadowedTerritories,
+    territoryDefenderCasualtyOrder: liveDefenderCasualtyOrder,
+  }));
+  const { territoryUnits, territoryData, shadowedTerritories, territoryDefenderCasualtyOrder } = boardSnapshot;
   /** Fresh props for effects that must not re-run on every multiplayer poll. */
   const territoryUnitsRef = useRef(territoryUnits);
   territoryUnitsRef.current = territoryUnits;
@@ -1014,8 +1022,8 @@ export default function CombatSimulatorPanel({
   }, [attackingTerritoryId, attackingTerritoryOptions]);
 
   /**
-   * Seed attacker counts when faction / attacking territory / land-vs-sea changes, or when definitions arrive
-   * and counts are still zero. Uses `territoryUnitsRef` so multiplayer polls do not retrigger a full re-seed.
+   * Seed attacker counts once per faction / attacking territory / combat domain selection.
+   * Later prop refreshes must preserve edits, including an intentionally empty army.
    */
   const attackerSeedKeyRef = useRef<string>('');
   useEffect(() => {
@@ -1047,12 +1055,7 @@ export default function CombatSimulatorPanel({
       return;
     }
 
-    setAttackerCounts((prev) => {
-      const prevTotal = Object.values(prev).reduce((a, b) => a + b, 0);
-      if (prevTotal > 0) return prev;
-      const next = computeNext();
-      return Object.keys(next).length > 0 ? next : prev;
-    });
+    // The selection was already seeded. Zero is a deliberate edit, not a loading signal.
   }, [attackerFaction, attackingTerritoryId, combatDomain, isLandCombat, definitions, unitDefs, heroesEnabled]);
 
   const isTerrainSelection = territoryId.startsWith(TERRAIN_PREFIX);
@@ -1190,7 +1193,13 @@ export default function CombatSimulatorPanel({
 
   const handleRefreshFromTerritories = () => {
     if (!canRefreshFromTerritories) return;
-    const attackingStacks = territoryUnitsRef.current?.[attackingTerritoryId] ?? [];
+    setBoardSnapshot({
+      territoryUnits: liveTerritoryUnits,
+      territoryData: liveTerritoryData,
+      shadowedTerritories: liveShadowedTerritories,
+      territoryDefenderCasualtyOrder: liveDefenderCasualtyOrder,
+    });
+    const attackingStacks = liveTerritoryUnits[attackingTerritoryId] ?? [];
     const refreshedAttackerCounts: Record<string, number> = {};
     attackingStacks.forEach((s) => {
       const raw = definitions?.units?.[s.unit_id];
@@ -1205,7 +1214,7 @@ export default function CombatSimulatorPanel({
 
     // Defender refresh only applies when a real territory is selected.
     if (!territoryId.startsWith(TERRAIN_PREFIX)) {
-      const freshDefenderStacks = (territoryUnitsRef.current?.[territoryId] ?? [])
+      const freshDefenderStacks = (liveTerritoryUnits[territoryId] ?? [])
         .filter((s) => s.count > 0)
         .filter((s) => unitAllowedForCombatType(definitions, s.unit_id, combatDomain));
       const freshDefenderCounts: Record<string, number> = {};
@@ -1665,6 +1674,12 @@ export default function CombatSimulatorPanel({
               className="combat-sim-select"
               value={attackerFaction}
               onChange={(e) => {
+                setBoardSnapshot({
+                  territoryUnits: liveTerritoryUnits,
+                  territoryData: liveTerritoryData,
+                  shadowedTerritories: liveShadowedTerritories,
+                  territoryDefenderCasualtyOrder: liveDefenderCasualtyOrder,
+                });
                 setAttackerFaction(e.target.value);
                 setAttackingTerritoryId('');
                 setAttackerCounts({});

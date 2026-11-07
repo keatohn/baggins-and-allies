@@ -21,7 +21,7 @@ from backend.engine.combat import (
     get_siegework_dice_counts,
 )
 from backend.engine.combat_specials import pending_combat_round
-from backend.engine.movement import _is_water_zone
+from backend.engine.movement import _is_water_zone, water_combat_unit_side
 from backend.engine.queries import participates_in_sea_hex_naval_combat
 from backend.engine.utils import generate_dice_rolls_for_units, has_unit_special
 
@@ -112,7 +112,11 @@ def _get_initiate_rosters(
         u_faction = get_unit_faction(u, ud)
         if faction_acts_as(fd, u_faction, attacker_faction):
             attackers.append(u)
-        elif _land_combat_unit_side(u, attacker_faction, attacker_alliance, ud, fd) == "defender":
+        elif (
+            water_combat_unit_side(u, attacker_faction, ud, fd)
+            if is_water
+            else _land_combat_unit_side(u, attacker_faction, attacker_alliance, ud, fd)
+        ) == "defender":
             defenders.append(u)
     attackers.sort(key=lambda u: u.instance_id)
     defenders.sort(key=lambda u: u.instance_id)
@@ -150,11 +154,20 @@ def _get_active_rosters(state, ud, td, fd) -> tuple[list, list]:
         [u for u in (getattr(attacker_territory, "units", []) or []) if getattr(u, "instance_id", "") in attacker_ids],
         key=lambda u: u.instance_id,
     )
+    attacker_faction = getattr(combat, "attacker_faction", None)
+    tdef = td.get(combat.territory_id)
+    water_battle = bool(tdef and _is_water_zone(tdef))
     defenders = sorted(
-        [u for u in territory.units if getattr(u, "instance_id", "") not in attacker_ids],
+        [
+            u for u in territory.units
+            if getattr(u, "instance_id", "") not in attacker_ids
+            and (
+                not water_battle
+                or water_combat_unit_side(u, attacker_faction, ud, fd) == "defender"
+            )
+        ],
         key=lambda u: u.instance_id,
     )
-    tdef = td.get(combat.territory_id)
     if tdef and _is_water_zone(tdef):
         attackers = [u for u in attackers if participates_in_sea_hex_naval_combat(u, ud.get(u.unit_id))]
         defenders = [u for u in defenders if participates_in_sea_hex_naval_combat(u, ud.get(u.unit_id))]

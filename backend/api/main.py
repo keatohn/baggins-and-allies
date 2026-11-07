@@ -253,6 +253,7 @@ from backend.engine.movement import (
     _is_sea_zone,
     _is_river_unit,
     _is_water_zone,
+    water_combat_unit_side,
     get_forced_naval_combat_instance_ids,
     resolve_territory_key_in_state,
     water_transport_relation,
@@ -1174,17 +1175,22 @@ def _get_combat_modifiers_and_specials(
             [u for u in territory.units if u.instance_id in attacker_ids],
             key=lambda u: u.instance_id,
         )
+    territory_def = td.get(combat.territory_id)
+    water_battle = bool(territory_def and _is_water_zone(territory_def))
     defenders = sorted(
         [
             u for u in territory.units
             if ud.get(u.unit_id)
-            and _land_combat_unit_side(
-                u, attacker_faction, attacker_alliance, ud, fd
+            and (
+                water_combat_unit_side(u, attacker_faction, ud, fd)
+                if water_battle
+                else _land_combat_unit_side(
+                    u, attacker_faction, attacker_alliance, ud, fd
+                )
             ) == "defender"
         ],
         key=lambda u: u.instance_id,
     )
-    territory_def = td.get(combat.territory_id)
     if territory_def and _is_water_zone(territory_def):
         attackers = [
             u for u in attackers
@@ -6142,8 +6148,12 @@ def _generate_initiate_combat_payload(
             [
                 u for u in territory.units
                 if ud.get(u.unit_id)
-                and _land_combat_unit_side(
-                    u, attacker_faction, attacker_alliance, ud, fd
+                and (
+                    water_combat_unit_side(u, attacker_faction, ud, fd)
+                    if is_sea_zone_combat
+                    else _land_combat_unit_side(
+                        u, attacker_faction, attacker_alliance, ud, fd
+                    )
                 ) == "defender"
                 and (
                     not is_sea_zone_combat
@@ -6778,9 +6788,8 @@ def _get_active_combat_units(
     """Return (attackers, defenders) for current active combat. Handles sea raid (sea + land roster).
 
     Side classification matches reducer._land_combat_unit_side: the attacking force is the
-    attacker's faction (+ subfactions); every other factioned unit on the hex — including
-    garrisons from an allied faction — is a defender (they roll and take hits). Units with no
-    faction (missing unit def) are excluded from both rosters.
+    attacker's faction (+ subfactions); enemies defend, and attacker-allied garrisons
+    are bystanders. Units with no faction (missing unit def) are excluded from both rosters.
     """
     if not state.active_combat:
         return [], []
@@ -6834,11 +6843,17 @@ def _get_active_combat_units(
             key=lambda u: u.instance_id,
         )
     if unit_defs is not None and faction_defs is not None:
+        active_tdef = territory_defs.get(combat.territory_id) if territory_defs else None
+        active_water = bool(active_tdef and _is_water_zone(active_tdef))
         defenders = sorted(
             [
                 u for u in territory.units
-                if _land_combat_unit_side(
-                    u, attacker_faction, attacker_alliance, unit_defs, faction_defs
+                if (
+                    water_combat_unit_side(u, attacker_faction, unit_defs, faction_defs)
+                    if active_water
+                    else _land_combat_unit_side(
+                        u, attacker_faction, attacker_alliance, unit_defs, faction_defs
+                    )
                 ) == "defender"
             ],
             key=lambda u: u.instance_id,

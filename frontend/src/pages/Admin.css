@@ -2126,6 +2126,35 @@ body:has(.combat-sim-modal-overlay) {
   gap: 0.5rem;
 }
 
+.mapov-art {
+  flex: 0 1 42%;
+  min-height: 7.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  overflow: hidden;
+}
+
+.mapov-art > .admin-mapview__toggle,
+.mapov-art > .admin-page__checkbox-label {
+  flex: 0 0 auto;
+}
+
+.mapov-art__images {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.mapov-landscape__group-label {
+  margin: 0.2rem 0 0;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+}
+
 .mapov-landscape__palette {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
@@ -4223,4 +4252,54 @@ body:has(.combat-sim-modal-overlay) {
   .mapbuilder__draft {
     flex: 1 1 10rem;
   }
+}
+
+/* Let the map workspace use the available screen, including tall displays. */
+body:has(.admin-modal--map-editor) .menu-scroll-overlay:not(.menu-scroll-overlay--closing):not(.menu-scroll-overlay--opening) {
+  visibility: hidden;
+}
+
+.admin-modal.admin-modal--map-editor {
+  width: calc(100vw - 1rem);
+  max-width: none;
+  height: calc(100dvh - 1rem);
+  max-height: calc(100dvh - 1rem);
+  box-sizing: border-box;
+}
+
+.mapov-side--landscape .mapov-art {
+  flex-grow: 0;
+  flex-shrink: 0;
+  min-height: 0;
+}
+
+.mapov-side--landscape .mapov-inspector {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.mapov-side--landscape .admin-graph__list {
+  flex-basis: 4rem;
+}
+
+.mapov-art__resize {
+  flex: 0 0 10px;
+  cursor: row-resize;
+  touch-action: none;
+  border-radius: 4px;
+  background: linear-gradient(var(--ink-faded), var(--ink-faded)) center / 3rem 2px no-repeat;
+}
+
+.mapov-art__resize:hover,
+.mapov-art__resize:focus-visible {
+  background-color: rgba(61, 41, 20, 0.12);
+  outline: 2px solid var(--ink-faded);
+}
+
+.mapov-brush {
+  flex-wrap: wrap;
+  justify-content: center;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  box-sizing: border-box;
 }

@@ -562,6 +562,7 @@
 
 /* Landscape art layer — above map raster (z-index 12), below territory markers (z18). */
 .territory-landscape-layer {
+  clip-path: inset(0);
   position: absolute;
   top: 0;
   left: 0;

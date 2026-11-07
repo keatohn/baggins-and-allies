@@ -6,7 +6,7 @@ import { CSS } from '@dnd-kit/utilities';
 import type { GameState, SelectedUnit, MapTransform, PendingMove, MapOverridesData, MapSpotKind, LandscapePlacement } from '../types/game';
 import { normalizeMapOverrides } from '../types/game';
 import type { TerritorySignalMap } from '../territorySignals';
-import { landscapeSrc, terrainEmojiSuppressed } from '../pages/admin/landscape';
+import { landscapeFilter, landscapeSrc, terrainEmojiSuppressed } from '../pages/admin/landscape';
 import { fetchMapSvgText } from '../pages/admin/territoryGraph';
 import DraggableUnit from './DraggableUnit';
 import DragOverlay, { type BulkDragOverlayStack } from './DragOverlay';
@@ -2329,6 +2329,7 @@ function GameMap({
     fromTerritory: string,
     unitId: string,
     navalDrag?: { passengerCount: number; instanceIds?: string[] },
+    eligibleInstanceIds?: ReadonlySet<string>,
   ): Set<string> => {
     if (!availableMoveTargets?.length) {
       return new Set();
@@ -2338,6 +2339,7 @@ function GameMap({
     const fromCanon = canonicalSeaZoneId(fromTerritory);
     const matches = availableMoveTargets.filter((m) => {
       if (m.unit.unit_id !== unitId) return false;
+      if (eligibleInstanceIds && !eligibleInstanceIds.has(m.unit.instance_id)) return false;
       const mKey = resolveTerritoryGraphKey(m.territory, fordGraphForMatch);
       return (
         mKey === fromKeyForMatch ||
@@ -2495,9 +2497,13 @@ function GameMap({
                   if (boatIds.size > 0 && !boatIds.has(u.loaded_onto)) return false;
                   return !navalUnitIds.has(u.unit_id);
                 });
-                const pendingIds = (pendingMoves ?? [])
-                  .filter((m) => pendingMoveIsSamePhaseLoadIntoSea(m, sz, territoryData, gameState.phase))
-                  .flatMap((m) => m.unit_instance_ids ?? []);
+                const pendingIds = pendingLoadInstanceIdsIntoSeaZone(
+                  sz,
+                  gameState.phase,
+                  pendingMoves,
+                  territoryData,
+                  boatIds,
+                );
                 const byId = new Map<string, { instance_id: string; unit_id: string; remaining_movement?: number }>();
                 for (const units of Object.values(territoryUnitsFull ?? {})) {
                   for (const u of units) byId.set(u.instance_id, u);
@@ -2705,18 +2711,25 @@ function GameMap({
     (fromTerritory: string): { validTargets: Set<string>; stacks: BulkDragOverlayStack[] } => {
       const stackUnits = territoryUnits[fromTerritory] || [];
       const currentFaction = gameState.current_faction;
+      const fromKey = resolveTerritoryGraphKey(fromTerritory, territoryData);
+      const fullUnits = territoryUnitsFull?.[fromTerritory] ?? territoryUnitsFull?.[fromKey];
+      const committed = committedInstanceIdsFromHex(pendingMoves, fromTerritory, canonicalSeaZoneId(fromTerritory), gameState.phase);
+      const eligibleInstanceIds = fullUnits
+        ? new Set(fullUnits.filter((unit) => !committed.has(unit.instance_id)).map((unit) => unit.instance_id))
+        : undefined;
       const friendlyStacks = stackUnits.filter((s) => {
+        if (fullUnits && !fullUnits.some((unit) => unit.unit_id === s.unit_id && eligibleInstanceIds?.has(unit.instance_id))) return false;
         const parts = s.unit_id.split('_');
         const factionFromId = parts.find((p) => factionData[p]);
         const defFaction = unitDefs[s.unit_id]?.faction;
-        const uf = factionFromId ?? defFaction ?? parts[0];
-        return uf === currentFaction;
+        const uf = defFaction ?? factionFromId ?? parts[0];
+        return unitCommandedByCurrent(uf, currentFaction, factionData);
       });
       const sortedFriendly = [...friendlyStacks].sort((a, b) =>
         compareUnitStacksByMapOrder(a, b, unitDefs, factionData),
       );
       const movableFriendly = sortedFriendly
-        .map((s) => ({ stack: s, targets: getValidTargets(fromTerritory, s.unit_id) }))
+        .map((s) => ({ stack: s, targets: getValidTargets(fromTerritory, s.unit_id, undefined, eligibleInstanceIds) }))
         .filter((row) => row.targets.size > 0);
       const movableStacks = movableFriendly.map((row) => row.stack);
       const targetsByUnitId = new Map<string, Set<string>>(
@@ -2801,6 +2814,13 @@ function GameMap({
             bulkTargets = next;
           }
         }
+      }
+      // The confirmation builds eligible stacks for this destination. A slower ground
+      // stack must not hide destinations that an aerial (or faster) stack can reach.
+      // Keep ford-escort destinations computed above, then add every individual target.
+      if (bulkTargets === null) bulkTargets = new Set<string>();
+      for (const targets of targetsByUnitId.values()) {
+        for (const target of targets) bulkTargets.add(target);
       }
       const stacks: BulkDragOverlayStack[] = movableStacks.map((s) => {
         const parts = s.unit_id.split('_');
@@ -3686,30 +3706,38 @@ function GameMap({
         }
         if (
           isOffloadOrSeaRaid &&
-          gameState.phase === 'non_combat_move' &&
-          instanceIdsToUse &&
-          territoryUnitsFull?.[unitForDrop.territoryId]
+          (gameState.phase === 'non_combat_move' || gameState.phase === 'combat_move') &&
+          instanceIdsToUse
         ) {
-          const fullUnits = territoryUnitsFull[unitForDrop.territoryId];
-          const boatIds = new Set(fullUnits.filter((u) => navalUnitIds.has(u.unit_id)).map((u) => u.instance_id));
-          const draggedBoatIds = new Set(instanceIdsToUse.filter((id) => boatIds.has(id)));
-          // Same-phase loads are not aboard yet. Treat them as passengers so the drop is not discarded.
+          const fromSeaKey = unitForDrop.territoryId;
+          const fullUnits =
+            territoryUnitsFull?.[fromSeaKey] ??
+            territoryUnitsFull?.[canonicalSeaZoneId(fromSeaKey)] ??
+            [];
+          const hullIds = new Set(fullUnits.filter((u) => navalUnitIds.has(u.unit_id)).map((u) => u.instance_id));
+          const draggedBoatIds = new Set(instanceIdsToUse.filter((id) => hullIds.has(id)));
           const pendingPassengerIds = pendingLoadInstanceIdsIntoSeaZone(
-            unitForDrop.territoryId,
+            fromSeaKey,
             gameState.phase,
             pendingMoves,
             territoryData,
             draggedBoatIds,
           );
-          for (const id of pendingPassengerIds) {
-            if (!instanceIdsToUse.includes(id)) instanceIdsToUse.push(id);
+          const unitById = new Map<string, { instance_id: string; unit_id: string; remaining_movement?: number }>();
+          for (const units of Object.values(territoryUnitsFull ?? {})) {
+            for (const u of units) unitById.set(u.instance_id, u);
           }
-          const byId = new Map(fullUnits.map((u) => [u.instance_id, u]));
-          const kept = instanceIdsToUse.filter((id) => {
-            if (boatIds.has(id)) return true;
-            const passenger = byId.get(id);
-            if (!passenger) return true;
-            return !marchingOrdersBlocksEnd(
+          const passengerIds = [
+            ...instanceIdsToUse.filter((id) => !hullIds.has(id)),
+            ...pendingPassengerIds,
+          ];
+          const uniquePassengers = [...new Set(passengerIds)];
+          // Marching orders: a bonus unit cannot spend its last point reinforcing a territory conquered this turn.
+          // Pending loads are still on land, but they offload with this boat, so they count as aboard.
+          const marchingOrdersBlocksOffload = uniquePassengers.some((id) => {
+            const passenger = unitById.get(id);
+            if (!passenger) return false;
+            return marchingOrdersBlocksEnd(
               passenger.instance_id,
               passenger.unit_id,
               passenger.remaining_movement ?? 0,
@@ -3717,33 +3745,36 @@ function GameMap({
               storeTarget,
             );
           });
-          const pendingStillAboard = pendingPassengerIds.some((id) => kept.includes(id));
-          if (!kept.some((id) => !boatIds.has(id)) && !pendingStillAboard) {
+          if (uniquePassengers.length === 0 || marchingOrdersBlocksOffload) {
             setActiveUnit(null);
             setActiveDragId(null);
             setValidDropTargets(new Set());
             return;
           }
-          instanceIdsToUse = kept;
+          for (const id of pendingPassengerIds) {
+            if (!instanceIdsToUse.includes(id)) instanceIdsToUse.push(id);
+          }
           if (navalBoatStacks) {
-            navalBoatStacks = navalBoatStacks
+            const stacks = navalBoatStacks;
+            const stackCount = stacks.length;
+            navalBoatStacks = stacks
               .map((stack) => {
-                const boat = stack.find((id) => boatIds.has(id));
+                const boat = stack.find((id) => hullIds.has(id));
                 const extras = pendingLoadInstanceIdsIntoSeaZone(
-                  unitForDrop.territoryId,
+                  fromSeaKey,
                   gameState.phase,
                   pendingMoves,
                   territoryData,
                   boat ? new Set([boat]) : draggedBoatIds,
-                  navalBoatStacks.length === 1,
+                  stackCount === 1,
                 );
                 const merged = [...stack];
                 for (const id of extras) {
                   if (!merged.includes(id)) merged.push(id);
                 }
-                return merged.filter((id) => kept.includes(id));
+                return merged;
               })
-              .filter((stack) => stack.some((id) => !boatIds.has(id)));
+              .filter((stack) => stack.some((id) => !hullIds.has(id)));
           }
         }
         // Land → sea (embark): transportable land units only. Aerial → sea in combat is naval battle, not loading.
@@ -4868,17 +4899,17 @@ function GameMap({
                     <div className="territory-landscape-layer">
                       {landscapeRows.map(({ tid, placement }, i) => {
                         const screenPos = svgToScreen(placement.x, placement.y);
-                        const clamped = clampToMap(screenPos);
+                        // Preserve editor coordinates; the landscape layer clips art at the map edge.
                         const size = Math.round(40 * (placement.s ?? 1));
                         const rotation = placement.r ? `translate(-50%, -50%) rotate(${placement.r}deg)` : undefined;
                         return (
                           <div
                             key={`${tid}|${i}|${placement.img}`}
                             className={`territory-landscape territory-landscape--${placement.cat}${placement.layer === 'border' ? ' territory-landscape--border' : ''}`}
-                            style={{ left: clamped.x, top: clamped.y, width: size, height: size, transform: rotation }}
+                            style={{ left: screenPos.x, top: screenPos.y, width: size, height: size, transform: rotation }}
                             aria-hidden
                           >
-                            <img src={landscapeSrc(placement)} alt="" draggable={false} />
+                            <img src={landscapeSrc(placement)} style={{ filter: landscapeFilter(placement) }} alt="" draggable={false} />
                             {placement.cat === 'volcano' ? (
                               <>
                                 <span className="territory-landscape__smoke" />
@@ -5869,19 +5900,11 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                         const sortedUnits = [...units].sort((a, b) =>
                           compareUnitStacksByMapOrder(a, b, unitDefs, factionData),
                         );
-                        const hasAnyMovableCurrentFactionStack = sortedUnits.some(({ unit_id }) => {
-                          const parts = unit_id.split('_');
-                          const factionFromId = parts.find((p) => factionData[p]);
-                          const defFaction = unitDefs[unit_id]?.faction;
-                          const unitFaction = factionFromId ?? defFaction ?? parts[0];
-                          if (unitFaction !== gameState.current_faction) return false;
-                          return getValidTargets(territoryId, unit_id).size > 0;
-                        });
                         const canShowAllDrag =
                           canAct &&
                           isMovementPhase &&
                           stackCount > 1 &&
-                          hasAnyMovableCurrentFactionStack;
+                          computeBulkAllMoveData(territoryId).validTargets.size > 0;
                         return (
                           <div
                             key={territoryId}

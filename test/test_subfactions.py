@@ -859,3 +859,39 @@ def test_home_only_limits_destinations_to_original_territories():
     )
     assert "osgiliath" in open_targets
     assert "pelargir" in open_targets
+
+
+def test_mordor_haradrim_archer_can_capture_empty_neutral_harondor():
+    """Match WOTR 2.0's parent/subfaction ownership on the real WOTR map."""
+    from dataclasses import replace
+    from backend.engine.definitions import load_static_definitions, load_starting_setup, SubfactionDefinition
+    from backend.engine.queries import get_contested_territories
+
+    ud, td, fd, cd, ports = load_static_definitions(setup_id="wotr_1.1")
+    fd["mordor"] = replace(fd["mordor"], subfactions=(
+        SubfactionDefinition(id="harad", display_name="Harad", color="#b85a22"),
+    ))
+    # Rebuild the lookup so Harad resolves to its controlling parent.
+    fd = type(fd)(fd)
+    ud["haradrim_archer"].faction = "harad"
+    state = initialize_game_state(fd, td, ud,
+        starting_setup=load_starting_setup(setup_id="wotr_1.1"), camp_defs=cd)
+    state.current_faction = "mordor"
+    state.phase = "combat_move"
+    for territory in state.territories.values():
+        territory.units = []
+    piece = _piece("harad_haradrim_archer_001", "haradrim_archer")
+    state.territories["haradwaith"].owner = "harad"
+    state.territories["haradwaith"].units = [piece]
+    state.territories["harondor"].owner = None
+    state.territories["harondor"].original_owner = None
+    action = move_units("mordor", "haradwaith", "harondor", [piece.instance_id])
+    assert validate_action(state, action, ud, td, fd, cd, ports).valid
+    state, _ = apply_action(state, action, ud, td, fd, cd, ports)
+    assert len(state.pending_moves) == 1
+    state, _ = apply_action(state, end_phase("mordor"), ud, td, fd, cd, ports)
+    assert state.phase == "combat"
+    assert not state.pending_moves
+    assert [u.instance_id for u in state.territories["harondor"].units] == [piece.instance_id]
+    assert state.pending_captures["harondor"] == "mordor"
+    assert get_contested_territories(state, "mordor", fd, ud, td) == []

@@ -1171,3 +1171,142 @@ button.friends-list__person .friends-list__name {
     border-radius: 4px;
   }
 }
+
+/* Friends management and a career leaderboard share one spacious dialog. */
+.account-modal.account-modal--friends {
+  width: min(1480px, 96vw);
+  height: min(860px, 94dvh);
+  max-height: 94dvh;
+}
+
+.account-modal--friends .account-modal__body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.friends-modal__layout {
+  display: grid;
+  grid-template-columns: minmax(16rem, 21rem) minmax(0, 1fr);
+  gap: 1.5rem;
+  height: 100%;
+  min-height: 0;
+}
+
+.friends-modal__social {
+  overflow-y: auto;
+  min-width: 0;
+  padding-right: 0.75rem;
+  border-right: 1px solid var(--ink-faded);
+}
+
+.friends-leaderboard {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.friends-leaderboard__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.friends-leaderboard__filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.friends-leaderboard__filters select {
+  max-width: 100%;
+}
+
+.friends-leaderboard__scroll {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--ink-faded);
+  border-radius: 6px;
+}
+
+.friends-leaderboard__table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+}
+
+.friends-leaderboard__table th,
+.friends-leaderboard__table td {
+  padding: 0.65rem 0.6rem;
+  text-align: right;
+  border-bottom: 1px solid rgba(61, 41, 20, 0.18);
+}
+
+.friends-leaderboard__table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--parchment-dark, #e8e0d0);
+}
+
+.friends-leaderboard__table th button {
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.friends-leaderboard__table th:nth-child(2),
+.friends-leaderboard__table .friends-leaderboard__player {
+  text-align: left;
+  min-width: 10rem;
+}
+
+.friends-leaderboard__player .friends-list__person {
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.friends-leaderboard__tier {
+  display: block;
+  font-size: 0.75rem;
+  margin: 0.2rem 0;
+  color: var(--ink-faded);
+}
+
+.friends-leaderboard__player .account-xp__bar {
+  height: 10px;
+}
+
+.friends-leaderboard__self td {
+  background: rgba(255, 255, 255, 0.65);
+}
+
+@media (max-width: 800px) {
+  .account-modal--friends .account-modal__body {
+    overflow: auto;
+  }
+
+  .friends-modal__layout {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .friends-modal__social {
+    overflow: visible;
+    border-right: 0;
+    border-bottom: 1px solid var(--ink-faded);
+    padding: 0;
+  }
+
+  .friends-leaderboard__scroll {
+    max-height: 65dvh;
+  }
+}

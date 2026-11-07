@@ -771,6 +771,13 @@ function Sidebar({
   const capitalOwner = currentFactionCapital ? territoryData[currentFactionCapital]?.owner : undefined;
   const capitalCaptured = !!currentFactionCapital && capitalOwner !== gameState.current_faction;
 
+  const moveConfirmationRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (canAct && pendingMoveConfirm && (gameState.phase === 'combat_move' || gameState.phase === 'non_combat_move')) {
+      moveConfirmationRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [canAct, pendingMoveConfirm, gameState.phase]);
+
   const currentFactionName = factionData[gameState.current_faction]?.name ?? '';
   const power = effectivePower ?? gameState.faction_resources[gameState.current_faction]?.power ?? 0;
 
@@ -864,14 +871,30 @@ function Sidebar({
                   const isLoad = !fromSea && toSea && !allMovingAerial;
                   const isOffload =
                     fromSea && !toSea && gameState.phase === 'non_combat_move' && !allMovingAerial;
-                  const isSail = fromSea && toSea;
+                  const toIdRaw =
+                    typeof bulkMoveConfirm.toTerritory === 'string'
+                      ? bulkMoveConfirm.toTerritory.trim()
+                      : '';
+                  const combatNavalAttack =
+                    gameState.phase === 'combat_move' &&
+                    fromSea &&
+                    toSea &&
+                    Boolean(toIdRaw) &&
+                    destinationSeaHasHostileEnemyNaval(
+                      toIdRaw,
+                      gameState.current_faction,
+                      territoryUnits,
+                      unitDefs,
+                      factionData,
+                    );
+                  const isSail = fromSea && toSea && !combatNavalAttack;
                   const isAttack =
                     gameState.phase === 'combat_move' &&
                     !isLoad &&
                     ((!fromSea && !toSea) ||
                       (fromSea && !toSea) ||
                       (!fromSea && toSea && allMovingAerial) ||
-                      (fromSea && toSea));
+                      combatNavalAttack);
                   const isNavalMove = isLoad || isOffload || isSail;
                   const buttonLabel = isLoad ? 'Load' : isOffload ? 'Offload' : isSail ? 'Sail' : isAttack ? 'Attack' : 'Move';
                   const confirmBtnClass = isAttack
@@ -991,8 +1014,8 @@ function Sidebar({
             )}
 
             {/* Pending move confirmation with +/- controls */}
-            {pendingMoveConfirm && !pendingOffloadSeaChoice && !bulkMoveConfirm && (
-              <div className="move-confirm">
+            {pendingMoveConfirm && (gameState.phase === 'combat_move' || gameState.phase === 'non_combat_move') && !pendingOffloadSeaChoice && !bulkMoveConfirm && (
+              <div className="move-confirm" ref={moveConfirmationRef} aria-live="polite">
                 {pendingMoveConfirm.chargePathOptions && pendingMoveConfirm.chargePathOptions.length > 1 ? (
                   <>
                     <p className="move-details">

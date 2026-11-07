@@ -39,7 +39,11 @@ from backend.engine.queries import (
     staging_zone_blocks_sea_raid,
 )
 from backend.engine.combat import calculate_required_dice
-from backend.engine.movement import expand_sea_offload_instance_ids, remaining_sea_load_passenger_slots
+from backend.engine.movement import (
+    expand_sea_offload_instance_ids,
+    get_reachable_territories_for_unit,
+    remaining_sea_load_passenger_slots,
+)
 
 
 def _is_naval_unit(unit_defs, unit_id: str) -> bool:
@@ -2997,3 +3001,220 @@ def test_stale_sea_raid_staging_cleared_at_combat_phase_end(wotr_defs):
     assert state.territory_sea_raid_from == {}
     assert state.territory_sea_raid_faction == {}
     assert state.territory_sea_raid_passenger_instance_ids == {}
+
+
+def _fresh_state(wotr_defs):
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    return state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs
+
+
+def test_allied_ships_share_sea_and_river_without_combat(wotr_defs):
+    """Same-alliance boats in a sea or river zone are not a battle."""
+    state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs = _fresh_state(wotr_defs)
+    sea = state.territories["sea_zone_8"]
+    lake = state.territories["esgaroth"]
+    sea.units.clear()
+    lake.units.clear()
+    gondor = _make_unit(state, "gondor", "gondor_ship", unit_defs)
+    elves = _make_unit(state, "elves", "lindon_ship", unit_defs)
+    sea.units.extend([gondor, elves])
+    lake.units.extend([
+        _make_unit(state, "gondor", "gondor_ship", unit_defs),
+        _make_unit(state, "elves", "lindon_ship", unit_defs),
+    ])
+    state.current_faction = "gondor"
+    state.phase = "combat"
+
+    for tid in ("sea_zone_8", "esgaroth"):
+        entries = [
+            c for c in get_contested_territories(
+                state, "gondor", faction_defs, unit_defs, territory_defs
+            )
+            if c.get("territory_id") == tid
+        ]
+        assert entries == [], f"{tid} must not be a battle between allies"
+
+    action = initiate_combat("gondor", "sea_zone_8", dice_rolls={"attacker": [1], "defender": [1]})
+    vr = validate_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert not vr.valid, vr.error
+
+
+def test_naval_battle_does_not_target_allied_ship(wotr_defs):
+    """An enemy ship is the defender. An allied ship in the same zone sits out and survives."""
+    state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs = _fresh_state(wotr_defs)
+    sea = state.territories["sea_zone_8"]
+    sea.units.clear()
+    gondor = _make_unit(state, "gondor", "gondor_ship", unit_defs)
+    elves = _make_unit(state, "elves", "lindon_ship", unit_defs)
+    harad = _make_unit(state, "harad", "black_ship", unit_defs)
+    sea.units.extend([gondor, elves, harad])
+    state.current_faction = "gondor"
+    state.phase = "combat"
+
+    contested = [
+        c for c in get_contested_territories(
+            state, "gondor", faction_defs, unit_defs, territory_defs
+        )
+        if c.get("territory_id") == "sea_zone_8"
+    ]
+    assert len(contested) == 1
+    assert elves.instance_id not in contested[0]["defender_unit_ids"]
+    assert harad.instance_id in contested[0]["defender_unit_ids"]
+
+    action = initiate_combat(
+        "gondor", "sea_zone_8", dice_rolls={"attacker": [1], "defender": [10]},
+    )
+    state, events = apply_action(
+        state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    started = next(e for e in events if e.type == "combat_started")
+    assert elves.instance_id not in started.payload["defender_units"]
+    assert harad.instance_id in started.payload["defender_units"]
+    ids = {u.instance_id for u in state.territories["sea_zone_8"].units}
+    assert gondor.instance_id in ids
+    assert elves.instance_id in ids
+    assert harad.instance_id not in ids
+
+
+def test_sail_into_allied_ship_is_non_combat_move(wotr_defs):
+    """Entering a water zone that holds an allied boat is a normal sail, not an attack."""
+    state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs = _fresh_state(wotr_defs)
+    origin = state.territories["sea_zone_11"]
+    dest = state.territories["sea_zone_8"]
+    origin.units.clear()
+    dest.units.clear()
+    mover = _make_unit(state, "gondor", "gondor_ship", unit_defs)
+    ally = _make_unit(state, "elves", "lindon_ship", unit_defs)
+    origin.units.append(mover)
+    dest.units.append(ally)
+    state.current_faction = "gondor"
+
+    state.phase = "combat_move"
+    combat_reach, _ = get_reachable_territories_for_unit(
+        mover, "sea_zone_11", state, unit_defs, territory_defs, faction_defs, "combat_move",
+    )
+    assert "sea_zone_8" not in combat_reach
+    combat_action = move_units("gondor", "sea_zone_11", "sea_zone_8", [mover.instance_id], move_type="sail")
+    combat_vr = validate_action(
+        state, combat_action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    assert not combat_vr.valid, combat_vr.error
+
+    state.phase = "non_combat_move"
+    ncm_reach, _ = get_reachable_territories_for_unit(
+        mover, "sea_zone_11", state, unit_defs, territory_defs, faction_defs, "non_combat_move",
+    )
+    assert "sea_zone_8" in ncm_reach
+    ncm_action = move_units("gondor", "sea_zone_11", "sea_zone_8", [mover.instance_id], move_type="sail")
+    ncm_vr = validate_action(
+        state, ncm_action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    assert ncm_vr.valid, ncm_vr.error
+    state, _ = apply_action(
+        state, ncm_action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    state = get_state_after_pending_moves(
+        state, "non_combat_move", unit_defs, territory_defs, faction_defs,
+    )
+    ids = {u.instance_id for u in state.territories["sea_zone_8"].units}
+    assert mover.instance_id in ids and ally.instance_id in ids
+    entries = [
+        c for c in get_contested_territories(
+            state, "gondor", faction_defs, unit_defs, territory_defs
+        )
+        if c.get("territory_id") == "sea_zone_8"
+    ]
+    assert entries == []
+
+
+@pytest.mark.parametrize("legacy_staging", [False, True])
+def test_parent_naval_victory_preserves_subfaction_sea_raid(wotr_defs, legacy_staging):
+    from dataclasses import replace
+    from backend.engine.definitions import SubfactionDefinition
+
+    state, ship, raider, ud, td, fd, cd, ports = _hostile_staging_offload_state(wotr_defs)
+    fd["mordor"] = replace(fd["mordor"], subfactions=(
+        SubfactionDefinition(id="harad", display_name="Harad", color="#b85a22"),
+    ))
+    del fd["harad"]
+    fd = type(fd)(fd)
+    state.current_faction = "mordor"
+    state.turn_order = ["mordor", "gondor"]
+    second_ship = _make_unit(state, "harad", "black_ship", ud)
+    second_raider = _make_unit(state, "harad", "corsair_of_umbar", ud)
+    second_raider.loaded_onto = second_ship.instance_id
+    staging_sea = state.territories["sea_zone_11"]
+    staging_sea.units = [u for u in staging_sea.units if u.instance_id not in {ship.instance_id, raider.instance_id}]
+    state.territories["sea_zone_10"].units = [ship, raider]
+    state.territories["sea_zone_8"].units = [second_ship, second_raider]
+    state.pending_moves = [
+        PendingMove(from_territory="sea_zone_10", to_territory="sea_zone_11",
+            unit_instance_ids=[ship.instance_id, raider.instance_id], phase="combat_move", move_type="sail"),
+        PendingMove(from_territory="sea_zone_8", to_territory="sea_zone_11",
+            unit_instance_ids=[second_ship.instance_id, second_raider.instance_id], phase="combat_move", move_type="sail"),
+        PendingMove(from_territory="sea_zone_11", to_territory="harondor",
+            unit_instance_ids=[ship.instance_id, raider.instance_id, second_ship.instance_id, second_raider.instance_id],
+            phase="combat_move", move_type="offload"),
+    ]
+    state = get_state_after_pending_moves(state, "combat_move", ud, td, fd)
+    assert state.territory_sea_raid_faction["harondor"] == "mordor"
+    if legacy_staging:
+        state.territory_sea_raid_faction["harondor"] = "harad"
+    state.phase = "combat"
+    before = get_contested_territories(state, "mordor", fd, ud, td)
+    assert any(b["territory_id"] == "harondor" for b in before)
+    state, _ = apply_action(state, initiate_combat("mordor", "sea_zone_11",
+        {"attacker": [1, 1], "defender": [10]}), ud, td, fd, cd, ports)
+    assert state.active_combat is None
+    land_units = {u.instance_id: u for u in state.territories["harondor"].units}
+    assert {raider.instance_id, second_raider.instance_id} <= land_units.keys()
+    assert second_ship.instance_id in {u.instance_id for u in state.territories["sea_zone_11"].units}
+    assert ship.instance_id in {u.instance_id for u in state.territories["sea_zone_11"].units}
+    assert land_units[raider.instance_id].loaded_onto is None
+    battles = get_contested_territories(state, "mordor", fd, ud, td)
+    raid = next(b for b in battles if b["territory_id"] == "harondor")
+    assert raid["sea_zone_id"] == "sea_zone_11"
+    assert raider.instance_id in raid["attacker_unit_ids"]
+    assert not validate_action(state, end_phase("mordor"), ud, td, fd, cd, ports).valid
+    action = initiate_combat("mordor", "harondor", {"attacker": [1, 1], "defender": [10]}, sea_zone_id="sea_zone_11")
+    assert validate_action(state, action, ud, td, fd, cd, ports).valid
+    state, _ = apply_action(state, action, ud, td, fd, cd, ports)
+    assert state.active_combat is None
+
+
+def test_legacy_subfaction_raid_still_lists_after_naval_victory(wotr_defs):
+    from dataclasses import replace
+    from backend.engine.definitions import SubfactionDefinition
+    from backend.engine.state import GameState
+
+    state, ship, raider, ud, td, fd, cd, ports = _hostile_staging_offload_state(wotr_defs)
+    fd["mordor"] = replace(fd["mordor"], subfactions=(
+        SubfactionDefinition(id="harad", display_name="Harad", color="#b85a22"),
+    ))
+    del fd["harad"]
+    fd = type(fd)(fd)
+    state.current_faction = "mordor"
+    state = get_state_after_pending_moves(state, "combat_move", ud, td, fd)
+    # Reproduce the old persisted state: enemy boat is gone, raiders still aboard,
+    # and the raid metadata names the subfaction rather than its parent.
+    sea = state.territories["sea_zone_11"]
+    sea.units = [u for u in sea.units if u.instance_id in {ship.instance_id, raider.instance_id}]
+    state.territory_sea_raid_faction["harondor"] = "harad"
+    state.phase = "combat"
+    state = GameState.from_dict(state.to_dict())
+    battles = get_contested_territories(state, "mordor", fd, ud, td)
+    raid = next(b for b in battles if b["territory_id"] == "harondor")
+    assert raid["sea_zone_id"] == "sea_zone_11"
+    assert raider.instance_id in raid["attacker_unit_ids"]
+    assert not validate_action(state, end_phase("mordor"), ud, td, fd, cd, ports).valid
+    action = initiate_combat("mordor", "harondor", {"attacker": [1], "defender": [10]}, sea_zone_id="sea_zone_11")
+    assert validate_action(state, action, ud, td, fd, cd, ports).valid
+    state, _ = apply_action(state, action, ud, td, fd, cd, ports)
+    assert raider.instance_id in {u.instance_id for u in state.territories["harondor"].units}
+    assert ship.instance_id in {u.instance_id for u in state.territories["sea_zone_11"].units}

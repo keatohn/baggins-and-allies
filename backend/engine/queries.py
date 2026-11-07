@@ -29,6 +29,7 @@ from backend.engine.movement import (
     _is_transport_boat_for_zone,
     _is_water_zone,
     _sea_zone_has_hostile_enemy_boats,
+    water_combat_unit_side,
     are_sea_zones_directly_adjacent,
     empty_sea_zone_valid_for_combat_move_sail_then_load_raid,
     get_forced_naval_combat_instance_ids,
@@ -573,6 +574,9 @@ def _land_combat_unit_side_for_queries(
         return None
     if faction_acts_as(faction_defs, uo, attacker_faction):
         return "attacker"
+    owner = faction_defs.get(uo)
+    if attacker_alliance and owner and owner.alliance == attacker_alliance:
+        return None
     return "defender"
 
 
@@ -1501,14 +1505,19 @@ def _validate_initiate_combat(
                 )
 
     # Find attacker and defender units (normal combat: both in same territory).
-    # Defenders = every factioned unit that is not part of the attacking force, including
-    # garrisons from an allied faction (they defend the territory).
+    # Land: only enemy factions defend; allied units are bystanders.
+    # Sea and river: same-alliance boats are bystanders, not defenders.
     attacker_units = []
     defender_units = []
     for unit in territory.units:
-        side = _land_combat_unit_side_for_queries(
-            unit, attacker_faction, attacker_alliance, unit_defs, faction_defs
-        )
+        if combat_territory_is_water:
+            side = water_combat_unit_side(
+                unit, attacker_faction, unit_defs, faction_defs
+            )
+        else:
+            side = _land_combat_unit_side_for_queries(
+                unit, attacker_faction, attacker_alliance, unit_defs, faction_defs
+            )
         if side == "attacker":
             attacker_units.append(unit)
         elif side == "defender":
@@ -2866,9 +2875,14 @@ def get_contested_territories(
             ud = unit_defs.get(unit.unit_id)
             if is_water and not participates_in_sea_hex_naval_combat(unit, ud):
                 continue
-            side = _land_combat_unit_side_for_queries(
-                unit, faction_id, attacker_alliance, unit_defs, faction_defs
-            )
+            if is_water:
+                side = water_combat_unit_side(
+                    unit, faction_id, unit_defs, faction_defs
+                )
+            else:
+                side = _land_combat_unit_side_for_queries(
+                    unit, faction_id, attacker_alliance, unit_defs, faction_defs
+                )
             if side == "attacker":
                 attacker_units.append(unit)
             elif side == "defender":
@@ -2889,7 +2903,7 @@ def get_contested_territories(
             include_sea_zone = False
             if staged_sea:
                 if staged_fac is not None:
-                    include_sea_zone = staged_fac == faction_id
+                    include_sea_zone = faction_acts_as(faction_defs, staged_fac, faction_id)
                 else:
                     include_sea_zone = _faction_has_sea_raid_passengers_in_sea_zone(
                         state.territories.get(staged_sea),
@@ -2915,16 +2929,15 @@ def get_contested_territories(
                 continue
             staged_fac = sea_raid_fac.get(land_tid)
             if staged_fac is not None:
-                if staged_fac != faction_id:
+                if not faction_acts_as(faction_defs, staged_fac, faction_id):
                     continue
             elif not _faction_has_sea_raid_passengers_in_sea_zone(
                 state.territories.get(sea_tid), faction_id, unit_defs, faction_defs
             ):
                 continue
-            if not staging_zone_blocks_sea_raid(
-                state, sea_tid, faction_id, unit_defs, faction_defs, territory_defs
-            ):
-                continue
+            # Still-embarked staged raiders may also come from a save where the
+            # naval battle was won before subfaction offloading was fixed. Keep
+            # their land battle discoverable; initiate_combat checks the naval gate.
             sea_t = state.territories.get(sea_tid)
             land_t = state.territories.get(land_tid)
             if not sea_t or not land_t:
