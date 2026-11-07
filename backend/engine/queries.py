@@ -574,6 +574,9 @@ def _land_combat_unit_side_for_queries(
         return None
     if faction_acts_as(faction_defs, uo, attacker_faction):
         return "attacker"
+    owner = faction_defs.get(uo)
+    if attacker_alliance and owner and owner.alliance == attacker_alliance:
+        return None
     return "defender"
 
 
@@ -1502,7 +1505,7 @@ def _validate_initiate_combat(
                 )
 
     # Find attacker and defender units (normal combat: both in same territory).
-    # Land: every other factioned unit defends, including an allied garrison.
+    # Land: only enemy factions defend; allied units are bystanders.
     # Sea and river: same-alliance boats are bystanders, not defenders.
     attacker_units = []
     defender_units = []

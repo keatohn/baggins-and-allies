@@ -248,19 +248,15 @@ def _land_combat_unit_side(
     unit_defs: dict[str, UnitDefinition],
     faction_defs: dict[str, FactionDefinition],
 ) -> str | None:
-    """
-    Land / sea-raid-land combat roster: must stay identical between initiate_combat and continue_combat
-    (including non-passenger attackers on the land hex, e.g. aerial joining the same assault).
-    attacker = the attacking force (attacking faction + its subfactions);
-    defender = every other factioned unit on the hex — including garrisons from an allied
-    faction, which defend the territory (roll and take hits) per the game rule;
-    None = non-participant only when the unit has no faction (missing/broken unit def).
-    """
+    """Acting faction/subfactions attack; enemies defend; allies are bystanders."""
     uo = get_unit_faction(unit, unit_defs)
     if uo is None:
         return None
     if faction_acts_as(faction_defs, uo, attacker_faction):
         return "attacker"
+    owner = faction_defs.get(uo)
+    if attacker_alliance and owner and owner.alliance == attacker_alliance:
+        return None
     return "defender"
 
 
@@ -2352,7 +2348,9 @@ def _apply_pending_moves(
                 defenders = [
                     u for u in to_territory.units
                     if u.instance_id not in unit_instance_ids
-                    and not faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), acting)
+                    and _land_combat_unit_side(
+                        u, acting, getattr(faction_defs.get(acting), "alliance", None), unit_defs, faction_defs
+                    ) == "defender"
                 ]
                 if not defenders:
                     state.pending_captures[to_id] = capture_owner_for_units(
@@ -2370,7 +2368,9 @@ def _apply_pending_moves(
                 if moving_alliance != owner_alliance:
                     enemy_units = [
                         u for u in to_territory.units
-                        if not faction_acts_as(faction_defs, get_unit_faction(u, unit_defs), acting)
+                        if _land_combat_unit_side(
+                            u, acting, moving_alliance, unit_defs, faction_defs
+                        ) == "defender"
                     ]
                     if not enemy_units:
                         state.pending_captures[to_id] = capture_owner_for_units(
@@ -4855,8 +4855,7 @@ def _offload_sea_raid_survivors_after_naval_win(
             )
         )
 
-        # Deferred capture: only when the land has no defenders left (allied garrisons
-        # defend the territory too) and is ownable.
+        # Deferred capture: only when the land has no enemy defenders left and is ownable.
         has_defenders = any(
             _land_combat_unit_side(
                 u, attacker_faction, attacker_alliance, unit_defs, faction_defs

@@ -4,10 +4,11 @@ Previously, any unit not in surviving_attacker_ids was treated as a defender, so
 units sharing the attacker's alliance (e.g. Harad with Mordor attacking) became
 defenders from round 2 onward, corrupting casualties and end-of-battle unit lists.
 
-Roster rule (game rule): the attacking force = attacking faction + its subfactions;
-every other factioned unit on the hex defends the territory — including garrisons
-from an allied faction (they roll and take hits).
+Roster rule: attacking faction and subfactions attack; enemies defend;
+other units in the attacker's alliance are non-participating bystanders.
 """
+
+import pytest
 
 from backend.engine.definitions import load_static_definitions
 from backend.engine.reducer import _land_combat_unit_side, _unit_id_from_instance_id_pattern
@@ -36,8 +37,8 @@ def test_land_combat_side_matches_initiate_rules():
     gondor_u = _u("gondor_x", "gondor_archer", unit_defs)
 
     assert _land_combat_unit_side(mordor_u, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "attacker"
-    # Allied faction garrison in the defending hex defends the territory (game rule).
-    assert _land_combat_unit_side(harad_u, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "defender"
+    # Allied units must never become defenders against their own alliance.
+    assert _land_combat_unit_side(harad_u, attacker_faction, attacker_alliance, unit_defs, faction_defs) is None
     assert _land_combat_unit_side(gondor_u, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "defender"
 
 
@@ -59,3 +60,42 @@ def test_good_allies_both_defend_against_evil():
     r = _u("r_x", "rohan_peasant", unit_defs)
     assert _land_combat_unit_side(g, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "defender"
     assert _land_combat_unit_side(r, attacker_faction, attacker_alliance, unit_defs, faction_defs) == "defender"
+
+
+@pytest.mark.parametrize("attacker,ally,attacking_unit,allied_unit,enemy_unit", [
+    ("mordor", "harad", "morgul_orc", "haradrim_archer", "gondor_archer"),
+    ("gondor", "rohan", "gondor_archer", "rohan_peasant", "morgul_orc"),
+])
+def test_allied_cooccupation_is_not_contested_and_cannot_start_battle(
+    attacker, ally, attacking_unit, allied_unit, enemy_unit
+):
+    from backend.engine.definitions import load_starting_setup
+    from backend.engine.utils import initialize_game_state
+    from backend.engine.queries import get_contested_territories, validate_action
+    from backend.engine.actions import initiate_combat, end_phase
+    from backend.engine.reducer import apply_action
+
+    ud, td, fd, cd, ports = load_static_definitions(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(faction_defs=fd, territory_defs=td, unit_defs=ud,
+        starting_setup=load_starting_setup(setup_id="wotr_exp_1.0"), camp_defs=cd)
+    state.phase = "combat"
+    state.current_faction = attacker
+    for territory in state.territories.values():
+        territory.units = []
+    territory = state.territories["minas_tirith"]
+    territory.owner = ally
+    territory.units = [_u("attacker_x", attacking_unit, ud), _u("ally_x", allied_unit, ud)]
+    assert get_contested_territories(state, attacker, fd, ud, td) == []
+    assert validate_action(state, end_phase(attacker), ud, td, fd, cd, ports).valid
+    action = initiate_combat(attacker, "minas_tirith", {})
+    validation = validate_action(state, action, ud, td, fd, cd, ports)
+    assert not validation.valid
+    assert "No enemy" in validation.error
+    with pytest.raises(ValueError):
+        apply_action(state, action, ud, td, fd, cd, ports)
+    territory.units.append(_u("enemy_x", enemy_unit, ud))
+    battles = get_contested_territories(state, attacker, fd, ud, td)
+    assert len(battles) == 1
+    assert battles[0]["attacker_unit_ids"] == ["attacker_x"]
+    assert battles[0]["defender_unit_ids"] == ["enemy_x"]
+    assert validate_action(state, action, ud, td, fd, cd, ports).valid

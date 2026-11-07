@@ -6798,9 +6798,8 @@ def _get_active_combat_units(
     """Return (attackers, defenders) for current active combat. Handles sea raid (sea + land roster).
 
     Side classification matches reducer._land_combat_unit_side: the attacking force is the
-    attacker's faction (+ subfactions); every other factioned unit on the hex — including
-    garrisons from an allied faction — is a defender (they roll and take hits). Units with no
-    faction (missing unit def) are excluded from both rosters.
+    attacker's faction (+ subfactions); enemies defend, and attacker-allied garrisons
+    are bystanders. Units with no faction (missing unit def) are excluded from both rosters.
     """
     if not state.active_combat:
         return [], []
