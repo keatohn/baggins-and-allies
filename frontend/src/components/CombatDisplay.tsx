@@ -71,6 +71,107 @@ function augmentRoundStartWithPriorEliminated(
   return extra.length ? [...roundUnits, ...extra] : roundUnits;
 }
 
+/** One unit from a combat_log / combat_round_resolved `*_units_at_start` snapshot. */
+interface BackendRoundUnit {
+  instance_id: string;
+  unit_id: string;
+  display_name?: string;
+  attack?: number;
+  defense?: number;
+  effective_attack?: number | null;
+  effective_defense?: number | null;
+  health?: number;
+  remaining_health?: number;
+  is_archer?: boolean;
+  siegework_archetype?: boolean;
+  faction?: string;
+  passenger_count?: number;
+  terror?: boolean;
+  terrain_mountain?: boolean;
+  terrain_forest?: boolean;
+  captain_bonus?: boolean;
+  king_bonus?: boolean;
+  anti_cavalry?: boolean;
+  sea_raider?: boolean;
+  archer?: boolean;
+  stealth?: boolean;
+  bombikazi?: boolean;
+  fearless?: boolean;
+  hope?: boolean;
+  light?: boolean;
+  ram?: boolean;
+}
+
+/** Payload specials flags → CombatUnit badge flags (same contract as the combat modal). */
+const ROUND_UNIT_BADGE_FLAGS: Array<[keyof BackendRoundUnit, keyof CombatUnit]> = [
+  ['terror', 'hasTerror'],
+  ['terrain_mountain', 'terrainMountain'],
+  ['terrain_forest', 'terrainForest'],
+  ['captain_bonus', 'hasCaptainBonus'],
+  ['king_bonus', 'hasKingBonus'],
+  ['anti_cavalry', 'hasAntiCavalry'],
+  ['sea_raider', 'hasSeaRaider'],
+  ['archer', 'hasArcher'],
+  ['stealth', 'hasStealth'],
+  ['bombikazi', 'hasBombikazi'],
+  ['fearless', 'hasFearless'],
+  ['hope', 'hasHope'],
+  ['light', 'hasLight'],
+  ['ram', 'hasRam'],
+];
+
+function roundUnitBadgeFlags(bu: BackendRoundUnit): Partial<CombatUnit> {
+  const out: Partial<CombatUnit> = {};
+  for (const [payloadKey, unitKey] of ROUND_UNIT_BADGE_FLAGS) {
+    const v = bu[payloadKey];
+    if (typeof v === 'boolean') (out as Record<string, boolean>)[unitKey] = v;
+  }
+  return out;
+}
+
+/**
+ * Apply a backend round-start snapshot to spectator shelves. Display fields (icon, faction color)
+ * come from the live/battle-open unit, but effective stats, archer membership, and specials badges
+ * always come from the snapshot so unit rows line up with that round's dice buckets exactly like
+ * the combat modal does. Returns null when the snapshot is missing (legacy combat_log entries)
+ * so callers can fall back to reconstructing from live state.
+ */
+function applyRoundStartUnitsAtStart(
+  payload: BackendRoundUnit[] | undefined,
+  liveUnits: CombatUnit[],
+  snapshot: CombatUnit[] | null,
+): CombatUnit[] | null {
+  if (!Array.isArray(payload) || payload.length === 0) return null;
+  const liveMap = new Map(liveUnits.map(u => [u.id, u]));
+  const snapMap = new Map((snapshot ?? []).map(u => [u.id, u]));
+  return payload.map(bu => {
+    const base = liveMap.get(bu.instance_id) ?? snapMap.get(bu.instance_id);
+    const fromPayload: Partial<CombatUnit> = {
+      ...roundUnitBadgeFlags(bu),
+      ...(typeof bu.effective_attack === 'number' ? { effectiveAttack: bu.effective_attack } : {}),
+      ...(typeof bu.effective_defense === 'number' ? { effectiveDefense: bu.effective_defense } : {}),
+      ...(typeof bu.is_archer === 'boolean' ? { isArcher: bu.is_archer } : {}),
+      ...(typeof bu.siegework_archetype === 'boolean' ? { siegeworkArchetype: bu.siegework_archetype } : {}),
+      ...(typeof bu.passenger_count === 'number' && bu.passenger_count > 0
+        ? { passengerCount: bu.passenger_count }
+        : {}),
+    };
+    if (base) return { ...base, ...fromPayload };
+    return {
+      id: bu.instance_id,
+      unitType: bu.unit_id,
+      name: bu.display_name || bu.unit_id,
+      icon: `/assets/units/${bu.unit_id}.png`,
+      attack: bu.attack ?? 0,
+      defense: bu.defense ?? 0,
+      health: bu.health ?? 1,
+      remainingHealth: bu.remaining_health ?? 0,
+      ...(bu.faction && { factionId: bu.faction }),
+      ...fromPayload,
+    };
+  });
+}
+
 interface CombatUnit {
   id: string;
   unitType: string;
@@ -1711,12 +1812,19 @@ function CombatDisplay({
       is_archer_prefire?: boolean;
       is_stealth_prefire?: boolean;
       is_siegeworks_round?: boolean;
+      attacker_dice?: Record<string, GroupedAttackerDicePayload>;
+      defender_dice?: Record<string, { rolls: number[]; hits: number }>;
+      attacker_dice_siegework_split?: Record<string, { ram?: { rolls?: number[]; hits?: number }; flex?: { rolls?: number[]; hits?: number } }>;
+      attacker_units_at_start?: BackendRoundUnit[];
+      defender_units_at_start?: BackendRoundUnit[];
     };
     const rn = last.round_number ?? 0;
     const aRolls = last.attacker_rolls ?? [];
     const dRolls = last.defender_rolls ?? [];
     const aHits = last.attacker_hits ?? 0;
     const dHits = last.defender_hits ?? 0;
+    // Legacy entries (or a side that did not roll) fall back to a flat bucket; grouped dice are
+    // per side so e.g. archer prefire still shelves defender dice by effective defense.
     const toAttackerFlat = (
       rolls: number[],
       hitCount: number
@@ -1728,18 +1836,10 @@ function CombatDisplay({
       const arr = rolls.map((value, i) => ({ value, target: 10, isHit: i < hitCount }));
       return arr.length ? { 1: arr } : {};
     };
-    const lastEx = last as {
-      attacker_dice?: Record<string, GroupedAttackerDicePayload>;
-      defender_dice?: Record<string, { rolls: number[]; hits: number }>;
-      attacker_dice_siegework_split?: Record<string, { ram?: { rolls?: number[]; hits?: number }; flex?: { rolls?: number[]; hits?: number } }>;
-    };
-    const hasGroupedDice =
-      lastEx.attacker_dice
-      && lastEx.defender_dice
-      && typeof lastEx.attacker_dice === 'object'
-      && typeof lastEx.defender_dice === 'object'
-      && Object.keys(lastEx.attacker_dice).length > 0
-      && Object.keys(lastEx.defender_dice).length > 0;
+    const hasGrouped = (d: unknown): d is Record<string, unknown> =>
+      !!d && typeof d === 'object' && Object.keys(d as object).length > 0;
+    const hasAttackerGrouped = hasGrouped(last.attacker_dice);
+    const hasDefenderGrouped = hasGrouped(last.defender_dice);
     let prevA: string[] = [];
     let prevD: string[] = [];
     for (let i = 0; i < combatLog.length - 1; i++) {
@@ -1747,18 +1847,24 @@ function CombatDisplay({
       prevA = prevA.concat(e.attacker_casualties ?? []);
       prevD = prevD.concat(e.defender_casualties ?? []);
     }
-    const aAtStart = attacker.units.filter(u => !prevA.includes(u.id));
-    const dAtStart = defender.units.filter(u => !prevD.includes(u.id));
+    // Round-start roster + effective stats from the log snapshot (same source as the combat modal);
+    // fall back to reconstructing from live units for legacy entries without the snapshot.
+    const aAtStart =
+      applyRoundStartUnitsAtStart(last.attacker_units_at_start, attacker.units, battleStartAttackerSnapshot)
+      ?? attacker.units.filter(u => !prevA.includes(u.id));
+    const dAtStart =
+      applyRoundStartUnitsAtStart(last.defender_units_at_start, defender.units, battleStartDefenderSnapshot)
+      ?? defender.units.filter(u => !prevD.includes(u.id));
     const round: CombatRound = {
       roundNumber: rn,
-      attackerRolls: hasGroupedDice
+      attackerRolls: hasAttackerGrouped
         ? groupedPayloadToAttackerRolls(
-            lastEx.attacker_dice ?? {},
-            lastEx.attacker_dice_siegework_split,
+            last.attacker_dice ?? {},
+            last.attacker_dice_siegework_split,
           )
         : toAttackerFlat(aRolls, aHits),
-      defenderRolls: hasGroupedDice
-        ? groupedPayloadToDefenderRolls(lastEx.defender_dice ?? {})
+      defenderRolls: hasDefenderGrouped
+        ? groupedPayloadToDefenderRolls(last.defender_dice ?? {})
         : toDefenderSpectator(dRolls, dHits),
       attackerHits: aHits,
       defenderHits: dHits,
@@ -1786,7 +1892,7 @@ function CombatDisplay({
     setTerrorFinalRound(null);
     setShowTerrorRerollX(false);
     setCombatPhase('awaiting_decision'); // Show round + hits; result banner only when combatEndResult is set
-  }, [isOpen, readOnly, combatLog, attacker.units, defender.units]);
+  }, [isOpen, readOnly, combatLog, attacker.units, defender.units, battleStartAttackerSnapshot, battleStartDefenderSnapshot]);
 
   // Spectator: when combat ended, show result banner then auto-close after 3s
   useEffect(() => {
