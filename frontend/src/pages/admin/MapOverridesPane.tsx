@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import GameMap, { DEFAULT_MAP_BASE } from '../../components/GameMap';
 import { TERRITORY_UNIT_PIXEL_NUDGE } from '../../components/mapSpotNudge';
 import { api } from '../../services/api';
@@ -916,34 +916,46 @@ export function MapOverridesPane({
     }
   };
 
-  const onWheel = (e: ReactWheelEvent<HTMLDivElement>) => {
-    e.preventDefault();
+  // Native non-passive wheel: React registers onWheel as a passive listener, so
+  // preventDefault() inside it is a no-op and the browser rubber-bands the page /
+  // modal ("the outside") instead of letting only the map respond. Attach directly
+  // with { passive: false }, like MapBuilder and GameMap do.
+  useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-    if (!e.ctrlKey) {
-      // Two-finger scroll (and plain mouse wheel) pans.
-      setTransform((prev) => ({
-        ...prev,
-        x: prev.x + e.deltaX,
-        y: prev.y + e.deltaY,
-      }));
-      return;
-    }
-    // Pinch (ctrlKey) and Ctrl+wheel zoom toward cursor.
-    const rect = el.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08;
-    setTransform((prev) => {
-      const nextScale = Math.min(8, Math.max(0.25, prev.scale * factor));
-      const k = nextScale / prev.scale;
-      return {
-        scale: nextScale,
-        x: mx - (mx - prev.x) * k,
-        y: my - (my - prev.y) * k,
-      };
-    });
-  };
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      // deltaMode: 1 = lines, 2 = pages — normalize to pixels (Firefox wheel, keyboard scroll).
+      const mult = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1;
+      const dx = e.deltaX * mult;
+      const dy = e.deltaY * mult;
+      if (!e.ctrlKey) {
+        // Two-finger scroll (and plain mouse wheel) pans.
+        setTransform((prev) => ({
+          ...prev,
+          x: prev.x + dx,
+          y: prev.y + dy,
+        }));
+        return;
+      }
+      // Pinch (ctrlKey) and Ctrl+wheel zoom toward cursor.
+      const rect = el.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const factor = dy < 0 ? 1.08 : 1 / 1.08;
+      setTransform((prev) => {
+        const nextScale = Math.min(8, Math.max(0.25, prev.scale * factor));
+        const k = nextScale / prev.scale;
+        return {
+          scale: nextScale,
+          x: mx - (mx - prev.x) * k,
+          y: my - (my - prev.y) * k,
+        };
+      });
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, [loading, err, editorTab]);
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     // Middle-button always pans so the map stays reachable in select/paint modes.
@@ -1004,17 +1016,22 @@ export function MapOverridesPane({
       return;
     }
     if (editorTab === 'landscape' && cursorMode === 'paint') {
-      // Hover used to stamp because a missing last point skipped the spacing check.
-      // Only the pointer that pressed down, and only while that button is held, paints.
-      if (!placing || paintPointerRef.current !== e.pointerId || (e.buttons & 1) === 0) return;
-      const last = paintLastRef.current;
-      const vb = viewportToViewBox(e.clientX, e.clientY);
-      if (!last || !vb) return;
-      const step = Math.max(PAINT_STAMP_SPACING, paintRadius);
-      if (Math.hypot(vb.x - last.x, vb.y - last.y) < step) return;
-      paintStampAt(e.clientX, e.clientY);
-      paintLastRef.current = vb;
-      return;
+      if (paintPointerRef.current === e.pointerId) {
+        // Only the pointer that pressed down, and only while that button is held, paints.
+        // (A missing last point skips the spacing check.)
+        if (!placing || (e.buttons & 1) === 0) return;
+        const last = paintLastRef.current;
+        const vb = viewportToViewBox(e.clientX, e.clientY);
+        if (!last || !vb) return;
+        const step = Math.max(PAINT_STAMP_SPACING, paintRadius);
+        if (Math.hypot(vb.x - last.x, vb.y - last.y) < step) return;
+        paintStampAt(e.clientX, e.clientY);
+        paintLastRef.current = vb;
+        return;
+      }
+      // Paint mode: no hover-stamping, and only a live (middle-button) pan may move the map.
+      // Falling through unconditionally here let a stale dragRef pan on plain mouse moves.
+      if (dragRef.current?.id !== e.pointerId) return;
     }
     const d = dragRef.current;
     if (!d || e.pointerId !== d.id) return;
@@ -1091,6 +1108,18 @@ export function MapOverridesPane({
   );
 
   const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    // Pan release first: the mode branches below must not strand an active middle-drag
+    // pan (a stale dragRef made later mouse moves pan with no button held).
+    const pan = dragRef.current;
+    if (pan && pan.id === e.pointerId) {
+      try {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      dragRef.current = null;
+      if (didDragRef.current) return;
+    }
     const sd = selectDragRef.current;
     if (sd && e.pointerId === sd.id) {
       try {
@@ -1163,15 +1192,6 @@ export function MapOverridesPane({
       }
       return;
     }
-    const d = dragRef.current;
-    if (d && e.pointerId === d.id) {
-      try {
-        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
-      } catch {
-        /* ignore */
-      }
-    }
-    dragRef.current = null;
     if (didDragRef.current) return;
     if (editorTab === 'landscape' && placing) {
       tryPlaceLandscape(e.clientX, e.clientY);
@@ -1786,11 +1806,11 @@ export function MapOverridesPane({
   // --- landscape placement dragging ---------------------------------------
 
   const onPlacementPointerDown = (e: ReactPointerEvent<HTMLDivElement>, tid: string, index: number) => {
-    e.stopPropagation();
-    e.preventDefault();
-    if (e.button !== 0) return;
+    if (e.button !== 0) return; // middle/right must reach the viewport — middle-button pans the map
     if (editorTab === 'landscape' && cursorMode === 'paint') return; // paint owns left-drag on the viewport
     if (editorTab === 'landscape' && cursorMode === 'select') {
+      e.stopPropagation();
+      e.preventDefault();
       const key = placementKey(tid, index);
       if (e.shiftKey || e.ctrlKey || e.metaKey) {
         setMultiSel((prev) => {
@@ -1826,9 +1846,11 @@ export function MapOverridesPane({
       return;
     }
     if (editorTab === 'landscape' && cursorMode !== 'navigate') return; // select/paint own left-drag
-    if (placing) return; // placing mode takes priority; don't start a drag
+    if (placing) return; // placing armed: fall through — viewport places on click, pans on drag
     const placement = landscapeFor(tid)[index];
     if (!placement) return;
+    e.stopPropagation();
+    e.preventDefault();
     setSelected(tid);
     setSelectedPlacement({ tid, index });
     try {
@@ -1850,9 +1872,13 @@ export function MapOverridesPane({
   };
 
   const onPlacementPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
-    e.stopPropagation();
     const bd = bulkDragRef.current;
     if (bd && e.pointerId === bd.id) {
+      e.stopPropagation(); // the group drag owns this gesture
+      if ((e.buttons & 1) === 0) {
+        bulkDragRef.current = null; // button already released — drop a stranded drag
+        return;
+      }
       const el = wrapRef.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
@@ -1902,7 +1928,12 @@ export function MapOverridesPane({
       return;
     }
     const d = placeDragRef.current;
-    if (!d || e.pointerId !== d.id) return;
+    if (!d || e.pointerId !== d.id) return; // not ours: let it bubble so pans keep working while the cursor crosses pieces
+    e.stopPropagation(); // the piece drag owns this gesture
+    if ((e.buttons & 1) === 0) {
+      placeDragRef.current = null; // button already released — drop a stranded drag
+      return;
+    }
     const el = wrapRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
@@ -1930,10 +1961,10 @@ export function MapOverridesPane({
   };
 
   const onPlacementPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
-    e.stopPropagation();
-    endGesture();
     const bd = bulkDragRef.current;
     if (bd && e.pointerId === bd.id) {
+      e.stopPropagation();
+      endGesture();
       try {
         if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
       } catch {
@@ -1943,7 +1974,9 @@ export function MapOverridesPane({
       return;
     }
     const d = placeDragRef.current;
-    if (!d || e.pointerId !== d.id) return;
+    if (!d || e.pointerId !== d.id) return; // not ours: let it bubble (viewport click/pan release)
+    e.stopPropagation();
+    endGesture();
     try {
       if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {
@@ -2047,15 +2080,12 @@ export function MapOverridesPane({
         rows.push({ tid, index, placement });
       });
     }
-    // Selected territory's placements render last so they stay clickable when overlapping.
-    rows.sort((a, b) => {
-      const aSel = a.tid === selected ? 1 : 0;
-      const bSel = b.tid === selected ? 1 : 0;
-      if (aSel !== bSel) return aSel - bSel;
-      return 0;
-    });
+    // Stable order (insertion order): re-sorting by selection moved the pressed element
+    // mid-drag, React re-keyed it, and the browser dropped our pointer capture — the
+    // piece drag died a few pixels in. Overlap order comes from --active/--multi
+    // z-index instead, so selected pieces still sit on top.
     return rows;
-  }, [current, selected]);
+  }, [current]);
 
   const landscapeCount = useMemo(
     () => Object.values(current?.landscape?.territories ?? {}).reduce((n, list) => n + list.length, 0),
@@ -3071,7 +3101,6 @@ export function MapOverridesPane({
                   ? ' admin-graph__viewport--select'
                   : ''
               }${editorTab === 'landscape' && cursorMode === 'paint' ? ' admin-graph__viewport--paint' : ''}`}
-              onWheel={onWheel}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
