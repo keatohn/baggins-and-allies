@@ -2329,6 +2329,7 @@ function GameMap({
     fromTerritory: string,
     unitId: string,
     navalDrag?: { passengerCount: number; instanceIds?: string[] },
+    eligibleInstanceIds?: ReadonlySet<string>,
   ): Set<string> => {
     if (!availableMoveTargets?.length) {
       return new Set();
@@ -2338,6 +2339,7 @@ function GameMap({
     const fromCanon = canonicalSeaZoneId(fromTerritory);
     const matches = availableMoveTargets.filter((m) => {
       if (m.unit.unit_id !== unitId) return false;
+      if (eligibleInstanceIds && !eligibleInstanceIds.has(m.unit.instance_id)) return false;
       const mKey = resolveTerritoryGraphKey(m.territory, fordGraphForMatch);
       return (
         mKey === fromKeyForMatch ||
@@ -2709,7 +2711,14 @@ function GameMap({
     (fromTerritory: string): { validTargets: Set<string>; stacks: BulkDragOverlayStack[] } => {
       const stackUnits = territoryUnits[fromTerritory] || [];
       const currentFaction = gameState.current_faction;
+      const fromKey = resolveTerritoryGraphKey(fromTerritory, territoryData);
+      const fullUnits = territoryUnitsFull?.[fromTerritory] ?? territoryUnitsFull?.[fromKey];
+      const committed = committedInstanceIdsFromHex(pendingMoves, fromTerritory, canonicalSeaZoneId(fromTerritory), gameState.phase);
+      const eligibleInstanceIds = fullUnits
+        ? new Set(fullUnits.filter((unit) => !committed.has(unit.instance_id)).map((unit) => unit.instance_id))
+        : undefined;
       const friendlyStacks = stackUnits.filter((s) => {
+        if (fullUnits && !fullUnits.some((unit) => unit.unit_id === s.unit_id && eligibleInstanceIds?.has(unit.instance_id))) return false;
         const parts = s.unit_id.split('_');
         const factionFromId = parts.find((p) => factionData[p]);
         const defFaction = unitDefs[s.unit_id]?.faction;
@@ -2720,7 +2729,7 @@ function GameMap({
         compareUnitStacksByMapOrder(a, b, unitDefs, factionData),
       );
       const movableFriendly = sortedFriendly
-        .map((s) => ({ stack: s, targets: getValidTargets(fromTerritory, s.unit_id) }))
+        .map((s) => ({ stack: s, targets: getValidTargets(fromTerritory, s.unit_id, undefined, eligibleInstanceIds) }))
         .filter((row) => row.targets.size > 0);
       const movableStacks = movableFriendly.map((row) => row.stack);
       const targetsByUnitId = new Map<string, Set<string>>(
@@ -5891,19 +5900,11 @@ className={`territory-marker faction-marker map-tip ${isCapital ? 'faction-marke
                         const sortedUnits = [...units].sort((a, b) =>
                           compareUnitStacksByMapOrder(a, b, unitDefs, factionData),
                         );
-                        const hasAnyMovableCurrentFactionStack = sortedUnits.some(({ unit_id }) => {
-                          const parts = unit_id.split('_');
-                          const factionFromId = parts.find((p) => factionData[p]);
-                          const defFaction = unitDefs[unit_id]?.faction;
-                          const unitFaction = defFaction ?? factionFromId ?? parts[0];
-                          if (!unitCommandedByCurrent(unitFaction, gameState.current_faction, factionData)) return false;
-                          return getValidTargets(territoryId, unit_id).size > 0;
-                        });
                         const canShowAllDrag =
                           canAct &&
                           isMovementPhase &&
                           stackCount > 1 &&
-                          hasAnyMovableCurrentFactionStack;
+                          computeBulkAllMoveData(territoryId).validTargets.size > 0;
                         return (
                           <div
                             key={territoryId}
