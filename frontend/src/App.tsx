@@ -4700,6 +4700,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           </header>
           <div className="combat-sim-modal-body">
             <CombatSimulatorPanel
+              key={GAME_ID}
               definitions={definitions}
               territoryUnits={currentTerritoryUnits}
               unitDefs={unitDefs}

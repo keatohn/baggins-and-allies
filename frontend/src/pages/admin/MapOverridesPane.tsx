@@ -1362,6 +1362,31 @@ export function MapOverridesPane({
     [multiSel, updateLandscape],
   );
 
+  const setBulkDarkness = useCallback(
+    (darkness: number) => {
+      const value = Math.min(1, Math.max(0, darkness));
+      updateLandscape((prev) => {
+        const map = { ...(prev?.territories ?? {}) };
+        const cloned = new Set<string>();
+        let changed = false;
+        for (const key of multiSel) {
+          const parsed = parsePlacementKey(key);
+          if (!parsed) continue;
+          const placement = map[parsed.tid]?.[parsed.index];
+          if (!placement || placement.cat !== 'mountains' || (placement.darkness ?? 0) === value) continue;
+          if (!cloned.has(parsed.tid)) {
+            map[parsed.tid] = [...map[parsed.tid]];
+            cloned.add(parsed.tid);
+          }
+          map[parsed.tid][parsed.index] = { ...placement, darkness: value };
+          changed = true;
+        }
+        return changed ? { territories: map } : prev;
+      });
+    },
+    [multiSel, updateLandscape],
+  );
+
   const setBulkScale = useCallback(
     (s: number) => {
       if (!multiSel.size) return;
@@ -2056,6 +2081,17 @@ export function MapOverridesPane({
       if (p) return p.r ?? 0;
     }
     return 0;
+  }, [multiSel, current]);
+
+  const selectedMountainDarkness = useMemo(() => {
+    const values: number[] = [];
+    for (const key of multiSel) {
+      const parsed = parsePlacementKey(key);
+      if (!parsed) continue;
+      const placement = current?.landscape?.territories?.[parsed.tid]?.[parsed.index];
+      if (placement?.cat === 'mountains') values.push(placement.darkness ?? 0);
+    }
+    return values.length ? { value: values[0], mixed: values.some((value) => value !== values[0]), count: values.length } : null;
   }, [multiSel, current]);
 
   // --- copy from another map ----------------------------------------------
@@ -3176,6 +3212,22 @@ export function MapOverridesPane({
                       onChange={(e) => setBulkScale(Number(e.target.value))}
                     />
                   </label>
+                  {selectedMountainDarkness ? (
+                    <label className="mapov-bulk__scale" title={`Darken all ${selectedMountainDarkness.count} selected mountains`}>
+                      Mountain darkness
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={selectedMountainDarkness.value}
+                        aria-valuetext={selectedMountainDarkness.mixed ? 'Mixed' : `${Math.round(selectedMountainDarkness.value * 100)}%`}
+                        onPointerDown={() => armGesture('landscape')}
+                        onChange={(e) => setBulkDarkness(Number(e.target.value))}
+                      />
+                      <span>{selectedMountainDarkness.mixed ? 'Mixed' : `${Math.round(selectedMountainDarkness.value * 100)}%`}</span>
+                    </label>
+                  ) : null}
                   <label className="mapov-bulk__scale" title="Rotate all selected pieces">
                     Rotate
                     <button type="button" className="mapov-landscape__rot-btn" aria-label="Rotate selection left" onClick={() => nudgeBulkRotation(-15)}>

@@ -2903,7 +2903,7 @@ def get_contested_territories(
             include_sea_zone = False
             if staged_sea:
                 if staged_fac is not None:
-                    include_sea_zone = staged_fac == faction_id
+                    include_sea_zone = faction_acts_as(faction_defs, staged_fac, faction_id)
                 else:
                     include_sea_zone = _faction_has_sea_raid_passengers_in_sea_zone(
                         state.territories.get(staged_sea),
@@ -2929,16 +2929,15 @@ def get_contested_territories(
                 continue
             staged_fac = sea_raid_fac.get(land_tid)
             if staged_fac is not None:
-                if staged_fac != faction_id:
+                if not faction_acts_as(faction_defs, staged_fac, faction_id):
                     continue
             elif not _faction_has_sea_raid_passengers_in_sea_zone(
                 state.territories.get(sea_tid), faction_id, unit_defs, faction_defs
             ):
                 continue
-            if not staging_zone_blocks_sea_raid(
-                state, sea_tid, faction_id, unit_defs, faction_defs, territory_defs
-            ):
-                continue
+            # Still-embarked staged raiders may also come from a save where the
+            # naval battle was won before subfaction offloading was fixed. Keep
+            # their land battle discoverable; initiate_combat checks the naval gate.
             sea_t = state.territories.get(sea_tid)
             land_t = state.territories.get(land_tid)
             if not sea_t or not land_t:

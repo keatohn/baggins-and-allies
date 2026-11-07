@@ -2106,7 +2106,7 @@ def _apply_pending_moves(
                 if not hasattr(state, "territory_sea_raid_faction") or state.territory_sea_raid_faction is None:
                     state.territory_sea_raid_faction = {}
                 state.territory_sea_raid_from[to_id] = from_id
-                state.territory_sea_raid_faction[to_id] = faction_id
+                state.territory_sea_raid_faction[to_id] = state.current_faction or faction_id
                 _merge_sea_raid_passenger_instance_ids(state, to_id, list(ids_to_move))
             elif phase == "combat_move" and not ids_to_move:
                 boat_ids_in_move = {
@@ -4808,7 +4808,7 @@ def _offload_sea_raid_survivors_after_naval_win(
 
     for lid in lands:
         staged_fac = tsfac.get(lid)
-        if staged_fac is not None and staged_fac != attacker_faction:
+        if staged_fac is not None and not faction_acts_as(faction_defs, staged_fac, attacker_faction):
             continue
         land_t = state.territories.get(lid)
         if not land_t:
