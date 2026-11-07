@@ -3113,6 +3113,15 @@ def get_sea_raid_targets(
     if not territory_defs:
         return []
     attacker_alliance = faction_defs.get(faction_id, FactionDefinition("", "", "", "", "")).alliance
+    # Reverse adjacency (audit L11): land hexes whose `adjacent` lists each zone. Built once
+    # per call — the previous per-sea scan over every territory was O(seas × territories)
+    # and this runs on every available-actions build.
+    lands_listing_zone: dict[str, set[str]] = {}
+    for tid, land_def in territory_defs.items():
+        if _is_water_zone(land_def):
+            continue
+        for adj_id in getattr(land_def, "adjacent", []) or []:
+            lands_listing_zone.setdefault(adj_id, set()).add(tid)
     result = []
     for sea_zone_id, territory in state.territories.items():
         tdef = territory_defs.get(sea_zone_id)
@@ -3137,16 +3146,11 @@ def get_sea_raid_targets(
         ):
             continue
         # Adjacent land: from sea's adjacent list, or any land that lists this sea zone (symmetric)
-        adj_lands = set()
+        adj_lands = set(lands_listing_zone.get(sea_zone_id, ()))
         for adj_id in getattr(tdef, "adjacent", []) or []:
             adj_def = territory_defs.get(adj_id)
             if adj_def and not _is_water_zone(adj_def):
                 adj_lands.add(adj_id)
-        for tid, land_def in territory_defs.items():
-            if _is_water_zone(land_def):
-                continue
-            if sea_zone_id in (getattr(land_def, "adjacent", []) or []):
-                adj_lands.add(tid)
         for adj_id in sorted(adj_lands):
             adj_state = state.territories.get(adj_id)
             if adj_state is None:

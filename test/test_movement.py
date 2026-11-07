@@ -332,6 +332,53 @@ def test_sail_charges_hostility_aware_distance_hostile_sea():
     )
 
 
+def test_land_move_without_payload_move_type_across_water_shortest_path_is_not_sail():
+    """Issue #50 L10: a land→land move whose geometric shortest path crosses water must not be
+    inferred as move_type='sail' when the payload omits move_type (AI / engine callers do).
+
+    'sail' prices only naval/river/aerial drivers, so the mislabel zero-charges the land stack
+    and logs a sail event for a ground move."""
+    state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs = _board(
+        "gondor", "combat_move"
+    )
+
+    origin, dest = "west_osgiliath", "harondor"
+    u = next(x for x in state.territories[origin].units if x.unit_id == "gondor_soldier")
+    u.remaining_movement = 4
+
+    # Geometric path west_osgiliath -> sea_zone_12 -> harondor crosses water (length 2);
+    # the hostility-aware land route costs 4.
+    reachable, _ = get_reachable_territories_for_unit(
+        u, origin, state, unit_defs, territory_defs, faction_defs, "combat_move",
+    )
+    assert reachable.get(dest) == 4, f"expected hostility-aware distance 4, got {reachable.get(dest)}"
+
+    action = move_units("gondor", origin, dest, [u.instance_id])  # no move_type in payload
+    v = validate_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert v.valid, v.error
+    state, _ = apply_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert len(state.pending_moves) == 1
+    assert state.pending_moves[0].move_type == "land", (
+        "land→land must not be inferred as sail when the geometric path crosses water, "
+        f"got {state.pending_moves[0].move_type!r}"
+    )
+
+    state, events = apply_action(
+        state, end_phase("gondor"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs
+    )
+    moved = next(x for x in state.territories[dest].units if x.instance_id == u.instance_id)
+    # Charged 4 of 4: the sail mislabel prices land units as passengers (free).
+    assert moved.remaining_movement == 0, (
+        f"expected charge of 4 (remaining 0), got remaining={moved.remaining_movement}"
+    )
+    sail_events = [
+        e.payload
+        for e in events
+        if e.type == "units_moved" and e.payload.get("move_type") == "sail"
+    ]
+    assert not sail_events, f"ground move must not log a sail event: {sail_events}"
+
+
 def _board(faction: str, phase: str):
     unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(setup_id="wotr_1.1")
     starting = load_starting_setup(setup_id="wotr_1.1")
