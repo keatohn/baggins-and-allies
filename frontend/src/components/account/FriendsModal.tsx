@@ -4,6 +4,7 @@ import type { AuthPlayer, FriendRequestItem, FriendUser, GameInvitation, PlayerA
 import { useMenuScroll } from '../MenuScrollContext';
 import ModalShell from './ModalShell';
 import ProfileModal from './ProfileModal';
+import FriendsLeaderboard from './FriendsLeaderboard';
 import { tierRingProps } from './tierRing';
 
 const FALLBACK_AVATAR: PlayerAvatarSettings = { image: 'hobbit.png', color: '#2d5a27' };
@@ -221,6 +222,8 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
       className="account-modal--friends"
       closeOnEscape={viewing == null}
     >
+      <div className="friends-modal__layout">
+      <div className="friends-modal__social">
       {invitations.length > 0 && (
         <section className="account-section" aria-label="Invitations">
           <h3 className="account-section__title">Invitations</h3>
@@ -414,6 +417,9 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
         {listError && <p className="account-msg account-msg--error">{listError}</p>}
         {actionError && <p className="account-msg account-msg--error">{actionError}</p>}
       </section>
+      </div>
+      <FriendsLeaderboard friends={friends} onOpen={openFriend} />
+      </div>
     </ModalShell>
     {viewing && (
       <ProfileModal player={viewing} readOnly onClose={() => setViewing(null)} />
