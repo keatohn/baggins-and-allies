@@ -328,6 +328,7 @@ export function MapOverridesPane({
   const [activeKind, setActiveKind] = useState<UiKind>('unit');
   const [search, setSearch] = useState('');
   const [terrainFilter, setTerrainFilter] = useState('');
+  const [overridesLoading, setOverridesLoading] = useState(false);
   const [stored, setStored] = useState<MapOverridesData | null>(null);
   const [draft, setDraft] = useState<MapOverridesData | null>(null);
   const [past, setPast] = useState(emptyEditorHistory);
@@ -642,6 +643,7 @@ export function MapOverridesPane({
     setPaths(new Map());
     setSpots(null);
     setStored(null);
+    setOverridesLoading(true);
     setDraft(null);
     clearHistory();
     setSelected(null);
@@ -659,8 +661,11 @@ export function MapOverridesPane({
       .then((r) => {
         if (!cancelled) setStored(normalizeMapOverrides(r?.overrides));
       })
-      .catch(() => {
-        if (!cancelled) setStored({ territories: {} });
+      .catch((e) => {
+        if (!cancelled) setErr(e instanceof Error ? e.message : 'Failed to load saved map placements');
+      })
+      .finally(() => {
+        if (!cancelled) setOverridesLoading(false);
       });
     loadTerritorySvgPaths(mapBase)
       .then(({ paths: nextPaths, viewBox: vb }) => {
@@ -1420,15 +1425,7 @@ export function MapOverridesPane({
     try {
       updateLandscape((prev) => {
         const map: Record<string, LandscapePlacement[]> = { ...(prev?.territories ?? {}) };
-        // Replace only this pill's previous auto pass. The other set, and anything placed by hand, stays.
-        for (const [tid, placements] of Object.entries(map)) {
-          map[tid] = placements.filter((p) => {
-            if (!p.auto) return true;
-            const isLandmark = p.cat === LANDSCAPE_LANDMARK_CATEGORY;
-            return landmarksOnly ? !isLandmark : isLandmark;
-          });
-          if (!map[tid].length) delete map[tid];
-        }
+        // Generation is additive: never remove or replace existing art, including auto placements.
         const seed = (Date.now() % 2147483647) || 1;
         let seedAcc = seed;
         const nextSeed = () => {
@@ -1457,7 +1454,10 @@ export function MapOverridesPane({
               const existing = map[key] ?? [];
               const room = Math.min(50 - existing.length, 2500 - totalPlaced);
               if (room <= 0) continue;
-              const generated = autoGenerateForTerritory(pathEl, cat, images, nextSeed()).slice(0, room);
+              const generated = autoGenerateForTerritory(pathEl, cat, images, nextSeed())
+                .filter((candidate) => !existing.some((p) =>
+                  (p.x - candidate.x) ** 2 + (p.y - candidate.y) ** 2 < PAINT_MIN_DIST ** 2))
+                .slice(0, room);
               if (generated.length) {
                 map[key] = [...existing, ...generated];
                 totalPlaced += generated.length;
@@ -1930,13 +1930,19 @@ export function MapOverridesPane({
   // --- save ---------------------------------------------------------------
 
   const save = async () => {
-    if (!dirty || !draft || !mapBase || saving) return;
+    if (!dirty || !draft || !mapBase || saving || overridesLoading || !stored) return;
     setSaving(true);
     setSaveError(null);
     try {
       const res = await api.adminPutMapOverrides(mapBase, draft);
-      setStored(normalizeMapOverrides(res?.overrides ?? draft));
-      setDraft(null);
+      const saved = normalizeMapOverrides(res?.overrides ?? draft);
+      const latest = currentRef.current;
+      storedRef.current = saved;
+      setStored(saved);
+      // Keep edits made while the request was in flight as an unsaved draft.
+      const remaining = latest && stableJson(latest) !== stableJson(draft) ? latest : null;
+      currentRef.current = remaining ?? saved;
+      setDraft(remaining);
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : 'Save failed');
     } finally {
@@ -2136,7 +2142,7 @@ export function MapOverridesPane({
         y: Math.round(y * 100) / 100,
         layer: p.layer,
       };
-      // Copied pieces are a deliberate import: keep them across the next auto pass.
+      // Copied pieces are manual placements; preserve their visual settings.
       if (typeof p.s === 'number' && p.s !== 1) placement.s = Math.min(4, Math.max(0.25, p.s));
       if (p.darkness != null) placement.darkness = p.darkness;
       const copiedRotation = landscapeRotation(p.r ?? 0);
@@ -2351,7 +2357,7 @@ export function MapOverridesPane({
       : editorTab === 'graph'
       ? 'Choose a territory, then click another to toggle that border. Land replaces aerial and ford. Aerial and ford can both stay. Save writes both sides onto this map and every setup that uses it.'
       : editorTab === 'landscape'
-      ? 'Place terrain art constrained by each territory’s type, or switch to Landmarks for named places. Auto-generate replaces only the selected set. Save applies to every setup using this map.'
+      ? 'Place terrain art constrained by each territory’s type, or switch to Landmarks for named places. Auto-generate only adds art; existing terrain and landmarks stay. Save applies to every setup using this map.'
       : spots
         ? 'Four dots per territory: blue units · red production/sea number · yellow faction logo · green other icons (territory type, homes, camps, ports, signals, rings). Pick a territory, switch it to Override, then drag its dots. Save applies to every setup using this map.'
         : 'Loading calculated spots…';
@@ -2518,8 +2524,8 @@ export function MapOverridesPane({
                   onClick={autoGenerateLandscape}
                   title={
                     artMode === 'landmarks'
-                      ? 'Place each landmark on its territory. Terrain art and hand-placed pieces stay.'
-                      : 'Fill terrain art. Landmarks and hand-placed pieces stay.'
+                      ? 'Add missing landmarks on their territories. Existing landmarks and terrain art stay.'
+                      : 'Add terrain art in available space. All existing art stays.'
                   }
                 >
                   {autoBusy ? 'Generating…' : 'Auto-generate'}
@@ -2547,7 +2553,7 @@ export function MapOverridesPane({
               <button
                 type="button"
                 className={`admin-page__btn${dirty ? ' admin-page__btn--primary' : ''}`}
-                disabled={saving || !dirty}
+                disabled={saving || overridesLoading || !stored || !!err || !dirty}
                 onClick={() => void save()}
               >
                 {saving ? 'Saving…' : 'Save'}
@@ -2607,14 +2613,14 @@ export function MapOverridesPane({
             </p>
           )}
         </div>
-        {loading ? <p className="admin-form__micro">Loading map…</p> : null}
+        {loading || overridesLoading ? <p className="admin-form__micro">Loading map…</p> : null}
         {err ? <p className="admin-page__error">{err}</p> : null}
         {saveError ? <p className="admin-page__error">{saveError}</p> : null}
-        {!loading && !err && editorTab === 'builder' ? (
+        {!loading && !overridesLoading && !err && editorTab === 'builder' ? (
           <div className="admin-graph__body">
             <MapBuilder />
           </div>
-        ) : !loading && !err ? (
+        ) : !loading && !overridesLoading && !err ? (
           <div className="admin-graph__body">
             <div className={`admin-graph__side mapov-side${editorTab === 'landscape' ? ' mapov-side--landscape' : ''}`}>
               {editorTab === 'landscape' ? (
