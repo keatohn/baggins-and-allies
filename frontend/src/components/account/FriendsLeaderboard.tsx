@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { compareLeaderboardValues, leaderboardValue } from './friendsLeaderboardOrder';
+import { tierRingProps } from './tierRing';
 import { api } from '../../services/api';
 import type { FriendUser, PlayerProfileCard, PlayerStats, PlayerStatsOverall } from '../../services/api';
 
 const columns = [
-  ['xp', 'Total XP'], ['wins', 'Wins'], ['losses', 'Losses'], ['win_pct', 'Win %'],
-  ['games', 'Games completed'], ['strongholds_captured', 'Strongholds conquered'],
-  ['battles_won', 'Battles won'], ['units_destroyed', 'Units destroyed'],
+  ['xp', 'XP'], ['wins', 'Wins'], ['losses', 'Losses'], ['win_pct', 'Win %'],
+  ['games', 'Games'], ['strongholds_captured', 'Strongholds'],
+  ['battles_won', 'Battles'], ['units_destroyed', 'Units'],
 ] as const;
 type SortKey = typeof columns[number][0];
 type Entry = { profile: PlayerProfileCard; stats: PlayerStats };
@@ -100,7 +101,7 @@ export default function FriendsLeaderboard({ friends, onOpen }: {
         <div className="friends-leaderboard__scroll">
           <table className="friends-leaderboard__table">
             <caption className="visually-hidden">You and your friends, ranked by {columns.find(([key]) => key === sort.key)?.[1]}, {sort.direction === 'desc' ? 'descending' : 'ascending'}</caption>
-            <thead><tr>{header('xp', 'Total XP')}<th scope="col">Player / tier</th>{columns.slice(1).map(([key, label]) => header(key, label))}</tr></thead>
+            <thead><tr><th scope="col">Username</th>{header('xp', 'XP')}<th scope="col">Tier</th>{columns.slice(1).map(([key, label]) => header(key, label))}</tr></thead>
             <tbody>{rows.map((entry) => {
               const profile = entry.profile;
               const xp = profile.xp ?? 0;
@@ -108,10 +109,19 @@ export default function FriendsLeaderboard({ friends, onOpen }: {
               const ceiling = profile.next_tier_xp;
               const progress = ceiling == null ? 100 : Math.min(100, Math.max(0, (xp - floor) / Math.max(1, ceiling - floor) * 100));
               const self = profile.id === board.selfId;
+              const avatar = profile.avatar ?? { image: 'hobbit.png', color: '#2d5a27' };
+              const ring = tierRingProps(profile.tier);
               return <tr key={profile.id} className={self ? 'friends-leaderboard__self' : undefined}>
-                <td>{xp.toLocaleString()}</td>
                 <td className="friends-leaderboard__player">
-                  <button type="button" className="friends-list__person" onClick={() => onOpen(profile)}>{profile.username}{self ? ' (you)' : ''}</button>
+                  <button type="button" className="friends-list__person" onClick={() => onOpen(profile)}>
+                    <span className={`friends-list__avatar${ring.className}`} style={{ backgroundColor: avatar.color, ...ring.style }} aria-hidden>
+                      <img src={`/assets/units/${avatar.image}`} alt="" />
+                    </span>
+                    <span className="friends-list__name">{profile.username}{self ? ' (you)' : ''}</span>
+                  </button>
+                </td>
+                <td>{xp.toLocaleString()}</td>
+                <td className="friends-leaderboard__progress">
                   <span className="friends-leaderboard__tier">{profile.tier?.name ?? 'Unranked'}</span>
                   <div className="account-xp__bar" role="progressbar" aria-label={`${profile.username}: ${profile.tier?.name ?? 'Unranked'} tier progress`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)}>
                     <span className="account-xp__fill" style={{ width: `${progress}%`, background: profile.tier?.color }} />
