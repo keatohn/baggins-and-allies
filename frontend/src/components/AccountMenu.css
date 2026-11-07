@@ -1174,9 +1174,9 @@ button.friends-list__person .friends-list__name {
 
 /* Friends management and a career leaderboard share one spacious dialog. */
 .account-modal.account-modal--friends {
-  width: min(1480px, 96vw);
-  height: min(860px, 94dvh);
-  max-height: 94dvh;
+  width: min(1180px, 94vw);
+  height: min(700px, 88dvh);
+  max-height: 88dvh;
 }
 
 .account-modal--friends .account-modal__body {
@@ -1187,8 +1187,8 @@ button.friends-list__person .friends-list__name {
 
 .friends-modal__layout {
   display: grid;
-  grid-template-columns: minmax(16rem, 21rem) minmax(0, 1fr);
-  gap: 1.5rem;
+  grid-template-columns: minmax(15rem, 18rem) minmax(0, 1fr);
+  gap: 1rem;
   height: 100%;
   min-height: 0;
 }
@@ -1236,13 +1236,15 @@ button.friends-list__person .friends-list__name {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
+  font-family: var(--font-parchment);
   font-variant-numeric: tabular-nums;
-  font-size: 0.85rem;
+  font-size: 1rem;
 }
 
 .friends-leaderboard__table th,
 .friends-leaderboard__table td {
-  padding: 0.65rem 0.6rem;
+  padding: 0.5rem 0.4rem;
+  font-family: var(--font-parchment);
   text-align: right;
   border-bottom: 1px solid rgba(61, 41, 20, 0.18);
 }
@@ -1261,12 +1263,17 @@ button.friends-list__person .friends-list__name {
   font: inherit;
   font-weight: 700;
   cursor: pointer;
+  padding: 0;
+  white-space: nowrap;
+  text-transform: none;
+  letter-spacing: normal;
 }
 
-.friends-leaderboard__table th:nth-child(2),
+.friends-leaderboard__table th:first-child,
 .friends-leaderboard__table .friends-leaderboard__player {
   text-align: left;
-  min-width: 10rem;
+  min-width: 8rem;
+  max-width: 12rem;
 }
 
 .friends-leaderboard__player .friends-list__person {
@@ -1276,17 +1283,34 @@ button.friends-list__person .friends-list__name {
 
 .friends-leaderboard__tier {
   display: block;
-  font-size: 0.75rem;
-  margin: 0.2rem 0;
+  font-size: 0.9rem;
+  margin: 0 0 0.2rem;
   color: var(--ink-faded);
 }
 
-.friends-leaderboard__player .account-xp__bar {
+.friends-leaderboard__progress {
+  min-width: 6rem;
+  text-align: left;
+}
+
+.friends-leaderboard__progress .account-xp__bar {
   height: 10px;
 }
 
-.friends-leaderboard__self td {
-  background: rgba(255, 255, 255, 0.65);
+.friends-leaderboard__table tbody tr:nth-child(odd) td {
+  background: var(--parchment);
+}
+
+.friends-leaderboard__table tbody tr:nth-child(even) td {
+  background: var(--parchment-light);
+}
+
+.friends-leaderboard__table tbody .friends-leaderboard__self td {
+  background: #f4e7cd;
+}
+
+.friends-leaderboard__table .friends-list__name {
+  font-size: inherit;
 }
 
 @media (max-width: 800px) {
