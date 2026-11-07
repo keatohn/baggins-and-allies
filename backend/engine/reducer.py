@@ -4472,8 +4472,7 @@ def _handle_retreat(
 
     if _sea_raid_retreat_is_vetoed(state):
         raise ValueError(
-            "Cannot retreat from this sea raid: all attackers came from the sea "
-            "(only units that joined the attack from land may retreat)"
+            "Cannot retreat from this sea raid: the attack includes units that came from the sea"
         )
 
     retreat_to = action.payload.get("retreat_to")

@@ -1759,8 +1759,7 @@ def _validate_retreat(
     if _sea_raid_retreat_is_vetoed(state):
         return ValidationResult(
             False,
-            "Cannot retreat from this sea raid: all attackers came from the sea "
-            "(only units that joined the attack from land may retreat)",
+            "Cannot retreat from this sea raid: the attack includes units that came from the sea",
         )
 
     destination = action.payload.get("retreat_to")
@@ -3237,11 +3236,12 @@ def _get_retreat_adjacent_ids(
 
 def _sea_raid_retreat_is_vetoed(state: GameState) -> bool:
     """
-    Sea-raid retreat veto: True when every surviving attacker in a sea raid came from the
-    water — still-embarked passengers in the staging sea, or passengers recorded as having
-    disembarked onto the raided hex (territory_sea_raid_passenger_instance_ids). If any
-    survivor joined the attack from land (walk-in, aerial, etc.), retreat stays available.
-    Pure naval battles (no sea_zone_id) are unaffected.
+    Sea-raid retreat veto: True when at least one surviving attacker in a sea raid came
+    from the water — still embarked in the staging sea zone, or recorded as having
+    disembarked onto the raided hex (territory_sea_raid_passenger_instance_ids). A single
+    such unit blocks retreat for the entire attack, land joiners included (no partial or
+    mixed-roster retreats). A roster with no sea-origin survivors (they all died) falls
+    back to the normal adjacency rules. Pure naval battles (no sea_zone_id) are unaffected.
     """
     combat = state.active_combat
     if combat is None or not getattr(combat, "sea_zone_id", None):
@@ -3252,15 +3252,11 @@ def _sea_raid_retreat_is_vetoed(state: GameState) -> bool:
         )
     )
     sea_zone = state.territories.get(combat.sea_zone_id)
-    land = state.territories.get(combat.territory_id)
     sea_ids = {u.instance_id for u in sea_zone.units} if sea_zone else set()
-    land_ids = {u.instance_id for u in land.units} if land else set()
     for iid in combat.attacker_instance_ids or []:
-        if iid in sea_ids:
-            continue
-        if iid in land_ids and iid not in passenger_ids:
-            return False
-    return True
+        if iid in sea_ids or iid in passenger_ids:
+            return True
+    return False
 
 
 def get_retreat_options(
@@ -3273,7 +3269,7 @@ def get_retreat_options(
     Get valid retreat destinations for the current active combat.
     Returns list of adjacent territory IDs that are allied (same alliance).
     Only ground-adjacent if any retreating unit is land; aerial_adjacent allowed only if all are aerial.
-    Empty when the sea-raid retreat veto applies (every attacker came from the sea).
+    Empty when the sea-raid retreat veto applies (the attack includes units that came from the sea).
     """
     if not state.active_combat:
         return []
