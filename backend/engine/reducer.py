@@ -1510,16 +1510,16 @@ def _handle_move_units(
         elif from_sea_mt and to_sea_mt:
             move_type = "sail"
         else:
-            path = get_shortest_path(from_id, to_id, territory_defs)
-            if path and any(_is_water_zone(territory_defs.get(t)) for t in path):
-                move_type = "sail"
-            else:
-                any_aerial = any(
-                    u and (getattr(unit_defs.get(u.unit_id), "archetype", "") == "aerial" or "aerial" in getattr(unit_defs.get(u.unit_id), "tags", []))
-                    for iid in unit_instance_ids
-                    for u in [units_by_id.get(iid)]
-                )
-                move_type = "aerial" if any_aerial else "land"
+            # Land→land: never infer "sail" (audit L10). A sail is water→water only — the
+            # geometric shortest path may hop a sea/river hex a land unit cannot enter, and
+            # pricing a ground move as sail charges only naval/river/aerial drivers (free
+            # land moves) and logs a sail event for a ground move.
+            any_aerial = any(
+                u is not None and is_aerial_unit(unit_defs.get(u.unit_id))
+                for iid in unit_instance_ids
+                for u in [units_by_id.get(iid)]
+            )
+            move_type = "aerial" if any_aerial else "land"
 
     load_onto_boat_instance_id = (action.payload.get("load_onto_boat_instance_id") or "").strip() or None
     primary_unit_id = str(units_to_move[0].unit_id) if units_to_move else ""

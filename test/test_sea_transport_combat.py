@@ -488,6 +488,49 @@ def test_sea_raid_targets_gated_while_hostile_fleet_in_staging_zone(state_with_s
     assert not vr.valid and "must be resolved" in vr.error
 
 
+def test_sea_raid_targets_include_land_that_only_lists_the_sea(wotr_defs):
+    """
+    L11: get_sea_raid_targets must consider both adjacency directions — the sea zone's own
+    `adjacent` list AND lands that list the sea zone. wotr_exp_1.0's fords_of_isen lists
+    sea_zone_6 while sea_zone_6 does not list it back; building only the forward scan
+    (e.g. while de-duplicating the O(seas × territories) reverse scan) drops that target.
+    """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    # Guard the one-sided adjacency premise this test depends on.
+    assert "sea_zone_6" in (getattr(territory_defs["fords_of_isen"], "adjacent", []) or [])
+    assert "fords_of_isen" not in (getattr(territory_defs["sea_zone_6"], "adjacent", []) or [])
+
+    sea = state.territories["sea_zone_6"]
+    sea.units.clear()
+    sea.units.append(_make_unit(state, "harad", "black_ship", unit_defs))
+    sea.units.append(_make_unit(state, "harad", "corsair_of_umbar", unit_defs))
+    state.current_faction = "harad"
+    state.phase = "combat"
+
+    targets = get_sea_raid_targets(state, "harad", faction_defs, unit_defs, territory_defs)
+    pair = {"territory_id": "fords_of_isen", "sea_zone_id": "sea_zone_6"}
+    assert pair in targets, (
+        "land that only lists the sea zone must still be advertised as a raid target"
+    )
+    # Advertised pairs must pass validation (validation accepts either adjacency direction).
+    vr = validate_action(
+        state,
+        initiate_combat(
+            "harad", "fords_of_isen",
+            dice_rolls={"attacker": [1], "defender": []},
+            sea_zone_id="sea_zone_6",
+        ),
+        unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
+    assert vr.valid, vr.error
+
+
 def test_sea_raid_combat_attacker_win_moves_to_territory(state_with_sea_units):
     """Sea raid with combat: attacker wins -> land survivors move to territory, ships stay in sea."""
     state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs = state_with_sea_units
