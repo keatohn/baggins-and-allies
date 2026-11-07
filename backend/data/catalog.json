@@ -112,7 +112,7 @@
       "id": "stealth",
       "name": "Stealth",
       "display_code": "ST",
-      "description": "If everyone in attack has stealth, they pre-fire and cancel any defensive archer pre-fire"
+      "description": "If everyone in attack has stealth, they pre-fire and cancel the defender's archer pre-fire and siegeworks round"
     },
     {
       "id": "terror",

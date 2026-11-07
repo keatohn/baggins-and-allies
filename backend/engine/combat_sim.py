@@ -6,12 +6,21 @@ Runs many combat trials using the same resolution logic as real combat
 without mutating game state. Used to estimate P(attacker wins), P(conquer),
 casualty distributions, and round counts.
 
+Everything is sourced from the combat engine's single-source helpers so the sim and
+live combat can never drift:
+- units: combat_specials.stacks_to_synthetic_units (same builder as the API battle context)
+- effective stats + applied specials: combat_specials.compute_battle_specials_and_modifiers
+- prefires / dedicated rounds / eligibility: combat resolvers + utils.has_unit_special,
+  archer_prefire_eligible, get_siegework_dice_counts, get_ladder_infantry_instance_ids
+- strongholds: default wall HP from the territory definition (live always soaks)
+
 Retreat: optional retreat_when_attacker_units_le; if set, after each round
 when attacker unit count <= that value, the battle ends as retreat (defender holds).
 
 Opening phase order (matches reducer): stealth prefire when all attackers have stealth
-(cancels dedicated siegework and archer prefire); else dedicated siegework round when
-applicable, then defender archer prefire when applicable, then standard rounds.
+(cancels the dedicated siegeworks round and defender archer prefire); else dedicated
+siegework round when applicable, then defender archer prefire when applicable, then
+standard rounds.
 """
 
 import math
@@ -26,6 +35,10 @@ CasualtyCostVarianceCategory = Literal["Predictable", "Moderate", "Unpredictable
 CV_PREDICTABLE = 0.4
 CV_UNPREDICTABLE = 0.8
 MEAN_EPSILON = 0.5  # below this mean we use stdev-only rule
+
+# Hard cap on rounds per battle so degenerate matchups (e.g. both sides attack 0)
+# cannot loop forever. A battle hitting the cap is scored as a defender hold.
+DEFAULT_MAX_ROUNDS = 500
 
 
 def _casualty_cost_variance_category(costs: list[float]) -> CasualtyCostVarianceCategory:
@@ -50,10 +63,6 @@ def _casualty_cost_variance_category(costs: list[float]) -> CasualtyCostVariance
 from backend.engine import DICE_SIDES
 from backend.engine.combat import (
     RoundResult,
-    compute_anti_cavalry_stat_modifiers,
-    compute_captain_stat_modifiers,
-    compute_sea_raider_stat_modifiers,
-    compute_terrain_stat_modifiers,
     get_attacker_effective_dice_and_bombikazi_self_destruct,
     get_bombikazi_pairing,
     get_ladder_infantry_instance_ids,
@@ -61,12 +70,15 @@ from backend.engine.combat import (
     get_siegework_attacker_rolling_units,
     get_siegework_defender_rolling_units,
     get_terror_reroll_targets,
-    merge_stat_modifiers,
     resolve_archer_prefire,
     resolve_combat_round,
     resolve_siegeworks_round,
     resolve_stealth_prefire,
     siegework_dice_round_applies,
+)
+from backend.engine.combat_specials import (
+    compute_battle_specials_and_modifiers,
+    stacks_to_synthetic_units,
 )
 from backend.engine.definitions import TerritoryDefinition, UnitDefinition
 from backend.engine.movement import _is_sea_zone, _is_water_zone
@@ -75,6 +87,7 @@ from backend.engine.utils import (
     archer_prefire_eligible,
     can_conquer_territory_as_attacker,
     generate_combat_rolls_for_units,
+    has_unit_special,
 )
 
 
@@ -88,12 +101,17 @@ class SimOptions:
     casualty_order_attacker: str = "best_unit"  # "best_unit" | "best_attack"
     casualty_order_defender: str = "best_unit"  # "best_unit" | "best_defense"
     must_conquer: bool = False
-    max_rounds: int | None = None  # Cap rounds; if hit, treat as defender wins
+    # Cap rounds; if hit, treat as defender wins. None (or omitted) = DEFAULT_MAX_ROUNDS —
+    # a battle can never loop forever (e.g. both sides attack 0).
+    max_rounds: int | None = DEFAULT_MAX_ROUNDS
     # Land combat only: passengers-from-sea scenario. Applies Sea Raider +attack to
     # units with that special. Not naval combat (no boats as attackers, no naval hit rules).
     is_sea_raid: bool = False
     retreat_when_attacker_units_le: int | None = None  # After round, if attacker count <= this, end as retreat
-    stronghold_initial_hp: int | None = None  # When set, defender stronghold starts at this HP (siegeworks + normal rounds soak it)
+    # Defender stronghold starts at this HP (siegeworks + normal rounds soak it).
+    # None (or omitted) defaults to the territory's stronghold_base_health — live combat
+    # always soaks; explicit 0 still means "walls down".
+    stronghold_initial_hp: int | None = None
     # True (default): bomb detonates in siegeworks and removes paired bombikazi after; False matches live fuse_bomb No
     fuse_bomb: bool = True
     # True (default): -1 to stealth and archer prefire target stats; False: 0 (setup manifest prefire_penalty).
@@ -156,48 +174,6 @@ class BattleOutcome:
     siegework_defender_dice: int = 0  # defender siegework dice (excludes ladder); 0 => no defender rolls
 
 
-def _stacks_to_units(
-    stacks: list[dict[str, Any]],
-    prefix: str,
-    unit_defs: dict[str, UnitDefinition],
-) -> list[Unit]:
-    """Build a list of Unit instances from stacks. Each stack is { "unit_id": str, "count": int }."""
-    units: list[Unit] = []
-    idx = 0
-    for s in stacks:
-        unit_id = (s.get("unit_id") or "").strip()
-        count = int(s.get("count") or 0)
-        if not unit_id or count <= 0:
-            continue
-        ud = unit_defs.get(unit_id)
-        if not ud:
-            continue
-        base_health = getattr(ud, "health", 1)
-        base_movement = getattr(ud, "movement", 0)
-        for _ in range(count):
-            instance_id = f"{prefix}_{idx}"
-            units.append(
-                Unit(
-                    instance_id=instance_id,
-                    unit_id=unit_id,
-                    remaining_movement=base_movement,
-                    remaining_health=base_health,
-                    base_movement=base_movement,
-                    base_health=base_health,
-                    loaded_onto=None,
-                )
-            )
-            idx += 1
-    return units
-
-
-def _has_special(unit_def: UnitDefinition | None, special: str) -> bool:
-    if not unit_def:
-        return False
-    specials = getattr(unit_def, "specials", []) or []
-    return special in specials or special in getattr(unit_def, "tags", [])
-
-
 def run_one_battle(
     attacker_stacks: list[dict[str, Any]],
     defender_stacks: list[dict[str, Any]],
@@ -228,6 +204,7 @@ def run_one_battle(
     if seed is not None:
         random.seed(seed)
     pdelta = -1 if opts.prefire_penalty else 0
+    max_rounds_cap = opts.max_rounds if opts.max_rounds is not None else DEFAULT_MAX_ROUNDS
 
     att_prefire_hits = 0
     def_prefire_hits = 0
@@ -239,8 +216,9 @@ def run_one_battle(
     sw_att_dice_at_resolution = 0
     sw_def_dice_at_resolution = 0
 
-    attacker_units = _stacks_to_units(attacker_stacks, "att", unit_defs)
-    defender_units = _stacks_to_units(defender_stacks, "def", unit_defs)
+    attacker_units, defender_units = stacks_to_synthetic_units(
+        attacker_stacks, defender_stacks, unit_defs,
+    )
 
     instance_to_att_uid = {u.instance_id: u.unit_id for u in attacker_units}
     instance_to_def_uid = {u.instance_id: u.unit_id for u in defender_units}
@@ -263,9 +241,9 @@ def run_one_battle(
     ran_stealth_prefire = False
 
     # --- Stealth prefire: all attackers have stealth -> attackers roll at attack-1, hits to defenders;
-    # cancels dedicated siegework round and defender archer prefire (same as live combat).
+    # cancels the dedicated siegework round and defender archer prefire (same as live combat).
     if attacker_units and defender_units and all(
-        _has_special(unit_defs.get(u.unit_id), "stealth") for u in attacker_units
+        has_unit_special(unit_defs.get(u.unit_id), "stealth") for u in attacker_units
     ):
         ran_stealth_prefire = True
         stealth_eff_dice, _, stealth_attack_ov = get_attacker_effective_dice_and_bombikazi_self_destruct(
@@ -277,21 +255,15 @@ def run_one_battle(
             attacker_effective_dice_override=stealth_eff_dice,
             exclude_archetypes={"siegework"},
         )
-        terrain_att, terrain_def = compute_terrain_stat_modifiers(
-            territory_def, attacker_units, defender_units, unit_defs
+        spec_stealth = compute_battle_specials_and_modifiers(
+            attacker_units,
+            defender_units,
+            territory_def,
+            unit_defs,
+            is_sea_raid=opts.is_sea_raid,
+            stealth_prefire_applicable=True,
         )
-        anticav_att, anticav_def = compute_anti_cavalry_stat_modifiers(
-            attacker_units, defender_units, unit_defs
-        )
-        captain_att, captain_def = compute_captain_stat_modifiers(
-            attacker_units, defender_units, unit_defs
-        )
-        sea_raider_att, _ = compute_sea_raider_stat_modifiers(
-            attacker_units, unit_defs, is_sea_raid=opts.is_sea_raid
-        )
-        attacker_mods = merge_stat_modifiers(
-            terrain_att, anticav_att, captain_att, sea_raider_att
-        )
+        attacker_mods = spec_stealth.stat_modifiers_attacker
         prefire_result = resolve_stealth_prefire(
             attacker_units,
             defender_units,
@@ -338,8 +310,14 @@ def run_one_battle(
             )
 
     siegeworks_occurred = False
-    stronghold_hp: int | None = getattr(opts, "stronghold_initial_hp", None)
     defender_territory_is_stronghold = bool(territory_def and getattr(territory_def, "is_stronghold", False))
+    stronghold_hp: int | None = getattr(opts, "stronghold_initial_hp", None)
+    if stronghold_hp is None and defender_territory_is_stronghold:
+        # Live combat always soaks against the territory's wall HP; default when the
+        # caller didn't pass one (explicit 0 still means "walls down").
+        base_wall_hp = int(getattr(territory_def, "stronghold_base_health", 0) or 0)
+        if base_wall_hp > 0:
+            stronghold_hp = base_wall_hp
     fuse_sim = bool(getattr(opts, "fuse_bomb", True))
     siegework_applies, siegework_att_dice, siegework_def_dice = siegework_dice_round_applies(
         attacker_units, defender_units, unit_defs, defender_territory_is_stronghold,
@@ -353,17 +331,16 @@ def run_one_battle(
         # --- Siegeworks round: before archer prefire and round 1 (stronghold soaks ram/bomb etc.; overflow hits defenders). ---
         if attacker_units and defender_units and siegework_applies:
             siegeworks_occurred = True
-            terrain_att, terrain_def = compute_terrain_stat_modifiers(
-                territory_def, attacker_units, defender_units, unit_defs
+            spec_sw = compute_battle_specials_and_modifiers(
+                attacker_units,
+                defender_units,
+                territory_def,
+                unit_defs,
+                is_sea_raid=opts.is_sea_raid,
+                ram_applicable=True,
             )
-            anticav_att, anticav_def = compute_anti_cavalry_stat_modifiers(
-                attacker_units, defender_units, unit_defs
-            )
-            captain_att, captain_def = compute_captain_stat_modifiers(
-                attacker_units, defender_units, unit_defs
-            )
-            attacker_mods = merge_stat_modifiers(terrain_att, anticav_att, captain_att)
-            defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
+            attacker_mods = spec_sw.stat_modifiers_attacker
+            defender_mods = spec_sw.stat_modifiers_defender
             att_rolling = get_siegework_attacker_rolling_units(
                 attacker_units, unit_defs, defender_territory_is_stronghold,
                 defender_stronghold_hp=stronghold_hp,
@@ -476,16 +453,17 @@ def run_one_battle(
         defender_archer_units = [u for u in defender_units if archer_prefire_eligible(unit_defs.get(u.unit_id))]
         if attacker_units and defender_archer_units:
             dice = generate_combat_rolls_for_units(attacker_units, defender_units, unit_defs, seed=None)
-            terrain_att, terrain_def = compute_terrain_stat_modifiers(
-                territory_def, attacker_units, defender_units, unit_defs
+            spec_archer = compute_battle_specials_and_modifiers(
+                attacker_units,
+                defender_units,
+                territory_def,
+                unit_defs,
+                is_sea_raid=opts.is_sea_raid,
+                archer_prefire_applicable=True,
             )
-            anticav_att, anticav_def = compute_anti_cavalry_stat_modifiers(
-                attacker_units, defender_units, unit_defs
-            )
-            captain_att, captain_def = compute_captain_stat_modifiers(
-                attacker_units, defender_units, unit_defs
-            )
-            defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
+            defender_mods = spec_archer.stat_modifiers_defender
+            # resolve_archer_prefire applies the stronghold/fortress penalty exemption
+            # (archer special) to this delta internally — same contract as the reducer.
             prefire_result = resolve_archer_prefire(
                 attacker_units,
                 defender_archer_units,
@@ -523,10 +501,6 @@ def run_one_battle(
                     siegework_defender_dice=sw_def_dice_at_resolution,
                 )
 
-    ladder_infantry_instance_ids = get_ladder_infantry_instance_ids(
-        attacker_units, unit_defs,
-    )
-
     # --- Round loop ---
     while True:
         round_number += 1
@@ -557,7 +531,7 @@ def run_one_battle(
         if not attacker_units or not defender_units:
             break
 
-        if opts.max_rounds is not None and round_number > opts.max_rounds:
+        if round_number > max_rounds_cap:
             return BattleOutcome(
                 winner="defender",
                 retreat=False,
@@ -578,30 +552,29 @@ def run_one_battle(
                 siegework_defender_dice=sw_def_dice_at_resolution,
             )
 
+        # Effective stats + specials for this round from the combat engine's single source
+        # (terrain, anti-cavalry, leader, sea raider — recomputed fresh each round like the reducer).
+        spec_round = compute_battle_specials_and_modifiers(
+            attacker_units,
+            defender_units,
+            territory_def,
+            unit_defs,
+            is_sea_raid=opts.is_sea_raid,
+        )
+        attacker_mods = spec_round.stat_modifiers_attacker
+        defender_mods = spec_round.stat_modifiers_defender
+
         use_pair_fusion = (not siegeworks_occurred) or fuse_sim
         att_effective_dice, att_self_destruct, att_attack_override = get_attacker_effective_dice_and_bombikazi_self_destruct(
             attacker_units, unit_defs,
             use_paired_fused_siegework_rules=use_pair_fusion,
         )
-        ladder_set = set(ladder_infantry_instance_ids)
+        # Ladder climbers are re-derived every round (same as live combat): members die
+        # between rounds, so a stale set would misroute wall-bypass hits.
+        ladder_set = set(get_ladder_infantry_instance_ids(attacker_units, unit_defs))
         if ladder_set:
-            terrain_att, terrain_def = compute_terrain_stat_modifiers(
-                territory_def, attacker_units, defender_units, unit_defs
-            )
-            anticav_att, anticav_def = compute_anti_cavalry_stat_modifiers(
-                attacker_units, defender_units, unit_defs
-            )
-            captain_att, captain_def = compute_captain_stat_modifiers(
-                attacker_units, defender_units, unit_defs
-            )
-            sea_raider_att, _ = compute_sea_raider_stat_modifiers(
-                attacker_units, unit_defs, is_sea_raid=opts.is_sea_raid
-            )
-            am = merge_stat_modifiers(
-                terrain_att, anticav_att, captain_att, sea_raider_att
-            )
             sort_attackers_for_ladder_dice_order(
-                attacker_units, unit_defs, ladder_set, am, att_attack_override or None,
+                attacker_units, unit_defs, ladder_set, attacker_mods, att_attack_override or None,
             )
         dice_rolls = generate_combat_rolls_for_units(
             attacker_units, defender_units, unit_defs, seed=None,
@@ -611,22 +584,12 @@ def run_one_battle(
 
         # Round 1 terror: light cancels all opposing terror, else hope cancels 1 each, then cap at 3 defender hit dice re-rolled
         if round_number == 1:
-            terrain_att, terrain_def = compute_terrain_stat_modifiers(
-                territory_def, attacker_units, defender_units, unit_defs
-            )
-            anticav_att, anticav_def = compute_anti_cavalry_stat_modifiers(
-                attacker_units, defender_units, unit_defs
-            )
-            captain_att, captain_def = compute_captain_stat_modifiers(
-                attacker_units, defender_units, unit_defs
-            )
-            defender_mods_r1 = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
             terror_indices, _ = get_terror_reroll_targets(
                 attacker_units,
                 defender_units,
                 unit_defs,
                 dice_rolls,
-                defender_mods_r1,
+                defender_mods,
                 terror_cap=3,
                 exclude_archetypes_from_rolling={"siegework"},
             )
@@ -636,23 +599,6 @@ def run_one_battle(
                     if idx < len(defender_rolls):
                         defender_rolls[idx] = random.randint(1, DICE_SIDES)
                 dice_rolls = {**dice_rolls, "defender": defender_rolls}
-
-        terrain_att, terrain_def = compute_terrain_stat_modifiers(
-            territory_def, attacker_units, defender_units, unit_defs
-        )
-        anticav_att, anticav_def = compute_anti_cavalry_stat_modifiers(
-            attacker_units, defender_units, unit_defs
-        )
-        captain_att, captain_def = compute_captain_stat_modifiers(
-            attacker_units, defender_units, unit_defs
-        )
-        sea_raider_att, _ = compute_sea_raider_stat_modifiers(
-            attacker_units, unit_defs, is_sea_raid=opts.is_sea_raid
-        )
-        attacker_mods = merge_stat_modifiers(
-            terrain_att, anticav_att, captain_att, sea_raider_att
-        )
-        defender_mods = merge_stat_modifiers(terrain_def, anticav_def, captain_def)
 
         round_result, stronghold_hp = resolve_combat_round(
             attacker_units,
@@ -671,7 +617,7 @@ def run_one_battle(
             is_naval_combat_defender=is_naval_defender,
             defender_stronghold_hp=stronghold_hp,
             exclude_archetypes_from_rolling=["siegework"],
-            attacker_ladder_instance_ids=set(ladder_infantry_instance_ids),
+            attacker_ladder_instance_ids=ladder_set,
         )
 
         for iid in round_result.attacker_casualties:
