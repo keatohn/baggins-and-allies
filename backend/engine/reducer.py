@@ -108,6 +108,7 @@ from backend.engine.rings import (
 from backend.engine.special_rules import territory_current_power
 from backend.engine.queries import (
     _get_retreat_adjacent_ids,
+    _sea_raid_retreat_is_vetoed,
     _territory_is_friendly_for_retreat,
     get_aerial_units_must_move,
     get_ladder_only_attack_instance_ids,
@@ -4468,6 +4469,12 @@ def _handle_retreat(
     combat = state.active_combat
     if not combat.attackers_have_rolled:
         raise ValueError("Cannot retreat until attackers have rolled (after archer or stealth prefire, click Continue first)")
+
+    if _sea_raid_retreat_is_vetoed(state):
+        raise ValueError(
+            "Cannot retreat from this sea raid: all attackers came from the sea "
+            "(only units that joined the attack from land may retreat)"
+        )
 
     retreat_to = action.payload.get("retreat_to")
     if not retreat_to:
