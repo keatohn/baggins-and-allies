@@ -4322,8 +4322,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     const seaRaidCombat = Boolean(acForRetreat?.sea_zone_id);
     const canRetreat =
       (acForRetreat ? acForRetreat.attackers_have_rolled !== false : true) &&
-      retreatOptions.length > 0 &&
-      !seaRaidCombat;
+      retreatOptions.length > 0;
 
     const territoryDefenderOrder = (backendState?.territory_defender_casualty_order ?? {})[effectiveCombat.territory] ?? 'best_unit';
 
