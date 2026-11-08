@@ -1965,6 +1965,34 @@ def friends_decline_request(
     return {"ok": True}
 
 
+@app.get("/friends/my-turn")
+def friends_my_turn(
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Small notification feed: active multiplayer games awaiting this player's turn."""
+    rows = (db.query(GameModel)
+        .filter(GameModel.status == "active", GameModel.game_code.isnot(None),
+                GameModel.players.contains(str(player.id)))
+        .order_by(GameModel.created_at.desc()).all())
+    awaiting = []
+    for row in rows:
+        try:
+            roster = json.loads(row.players)
+            state = json.loads(row.game_state)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(roster, list) or not isinstance(state, dict) or state.get("winner"):
+            continue
+        faction = state.get("current_faction")
+        if not faction or str(player.id) in _get_forfeited_player_ids(row):
+            continue
+        if any(isinstance(seat, dict) and str(seat.get("player_id")) == str(player.id)
+               and seat.get("faction_id") == faction for seat in roster):
+            awaiting.append({"id": str(row.id), "name": row.name})
+    return {"games": awaiting}
+
+
 @app.get("/friends")
 def friends_list(
     player: Player = Depends(get_current_player),

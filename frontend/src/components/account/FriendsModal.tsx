@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../services/api';
-import type { AuthPlayer, FriendRequestItem, FriendUser, GameInvitation, PlayerAvatarSettings, PlayerProfileCard, ProgressionTier } from '../../services/api';
+import type { AuthPlayer, FriendRequestItem, FriendUser, GameInvitation, MyTurnGame, PlayerAvatarSettings, PlayerProfileCard, ProgressionTier } from '../../services/api';
 import { useMenuScroll } from '../MenuScrollContext';
 import ModalShell from './ModalShell';
 import ProfileModal from './ProfileModal';
@@ -63,12 +63,15 @@ function PersonIdentity({
 }
 
 interface FriendsModalProps {
+  myTurnGames?: MyTurnGame[];
+  myTurnError?: boolean;
+  onRefreshTurns?: () => void;
   onClose: () => void;
   /** Called after any request/friend mutation so the badge count refreshes. */
   onRequestsChanged: () => void;
 }
 
-export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModalProps) {
+export default function FriendsModal({ onClose, onRequestsChanged, myTurnGames = [], myTurnError = false, onRefreshTurns }: FriendsModalProps) {
   const { navigateWithScroll } = useMenuScroll();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<FriendUser[] | null>(null);
@@ -351,6 +354,24 @@ export default function FriendsModal({ onClose, onRequestsChanged }: FriendsModa
           </ul>
         )}
       </section>
+
+      {(myTurnGames.length > 0 || myTurnError) && (
+        <section className="account-section" aria-label="My Turn">
+          <h3 className="account-section__title">My Turn {myTurnGames.length > 0 && <span className="friends-my-turn__count">{myTurnGames.length}</span>}</h3>
+          {myTurnError && <p className="account-msg account-msg--error">Could not refresh games awaiting your turn. <button type="button" className="account-btn account-btn--small" onClick={onRefreshTurns}>Retry</button></p>}
+          <ul className="friends-list" aria-label="Games awaiting your turn">
+            {myTurnGames.map((game) => (
+              <li key={game.id} className="friends-list__row">
+                <span className="friends-list__name" title={game.name}>{game.name}</span>
+                <button type="button" className="account-btn account-btn--small" aria-label={`Play ${game.name}`} onClick={() => {
+                  onClose();
+                  navigateWithScroll(`/game/${encodeURIComponent(game.id)}`, undefined, { force: true });
+                }}>Play</button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="account-section" aria-label="Friends">
         <h3 className="account-section__title">Friends</h3>
