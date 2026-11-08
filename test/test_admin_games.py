@@ -668,3 +668,20 @@ def test_admin_test_mode_on_active_game_skips_later_stats(make_client, players, 
     game.game_state = json.dumps(state)
     db_session.commit()
     assert ensure_game_results_for_row(db_session, game) == 0
+
+
+def test_admin_games_player_alliances_follow_all_controlled_factions(make_client, players, db_session):
+    admin, user = players
+    game = _add_game(db_session, name="Alliance labels", status="active", players_list=[
+        {"player_id": user.id, "faction_id": "gondor"},
+        {"player_id": user.id, "faction_id": "rohan"},
+        {"player_id": admin.id, "faction_id": "mordor"},
+    ], state={"current_faction": "gondor", "phase": "purchase", "turn_order": ["gondor", "rohan", "mordor"]})
+    client = make_client(admin)
+    response = client.get("/admin/games")
+    assert response.status_code == 200
+    row = next(g for g in response.json()["games"] if g["id"] == game.id)
+    by_id = {p["player_id"]: p for p in row["players"]}
+    assert by_id[user.id]["alliances"] == ["good"]
+    assert by_id[admin.id]["alliances"] == ["evil"]
+    assert len(row["players"]) == 2

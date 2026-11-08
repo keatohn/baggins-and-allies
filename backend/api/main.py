@@ -3745,8 +3745,13 @@ def _build_games_list(
                     "player_id": pid_s,
                     "username": players_by_id.get(pid_s),
                     "faction_id": p.get("faction_id"),
+                    "alliances": [],
                 }
             fid = p.get("faction_id")
+            faction = fd.get(str(fid)) if fd and fid is not None else None
+            alliance = getattr(faction, "alliance", None)
+            if alliance and alliance not in players_by_pid[pid_s]["alliances"]:
+                players_by_pid[pid_s]["alliances"].append(alliance)
             if fid is not None:
                 rank = faction_rank.get(str(fid))
                 if rank is not None and (pid_s not in player_rank or rank < player_rank[pid_s]):
