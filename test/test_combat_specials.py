@@ -813,6 +813,52 @@ def test_pending_combat_round_all_false_after_round_one(defs):
     assert p.siegework_attacker_dice > 0
 
 
+def test_pending_combat_round_stealth_suppresses_siegeworks(defs):
+    """A logged stealth prefire cancels the dedicated siegeworks round (and archer prefire)."""
+    unit_defs, _ = defs
+    stealth_siege_id = "stealth_siege_mock"
+    mock_ud = UnitDefinition(
+        id=stealth_siege_id,
+        display_name="Stealth Siege Mock",
+        faction="isengard",
+        archetype="siegework",
+        tags=["land"],
+        attack=5,
+        defense=1,
+        movement=0,
+        health=1,
+        cost={"power": 1},
+        dice=2,
+        specials=["stealth"],
+    )
+    ud_ext = {**unit_defs, stealth_siege_id: mock_ud}
+    archer_id = next((k for k in unit_defs if getattr(unit_defs[k], "archetype", "") == "archer"), None)
+    if not archer_id:
+        pytest.skip("need archer")
+    att, dfn = stacks_to_synthetic_units(
+        [{"unit_id": stealth_siege_id, "count": 1}],
+        [{"unit_id": archer_id, "count": 1}],
+        ud_ext,
+    )
+    kw = dict(
+        round_number=0, attacker_units=att, defender_units=dfn, unit_defs=ud_ext,
+        defender_territory_is_stronghold=True, defender_stronghold_hp=4,
+    )
+    # Before the stealth prefire logs: siegeworks pending (siege dice vs stronghold).
+    p0 = pending_combat_round([], **kw)
+    assert p0.siegeworks is True
+    assert p0.siegework_attacker_dice > 0
+    # After stealth logs: siegeworks AND archer prefires are cancelled; dice still exposed.
+    stealth_log = [SimpleNamespace(
+        is_stealth_prefire=True, is_siegeworks_round=False, is_archer_prefire=False,
+    )]
+    p1 = pending_combat_round(stealth_log, **kw)
+    assert p1.siegeworks is False, "stealth must cancel the dedicated siegeworks round"
+    assert p1.archer_prefire is False, "stealth must cancel the defender archer prefire"
+    assert p1.stealth_prefire is False
+    assert p1.siegework_attacker_dice == p0.siegework_attacker_dice
+
+
 def test_pending_combat_round_stealth_flags(defs):
     """Stealth prefire pending until logged; a stealth entry clears it and blocks archer prefire."""
     unit_defs, territory_defs = defs

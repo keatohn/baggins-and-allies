@@ -274,11 +274,12 @@ def pending_combat_round(
     continue_combat, API payloads, AI dice sampling, and the ram/stealth UI badges.
 
     Predicates mirror the per-site rules exactly (all at round 0):
-    - siegeworks: no siegework round logged yet and siegework dice apply (stealth prefire
-      runs at combat open and does not suppress the siegeworks round).
+    - stealth prefire: no stealth prefire logged and every attacker has stealth. Runs first
+      at combat open and cancels BOTH the dedicated siegeworks round and the defender
+      archer prefire (stealth: strike before the defender can respond).
+    - siegeworks: no stealth prefire logged, no siegework round logged, and siegework dice apply.
     - archer prefire: no siegeworks round pending, no archer/stealth prefire logged,
       and at least one defender has the archer special.
-    - stealth prefire: no stealth prefire logged and every attacker has stealth.
 
     combat_log entries may be CombatRoundResult objects or dicts (API serialization).
     """
@@ -290,8 +291,10 @@ def pending_combat_round(
         defender_stronghold_hp=defender_stronghold_hp,
         fuse_bomb=fuse_bomb,
     )
+    stealth_logged = any(_log_flag(r, "is_stealth_prefire") for r in combat_log)
     siegeworks_pending = (
         round_number == 0
+        and not stealth_logged
         and not any(_log_flag(r, "is_siegeworks_round") for r in combat_log)
         and (sa > 0 or sd > 0)
     )
@@ -299,13 +302,13 @@ def pending_combat_round(
         round_number == 0
         and not siegeworks_pending
         and not any(_log_flag(r, "is_archer_prefire") for r in combat_log)
-        and not any(_log_flag(r, "is_stealth_prefire") for r in combat_log)
+        and not stealth_logged
         and any(has_unit_special(unit_defs.get(u.unit_id), "archer") for u in defender_units)
     )
     stealth_prefire_pending = (
         round_number == 0
         and bool(attacker_units)
-        and not any(_log_flag(r, "is_stealth_prefire") for r in combat_log)
+        and not stealth_logged
         and all(has_unit_special(unit_defs.get(u.unit_id), "stealth") for u in attacker_units)
     )
     return PendingCombatRound(
