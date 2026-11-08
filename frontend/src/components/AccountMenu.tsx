@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMatch, useSearchParams } from 'react-router-dom';
 import { api, getAuthToken, AUTH_CHANGED_EVENT } from '../services/api';
-import type { AuthPlayer } from '../services/api';
+import type { AuthPlayer, MyTurnGame } from '../services/api';
 import ProfileModal from './account/ProfileModal';
 import { tierRingProps } from './account/tierRing';
 import SettingsModal from './account/SettingsModal';
@@ -34,20 +34,33 @@ export default function AccountMenu({ variant = 'menu' }: AccountMenuProps) {
   // Signed out at mount → already "loaded" (no effect work, no sync setState).
   const [loaded, setLoaded] = useState(() => !getAuthToken());
   const [pendingCount, setPendingCount] = useState(0);
+  const [turnGames, setTurnGames] = useState<MyTurnGame[]>([]);
+  const [turnError, setTurnError] = useState(false);
+  const currentGameId = useMatch('/game/:gameId')?.params.gameId;
+  const otherTurnGames = useMemo(() => turnGames.filter((game) => game.id !== currentGameId), [turnGames, currentGameId]);
   // Old /profile route redirects here with ?modal=profile: open on first render.
   const [open, setOpen] = useState<AccountModalKind | null>(() =>
     modalFromSearch(searchParams.get('modal')),
   );
 
   const refreshPendingCount = useCallback(() => {
-    if (!getAuthToken()) {
+    const token = getAuthToken();
+    if (!token) {
       setPendingCount(0);
+      setTurnGames([]);
+      setTurnError(false);
       return;
     }
-    api
-      .getPendingFriendCount()
-      .then((r) => setPendingCount(r.count))
-      .catch(() => {});
+    void api.getPendingFriendCount().then((r) => {
+      if (getAuthToken() === token) setPendingCount(r.count);
+    }).catch(() => {});
+    void api.getMyTurnGames().then((r) => {
+      if (getAuthToken() !== token) return;
+      setTurnGames(r.games);
+      setTurnError(false);
+    }).catch(() => {
+      if (getAuthToken() === token) setTurnError(true);
+    });
   }, []);
 
   useEffect(() => {
@@ -77,6 +90,8 @@ export default function AccountMenu({ variant = 'menu' }: AccountMenuProps) {
         setPlayer(null);
         setLoaded(true);
         setPendingCount(0);
+        setTurnGames([]);
+        setTurnError(false);
         setOpen(null);
       } else {
         load();
@@ -113,10 +128,8 @@ export default function AccountMenu({ variant = 'menu' }: AccountMenuProps) {
   const avatar = player.avatar ?? DEFAULT_AVATAR;
   const ring = tierRingProps(player.tier);
   const profileTitle = player.tier?.name ? `Profile · ${player.tier.name}` : 'Profile';
-  const friendsLabel =
-    pendingCount > 0
-      ? `Open friends (${pendingCount} waiting)`
-      : 'Open friends';
+  const badgeCount = pendingCount + otherTurnGames.length;
+  const friendsLabel = `Open friends (${pendingCount} pending requests, ${otherTurnGames.length} multiplayer games awaiting your turn)`;
 
   return (
     <>
@@ -142,8 +155,11 @@ export default function AccountMenu({ variant = 'menu' }: AccountMenuProps) {
         <button
           type="button"
           className={`account-menu__btn account-menu__btn--icon${open === 'friends' ? ' account-menu__btn--active' : ''}`}
-          onClick={() => setOpen(open === 'friends' ? null : 'friends')}
-          title="Friends"
+          onClick={() => {
+            if (open !== 'friends') refreshPendingCount();
+            setOpen(open === 'friends' ? null : 'friends');
+          }}
+          title={friendsLabel}
           aria-label={friendsLabel}
           aria-pressed={open === 'friends'}
         >
@@ -165,9 +181,9 @@ export default function AccountMenu({ variant = 'menu' }: AccountMenuProps) {
               strokeLinecap="round"
             />
           </svg>
-          {pendingCount > 0 && (
+          {badgeCount > 0 && (
             <span className="account-menu__badge" aria-hidden>
-              {pendingCount > 99 ? '99+' : pendingCount}
+              {badgeCount > 99 ? '99+' : badgeCount}
             </span>
           )}
         </button>
@@ -206,6 +222,9 @@ export default function AccountMenu({ variant = 'menu' }: AccountMenuProps) {
       )}
       {open === 'friends' && (
         <FriendsModal
+          myTurnGames={otherTurnGames}
+          myTurnError={turnError}
+          onRefreshTurns={refreshPendingCount}
           onClose={() => {
             setOpen(null);
             refreshPendingCount();

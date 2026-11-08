@@ -1334,3 +1334,18 @@ button.friends-list__person .friends-list__name {
     max-height: 65dvh;
   }
 }
+
+.friends-my-turn__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  margin-left: 0.3rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: #9f3428;
+  color: #fff3d6;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}

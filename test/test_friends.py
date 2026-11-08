@@ -387,3 +387,49 @@ def test_game_meta_portraits_include_avatar_and_relation(make_client, players, d
     assert portraits[buddy.id]["username"] == buddy.username
     assert portraits[buddy.id]["relation"] == "pending_out"
     assert portraits[buddy.id]["request_id"] == request.id
+
+
+def test_my_turn_feed_only_lists_active_multiplayer_turns(make_client, players, db_session):
+    _admin, user, buddy = players
+
+    def add(name, *, multiplayer=True, status="active", current="gondor", roster=None, winner=None):
+        game = Game(id=str(uuid.uuid4()), name=name,
+            game_code=uuid.uuid4().hex[:8] if multiplayer else None,
+            status=status, game_state=json.dumps({"current_faction": current, "winner": winner}),
+            players=json.dumps(roster if roster is not None else [
+                {"player_id": user.id, "faction_id": "gondor"},
+                {"player_id": buddy.id, "faction_id": "mordor"},
+            ]))
+        db_session.add(game)
+        return game
+
+    waiting = add("My multiplayer turn")
+    add("Someone else's turn", current="mordor")
+    add("Single player", multiplayer=False)
+    add("Lobby", status="lobby")
+    add("Finished", status="finished")
+    add("Winner already recorded", winner="good")
+    add("Not seated", roster=[{"player_id": buddy.id, "faction_id": "gondor"}])
+    add("Unassigned seat", roster=[{"player_id": user.id, "faction_id": None}])
+    second = add("My other faction", current="rohan", roster=[
+        {"player_id": user.id, "faction_id": "gondor"},
+        {"player_id": user.id, "faction_id": "rohan"},
+    ])
+    db_session.commit()
+    client = make_client(user)
+    response = client.get("/friends/my-turn")
+    assert response.status_code == 200
+    games = response.json()["games"]
+    assert {g["id"] for g in games} == {waiting.id, second.id}
+    assert all(set(g) == {"id", "name"} for g in games)
+    # Each viewer gets their own turn feed, never the other player's game names.
+    response = make_client(buddy).get("/friends/my-turn")
+    assert response.status_code == 200
+    assert {g["name"] for g in response.json()["games"]} == {"Someone else's turn", "Not seated"}
+
+
+def test_my_turn_feed_requires_login(make_client, players):
+    _admin, user, _buddy = players
+    client = make_client(user)
+    del app.dependency_overrides[get_current_player]
+    assert client.get("/friends/my-turn").status_code == 401

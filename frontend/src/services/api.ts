@@ -733,6 +733,11 @@ export interface AuthPlayer {
 }
 
 /** Search result / friend-list row with the viewer's relation to that user. */
+export interface MyTurnGame {
+  id: string;
+  name: string;
+}
+
 export interface GameInvitation {
   id: string;
   game_id: string;
@@ -1397,6 +1402,7 @@ export const api = {
     }),
   /** Accepted friends list. */
   listFriends: () => fetchJson<{ friends: FriendUser[] }>('/friends'),
+  getMyTurnGames: () => fetchJson<{ games: MyTurnGame[] }>('/friends/my-turn', { cache: 'no-store' }),
   /** Lobby invitations still waiting on this player. */
   listGameInvites: () =>
     fetchJson<{ invitations: GameInvitation[] }>('/games/invites'),
