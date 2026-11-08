@@ -120,6 +120,34 @@ class SimOptions:
     ring_boosts: list[dict[str, Any]] | None = None
 
 
+def sim_stronghold_initial_hp(state: Any, territory_id: str, tdef: Any) -> int | None:
+    """Wall HP a sim should soak against for `territory_id` (live combat parity).
+
+    Repairs raise `stronghold_current_health`, prior siegeworks rounds lower it, so a
+    partially battered (or already breached) wall must not be simulated at full base HP.
+    Falls back to the territory's base health when the state carries no value; None when
+    the territory is not a simmable stronghold (SimOptions then applies its own default).
+    """
+    if not tdef or not getattr(tdef, "is_stronghold", False):
+        return None
+    base = int(getattr(tdef, "stronghold_base_health", 0) or 0)
+    if base <= 0:
+        return None
+    territories = getattr(state, "territories", None) or {}
+    terr = territories.get(territory_id)
+    cur = getattr(terr, "stronghold_current_health", None) if terr is not None else None
+    try:
+        cur = int(cur) if cur is not None else None
+    except (TypeError, ValueError):
+        cur = None
+    return cur if cur is not None else base
+
+
+def sim_prefire_penalty(state: Any) -> bool:
+    """Setup manifest `prefire_penalty` for sims (live parity): True => -1 on prefire stats."""
+    return bool(getattr(state, "prefire_penalty", True))
+
+
 def apply_sim_ring_boosts(
     unit_defs: dict[str, UnitDefinition],
     ring_boosts: list[dict[str, Any]] | None,

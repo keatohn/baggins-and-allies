@@ -27,7 +27,12 @@ from backend.engine.reducer import apply_action, get_state_after_pending_moves
 from backend.engine.definitions import faction_acts_as
 
 from backend.ai.context import AIContext
-from backend.engine.combat_sim import SimOptions, run_simulation
+from backend.engine.combat_sim import (
+    SimOptions,
+    run_simulation,
+    sim_prefire_penalty,
+    sim_stronghold_initial_hp,
+)
 
 from backend.ai.formulas import (
     battle_gain_if_win,
@@ -768,17 +773,13 @@ class CombatMoveProblem(Problem):
         tdef = self.td.get(territory_id)
         stronghold = bool(getattr(tdef, "is_stronghold", False))
         terr = board.territories.get(territory_id) if board is not None else None
-        hp = None
-        if stronghold and tdef is not None:
-            base = int(getattr(tdef, "stronghold_base_health", 0) or 0)
-            if base > 0:
-                cur = getattr(terr, "stronghold_current_health", None) if terr is not None else None
-                hp = int(cur) if cur is not None else base
+        hp = sim_stronghold_initial_hp(board, territory_id, tdef)
         opts = SimOptions(
             must_conquer=stronghold,
             casualty_order_attacker="best_attack" if stronghold else "best_unit",
             is_sea_raid=sea_raid,
             stronghold_initial_hp=hp,
+            prefire_penalty=sim_prefire_penalty(board),
         )
         key = (
             tuple(sorted((s.get("unit_id"), int(s.get("count") or 0)) for s in att_stacks)),

@@ -38,7 +38,12 @@ from backend.engine.queries import (
 )
 from backend.engine.utils import has_unit_special
 from backend.engine.reducer import get_state_after_pending_moves
-from backend.engine.combat_sim import run_simulation, SimOptions
+from backend.engine.combat_sim import (
+    SimOptions,
+    run_simulation,
+    sim_prefire_penalty,
+    sim_stronghold_initial_hp,
+)
 
 from backend.ai.combat_forecast import (
     empty_exposed_holes_map,
@@ -1081,10 +1086,15 @@ def decide_combat_move(ctx: AIContext):
             committed_win_rate[to_tid] = 0.0
             committed_net[to_tid] = 0.0
             continue
-        opts = None
-        if getattr(td.get(to_tid), "is_stronghold", False):
-            opts = SimOptions(must_conquer=True,
-                              casualty_order_attacker="best_attack")
+        is_sh = bool(getattr(td.get(to_tid), "is_stronghold", False))
+        opts = SimOptions(
+            must_conquer=is_sh,
+            casualty_order_attacker="best_attack" if is_sh else "best_unit",
+            stronghold_initial_hp=sim_stronghold_initial_hp(
+                state_after, to_tid, td.get(to_tid)
+            ),
+            prefire_penalty=sim_prefire_penalty(state_after),
+        )
         sim = run_simulation(att, def_stacks, to_tid, ud,
                              td, n_trials=COMBAT_SIM_TRIALS, options=opts)
         committed_win_rate[to_tid] = sim.p_attacker_win
@@ -1368,10 +1378,15 @@ def decide_combat_move(ctx: AIContext):
             combined[uid] = combined.get(uid, 0) + s.get("count", 0)
         att_stacks = [{"unit_id": uid, "count": c}
                       for uid, c in combined.items()]
-        opts = None
-        if getattr(td.get(to_tid), "is_stronghold", False):
-            opts = SimOptions(must_conquer=True,
-                              casualty_order_attacker="best_attack")
+        is_sh = bool(getattr(td.get(to_tid), "is_stronghold", False))
+        opts = SimOptions(
+            must_conquer=is_sh,
+            casualty_order_attacker="best_attack" if is_sh else "best_unit",
+            stronghold_initial_hp=sim_stronghold_initial_hp(
+                state_after, to_tid, td.get(to_tid)
+            ),
+            prefire_penalty=sim_prefire_penalty(state_after),
+        )
         sim = run_simulation(att_stacks, def_stacks, to_tid,
                              ud, td, n_trials=COMBAT_SIM_TRIALS, options=opts)
         def_cas = _defender_cas_mean_for_net(to_tid, sim.defender_casualty_cost_mean)
