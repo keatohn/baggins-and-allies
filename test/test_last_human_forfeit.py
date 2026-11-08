@@ -217,6 +217,91 @@ def test_two_humans_one_forfeit_stays_active(make_client, players, db_session):
     assert "gondor" in set(config.get("ai_factions") or [])
 
 
+def _mid_turn_state():
+    """A game stopped mid-turn on gondor, so a forfeit has a turn to hand over."""
+    state = _fresh_state()
+    state.current_faction = "gondor"
+    state.phase = "combat_move"
+    state.turn_number = 3
+    return state
+
+
+def test_forfeit_mid_turn_leaves_turn_state_untouched(make_client, players, db_session):
+    """Forfeit only reassigns the player: turn, phase, and pending state stay put."""
+    user, other = players
+    client = make_client(user)
+    game = _add_game(
+        db_session,
+        players_list=[
+            {"player_id": user.id, "faction_id": "gondor"},
+            {"player_id": other.id, "faction_id": "rohan"},
+        ],
+        state=_mid_turn_state(),
+        config={"ai_factions": ["mordor", "isengard", "elves", "erebor", "rhun", "harad"]},
+    )
+    state_before = game.game_state
+
+    r = _forfeit(client, game.id, {"gondor": "computer"})
+    assert r.status_code == 200
+    assert r.json().get("game_over") is not True
+
+    db_session.refresh(game)
+    assert game.status == "active"
+    assert game.game_state == state_before, "forfeit must not advance or alter the turn"
+    mid = json.loads(game.game_state)
+    assert mid["current_faction"] == "gondor"
+    assert mid["phase"] == "combat_move"
+    assert mid["turn_number"] == 3
+
+    config = json.loads(game.config)
+    assert "gondor" in set(config.get("ai_factions") or [])
+    assert user.id in (config.get("forfeited_player_ids") or [])
+    assert config.get("forfeited_player_factions", {}).get(user.id) == ["gondor"]
+    # Snapshot of the leaving player: the round they left on plus their earned stats.
+    assert config.get("forfeited_player_rounds", {}).get(user.id) == 3
+    assert "gondor" in (config.get("forfeited_player_stat_snapshot") or {}).get(user.id, {})
+    remaining = json.loads(game.players)
+    assert not any(str(p.get("player_id")) == user.id for p in remaining)
+    assert any(str(p.get("player_id")) == other.id for p in remaining)
+
+
+def test_forfeit_mid_turn_to_ally_keeps_turn_for_new_owner(make_client, players, db_session):
+    """An allied assignee picks the turn up exactly where the forfeiter left off."""
+    user, other = players
+    client = make_client(user)
+    game = _add_game(
+        db_session,
+        players_list=[
+            {"player_id": user.id, "faction_id": "gondor"},
+            {"player_id": other.id, "faction_id": "rohan"},
+        ],
+        state=_mid_turn_state(),
+        config={"ai_factions": ["mordor", "isengard", "elves", "erebor", "rhun", "harad"]},
+    )
+    state_before = game.game_state
+
+    r = _forfeit(client, game.id, {"gondor": other.id})
+    assert r.status_code == 200
+    assert r.json().get("game_over") is not True
+
+    db_session.refresh(game)
+    assert game.status == "active"
+    assert game.game_state == state_before, "forfeit must not advance or alter the turn"
+    roster = json.loads(game.players)
+    assert not any(str(p.get("player_id")) == user.id for p in roster)
+    assert any(
+        str(p.get("player_id")) == other.id and str(p.get("faction_id")) == "gondor"
+        for p in roster
+    )
+    config = json.loads(game.config)
+    assert "gondor" not in set(config.get("ai_factions") or [])
+    assert config.get("forfeited_player_rounds", {}).get(user.id) == 3
+
+    from backend.api.main import _player_can_act
+
+    assert _player_can_act(game.id, other, db_session) is True
+
+
 def test_forfeit_options_ends_game_flag_sole_human(make_client, players, db_session):
     user, _other = players
     client = make_client(user)
