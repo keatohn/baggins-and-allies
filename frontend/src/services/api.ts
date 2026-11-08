@@ -2011,7 +2011,7 @@ export const api = {
     gameId: string,
     territoryId: string,
     seaZoneId?: string,
-    options?: { fuse_bomb?: boolean },
+    options?: { fuse_bomb?: boolean; casualty_order?: string; must_conquer?: boolean },
   ) =>
     fetchJson<ActionResponse>(`/games/${gameId}/combat/initiate`, {
       method: 'POST',
@@ -2020,6 +2020,8 @@ export const api = {
         territory_id: territoryId,
         ...(seaZoneId != null && seaZoneId !== '' && { sea_zone_id: seaZoneId }),
         ...(options?.fuse_bomb === false ? { fuse_bomb: false } : {}),
+        ...(options?.casualty_order != null && { casualty_order: options.casualty_order }),
+        ...(options?.must_conquer != null && { must_conquer: options.must_conquer }),
       }),
     }),
   
