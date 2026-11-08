@@ -1349,3 +1349,10 @@ button.friends-list__person .friends-list__name {
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
 }
+
+.account-stats__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}

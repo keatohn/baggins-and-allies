@@ -1176,6 +1176,7 @@ export interface PlayerStatsHeadToHead {
 }
 
 export interface PlayerStats {
+  faction_options?: { id: string; name: string }[];
   player_id: string;
   overall: PlayerStatsOverall;
   by_alliance: Record<'good' | 'evil', PlayerStatsAlliance>;
@@ -1206,6 +1207,7 @@ export interface PlayerProfileCard {
 }
 
 export interface PlayerStatsQuery {
+  faction?: string;
   scenario?: string;
   opponent?: string;
   teammate?: string;
@@ -1773,6 +1775,7 @@ export const api = {
   getPlayerStats: (playerId: string, query?: PlayerStatsQuery) => {
     const qs = new URLSearchParams();
     if (query?.scenario) qs.set('scenario', query.scenario);
+    if (query?.faction) qs.set('faction', query.faction);
     if (query?.opponent) qs.set('opponent', query.opponent);
     if (query?.teammate) qs.set('teammate', query.teammate);
     if (query?.alliance) qs.set('alliance', query.alliance);

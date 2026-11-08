@@ -511,3 +511,38 @@ def test_head_to_head_has_one_row_per_computer_difficulty(db_session, players, m
     assert h2h[("Computer (Hard)", "against")]["games"] == 1
     assert h2h[("Computer (Hard)", "against")]["wins"] == 1
     assert ("Computer (Easy)", "with") not in h2h
+
+
+def test_stats_faction_filter_combines_with_scenario_and_alliance(db_session, players, make_client):
+    alice, bob, _ = players
+    for setup, faction, winner in [
+        ("wotr_exp_1.0", "gondor", "good"),
+        ("wotr_exp_1.0", "rohan", "evil"),
+        ("wotr_1.0", "gondor", "evil"),
+    ]:
+        _finish_game(db_session, players_list=[
+            {"player_id": alice.id, "faction_id": faction},
+            {"player_id": bob.id, "faction_id": "mordor"},
+        ], winner=winner, setup_id=setup)
+    for row in db_session.query(GameResult).filter(GameResult.player_id == alice.id):
+        selected = row.setup_id == "wotr_exp_1.0" and row.faction_id == "gondor"
+        row.battles_won = 7 if selected else 99
+        row.strongholds_captured = 2 if selected else 99
+        row.units_destroyed = 12 if selected else 99
+    db_session.commit()
+    client = make_client(alice)
+    url = f"/players/{alice.id}/stats"
+    response = client.get(url, params={"scenario": "wotr_exp_1.0", "faction": "gondor", "alliance": "good"})
+    assert response.status_code == 200
+    stats = response.json()
+    assert stats["overall"]["games"] == 1
+    assert stats["overall"]["wins"] == 1
+    assert stats["overall"]["battles_won"] == 7
+    assert stats["overall"]["strongholds_captured"] == 2
+    assert stats["overall"]["units_destroyed"] == 12
+    assert {f["id"] for f in stats["faction_options"]} >= {"gondor", "rohan", "mordor"}
+    assert stats["by_alliance"]["evil"]["games"] == 0
+    assert client.get(url, params={"scenario": "wotr_exp_1.0", "faction": "gondor", "alliance": "evil"}).json()["overall"]["games"] == 0
+    assert client.get(url, params={"scenario": "wotr_exp_1.0", "faction": "unknown"}).json()["overall"]["games"] == 0
+    assert client.get(url).json()["overall"]["games"] == 3
+    assert client.get(url).json()["faction_options"] == []

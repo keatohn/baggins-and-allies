@@ -2039,6 +2039,7 @@ def _parse_date_param(value: str | None, field: str) -> datetime | None:
 def get_player_stats(
     player_id: str,
     scenario: str | None = Query(None, description="Filter by setup_id"),
+    faction: str | None = Query(None, description="Filter by faction ID"),
     opponent: str | None = Query(None, description="Only games against this player_id"),
     teammate: str | None = Query(None, description="Only games with this player_id as teammate"),
     alliance: str | None = Query(None, pattern="^(good|evil)$", description="Filter by alliance played"),
@@ -2052,22 +2053,38 @@ def get_player_stats(
     Headline W-L skips a player who forfeited before the round the game ended.
     A forfeit on that ending round still counts. Older rows with no forfeit round
     still count.
-    Filters: scenario (setup_id), opponent/teammate (player_id),
+    Filters: scenario (setup_id), faction (faction_id), opponent/teammate (player_id),
     alliance (good|evil), from/to (ISO dates on game end).
     """
     target = db.query(Player).filter(Player.id == str(player_id)).first()
     if not target:
         raise HTTPException(status_code=404, detail="Player not found")
-    return compute_player_stats(
+    stats = compute_player_stats(
         db,
         str(target.id),
         scenario=scenario,
+        faction=faction,
         opponent=opponent,
         teammate=teammate,
         alliance=alliance,
         date_from=_parse_date_param(date_from, "from"),
         date_to=_parse_date_param(date_to, "to"),
     )
+
+    options = {}
+    if scenario:
+        try:
+            _, _, factions, _, _ = try_load_static_definitions(scenario, db)
+            options = {fid: f.display_name for fid, f in factions.items()
+                       if f.alliance != "neutral" and not getattr(f, "parent", None)}
+        except (FileNotFoundError, ValueError, KeyError):
+            pass
+        # Keep historical factions selectable even if the setup has since changed.
+        for (fid,) in db.query(GameResult.faction_id).filter(GameResult.setup_id == scenario).distinct():
+            if fid:
+                options.setdefault(fid, fid.replace("_", " ").title())
+    stats["faction_options"] = [{"id": fid, "name": name} for fid, name in sorted(options.items(), key=lambda item: item[1])]
+    return stats
 
 
 @app.get("/players/{player_id}/profile")

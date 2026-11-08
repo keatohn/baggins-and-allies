@@ -190,6 +190,7 @@ def compute_player_stats(
     player_id: str,
     *,
     scenario: str | None = None,
+    faction: str | None = None,
     opponent: str | None = None,
     teammate: str | None = None,
     alliance: str | None = None,
@@ -200,6 +201,7 @@ def compute_player_stats(
 
     Filters:
       scenario: setup_id match
+      faction: faction_id match
       opponent: only games where this player faced `opponent` (different alliance)
       teammate: only games where this player was on the same alliance as `teammate`
       alliance: only games where the subject played this alliance
@@ -211,6 +213,8 @@ def compute_player_stats(
     base_query = db.query(GameResult).filter(GameResult.player_id == player_id)
     if scenario:
         base_query = base_query.filter(GameResult.setup_id == scenario)
+    if faction:
+        base_query = base_query.filter(GameResult.faction_id == faction)
     if alliance:
         base_query = base_query.filter(GameResult.alliance == alliance)
     if date_from is not None:

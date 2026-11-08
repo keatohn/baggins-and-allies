@@ -68,6 +68,7 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsError, setStatsError] = useState<string | null>(null);
   const [scenarioFilter, setScenarioFilter] = useState('');
+  const [factionFilter, setFactionFilter] = useState('');
   const [logoutConfirm, setLogoutConfirm] = useState(false);
 
   useEffect(() => {
@@ -97,7 +98,7 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
     setStatsLoading(true);
     setStatsError(null);
     api
-      .getPlayerStats(player.id, scenarioFilter ? { scenario: scenarioFilter } : undefined)
+      .getPlayerStats(player.id, scenarioFilter ? { scenario: scenarioFilter, ...(factionFilter ? { faction: factionFilter } : {}) } : undefined)
       .then((s) => {
         if (cancelled) return;
         setStats(s);
@@ -112,7 +113,7 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
     return () => {
       cancelled = true;
     };
-  }, [player.id, scenarioFilter]);
+  }, [player.id, scenarioFilter, factionFilter]);
 
   const avatarDirty =
     avatarImage !== (player.avatar?.image ?? 'hobbit.png') ||
@@ -412,12 +413,12 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
               </span>
             </div>
             {scenarioChoices.length > 0 && (
-              <label className="account-stats__row">
+              <div className="account-stats__filters"><label className="account-stats__row">
                 <span className="account-stats__filter-label">Scenario</span>
                 <select
                   className="account-stats__select"
                   value={scenarioFilter}
-                  onChange={(e) => setScenarioFilter(e.target.value)}
+                  onChange={(e) => { setScenarioFilter(e.target.value); setFactionFilter(''); }}
                 >
                   <option value="">All scenarios</option>
                   {scenarioChoices.map((row) => (
@@ -427,6 +428,13 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
                   ))}
                 </select>
               </label>
+              {scenarioFilter && <label className="account-stats__row"><span className="account-stats__filter-label">Faction</span>
+                <select className="account-stats__select" value={factionFilter} disabled={statsLoading} onChange={(e) => setFactionFilter(e.target.value)}>
+                  <option value="">All factions</option>
+                  {stats.faction_options?.map((faction) => <option key={faction.id} value={faction.id}>{faction.name}</option>)}
+                </select>
+              </label>}
+              </div>
             )}
             {scenarios.length > 0 && (
               <div className="account-stats__table-wrap">

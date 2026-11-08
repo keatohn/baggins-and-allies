@@ -21,6 +21,8 @@ export default function FriendsLeaderboard({ friends, onOpen }: {
   const [retry, setRetry] = useState(0);
   const [alliance, setAlliance] = useState<'' | 'good' | 'evil'>('');
   const [scenario, setScenario] = useState('');
+  const [faction, setFaction] = useState('');
+  const [factionOptions, setFactionOptions] = useState<{ id: string; name: string }[]>([]);
   const [sort, setSort] = useState<{ key: SortKey; direction: 'asc' | 'desc' }>({ key: 'xp', direction: 'desc' });
   const [filtered, setFiltered] = useState<{ key: string; stats: Record<string, PlayerStatsOverall>; error: string | null }>({ key: '', stats: {}, error: null });
 
@@ -47,24 +49,27 @@ export default function FriendsLeaderboard({ friends, onOpen }: {
     return () => { cancelled = true; };
   }, [friends, retry]);
 
-  const filterKey = JSON.stringify([alliance, scenario]);
+  const filterKey = JSON.stringify([alliance, scenario, faction]);
   const hasFilters = alliance !== '' || scenario !== '';
   useEffect(() => {
     if (!hasFilters || board.loading || board.error) return;
     let cancelled = false;
     async function load() {
       try {
-        const stats = await Promise.all(board.entries.map(async ({ profile }) => [profile.id, (await api.getPlayerStats(profile.id, {
-          ...(alliance ? { alliance } : {}), ...(scenario ? { scenario } : {}),
-        })).overall] as const));
-        if (!cancelled) setFiltered({ key: filterKey, stats: Object.fromEntries(stats), error: null });
+        const responses = await Promise.all(board.entries.map(async ({ profile }) => [profile.id, (await api.getPlayerStats(profile.id, {
+          ...(alliance ? { alliance } : {}), ...(scenario ? { scenario } : {}), ...(faction ? { faction } : {}),
+        }))] as const));
+        if (!cancelled) {
+          setFactionOptions(responses[0]?.[1].faction_options ?? []);
+          setFiltered({ key: filterKey, stats: Object.fromEntries(responses.map(([id, stats]) => [id, stats.overall])), error: null });
+        }
       } catch (err) {
         if (!cancelled) setFiltered({ key: filterKey, stats: {}, error: err instanceof Error ? err.message : 'Could not filter leaderboard' });
       }
     }
     void load();
     return () => { cancelled = true; };
-  }, [alliance, scenario, hasFilters, filterKey, board]);
+  }, [alliance, scenario, faction, hasFilters, filterKey, board]);
 
   const scenarioOptions = useMemo(() => {
     const options = new Map<string, string>();
@@ -92,9 +97,12 @@ export default function FriendsLeaderboard({ friends, onOpen }: {
         <label>Alliance<select className="account-stats__select" value={alliance} onChange={(e) => setAlliance(e.target.value as typeof alliance)}>
           <option value="">All alliances</option><option value="good">Good</option><option value="evil">Evil</option>
         </select></label>
-        <label>Scenario<select className="account-stats__select" value={scenario} onChange={(e) => setScenario(e.target.value)}>
+        <label>Scenario<select className="account-stats__select" value={scenario} onChange={(e) => { setScenario(e.target.value); setFaction(''); setFactionOptions([]); }}>
           <option value="">All scenarios</option>{scenarioOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select></label>
+        {scenario && <label>Faction<select className="account-stats__select" value={faction} disabled={loading} onChange={(e) => setFaction(e.target.value)}>
+          <option value="">All factions</option>{factionOptions.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
+        </select></label>}
       </div>
       <p className="account-subtle">Career XP and tiers. Filters apply to game stats.</p>
       {error ? <p className="account-msg account-msg--error" role="alert">{error} <button type="button" className="account-btn account-btn--small" onClick={() => { setFiltered({ key: '', stats: {}, error: null }); setRetry((value) => value + 1); }}>Retry</button></p> : loading ? <p className="account-subtle" role="status">Loading leaderboard…</p> : (
