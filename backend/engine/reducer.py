@@ -5526,6 +5526,18 @@ def _handle_skip_turn(
     state.combat_move_naval_idle_sail_instance_ids = []
     state.avoided_forced_naval_combat_instance_ids = []
     state.naval_mobilization_intruder_instance_ids = []
+    # Raid staging never outlives the combat phase (same invariant as _handle_end_phase):
+    # skip_turn bypasses that cleanup, so clear the maps here too or a forfeit mid-combat
+    # leaves territory_sea_raid_* live into later turns (stale sea_zone_id tags, wrong
+    # retreat veto / Sea Raider bonus once the staging boat has sailed elsewhere).
+    for attr in (
+        "territory_sea_raid_from",
+        "territory_sea_raid_faction",
+        "territory_sea_raid_passenger_instance_ids",
+    ):
+        m = getattr(state, attr, None)
+        if m:
+            m.clear()
     return _handle_end_turn(
         state, territory_defs, faction_defs, camp_defs, unit_defs, force=True,
     )
