@@ -5561,6 +5561,21 @@ def _handle_end_turn(
         if blocked:
             raise ValueError(blocked)
 
+    # Flush queued mobilization work while this faction is still current.
+    # Pending entries carry no faction of their own, so if they survived the
+    # turn the next faction's end_phase would deploy them as itself.
+    if state.phase == "mobilization":
+        if state.pending_camp_placements:
+            state, camp_flush_events = _apply_pending_camp_placements(
+                state, camp_defs or {}
+            )
+            events.extend(camp_flush_events)
+        if state.pending_mobilizations:
+            state, mob_flush_events = _apply_pending_mobilizations(
+                state, unit_defs, territory_defs, faction_defs
+            )
+            events.extend(mob_flush_events)
+
     # Units still in the pool had no legal destination (or this is a forfeit).
     state.faction_purchased_units[state.current_faction] = []
 
