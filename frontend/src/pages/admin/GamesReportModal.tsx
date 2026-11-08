@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../services/api';
-import type { AdminGameEditor, GameListItem } from '../../services/api';
+import type { AdminGameEditor, GameListItem, GameListPlayer } from '../../services/api';
 import { MapViewPane } from './MapViewPane';
 
 type FilterKey = 'all' | 'lobby' | 'active' | 'finished';
@@ -114,6 +114,26 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const editRequest = useRef(0);
+  const [factionTarget, setFactionTarget] = useState<{ game: GameListItem; player: GameListPlayer } | null>(null);
+  const [repairFaction, setRepairFaction] = useState('');
+  const [repairBusy, setRepairBusy] = useState(false);
+  const [repairError, setRepairError] = useState<string | null>(null);
+
+  const submitFactionRepair = async () => {
+    if (!factionTarget || !repairFaction || repairBusy) return;
+    setRepairBusy(true);
+    setRepairError(null);
+    try {
+      await api.adminRepairPlayerFaction(factionTarget.game.id, factionTarget.player.player_id, repairFaction);
+      setFactionTarget(null);
+      refreshGames();
+    } catch (error) {
+      setRepairError(error instanceof Error ? error.message : 'Could not assign faction');
+    } finally {
+      setRepairBusy(false);
+    }
+  };
+
 
   const refreshGames = () => {
     api
@@ -433,6 +453,13 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
                       <td className="games-report__name">{g.name}</td>
                       <td className="games-report__players">
                         <span className="games-report__players-text">{playerNames(g)}</span>
+                        {(g.players ?? []).filter((player) => !player.faction_id && (player.forfeited || g.status === 'finished')).map((player) => (
+                          <button key={player.player_id} type="button" className="games-report__end-btn" onClick={() => {
+                            setFactionTarget({ game: g, player });
+                            setRepairFaction('');
+                            setRepairError(null);
+                          }}>Assign faction: {player.username || 'Unknown player'}</button>
+                        ))}
                       </td>
                       <td className="games-report__scenario">{scenarioOptionLabel(g)}</td>
                       <td className="games-report__turn">{turnPhase(g)}</td>
@@ -627,6 +654,26 @@ export function GamesReportModal({ onClose }: { onClose: () => void }) {
               });
             }}
           />
+        ) : null}
+        {factionTarget ? (
+          <div className="admin-modal-overlay admin-graph__confirm" role="presentation" onClick={() => { if (!repairBusy) setFactionTarget(null); }}>
+            <div className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="repair-faction-title" onClick={(event) => event.stopPropagation()}>
+              <h2 id="repair-faction-title" className="admin-modal__title">Assign historical faction</h2>
+              <p>{factionTarget.player.username} — {factionTarget.game.name}</p>
+              <p className="admin-form__micro">Repairs this player's historical faction and missing finished-game stats. Does not grant live control, change XP, or remove forfeited status.</p>
+              <label className="admin-form__label">Faction
+                <select className="admin-page__select" value={repairFaction} disabled={repairBusy} onChange={(event) => setRepairFaction(event.target.value)}>
+                  <option value="">Choose faction</option>
+                  {(factionTarget.game.faction_options ?? []).map((faction) => <option key={faction.id} value={faction.id}>{faction.display_name}</option>)}
+                </select>
+              </label>
+              {repairError ? <p className="admin-page__error" role="alert">{repairError}</p> : null}
+              <div className="admin-modal__actions">
+                <button type="button" className="admin-page__btn" disabled={repairBusy} onClick={() => setFactionTarget(null)}>Cancel</button>
+                <button type="button" className="admin-page__btn admin-page__btn--primary" disabled={repairBusy || !repairFaction} onClick={submitFactionRepair}>{repairBusy ? 'Saving…' : 'Save faction'}</button>
+              </div>
+            </div>
+          </div>
         ) : null}
         {editLoading || (editError && !editDoc) ? (
           <div className="admin-modal-overlay admin-graph__confirm" role="presentation" onClick={closeEdit}>

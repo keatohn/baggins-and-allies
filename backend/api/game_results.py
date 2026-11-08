@@ -193,16 +193,18 @@ def game_results_exist(db: Session, game_id: str) -> bool:
     )
 
 
-def ensure_game_results_for_row(db: Session, row: GameModel) -> int:
+def ensure_game_results_for_row(db: Session, row: GameModel, *, repair_player_id: str | None = None) -> int:
     """Write game_results for a finished game if not already present.
 
     Idempotent: no-ops when status is not finished, the game is in test mode,
-    or rows already exist for game_id. Returns number of rows written.
+    or rows already exist for game_id. Admin historical repairs may supply
+    repair_player_id to add only that player's missing rows, preserving existing
+    results for everyone. Returns number of rows written; never changes XP.
     """
     if not row or str(row.status) != "finished":
         return 0
     game_id = str(row.id)
-    if game_results_exist(db, game_id):
+    if repair_player_id is None and game_results_exist(db, game_id):
         return 0
 
     state = _parse_json(getattr(row, "game_state", None), {}) or {}
@@ -279,7 +281,12 @@ def ensure_game_results_for_row(db: Session, row: GameModel) -> int:
 
     now = datetime.utcnow()
     rows: list[GameResult] = []
+    existing_keys = set()
+    if repair_player_id is not None:
+        existing_keys = {(r.player_id, r.faction_id) for r in db.query(GameResult).filter(GameResult.game_id == game_id).all()}
     for entry in entries:
+        if repair_player_id is not None and (entry["player_id"] != repair_player_id or (entry["player_id"], entry["faction_id"]) in existing_keys):
+            continue
         alliance = _faction_alliance_from_config(config, entry["faction_id"])
         won = winner is not None and alliance == winner
         pid = entry["player_id"]
@@ -292,6 +299,8 @@ def ensure_game_results_for_row(db: Session, row: GameModel) -> int:
             counts = {"battles_won": 0, "strongholds_captured": 0, "enemy_units_destroyed": 0}
         else:
             counts = profile_counts_for_faction(config, pid, entry["faction_id"], round_at)
+        if repair_player_id is not None:
+            existing_keys.add((entry["player_id"], entry["faction_id"]))
         rows.append(
             GameResult(
                 id=str(uuid.uuid4()),

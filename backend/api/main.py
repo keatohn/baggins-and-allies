@@ -2781,6 +2781,60 @@ def admin_list_games(
     return {"games": _build_games_list(_admin, db, include_all=True)}
 
 
+class RepairPlayerFactionRequest(BaseModel):
+    faction_id: str
+
+
+@app.put("/admin/games/{game_id}/players/{player_id}/faction")
+def admin_repair_player_faction(
+    game_id: str,
+    player_id: str,
+    request: RepairPlayerFactionRequest,
+    _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """Repair an unassigned historical player without restoring a forfeited seat."""
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Game not found")
+    try:
+        roster = json.loads(row.players)
+        config = json.loads(row.config) if row.config else {}
+        raw_state = json.loads(row.game_state)
+    except (TypeError, json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail="Invalid game records")
+    if not isinstance(roster, list) or not isinstance(config, dict) or not isinstance(raw_state, dict):
+        raise HTTPException(status_code=400, detail="Invalid game records")
+    seats = [seat for seat in roster if isinstance(seat, dict) and str(seat.get("player_id")) == player_id]
+    forfeited = player_id in _get_forfeited_player_ids(row)
+    if not seats and not forfeited:
+        raise HTTPException(status_code=404, detail="Player is not in this game's records")
+    _, _, fd, _, _ = get_game_definitions(game_id, db)
+    faction = fd.get(request.faction_id)
+    if not faction or faction.alliance == "neutral" or getattr(faction, "parent", None):
+        raise HTTPException(status_code=400, detail="Choose a playable faction from this game")
+    recorded = config.get("forfeited_player_factions") or {}
+    if not isinstance(recorded, dict):
+        raise HTTPException(status_code=400, detail="Invalid historical faction records")
+    if any(seat.get("faction_id") for seat in seats) or (forfeited and recorded.get(player_id)):
+        raise HTTPException(status_code=409, detail="Player already has a faction recorded")
+    if forfeited:
+        recorded[player_id] = [request.faction_id]
+        config["forfeited_player_factions"] = recorded
+        row.config = json.dumps(config)
+    elif row.status == "finished":
+        for seat in seats:
+            seat["faction_id"] = request.faction_id
+        row.players = json.dumps(roster)
+    else:
+        raise HTTPException(status_code=400, detail="This repair is for historical records, not live player control")
+    from .game_results import ensure_game_results_for_row
+    if raw_state.get("winner"):
+        ensure_game_results_for_row(db, row, repair_player_id=player_id)
+    db.commit()
+    return {"ok": True}
+
+
 @app.get("/admin/users")
 def admin_list_users(
     _admin: Player = Depends(get_current_admin),
@@ -3789,13 +3843,25 @@ def _build_games_list(
             key=lambda e: player_rank.get(e["player_id"], len(faction_rank)),
         )
         # Forfeited players were dropped from `players` on leave; re-append them (flagged) so reports/cards keep the original roster.
+        try:
+            record_config = json.loads(r.config) if isinstance(r.config, str) else r.config or {}
+        except (TypeError, json.JSONDecodeError):
+            record_config = {}
+        recorded_factions = record_config.get("forfeited_player_factions", {}) if isinstance(record_config, dict) else {}
+        if not isinstance(recorded_factions, dict):
+            recorded_factions = {}
         for fid_pid in forfeited_by_game.get(str(r.id), []):
             if fid_pid not in players_by_pid:
+                known = recorded_factions.get(fid_pid, [])
+                if isinstance(known, str):
+                    known = [known]
+                known = [fid for fid in known if isinstance(fid, str) and fd.get(fid)] if isinstance(known, list) else []
                 players_out.append(
                     {
                         "player_id": fid_pid,
                         "username": players_by_id.get(fid_pid),
-                        "faction_id": None,
+                        "faction_id": known[0] if known else None,
+                        "alliances": list(dict.fromkeys(fd[fid].alliance for fid in known)),
                         "forfeited": True,
                     }
                 )
@@ -3829,6 +3895,11 @@ def _build_games_list(
             "ai_difficulty": _ai_setting_from_config(r, "ai_difficulty", "normal"),
             "ai_algorithm": _ai_setting_from_config(r, "ai_algorithm", "heuristic"),
         }
+        if include_all:
+            item["faction_options"] = [
+                {"id": fid, "display_name": faction.display_name}
+                for fid, faction in fd.items() if faction.alliance != "neutral" and not getattr(faction, "parent", None)
+            ]
         mine.append(item)
     return mine
 

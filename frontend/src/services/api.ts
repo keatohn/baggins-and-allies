@@ -1214,6 +1214,7 @@ export interface PlayerStatsQuery {
 
 export interface GameListItem {
   id: string;
+  faction_options?: { id: string; display_name: string }[];
   name: string;
   game_code: string | null;
   status: string;
@@ -1435,6 +1436,10 @@ export const api = {
   adminListSetups: () =>
     fetchJson<{ setups: AdminSetupListItem[] }>('/admin/setups'),
   adminListGames: () => fetchJson<{ games: GameListItem[] }>('/admin/games'),
+  adminRepairPlayerFaction: (gameId: string, playerId: string, factionId: string) =>
+    fetchJson<{ ok: boolean }>(`/admin/games/${encodeURIComponent(gameId)}/players/${encodeURIComponent(playerId)}/faction`, {
+      method: 'PUT', body: JSON.stringify({ faction_id: factionId }),
+    }),
   adminListUsers: () => fetchJson<{ users: AdminUserItem[] }>('/admin/users'),
   /** Tables and columns on the database this server is using. */
   adminQuerySchema: () => fetchJson<{ tables: AdminQuerySchemaTable[] }>('/admin/query/schema'),

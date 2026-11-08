@@ -685,3 +685,72 @@ def test_admin_games_player_alliances_follow_all_controlled_factions(make_client
     assert by_id[user.id]["alliances"] == ["good"]
     assert by_id[admin.id]["alliances"] == ["evil"]
     assert len(row["players"]) == 2
+
+
+def test_admin_can_repair_missing_forfeit_faction_without_restoring_control(make_client, players, db_session):
+    from backend.api.game_results import ensure_game_results_for_row
+    from backend.api.models import GameResult
+    admin, user = players
+    roster = [{"player_id": admin.id, "faction_id": "mordor"}]
+    original_xp = user.xp
+    game = _add_game(db_session, name="Legacy forfeit", status="finished", players_list=roster,
+        state={"winner": "good", "turn_number": 5}, config={
+            "forfeited_player_ids": [user.id],
+            "definitions": {"factions": {
+                "gondor": {"id": "gondor", "display_name": "Gondor", "alliance": "good", "capital": "minas_tirith", "color": "#000000"},
+                "mordor": {"id": "mordor", "display_name": "Mordor", "alliance": "evil", "capital": "barad_dur", "color": "#000000"},
+            }},
+        })
+    ensure_game_results_for_row(db_session, game)
+    db_session.commit()
+    old_results = {r.id for r in db_session.query(GameResult).filter(GameResult.game_id == game.id)}
+    client = make_client(admin)
+    url = f"/admin/games/{game.id}/players/{user.id}/faction"
+    assert make_client(user).put(url, json={"faction_id": "gondor"}).status_code == 403
+    client = make_client(admin)
+    assert client.put(url, json={"faction_id": "not_a_faction"}).status_code == 400
+    assert client.put(url, json={"faction_id": "gondor"}).status_code == 200
+    db_session.refresh(game)
+    assert json.loads(game.players) == roster
+    assert json.loads(game.config)["forfeited_player_ids"] == [user.id]
+    assert json.loads(game.config)["forfeited_player_factions"][user.id] == ["gondor"]
+    results = db_session.query(GameResult).filter(GameResult.game_id == game.id).all()
+    assert old_results <= {r.id for r in results}
+    repaired = next(r for r in results if r.player_id == user.id)
+    assert repaired.faction_id == "gondor"
+    assert repaired.alliance == "good"
+    assert repaired.forfeited is True
+    db_session.refresh(user)
+    assert user.xp == original_xp
+    listed = next(g for g in client.get("/admin/games").json()["games"] if g["id"] == game.id)
+    listed_player = next(p for p in listed["players"] if p["player_id"] == user.id)
+    assert listed_player["faction_id"] == "gondor"
+    assert listed_player["alliances"] == ["good"]
+    assert listed_player["forfeited"] is True
+    assert client.put(url, json={"faction_id": "mordor"}).status_code == 409
+    assert len(db_session.query(GameResult).filter(GameResult.game_id == game.id).all()) == len(results)
+
+
+def test_faction_repair_does_not_assign_live_control(make_client, players, db_session):
+    admin, user = players
+    game = _add_game(db_session, name="Unassigned live player", status="active", players_list=[
+        {"player_id": user.id, "faction_id": None},
+    ], state={"current_faction": "gondor"})
+    response = make_client(admin).put(f"/admin/games/{game.id}/players/{user.id}/faction", json={"faction_id": "gondor"})
+    assert response.status_code == 400
+    db_session.refresh(game)
+    assert json.loads(game.players)[0]["faction_id"] is None
+
+
+def test_finished_unassigned_player_repair_keeps_void_game_out_of_stats(make_client, players, db_session):
+    from backend.api.models import GameResult
+    admin, user = players
+    game = _add_game(db_session, name="Legacy void game", status="finished", players_list=[
+        {"player_id": user.id, "faction_id": None},
+    ], state={"winner": None})
+    client = make_client(admin)
+    response = client.put(f"/admin/games/{game.id}/players/{user.id}/faction", json={"faction_id": "gondor"})
+    assert response.status_code == 200
+    db_session.refresh(game)
+    assert json.loads(game.players)[0]["faction_id"] == "gondor"
+    assert db_session.query(GameResult).filter(GameResult.game_id == game.id).count() == 0
