@@ -1254,6 +1254,14 @@ export interface GameListItem {
   } | null;
 }
 
+export interface AdminGameAssignments {
+  game_id: string;
+  name: string;
+  factions: { id: string; name: string; alliance: string }[];
+  players: { id: string; name: string; forfeited: boolean }[];
+  assignments: Record<string, string | null>;
+}
+
 export interface AdminGameEditor {
   game: { id: string; name: string; status: string };
   map_asset: string;
@@ -1436,6 +1444,9 @@ export const api = {
   adminListSetups: () =>
     fetchJson<{ setups: AdminSetupListItem[] }>('/admin/setups'),
   adminListGames: () => fetchJson<{ games: GameListItem[] }>('/admin/games'),
+  adminGetGameAssignments: (gameId: string) => fetchJson<AdminGameAssignments>(`/admin/games/${encodeURIComponent(gameId)}/assignments`),
+  adminPutGameAssignments: (gameId: string, assignments: Record<string, string | null>) =>
+    fetchJson<AdminGameAssignments>(`/admin/games/${encodeURIComponent(gameId)}/assignments`, { method: 'PUT', body: JSON.stringify({ assignments }) }),
   adminRepairPlayerFaction: (gameId: string, playerId: string, factionId: string) =>
     fetchJson<{ ok: boolean }>(`/admin/games/${encodeURIComponent(gameId)}/players/${encodeURIComponent(playerId)}/faction`, {
       method: 'PUT', body: JSON.stringify({ faction_id: factionId }),

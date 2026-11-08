@@ -253,6 +253,11 @@ def ensure_game_results_for_row(db: Session, row: GameModel, *, repair_player_id
             if fid_s:
                 entries.append({"player_id": pid_s, "faction_id": fid_s})
     entries.extend(computers)
+    historical = config.get("historical_faction_assignments")
+    if isinstance(historical, dict):
+        entries = [{"player_id": computer_player_id(_difficulty_for_faction(config, fid)) if pid == "computer" else pid,
+                    "faction_id": fid, "is_ai": pid == "computer"}
+                   for fid, pid in historical.items() if pid is not None]
 
     participant_ids = sorted({
         e["player_id"] for e in entries if not str(e["player_id"]).startswith(f"{_COMPUTER_PLAYER_ID}:")

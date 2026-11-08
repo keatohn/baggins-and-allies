@@ -754,3 +754,105 @@ def test_finished_unassigned_player_repair_keeps_void_game_out_of_stats(make_cli
     db_session.refresh(game)
     assert json.loads(game.players)[0]["faction_id"] == "gondor"
     assert db_session.query(GameResult).filter(GameResult.game_id == game.id).count() == 0
+
+
+def _assignment_game(db_session, admin, user, *, status="finished"):
+    return _add_game(db_session, name="Assignment editor", status=status,
+        players_list=[{"player_id": admin.id, "faction_id": "mordor"}],
+        state={"winner": "good" if status == "finished" else None, "turn_number": 5, "current_faction": "mordor"},
+        config={"forfeited_player_ids": [user.id], "ai_factions": ["rohan"],
+            "forfeited_player_factions": {user.id: ["gondor"]},
+            "definitions": {"factions": {
+                fid: {"id": fid, "display_name": fid.title(), "alliance": alliance, "capital": "", "color": "#000000"}
+                for fid, alliance in [("gondor", "good"), ("rohan", "good"), ("mordor", "evil")]
+            }}})
+
+
+def test_assign_editor_supports_multiple_factions_and_computers_without_live_changes(make_client, players, db_session):
+    from backend.api.game_results import ensure_game_results_for_row
+    from backend.api.models import GameResult
+    admin, user = players
+    game = _assignment_game(db_session, admin, user)
+    roster = game.players
+    old_config = json.loads(game.config)
+    ensure_game_results_for_row(db_session, game)
+    db_session.commit()
+    preserved = db_session.query(GameResult).filter_by(game_id=game.id, player_id=user.id, faction_id="gondor").one()
+    preserved_id = preserved.id
+    xp = user.xp
+    client = make_client(admin)
+    url = f"/admin/games/{game.id}/assignments"
+    document = client.get(url).json()
+    assert {p["id"] for p in document["players"]} == {admin.id, user.id}
+    assert document["assignments"] == {"gondor": user.id, "rohan": "computer", "mordor": admin.id}
+    assignments = {"gondor": user.id, "rohan": user.id, "mordor": "computer"}
+    assert client.put(url, json={"assignments": assignments}).status_code == 200
+    db_session.refresh(game)
+    db_session.refresh(user)
+    assert game.players == roster
+    assert user.xp == xp
+    config = json.loads(game.config)
+    assert config["historical_faction_assignments"] == assignments
+    assert config["ai_factions"] == old_config["ai_factions"]
+    assert config["forfeited_player_ids"] == [user.id]
+    rows = db_session.query(GameResult).filter_by(game_id=game.id).all()
+    assert {(r.player_id, r.faction_id) for r in rows} == {(user.id, "gondor"), (user.id, "rohan"), ("__computer__:normal", "mordor")}
+    assert next(r for r in rows if r.faction_id == "gondor").id == preserved_id
+    assert all(r.forfeited for r in rows if r.player_id == user.id)
+    assert all(json.loads(r.participant_ids) == [user.id] for r in rows)
+    count = len(rows)
+    assert client.put(url, json={"assignments": assignments}).status_code == 200
+    assert db_session.query(GameResult).filter_by(game_id=game.id).count() == count
+    listed = next(g for g in client.get("/admin/games").json()["games"] if g["id"] == game.id)
+    assert next(p for p in listed["players"] if p["player_id"] == user.id)["alliances"] == ["good"]
+
+
+@pytest.mark.parametrize("assignments", [
+    "cross_alliance", "outsider", "missing_faction", "unknown_faction",
+])
+def test_assign_editor_rejects_invalid_assignments_atomically(make_client, players, db_session, assignments):
+    admin, user = players
+    game = _assignment_game(db_session, admin, user)
+    before = game.config
+    mapping = {"gondor": user.id, "rohan": user.id, "mordor": "computer"}
+    if assignments == "cross_alliance": mapping["mordor"] = user.id
+    if assignments == "outsider": mapping["gondor"] = str(uuid.uuid4())
+    if assignments == "missing_faction": del mapping["gondor"]
+    if assignments == "unknown_faction": mapping["unknown"] = "computer"
+    url = f"/admin/games/{game.id}/assignments"
+    client = make_client(admin)
+    assert client.put(url, json={"assignments": mapping}).status_code == 400
+    db_session.refresh(game)
+    assert game.config == before
+    client = make_client(user)
+    assert client.get(url).status_code == 403
+    assert client.put(url, json={"assignments": mapping}).status_code == 403
+
+
+def test_historical_assign_editor_never_reassigns_live_seats(make_client, players, db_session):
+    from backend.api.main import _player_can_act
+    admin, user = players
+    game = _assignment_game(db_session, admin, user, status="active")
+    original_roster = game.players
+    url = f"/admin/games/{game.id}/assignments"
+    response = make_client(admin).put(url, json={"assignments": {"gondor": admin.id, "rohan": admin.id, "mordor": user.id}})
+    assert response.status_code == 200
+    db_session.refresh(game)
+    assert game.players == original_roster
+    assert _player_can_act(game.id, admin, db_session)
+    assert not _player_can_act(game.id, user, db_session)
+
+
+def test_assign_editor_recognizes_computer_roster_seats(make_client, players, db_session):
+    admin, user = players
+    game = _assignment_game(db_session, admin, user)
+    game.players = json.dumps([
+        {"player_id": admin.id, "faction_id": "mordor"},
+        {"player_id": "__computer__", "faction_id": "rohan"},
+    ])
+    db_session.commit()
+    response = make_client(admin).get(f"/admin/games/{game.id}/assignments")
+    assert response.status_code == 200
+    document = response.json()
+    assert document["assignments"]["rohan"] == "computer"
+    assert {p["id"] for p in document["players"]} == {admin.id, user.id}

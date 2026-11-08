@@ -2781,6 +2781,98 @@ def admin_list_games(
     return {"games": _build_games_list(_admin, db, include_all=True)}
 
 
+class HistoricalAssignmentsRequest(BaseModel):
+    assignments: dict[str, str | None]
+
+
+def _historical_assignment_document(row: GameModel, db: Session) -> dict:
+    try:
+        roster = json.loads(row.players)
+        config = json.loads(row.config) if row.config else {}
+    except (TypeError, json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail="Invalid game records")
+    if not isinstance(roster, list) or not isinstance(config, dict):
+        raise HTTPException(status_code=400, detail="Invalid game records")
+    _, _, definitions, _, _ = get_game_definitions(str(row.id), db)
+    factions = [{"id": fid, "name": faction.display_name, "alliance": faction.alliance}
+                for fid, faction in definitions.items()
+                if faction.alliance != "neutral" and not getattr(faction, "parent", None)]
+    ids = {str(seat["player_id"]) for seat in roster if isinstance(seat, dict) and seat.get("player_id") and str(seat["player_id"]) != LOBBY_COMPUTER_PLAYER_ID}
+    forfeited = set(_get_forfeited_player_ids(row))
+    ids |= forfeited
+    names = {str(player.id): player.username for player in db.query(Player).filter(Player.id.in_(ids)).all()}
+    players = [{"id": pid, "name": names.get(pid) or "Unknown player", "forfeited": pid in forfeited} for pid in sorted(ids)]
+    assignments = {faction["id"]: None for faction in factions}
+    for seat in roster:
+        if isinstance(seat, dict) and seat.get("faction_id") in assignments and seat.get("player_id"):
+            assignments[seat["faction_id"]] = "computer" if str(seat["player_id"]) == LOBBY_COMPUTER_PLAYER_ID else str(seat["player_id"])
+    recorded = config.get("forfeited_player_factions") or {}
+    if isinstance(recorded, dict):
+        for pid, fids in recorded.items():
+            for fid in ([fids] if isinstance(fids, str) else fids if isinstance(fids, list) else []):
+                if fid in assignments and assignments[fid] is None and pid in ids:
+                    assignments[fid] = pid
+    for fid in _get_ai_factions_from_config(row):
+        if fid in assignments and assignments[fid] is None:
+            assignments[fid] = "computer"
+    saved = config.get("historical_faction_assignments")
+    if isinstance(saved, dict):
+        for fid in assignments:
+            if fid in saved:
+                assignments[fid] = saved[fid]
+    return {"game_id": str(row.id), "name": row.name, "factions": factions, "players": players, "assignments": assignments}
+
+
+@app.get("/admin/games/{game_id}/assignments")
+def admin_get_historical_assignments(game_id: str, _admin: Player = Depends(get_current_admin), db: Session = Depends(get_db)):
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Game not found")
+    return _historical_assignment_document(row, db)
+
+
+@app.put("/admin/games/{game_id}/assignments")
+def admin_put_historical_assignments(game_id: str, request: HistoricalAssignmentsRequest,
+                                     _admin: Player = Depends(get_current_admin), db: Session = Depends(get_db)):
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Game not found")
+    document = _historical_assignment_document(row, db)
+    factions = {f["id"]: f for f in document["factions"]}
+    if set(request.assignments) != set(factions):
+        raise HTTPException(status_code=400, detail="Assignments must include each playable faction exactly once")
+    humans = {p["id"] for p in document["players"]}
+    alliances: dict[str, str] = {}
+    for fid, pid in request.assignments.items():
+        if pid is None or pid == "computer":
+            continue
+        if pid not in humans:
+            raise HTTPException(status_code=400, detail="Choose a player who participated in this game or Computer")
+        alliance = factions[fid]["alliance"]
+        if pid in alliances and alliances[pid] != alliance:
+            raise HTTPException(status_code=400, detail="A human player cannot be assigned to two different alliances")
+        alliances[pid] = alliance
+    config = json.loads(row.config) if row.config else {}
+    config["historical_faction_assignments"] = request.assignments
+    row.config = json.dumps(config)
+    raw_state = json.loads(row.game_state)
+    if row.status == "finished" and isinstance(raw_state, dict) and raw_state.get("winner") and not config.get("test_mode"):
+        from .game_results import computer_player_id, _difficulty_for_faction, ensure_game_results_for_row
+        desired = {(computer_player_id(_difficulty_for_faction(config, fid)) if pid == "computer" else pid, fid)
+                   for fid, pid in request.assignments.items() if pid is not None}
+        participant_ids = json.dumps(sorted({pid for pid in request.assignments.values() if pid and pid != "computer"}))
+        for result in db.query(GameResult).filter(GameResult.game_id == game_id).all():
+            if (result.player_id, result.faction_id) not in desired:
+                db.delete(result)
+            else:
+                result.participant_ids = participant_ids
+        db.flush()
+        for pid in sorted({pid for pid, _ in desired}):
+            ensure_game_results_for_row(db, row, repair_player_id=pid)
+    db.commit()
+    return document | {"assignments": request.assignments}
+
+
 class RepairPlayerFactionRequest(BaseModel):
     faction_id: str
 
@@ -3865,6 +3957,17 @@ def _build_games_list(
                         "forfeited": True,
                     }
                 )
+        historical = record_config.get("historical_faction_assignments") if isinstance(record_config, dict) else None
+        if include_all and isinstance(historical, dict):
+            players_out = [person for person in players_out if person["player_id"] != LOBBY_COMPUTER_PLAYER_ID]
+            for person in players_out:
+                fids = [fid for fid, pid in historical.items() if pid == person["player_id"] and fd.get(fid)]
+                person["faction_id"] = fids[0] if fids else None
+                person["alliances"] = list(dict.fromkeys(fd[fid].alliance for fid in fids))
+            computer_fids = [fid for fid, pid in historical.items() if pid == "computer" and fd.get(fid)]
+            if computer_fids:
+                players_out.append({"player_id": "computer", "username": "Computer", "faction_id": computer_fids[0],
+                                    "alliances": list(dict.fromkeys(fd[fid].alliance for fid in computer_fids))})
         raw_winner = state_dict.get("winner")
         winner = str(raw_winner) if isinstance(raw_winner, str) and raw_winner else None
 

@@ -4307,3 +4307,27 @@ body:has(.admin-modal--map-editor) .menu-scroll-overlay:not(.menu-scroll-overlay
   max-width: calc(100% - 24px);
   box-sizing: border-box;
 }
+
+.admin-modal.admin-assignments {
+  width: min(30rem, 94vw);
+}
+
+.admin-assignments__alliance {
+  margin: 0.75rem 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--ink-faded);
+  border-radius: 6px;
+}
+
+.admin-assignments__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.4rem 0;
+}
+
+.admin-assignments__row select {
+  width: 100%;
+  min-width: 0;
+}
