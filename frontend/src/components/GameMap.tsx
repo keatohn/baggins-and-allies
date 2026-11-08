@@ -22,6 +22,7 @@ import './MapTooltip.css';
 import { sortSeaZoneIdsByNumericSuffix, seaZonesReachableBySailFrom } from '../seaZoneSort';
 import { isRiverTerrain, isWaterTerrain } from '../waterTerrain';
 import { MAP_TEXTURE_CONFIG, getMapTextureOpacity, refreshMapTextureOpacity, subscribeMapTextureOpacity } from '../mapTexture';
+import { useCoarsePointer } from '../useCoarsePointer';
 import { createWheelNavIntentResolver, wheelZoomScaleMultiplier } from '../utils/wheelNavIntent';
 import {
   directFordOnlyLandPair,
@@ -829,6 +830,7 @@ function DroppableTerritory({
   conquestFadeColor,
   texturePatternId,
   textureOpacity,
+  colorGlow = true,
   onClick,
 }: {
   territoryId: string;
@@ -851,6 +853,8 @@ function DroppableTerritory({
   texturePatternId?: string | null;
   /** Multiply strength of the parchment grain. */
   textureOpacity: number;
+  /** Per-territory color glow (native SVG filter on the stroke). Off on coarse pointers: ~90 of them are the main mobile paint cost. */
+  colorGlow?: boolean;
   onClick: (e: React.MouseEvent) => void;
 }) {
   const tid = typeof territoryId === 'string' ? territoryId : (territoryId != null && typeof territoryId === 'object' && 'id' in (territoryId as object) ? String((territoryId as { id: string }).id) : (territoryId != null && typeof territoryId === 'object' && 'territoryId' in (territoryId as object) ? String((territoryId as { territoryId: string }).territoryId) : String(territoryId ?? '')));
@@ -862,7 +866,7 @@ function DroppableTerritory({
   const pathClass = `territory-path ${isSeaZone ? 'territory-path--sea' : 'territory-path--svg-glow'} ${isSelected ? 'selected' : ''} ${keyStronghold ? 'key-stronghold' : ''} ${showStrongHighlight ? 'highlight' : ''} ${highlightMuted ? 'highlight-muted' : ''} ${isOver && isValidDrop ? 'drop-target' : ''}`;
   const safeColor = color || '#d4c4a8';
   const glowVars = territoryGlowFromHex(safeColor);
-  const glowFilterId = isSeaZone ? undefined : `territory-glow-${safeColor.replace(/^#/, '')}`;
+  const glowFilterId = isSeaZone || !colorGlow ? undefined : `territory-glow-${safeColor.replace(/^#/, '')}`;
   const pathStyle = {
     ['--territory-glow' as string]: safeColor,
     ['--territory-stroke' as string]: glowVars.stroke,
@@ -1148,6 +1152,8 @@ function GameMap({
     [seaHullIds, riverUnitIds],
   );
   const prefersReducedMotion = usePrefersReducedMotion();
+  /** Touch-first devices: gates the map effects that blow up mobile Safari's paint memory. */
+  const coarsePointer = useCoarsePointer();
   /** Unique territory colors for SVG glow filters (Safari doesn't render CSS drop-shadow on SVG). */
   const uniqueGlowColors = useMemo(() => {
     const s = new Set<string>(['#2d4258', '#d4c4a8', '#7a7a7a']);
@@ -1212,6 +1218,8 @@ function GameMap({
   const textureUid = useId().replace(/:/g, '');
   const textureOpacity = useSyncExternalStore(subscribeMapTextureOpacity, getMapTextureOpacity, getMapTextureOpacity);
   const texturePatternId = MAP_TEXTURE_CONFIG.enabled ? `land-parchment-${textureUid}` : null;
+  /** Parchment grain costs ~90 `mix-blend-mode` paths over the map; skip it on coarse pointers. */
+  const activeTexturePatternId = coarsePointer ? null : texturePatternId;
   const svgRef = useRef<SVGSVGElement>(null);
   const [svgPaths, setSvgPaths] = useState<Map<string, TerritoryPathData>>(new Map());
   const [svgHintAnchors, setSvgHintAnchors] = useState<SvgHintAnchorsByTerritory>({});
@@ -1238,6 +1246,35 @@ function GameMap({
   useEffect(() => {
     transformRef.current = transform;
   }, [transform]);
+  /**
+   * Coalesce gesture updates to one render per frame: `setTransform` re-renders the whole map,
+   * and `touchmove` fires at display rate (60–120Hz) on phones. `transformRef` is updated when a
+   * transform is queued so the next gesture sample sees the queued value, not the last committed one.
+   */
+  const pendingTransformRef = useRef<MapTransform | null>(null);
+  const transformFrameRef = useRef<number | null>(null);
+  const flushQueuedTransform = useCallback(() => {
+    transformFrameRef.current = null;
+    const next = pendingTransformRef.current;
+    pendingTransformRef.current = null;
+    if (next) setTransform(next);
+  }, []);
+  const queueTransform = useCallback(
+    (next: MapTransform) => {
+      pendingTransformRef.current = next;
+      transformRef.current = next;
+      if (transformFrameRef.current == null) {
+        transformFrameRef.current = window.requestAnimationFrame(flushQueuedTransform);
+      }
+    },
+    [flushQueuedTransform],
+  );
+  useEffect(
+    () => () => {
+      if (transformFrameRef.current != null) window.cancelAnimationFrame(transformFrameRef.current);
+    },
+    [],
+  );
   const [territoryCentroids, setTerritoryCentroids] = useState<Record<string, { x: number; y: number }>>({});
   /** For larger territories: marker position (pp/logo/emojis) and unit position (stacks) can differ to avoid overlap. `center` is the interior point used for signals and is not nudged with the unit stack. */
   const [territoryPositions, setTerritoryPositions] = useState<Record<string, { marker: { x: number; y: number }; unit: { x: number; y: number }; center?: { x: number; y: number } }>>({});
@@ -1588,6 +1625,22 @@ function GameMap({
   const TERRITORY_TWO_SPOT_HEIGHT_THRESHOLD = 250;
 
   // Calculate marker and unit positions: pole of inaccessibility; for large territories, a second pole for units
+  /**
+   * Terrain-only view of `territoryData`. The geometry pass below reads nothing else, and the
+   * multiplayer poll rebuilds `territoryData` wholesale every tick — keying the effect on this
+   * string keeps the centroid / `getBBox` / `isPointInFill` pass from re-running on every poll.
+   */
+  const territoryTerrainKey = useMemo(() => {
+    const entries = Object.entries(territoryData).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    let key = String(entries.length);
+    for (const [id, t] of entries) key += `|${id}=${t?.terrain ?? ''}`;
+    return key;
+  }, [territoryData]);
+  /** Latest `territoryData` for that pass (synced after render, before the pass effect runs). */
+  const territoryDataRef = useRef(territoryData);
+  useEffect(() => {
+    territoryDataRef.current = territoryData;
+  }, [territoryData]);
   useEffect(() => {
     if (svgPaths.size === 0 || !svgRef.current) {
       setTerritoryCentroids({});
@@ -1596,10 +1649,11 @@ function GameMap({
     }
 
     const terrainForId = (id: string): string | undefined => {
-      const direct = territoryData[id]?.terrain;
+      const data = territoryDataRef.current;
+      const direct = data[id]?.terrain;
       if (direct) return direct;
       const lower = id.toLowerCase();
-      for (const [key, value] of Object.entries(territoryData)) {
+      for (const [key, value] of Object.entries(data)) {
         if (key.toLowerCase() === lower) return value?.terrain;
       }
       return undefined;
@@ -2032,7 +2086,9 @@ function GameMap({
     };
 
     let timer2: ReturnType<typeof setTimeout> | null = null;
+    let attempts = 0;
     const run = () => {
+      attempts += 1;
       const { centroids, positions } = computeCentroidsAndPositions();
       const resolvePositionKey = (rawTid: string): string | null => {
         if (rawTid in positions) return rawTid;
@@ -2087,7 +2143,9 @@ function GameMap({
       }
       setTerritoryCentroids(centroids);
       setTerritoryPositions(positions);
-      if (Object.keys(centroids).length < svgPaths.size) {
+      // Bounded retries: a path that never yields a centroid (bad geometry, case-mismatched
+      // ids) must not re-run the whole pass every 200ms forever.
+      if (Object.keys(centroids).length < svgPaths.size && attempts < 6) {
         timer2 = setTimeout(run, 200);
       }
     };
@@ -2097,7 +2155,7 @@ function GameMap({
       clearTimeout(timer1);
       if (timer2 != null) clearTimeout(timer2);
     };
-  }, [svgPaths, svgHintAnchors, SVG_VIEWBOX.width, SVG_VIEWBOX.height, mapBase, territoryData, normalizedMapOverrides]);
+  }, [svgPaths, svgHintAnchors, SVG_VIEWBOX.width, SVG_VIEWBOX.height, mapBase, territoryTerrainKey, normalizedMapOverrides]);
 
   // Compute move arrows to render - only for current phase moves
   const moveArrows = useMemo(() => {
@@ -4159,7 +4217,7 @@ function GameMap({
         const maxY = Math.max(0, el.clientHeight - scaledH);
         newX = Math.max(minX, Math.min(maxX, newX));
         newY = Math.max(minY, Math.min(maxY, newY));
-        setTransform({ x: newX, y: newY, scale: newScale });
+        queueTransform({ x: newX, y: newY, scale: newScale });
       } else if (e.touches.length === 1 && touchPanRef.current) {
         e.preventDefault();
         const dx = e.touches[0].clientX - touchPanRef.current.startX;
@@ -4175,7 +4233,7 @@ function GameMap({
         const maxY = Math.max(0, el.clientHeight - scaledH);
         newX = Math.max(minX, Math.min(maxX, newX));
         newY = Math.max(minY, Math.min(maxY, newY));
-        setTransform(prev => ({ ...prev, x: newX, y: newY }));
+        queueTransform({ ...transformRef.current, x: newX, y: newY });
       }
     };
     const handleTouchEnd = (e: TouchEvent) => {
@@ -4192,7 +4250,7 @@ function GameMap({
       el.removeEventListener('touchend', handleTouchEnd);
       el.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, []);
+  }, [queueTransform]);
 
   // Non-passive wheel listener.
   // Trackpad: two-finger scroll pans; pinch (ctrlKey) zooms toward cursor.
@@ -4629,19 +4687,21 @@ function GameMap({
                               keyStronghold={isKeyStronghold}
                               conquestFadeColor={conquestFadeByTerritory.get(territoryId)}
                               texturePatternId={
-                                texturePatternId &&
+                                activeTexturePatternId &&
                                 !(MAP_TEXTURE_CONFIG.applyToLandOnly && (isSeaZone || isRiverZone))
-                                  ? texturePatternId
+                                  ? activeTexturePatternId
                                   : null
                               }
                               textureOpacity={textureOpacity}
+                              colorGlow={!coarsePointer}
                               onClick={(e) => handleTerritoryClick(territoryId, e)}
                             />
                           );
                         })}
                       <defs>
-                        {/* Native SVG glow filters so Safari shows the halo (Safari ignores CSS drop-shadow on SVG) */}
-                        {uniqueGlowColors.map((hex) => {
+                        {/* Native SVG glow filters so Safari shows the halo (Safari ignores CSS drop-shadow on SVG).
+                            Skipped on coarse pointers, where no land stroke references them (DroppableTerritory colorGlow). */}
+                        {!coarsePointer && uniqueGlowColors.map((hex) => {
                           const { glowRgba, glowRgbaSoft } = territoryGlowFromHex(hex);
                           const id = `territory-glow-${hex.replace(/^#/, '')}`;
                           return (
@@ -4661,7 +4721,7 @@ function GameMap({
                             </filter>
                           );
                         })}
-                        {/* Gold halo for selected land territories (native filter so Safari shows it) */}
+                          {/* Gold halo for selected land territories (native filter so Safari shows it) */}
                         <filter id="territory-glow-stronghold" x="-80%" y="-80%" width="260%" height="260%">
                           <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blurCore" />
                           <feGaussianBlur in="SourceGraphic" stdDeviation="16" result="blurWide" />
@@ -4710,9 +4770,9 @@ function GameMap({
                               re-rasterizing patternTransform; CSS transform on pattern is poorly
                               implemented per SVG2/MDN, so keep SMIL as the attribute-channel fallback.
                             Animating children inside the tile rasterizes once and never moves. */}
-                        {texturePatternId ? (
+                        {activeTexturePatternId ? (
                           <pattern
-                            id={texturePatternId}
+                            id={activeTexturePatternId}
                             patternUnits="userSpaceOnUse"
                             x="0"
                             y="0"
@@ -4744,7 +4804,7 @@ function GameMap({
                           <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(195,225,245,0.55)" strokeWidth="2.75" strokeLinecap="round" />
                           {/* Darker troughs for depth */}
                           <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(10,24,40,0.62)" strokeWidth="3" strokeLinecap="round" />
-                          {!prefersReducedMotion && (
+                          {!prefersReducedMotion && !coarsePointer && (
                             <animateTransform attributeName="patternTransform" type="translate" from="0 0" to="-120 0" dur="5s" repeatCount="indefinite" />
                           )}
                         </pattern>
@@ -4762,7 +4822,7 @@ function GameMap({
                           <path d="M0 20 Q30 12 60 20 T120 20 M0 45 Q30 37 60 45 T120 45" fill="none" stroke="rgba(205,230,250,0.78)" strokeWidth="4" strokeLinecap="round" />
                           <path d="M0 32 Q25 26 50 32 T100 32 T120 32" fill="none" stroke="rgba(225,240,252,0.6)" strokeWidth="2.75" strokeLinecap="round" />
                           <path d="M0 38 Q30 44 60 38 T120 38" fill="none" stroke="rgba(16,40,74,0.55)" strokeWidth="3" strokeLinecap="round" />
-                          {!prefersReducedMotion && (
+                          {!prefersReducedMotion && !coarsePointer && (
                             <animateTransform attributeName="patternTransform" type="translate" from="0 0" to="-120 0" dur="3s" repeatCount="indefinite" />
                           )}
                         </pattern>
@@ -4909,7 +4969,7 @@ function GameMap({
                             style={{ left: screenPos.x, top: screenPos.y, width: size, height: size, transform: rotation }}
                             aria-hidden
                           >
-                            <img src={landscapeSrc(placement)} style={{ filter: landscapeFilter(placement) }} alt="" draggable={false} />
+                            <img src={landscapeSrc(placement)} style={{ filter: landscapeFilter(placement) }} alt="" draggable={false} loading="lazy" decoding="async" />
                             {placement.cat === 'volcano' ? (
                               <>
                                 <span className="territory-landscape__smoke" />

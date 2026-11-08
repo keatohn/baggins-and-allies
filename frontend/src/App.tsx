@@ -29,6 +29,7 @@ import LobbyView from './components/LobbyView';
 import { useMenuScroll } from './components/MenuScrollContext';
 import { sortSeaZoneIdsByNumericSuffix, canonicalSeaZoneId } from './seaZoneSort';
 import { isWaterTerrain } from './waterTerrain';
+import { useCoarsePointer } from './useCoarsePointer';
 import {
   fordShortcutRequiresEscortLead,
   isFordCrosser,
@@ -683,6 +684,52 @@ function factionAssetUrl(filename: string | null | undefined): string | undefine
   return trimmed ? `/assets/factions/${trimmed}` : undefined;
 }
 
+/**
+ * Field-by-field equality for one derived territory row (primitives + adjacency arrays).
+ * Used to keep `currentTerritoryData` identity stable across polls that changed nothing, so
+ * the downstream memos — and the map — don't rebuild on every 2s tick.
+ */
+function territoryRowEquals(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  if (a === b) return true;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const key of keys) {
+    const av = a[key];
+    const bv = b[key];
+    if (av === bv) continue;
+    if (Array.isArray(av) && Array.isArray(bv)) {
+      if (av.length !== bv.length) return false;
+      for (let i = 0; i < av.length; i++) {
+        if (av[i] !== bv[i]) return false;
+      }
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+/** One row of `currentTerritoryData` — everything the map reads per territory. */
+type TerritoryDataRow = {
+  name: string;
+  owner?: FactionId;
+  /** Starting-setup owner when set; omitted or neutral means no "Original Owner" UI. */
+  original_owner?: FactionId | null;
+  terrain: string;
+  stronghold: boolean;
+  stronghold_base_health: number;
+  stronghold_current_health: number;
+  produces: number;
+  adjacent: string[];
+  aerial_adjacent?: string[];
+  ford_adjacent?: string[];
+  hasCamp: boolean;
+  hasPort: boolean;
+  isCapital: boolean;
+  ownable?: boolean;
+  image?: string;
+};
+
 function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   const GAME_ID = gameIdProp ?? DEFAULT_GAME_ID;
   const { holdScroll, revealScroll, showCoverReload } = useMenuScroll();
@@ -1200,6 +1247,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
   }, [definitions]);
 
   // Build territory data from backend state (includes hasCamp from standing camps, isCapital from faction definitions)
+  /** Last row set handed out; lets an unchanged poll reuse the previous object identity. */
+  const currentTerritoryDataRef = useRef<Record<string, TerritoryDataRow> | null>(null);
   const currentTerritoryData = useMemo(() => {
     if (!backendState || !territoryDefs) return {};
     const camps = definitions?.camps;
@@ -1223,25 +1272,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         (f) => (f as { capital?: string }).capital === tid
       );
 
-    const result: Record<string, {
-      name: string;
-      owner?: FactionId;
-      /** Starting-setup owner when set; omitted or neutral means no "Original Owner" UI. */
-      original_owner?: FactionId | null;
-      terrain: string;
-      stronghold: boolean;
-      stronghold_base_health: number;
-      stronghold_current_health: number;
-      produces: number;
-      adjacent: string[];
-      aerial_adjacent?: string[];
-      ford_adjacent?: string[];
-      hasCamp: boolean;
-      hasPort: boolean;
-      isCapital: boolean;
-      ownable?: boolean;
-      image?: string;
-    }> = {};
+    const result: Record<string, TerritoryDataRow> = {};
 
     const pendingCaptures = pendingCapturesOverlayForPhase(
       backendState.phase,
@@ -1297,6 +1328,21 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           ownable: true,
         };
     }
+    // A poll that changed nothing reuses the previous object, so every downstream memo —
+    // and the map — skips its rebuild instead of re-running on each 2s tick.
+    const prev = currentTerritoryDataRef.current;
+    if (prev && Object.keys(prev).length === Object.keys(result).length) {
+      let unchanged = true;
+      for (const [id, row] of Object.entries(result)) {
+        const prevRow = prev[id];
+        if (!prevRow || !territoryRowEquals(prevRow, row)) {
+          unchanged = false;
+          break;
+        }
+      }
+      if (unchanged) return prev;
+    }
+    currentTerritoryDataRef.current = result;
     return result;
   }, [backendState, territoryDefs, definitions, factionData]);
 
@@ -1946,7 +1992,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     return () => window.clearTimeout(t);
   }, [loading, mapBackdropSettled, showCoverReload]);
 
-  // Poll game state only in multiplayer (2s default; 1s while spectating a battle for faster combat sync)
+  // Poll game state only in multiplayer (2s default; 1s while spectating a battle for faster
+  // combat sync; doubled on coarse pointers — see coarsePointer above)
   const isMultiplayer = gameMeta?.is_multiplayer ?? Boolean(gameMeta?.game_code);
   const seatPortraits = useMemo(() => {
     const cards = gameMeta?.player_portraits;
@@ -1979,7 +2026,9 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     }
     return out;
   }, [gameMeta]);
-  const pollIntervalMs = spectatingBattle ? 1000 : GAME_POLL_INTERVAL_MS;
+  // Phones re-render the entire map on every poll, so poll at half rate on coarse pointers.
+  const coarsePointer = useCoarsePointer();
+  const pollIntervalMs = (spectatingBattle ? 1000 : GAME_POLL_INTERVAL_MS) * (coarsePointer ? 2 : 1);
   useEffect(() => {
     if (!GAME_ID || !isMultiplayer) return;
     const t = setInterval(() => refreshState(), pollIntervalMs);
