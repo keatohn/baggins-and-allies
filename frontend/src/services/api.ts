@@ -1105,7 +1105,7 @@ export interface GameMeta {
   computer_only?: boolean;
   /** Per-faction difficulty and board-score weights. Set in the Computer Only lobby. */
   ai_faction_settings?: Record<string, AiFactionSetting>;
-  /** Player IDs who forfeited; their turns are auto-skipped. Used for forfeit notification toast. */
+  /** Player IDs who forfeited; their factions were reassigned and the turn continues with the new owner. Used for forfeit notification toast. */
   forfeited_player_ids?: string[];
   /** Forfeit summary by forfeited player id, e.g. ["Gondor -> Alice", "Rohan -> Computer"]. */
   forfeit_reassignments?: Record<string, string[]>;

@@ -17,9 +17,8 @@ from dataclasses import asdict, replace
 from datetime import datetime, timedelta
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.testclient import TestClient
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func
@@ -5225,12 +5224,16 @@ def _normalize_forfeit_assign_target(raw: str) -> str:
 @app.post("/games/{game_id}/forfeit")
 def forfeit_game(
     game_id: str,
-    http_request: Request,
     body: ForfeitRequest,
     player: Player = Depends(get_current_player),
     db: Session = Depends(get_db),
 ):
-    """Leave the game and reassign each of your factions to the computer or an allied player."""
+    """Leave the game and reassign each of your factions to the computer or an allied player.
+
+    The current turn is left untouched: the newly assigned human or computer continues
+    it from wherever the forfeiting player stopped. Only the roster/config change,
+    alongside the forfeit snapshot of the leaving player.
+    """
     row = db.query(GameModel).filter(GameModel.id == game_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Game not found")
@@ -5284,11 +5287,10 @@ def forfeit_game(
         forfeited = []
     if player_id_str not in forfeited:
         forfeited = list(forfeited) + [player_id_str]
-    forfeited_set = set(str(x) for x in forfeited)
     config["forfeited_player_ids"] = forfeited
     # Record the factions this player controlled so game_results can write rows for them
-    # after they are removed from the roster. The round is captured before any skip-turn
-    # so a game that ends on this round is not treated as an earlier forfeit.
+    # after they are removed from the roster. The round is captured from the untouched
+    # game state, so a game that ends on this round is not treated as an earlier forfeit.
     if row.status != "lobby":
         factions_cfg = config.get("forfeited_player_factions")
         if not isinstance(factions_cfg, dict):
@@ -5340,41 +5342,9 @@ def forfeit_game(
         config["lobby_claims"] = lobby_claims
         new_players = [p for p in players_list if str(p.get("player_id")) != player_id_str]
     else:
-        # Advance past this player's turn while they still appear as owners in the DB (skip-turn auth).
-        # Skipped when this forfeit ends the game: no further turns, and cycle-wrap victory must not override the forced defeat.
-        # Also skipped on already-finished games: turns are over, no skip-turn round-trips needed.
-        if row.status == "active" and not forfeit_ends_game:
-            try:
-                raw = json.loads(row.game_state) if isinstance(row.game_state, str) else row.game_state
-                if isinstance(raw, dict):
-                    state = GameState.from_dict(raw)
-                    faction_to_player_old = {
-                        str(p["faction_id"]): str(p["player_id"])
-                        for p in players_list
-                        if p.get("faction_id") is not None and p.get("player_id") is not None
-                    }
-                    _, _, fd_skip, _, _ = get_game_definitions(game_id, db)
-                    faction_ids = state.turn_order if state.turn_order else (sorted(fd_skip.keys()) if fd_skip else [])
-                    max_skips = len(faction_ids) if faction_ids else 1
-                    auth = http_request.headers.get("Authorization") or http_request.headers.get("authorization")
-                    headers = {"Authorization": auth} if auth else {}
-                    with TestClient(app) as client:
-                        for _ in range(max_skips):
-                            owner = faction_to_player_old.get(state.current_faction)
-                            if owner not in forfeited_set:
-                                break
-                            r = client.post(f"/games/{game_id}/skip-turn", headers=headers)
-                            if r.status_code != 200:
-                                break
-                            db.refresh(row)
-                            raw = json.loads(row.game_state) if isinstance(row.game_state, str) else {}
-                            if isinstance(raw, dict):
-                                state = GameState.from_dict(raw)
-                            else:
-                                break
-            except Exception:
-                pass
-
+        # Never advance or alter the turn here: the newly assigned human or computer
+        # finishes it from the exact phase/pending state the forfeiter left behind.
+        # Game state is written only when this forfeit ends the game (forced victory below).
         new_players = [p for p in players_list if str(p.get("player_id")) != player_id_str]
         ai_existing = [str(x) for x in (config.get("ai_factions") or []) if x]
         ai_set = set(ai_existing)
@@ -6967,7 +6937,10 @@ def do_skip_turn(
     player: Player = Depends(get_current_player),
     db: Session = Depends(get_db),
 ):
-    """Force end current faction's turn from any phase (used by forfeit when a player leaves on their turn)."""
+    """Force end current faction's turn from any phase.
+
+    Not used by forfeit (the new owner continues the turn in place); kept for compatibility.
+    """
     _require_can_act(game_id, player, db)
     state = get_game(game_id, db)
     ud, td, fd, cd, port_d = get_game_definitions(game_id, db)
