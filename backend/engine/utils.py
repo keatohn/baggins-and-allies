@@ -242,6 +242,7 @@ def initialize_game_state(
     stronghold_repair_cost: int | None = None,
     prefire_penalty: bool | None = None,
     heroes_enabled: bool | None = None,
+    specials_enabled: bool | None = None,
     special_rules: list | None = None,
     shadow_of_war: bool | None = None,
     marching_orders: bool | None = None,
@@ -383,6 +384,7 @@ def initialize_game_state(
     stronghold_repair_cost_val = stronghold_repair_cost if stronghold_repair_cost is not None else 0
     prefire_penalty_val = True if prefire_penalty is None else bool(prefire_penalty)
     heroes_enabled_val = True if heroes_enabled is None else bool(heroes_enabled)
+    specials_enabled_val = True if specials_enabled is None else bool(specials_enabled)
     starting_territory_owners: dict[str, str] = {
         tid: o for tid, o in (
             (tid, ts.original_owner)
@@ -408,6 +410,7 @@ def initialize_game_state(
         stronghold_repair_cost=stronghold_repair_cost_val,
         prefire_penalty=prefire_penalty_val,
         heroes_enabled=heroes_enabled_val,
+        specials_enabled=specials_enabled_val,
         shadow_of_war=bool(shadow_of_war),
         marching_orders=bool(marching_orders),
         rings_of_power=bool(rings_of_power) and heroes_enabled_val,
