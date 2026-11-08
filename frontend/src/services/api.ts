@@ -154,6 +154,8 @@ export interface ApiGameState {
   camp_cost?: number;
   /** Unique/hero units (`hero_id` on the unit def). Missing defaults true (older games). */
   heroes_enabled?: boolean;
+  /** Catalog specials on units. Missing defaults true (older games). When false, unit defs have no specials. */
+  specials_enabled?: boolean;
   /** Create-game option. Missing or false leaves the board fully visible. */
   shadow_of_war?: boolean;
   /** Create-game option. Missing or false means units get no extra non-combat movement. */
@@ -1698,6 +1700,7 @@ export const api = {
     isMultiplayer: boolean,
     setupId?: string,
     heroesEnabled: boolean = true,
+    specialsEnabled: boolean = true,
     shadowOfWar: boolean = false,
     marchingOrders: boolean = false,
     ringsOfPower: boolean = false,
@@ -1713,6 +1716,7 @@ export const api = {
         computer_only: computerOnly,
         test_mode: testMode,
         heroes_enabled: heroesEnabled,
+        specials_enabled: specialsEnabled,
         shadow_of_war: shadowOfWar,
         marching_orders: marchingOrders,
         rings_of_power: ringsOfPower,

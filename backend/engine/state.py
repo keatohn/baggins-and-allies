@@ -771,6 +771,8 @@ class GameState:
     prefire_penalty: bool = True
     # Hero units (`hero_id` on the unit def): when False, they cannot be purchased and are omitted from starting placement.
     heroes_enabled: bool = True
+    # Catalog specials on units. When False, unit defs were stripped at create (specials=[] and catalog-id tags dropped).
+    specials_enabled: bool = True
     # When True, each alliance sees armies only in its land and one territory beyond.
     shadow_of_war: bool = False
     # Optional rule "Marching Orders": units that did not move in combat_move get +1 remaining_movement on NCM entry.
@@ -871,6 +873,7 @@ class GameState:
             "stronghold_repair_cost": getattr(self, "stronghold_repair_cost", 0),
             "prefire_penalty": getattr(self, "prefire_penalty", True),
             "heroes_enabled": getattr(self, "heroes_enabled", True),
+            "specials_enabled": getattr(self, "specials_enabled", True),
             "shadow_of_war": bool(getattr(self, "shadow_of_war", False)),
             "marching_orders": bool(getattr(self, "marching_orders", False)),
             "combat_move_moved_ids": list(getattr(self, "combat_move_moved_ids", None) or []),
@@ -996,6 +999,7 @@ class GameState:
             stronghold_repair_cost=int(data["stronghold_repair_cost"]) if data.get("stronghold_repair_cost") is not None else 0,
             prefire_penalty=parse_prefire_penalty_from_manifest(data.get("prefire_penalty")),
             heroes_enabled=parse_prefire_penalty_from_manifest(data.get("heroes_enabled")),
+            specials_enabled=parse_prefire_penalty_from_manifest(data.get("specials_enabled")),
             shadow_of_war=bool(data.get("shadow_of_war")),
             marching_orders=bool(data.get("marching_orders")),
             combat_move_moved_ids=_ensure_str_list(data.get("combat_move_moved_ids")),

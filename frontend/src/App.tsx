@@ -4684,6 +4684,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
         seatPortraits={seatPortraits}
         computerSeats={computerSeats}
         viewerId={currentPlayerId}
+        specialsEnabled={backendState?.specials_enabled !== false}
       />
 
       {/* Combat Simulator modal: always mounted so form state persists when closed */}

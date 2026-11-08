@@ -60,6 +60,7 @@ export default function CreateGame() {
   const [testMode, setTestMode] = useState(false);
   const [player, setPlayer] = useState<AuthPlayer | null>(null);
   const [heroesEnabled, setHeroesEnabled] = useState(true);
+  const [specialsEnabled, setSpecialsEnabled] = useState(true);
   const [shadowOfWar, setShadowOfWar] = useState(false);
   const [marchingOrders, setMarchingOrders] = useState(false);
   const [optionalRules, setOptionalRules] = useState<Record<string, boolean>>({});
@@ -145,6 +146,7 @@ export default function CreateGame() {
         mode === 'multi',
         selectedSetupId ?? undefined,
         heroesEnabled,
+        specialsEnabled,
         shadowOfWar,
         marchingOrders,
         Boolean(selectedScenario?.rings_of_power) || optionalRules.rings_of_power === true,
@@ -259,6 +261,28 @@ export default function CreateGame() {
                     prev.rings_of_power === undefined ? prev : { ...prev, rings_of_power: false }
                   ));
                 }}
+              >
+                Off
+              </button>
+            </div>
+          </div>
+          <div className="create-game-form__field">
+            <RuleLabel
+              name="Specials"
+              description="Unit special abilities (prefire, terror, home deploy, and other combat modifiers). Off removes specials entirely for this game."
+            />
+            <div className="create-game-form__picker" role="group" aria-label="Specials on or off">
+              <button
+                type="button"
+                className={`create-game-form__picker-option ${specialsEnabled ? 'create-game-form__picker-option--active' : ''}`}
+                onClick={() => setSpecialsEnabled(true)}
+              >
+                On
+              </button>
+              <button
+                type="button"
+                className={`create-game-form__picker-option ${!specialsEnabled ? 'create-game-form__picker-option--active' : ''}`}
+                onClick={() => setSpecialsEnabled(false)}
               >
                 Off
               </button>

@@ -13,7 +13,7 @@ import threading
 import uuid
 from contextlib import asynccontextmanager
 from copy import deepcopy
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -204,7 +204,7 @@ from backend.map_overrides import (
 from backend.unit_formulas import UnitFormulasError, load_unit_formulas, save_unit_formulas, train_regression
 from backend.setup_validation import validate_setup_payload
 from backend.email import send_temp_password_email
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from backend.engine.queries import (
     validate_action,
     get_purchasable_units,
@@ -466,6 +466,8 @@ class CreateGameRequest(BaseModel):
     ai_algorithm: str | None = None
     """Hero-tagged units. Default True. When False they cannot be purchased and are omitted from starting placement."""
     heroes_enabled: bool = True
+    """Catalog specials on units. Default True. When False, unit defs are stripped of specials at game creation."""
+    specials_enabled: bool = True
     """When True, each alliance sees armies only on its land and one territory beyond. Default off."""
     shadow_of_war: bool = False
     """Marching Orders: units that did not move during combat move get +1 movement in non-combat move. Default off."""
@@ -3395,6 +3397,17 @@ def create_game(
         request.optional_rules,
         legacy_rings=bool(request.rings_of_power),
     )
+    specials_enabled = bool(request.specials_enabled)
+    if not specials_enabled:
+        special_ids = {e["id"] for e in load_catalog(db).get("specials") or [] if isinstance(e, dict) and e.get("id")}
+        ud = {
+            uid: replace(
+                u,
+                specials=[],
+                tags=[t for t in (u.tags or []) if t not in special_ids],
+            )
+            for uid, u in ud.items()
+        }
     state = initialize_game_state(
         faction_defs=fd,
         territory_defs=td,
@@ -3407,6 +3420,7 @@ def create_game(
         stronghold_repair_cost=stronghold_repair_cost,
         prefire_penalty=parse_prefire_penalty_from_manifest(setup.get("prefire_penalty")),
         heroes_enabled=bool(request.heroes_enabled) or rings_on,
+        specials_enabled=specials_enabled,
         shadow_of_war=bool(request.shadow_of_war),
         marching_orders=bool(request.marching_orders),
         rings_of_power=rings_on,
@@ -3443,6 +3457,7 @@ def create_game(
     # Always persist resolved setup (including default) so list/meta can show scenario name.
     config_snapshot["setup_id"] = setup_id
     config_snapshot["heroes_enabled"] = bool(getattr(state, "heroes_enabled", True))
+    config_snapshot["specials_enabled"] = bool(getattr(state, "specials_enabled", True))
     starting_message = parse_starting_message(setup.get("starting_message"))
     if starting_message:
         config_snapshot["starting_message"] = starting_message

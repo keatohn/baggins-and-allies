@@ -49,6 +49,8 @@ interface HeaderProps {
   computerSeats?: Record<string, { dots: number; difficulty: string }>;
   /** Logged-in player, so their own portrait opens the editable profile. */
   viewerId?: string | null;
+  /** Specials Off for this game: hide the ★ SP button and Specials modal. */
+  specialsEnabled?: boolean;
 }
 
 type FactionMark = { id: string; name: string; icon: string; color: string };
@@ -222,7 +224,7 @@ function placeHeaderTitle(scroll: HTMLElement, title: HTMLElement, bar: HTMLElem
   }
 }
 
-function Header({ gameState, turnOrderForTicker, factionData, factionStats, ringsByFaction, ringsOfPower = null, unitsByFaction = {}, gameName = null, setupDisplayName = null, specials = {}, specialsOrder: _specialsOrder = [], unitsBySpecial = {}, onOpenCombatSim, subfactionRules = {}, unitNames = {}, specialRules = [], catalogRules = [], seatPortraits, computerSeats, viewerId = null }: HeaderProps) {
+function Header({ gameState, turnOrderForTicker, factionData, factionStats, ringsByFaction, ringsOfPower = null, unitsByFaction = {}, gameName = null, setupDisplayName = null, specials = {}, specialsOrder: _specialsOrder = [], unitsBySpecial = {}, onOpenCombatSim, subfactionRules = {}, unitNames = {}, specialRules = [], catalogRules = [], seatPortraits, computerSeats, viewerId = null, specialsEnabled = true }: HeaderProps) {
   const { navigateWithScroll } = useMenuScroll();
   const headerScrollRef = useRef<HTMLDivElement>(null);
   const strongholdBarRef = useRef<HTMLDivElement>(null);
@@ -376,16 +378,18 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
             </span>
           </button>
         )}
-        <button
-          type="button"
-          className="header-specials-btn"
-          onClick={() => setSpecialsOpen(true)}
-          title="Specials"
-          aria-label="Open special abilities"
-        >
-          <span className="header-specials-star" aria-hidden>★</span>
-          <span className="header-specials-sp">SP</span>
-        </button>
+        {specialsEnabled && (
+          <button
+            type="button"
+            className="header-specials-btn"
+            onClick={() => setSpecialsOpen(true)}
+            title="Specials"
+            aria-label="Open special abilities"
+          >
+            <span className="header-specials-star" aria-hidden>★</span>
+            <span className="header-specials-sp">SP</span>
+          </button>
+        )}
         <button
           type="button"
           className="header-unit-stats-btn"
@@ -743,7 +747,7 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
       }
 
       {
-        specialsOpen && (
+        specialsEnabled && specialsOpen && (
           <div className="modal-overlay" onClick={() => setSpecialsOpen(false)}>
             <div className="modal specials-modal" onClick={e => e.stopPropagation()}>
               <header className="modal-header">
@@ -796,6 +800,7 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
           unitsByFaction={unitsByFaction}
           factionData={factionData}
           turnOrder={turnOrder}
+          showSpecials={specialsEnabled}
           onClose={() => setUnitStatsOpen(false)}
         />
       )}

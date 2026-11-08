@@ -397,6 +397,7 @@ export function UnitStatsModal({
   turnOrder = [],
   extraColumns = [],
   extraKey,
+  showSpecials = true,
   onClose,
 }: {
   unitsByFaction: Record<string, UnitForStats[]>;
@@ -404,10 +405,13 @@ export function UnitStatsModal({
   turnOrder?: string[];
   extraColumns?: UnitStatsExtraColumn[];
   extraKey?: string;
+  /** When false, hide the SP column and legend (specials-off game). Default true. */
+  showSpecials?: boolean;
   onClose: () => void;
 }) {
   const order = unitStatsFactionOrder(unitsByFaction, factionData, turnOrder);
   const wide = extraColumns.length > 0;
+  const statColCount = (showSpecials ? 10 : 9) + extraColumns.length;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -428,7 +432,7 @@ export function UnitStatsModal({
                 ))}
                 <col className="stats-units-col-num stats-units-col-tc" />
                 <col className="stats-units-col-num stats-units-col-tr" />
-                <col className="stats-units-col-specials" />
+                {showSpecials && <col className="stats-units-col-specials" />}
                 {extraColumns.map((col) => (
                   <col key={col.key} className="stats-units-col-extra" />
                 ))}
@@ -444,7 +448,7 @@ export function UnitStatsModal({
                   <th className="stats-col-num">HP</th>
                   <th className="stats-col-num" title="Transport capacity">TC</th>
                   <th className="stats-col-num" title="Transportable">TR</th>
-                  <th className="stats-col-num stats-col-specials">SP</th>
+                  {showSpecials && <th className="stats-col-num stats-col-specials">SP</th>}
                   {extraColumns.map((col) => (
                     <th key={col.key} className={`stats-col-num stats-col-extra stats-col-extra--${col.tone}`} title={col.label}>
                       {col.label}
@@ -458,7 +462,7 @@ export function UnitStatsModal({
                   const fd = factionData[fid];
                   return [
                     <tr key={`faction-${fid}`} className="unit-stats-faction-row">
-                      <td colSpan={10 + extraColumns.length} className="stats-col-unit">
+                      <td colSpan={statColCount} className="stats-col-unit">
                         <div className="unit-stats-name-cell">
                           {fd?.icon && (fd?.alliance === 'good' || fd?.alliance === 'evil') && (
                             <span
@@ -488,9 +492,11 @@ export function UnitStatsModal({
                         <td className="stats-col-num">{u.health}</td>
                         <td className="stats-col-num">{u.transportCapacity > 0 ? u.transportCapacity : '–'}</td>
                         <td className="stats-col-num">{u.transportable ? '✓' : '–'}</td>
-                        <td className="stats-col-num stats-col-specials">
-                          {u.specials?.length ? u.specials.join(', ') : ''}
-                        </td>
+                        {showSpecials && (
+                          <td className="stats-col-num stats-col-specials">
+                            {u.specials?.length ? u.specials.join(', ') : ''}
+                          </td>
+                        )}
                         {extraColumns.map((col) => (
                           <td key={col.key} className={extraCellClass(col, col.values[u.id])}>
                             {formatExtra(col.values[u.id], col.tone === 'diff')}
@@ -507,7 +513,8 @@ export function UnitStatsModal({
           )}
         </div>
         <p className="unit-stats-modal-key">
-          P = Power cost | A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points | TC = Transport capacity | TR = Transportable | SP = Specials
+          P = Power cost | A = Attack | D = Defense | R = Dice rolls | M = Moves | HP = Hit Points | TC = Transport capacity | TR = Transportable
+          {showSpecials ? ' | SP = Specials' : ''}
           {extraKey ? ` | ${extraKey}` : ''}
         </p>
       </div>
