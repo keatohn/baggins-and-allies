@@ -168,6 +168,14 @@
     animation: none;
   }
 }
+/* Coarse pointers: one continuously animating pattern is a full-map repaint per frame.
+   Both channels (CSS + SMIL) are gated off on phones — see GameMap.tsx for the SMIL side. */
+@media (pointer: coarse) {
+  .wave-pattern-sea,
+  .wave-pattern-river {
+    animation: none;
+  }
+}
 .territory-path-stroke {
   pointer-events: none;
 }
@@ -260,6 +268,17 @@
 .territory-path-stroke.territory-path--sea.selected:not(.drop-target) {
   filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.8))
           drop-shadow(0 0 14px rgba(255, 215, 0, 0.45));
+}
+
+/* Coarse pointers: drop the decorative per-path glow filters. Every sea path carries two
+   CSS drop-shadows (and every land stroke an SVG feGaussianBlur, gated in GameMap.tsx);
+   at MAX_SCALE zoom on a DPR-3 phone those rasterize into multi-thousand-pixel buffers —
+   the classic iOS Safari tab-kill. Selected / drop-target / key-stronghold keep theirs. */
+@media (pointer: coarse) {
+  .territory-path-fill:not(.selected):not(.drop-target),
+  .territory-path-stroke.territory-path--sea:not(.selected):not(.drop-target) {
+    filter: none;
+  }
 }
 
 /* Selected land: slight lift about the polygon center. Sea polygons are huge — no lift for sea.
@@ -750,6 +769,21 @@
     animation: none;
     opacity: 0.7;
     transform: translateY(-8px);
+  }
+}
+
+/* Coarse pointers: drop the per-image drop-shadow (one filtered layer per art piece) and
+   the animated smoke/fume/spark particles — hundreds of blurred, infinitely-animating
+   elements on a busy map. Art itself stays. */
+@media (pointer: coarse) {
+  .territory-landscape {
+    filter: none;
+  }
+
+  .territory-landscape__smoke,
+  .territory-landscape__fume,
+  .territory-landscape__spark {
+    display: none;
   }
 }
 

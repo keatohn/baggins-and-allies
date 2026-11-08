@@ -127,6 +127,14 @@
   filter: url('#scroll-paper-ruffle');
 }
 
+/* Coarse pointers: the turbulence/displacement ruffle spans the whole 50vw panel and is
+   painted exactly when the map first appears — the cheapest place to lose it on phones. */
+@media (pointer: coarse) {
+  .menu-scroll-panel__paper {
+    filter: none;
+  }
+}
+
 .menu-scroll-panel--left .menu-scroll-panel__face {
   box-shadow: inset -10px 0 18px -6px rgba(61, 41, 20, 0.35);
 }
