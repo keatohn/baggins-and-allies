@@ -1124,6 +1124,8 @@ export interface GameListPlayer {
   player_id: string;
   username: string | null;
   faction_id: string | null;
+  /** Alliances of all factions this player controls in this game. */
+  alliances?: string[];
   /** True when this player left via forfeit; kept in the list so the original roster shows. */
   forfeited?: boolean;
 }

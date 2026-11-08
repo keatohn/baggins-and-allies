@@ -636,6 +636,10 @@ body:has(.combat-sim-modal-overlay) {
   flex-direction: column;
 }
 
+.admin-modal.admin-modal--games {
+  width: min(100%, 82rem);
+}
+
 .admin-modal--units .unit-stats-modal,
 .admin-modal--games .games-report__table-scroll,
 .admin-modal--units .games-report__table-scroll {

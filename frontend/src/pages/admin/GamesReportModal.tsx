@@ -41,7 +41,9 @@ function playerNames(game: GameListItem): string {
   for (const p of game.players ?? []) {
     const n = p.username?.trim();
     if (!n) continue;
-    const label = p.forfeited ? `${n} (forfeited)` : n;
+    const initials = [...new Set((p.alliances ?? []).filter(Boolean).map((alliance) => alliance[0].toUpperCase()))];
+    const name = initials.length ? `${n} (${initials.join('/')})` : n;
+    const label = p.forfeited ? `${name} (forfeited)` : name;
     if (!names.includes(label)) names.push(label);
   }
   if (names.length > 0) return names.join(', ');
