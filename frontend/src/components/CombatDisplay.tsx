@@ -2703,7 +2703,7 @@ function CombatDisplay({
                   title={
                     !canRetreat
                       ? seaRaidCombat
-                        ? 'Retreat is not available during a sea raid'
+                        ? 'Retreat unavailable in this sea raid (sea raiding units cannot retreat, or no adjacent allied territory)'
                         : 'Retreat unavailable (click Continue first after archer prefire, or no adjacent allied/neutral territory)'
                       : undefined
                   }

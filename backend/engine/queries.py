@@ -1756,6 +1756,12 @@ def _validate_retreat(
             "Cannot retreat until attackers have rolled (after archer or stealth prefire, continue combat first)",
         )
 
+    if _sea_raid_retreat_is_vetoed(state):
+        return ValidationResult(
+            False,
+            "Cannot retreat from this sea raid: sea raiding units cannot retreat",
+        )
+
     destination = action.payload.get("retreat_to")
     if not destination:
         return ValidationResult(False, "No retreat destination specified")
@@ -3228,6 +3234,38 @@ def _get_retreat_adjacent_ids(
     ))
 
 
+def _sea_raid_retreat_is_vetoed(state: GameState) -> bool:
+    """
+    Sea-raid retreat veto: True when the active sea raid's roster still contains at least
+    one sea-raiding unit — a fleet passenger still in the staging sea, or a disembarked
+    passenger recorded in territory_sea_raid_passenger_instance_ids for the raided hex.
+    Any such unit vetoes retreat for the WHOLE attack: units that joined from land cannot
+    retreat either. Retreat stays available only when every surviving attacker joined the
+    attack from land (all sea-raiding units dead). Pure naval battles (no sea_zone_id)
+    are unaffected.
+    """
+    combat = state.active_combat
+    if combat is None or not getattr(combat, "sea_zone_id", None):
+        return False
+    passenger_ids = set(
+        (getattr(state, "territory_sea_raid_passenger_instance_ids", None) or {}).get(
+            combat.territory_id, []
+        )
+    )
+    sea_zone = state.territories.get(combat.sea_zone_id)
+    land = state.territories.get(combat.territory_id)
+    sea_ids = {u.instance_id for u in sea_zone.units} if sea_zone else set()
+    land_ids = {u.instance_id for u in land.units} if land else set()
+    for iid in combat.attacker_instance_ids or []:
+        if iid in passenger_ids or iid in sea_ids:
+            return True
+        if iid not in land_ids:
+            # Roster member found neither at sea nor on the raided land: treat as
+            # sea-origin so the conservative answer is "no retreat".
+            return True
+    return False
+
+
 def get_retreat_options(
     state: GameState,
     territory_defs: dict[str, TerritoryDefinition],
@@ -3238,8 +3276,11 @@ def get_retreat_options(
     Get valid retreat destinations for the current active combat.
     Returns list of adjacent territory IDs that are allied (same alliance).
     Only ground-adjacent if any retreating unit is land; aerial_adjacent allowed only if all are aerial.
+    Empty when the sea-raid retreat veto applies (the roster still contains a sea-raiding unit).
     """
     if not state.active_combat:
+        return []
+    if _sea_raid_retreat_is_vetoed(state):
         return []
 
     combat_territory = state.active_combat.territory_id

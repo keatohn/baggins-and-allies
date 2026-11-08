@@ -4320,10 +4320,12 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       sea_zone_id?: string | null;
     } | undefined;
     const seaRaidCombat = Boolean(acForRetreat?.sea_zone_id);
+    // Sea-raid retreat availability comes from the backend (retreat_options is empty
+    // while the raid roster still contains sea-raiding units) — trust it rather than
+    // blanket-blocking every sea raid.
     const canRetreat =
       (acForRetreat ? acForRetreat.attackers_have_rolled !== false : true) &&
-      retreatOptions.length > 0 &&
-      !seaRaidCombat;
+      retreatOptions.length > 0;
 
     const territoryDefenderOrder = (backendState?.territory_defender_casualty_order ?? {})[effectiveCombat.territory] ?? 'best_unit';
 
