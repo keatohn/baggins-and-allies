@@ -1295,7 +1295,7 @@ def state_for_response(state: GameState, game_id: str | None = None, db: Session
         if state.active_combat:
             ac_out = out.get("active_combat")
             if isinstance(ac_out, dict):
-                _enrich_active_combat_siegework_display_ids(ac_out, state, ud, td, fd)
+                _enrich_active_combat_ui_fields(ac_out, state, ud, td, fd)
     except Exception:
         out["faction_stats"] = {"factions": {}, "alliances": {}}
     return out
@@ -5616,33 +5616,7 @@ def _build_available_actions(state: GameState, game_id: str, db: Session | None 
             actions["sea_raid_targets"] = get_sea_raid_targets(state, faction, fd, ud, td)
             if state.active_combat:
                 ac_dict = state.active_combat.to_dict()
-                attackers_ac, defenders_ac = _get_active_combat_units(state, td, ud, fd)
-                combat_tid = getattr(state.active_combat, "territory_id", "") or ""
-                tdef_combat = td.get(combat_tid)
-                def_stronghold = bool(tdef_combat and getattr(tdef_combat, "is_stronghold", False))
-                terr_ac = state.territories.get(combat_tid)
-                def_sh_hp_ac = _combat_territory_stronghold_hp(terr_ac, tdef_combat)
-                fuse_ac = getattr(state.active_combat, "fuse_bomb", True)
-                if not isinstance(fuse_ac, bool):
-                    fuse_ac = True
-                combat_log_list = ac_dict.get("combat_log") or []
-                pending = pending_combat_round(
-                    combat_log_list,
-                    ac_dict.get("round_number", 0),
-                    attackers_ac,
-                    defenders_ac,
-                    ud,
-                    defender_territory_is_stronghold=def_stronghold,
-                    defender_stronghold_hp=def_sh_hp_ac,
-                    fuse_bomb=fuse_ac,
-                )
-                ac_dict["combat_siegeworks_pending"] = pending.siegeworks
-                ac_dict["combat_archer_prefire_pending"] = pending.archer_prefire
-                ac_dict["combat_siegeworks_dice"] = {
-                    "attacker": pending.siegework_attacker_dice,
-                    "defender": pending.siegework_defender_dice,
-                }
-                _enrich_active_combat_siegework_display_ids(ac_dict, state, ud, td, fd)
+                _enrich_active_combat_ui_fields(ac_dict, state, ud, td, fd)
                 actions["active_combat"] = ac_dict
                 retreat_destinations = get_retreat_options(state, td, fd, ud)
                 actions["retreat_options"] = {
@@ -7075,8 +7049,14 @@ def _get_active_combat_units(
     return attackers, defenders
 
 
-def _enrich_active_combat_siegework_display_ids(ac_dict: dict, state: GameState, ud, td, fd) -> None:
-    """When the next step is the siegeworks round, expose which units belong on shelves (same rules as combat_round_resolved)."""
+def _enrich_active_combat_ui_fields(ac_dict: dict, state: GameState, ud, td, fd) -> None:
+    """Attach the shared pending-round fields every active_combat payload needs.
+
+    Single source of truth for combat_siegeworks_pending,
+    combat_archer_prefire_pending, combat_siegeworks_dice, and the siegeworks
+    shelf display ids. Both state_for_response and _build_available_actions call
+    this so the state payload and the available-actions payload cannot drift apart.
+    """
     if not state.active_combat:
         return
     combat_log_list = ac_dict.get("combat_log") or []
@@ -7089,7 +7069,7 @@ def _enrich_active_combat_siegework_display_ids(ac_dict: dict, state: GameState,
     fuse_en = getattr(state.active_combat, "fuse_bomb", True)
     if not isinstance(fuse_en, bool):
         fuse_en = True
-    siegeworks_pending = pending_combat_round(
+    pending = pending_combat_round(
         combat_log_list,
         ac_dict.get("round_number", 0),
         attackers,
@@ -7098,8 +7078,14 @@ def _enrich_active_combat_siegework_display_ids(ac_dict: dict, state: GameState,
         defender_territory_is_stronghold=def_sh,
         defender_stronghold_hp=def_sh_hp_enrich,
         fuse_bomb=fuse_en,
-    ).siegeworks
-    if siegeworks_pending:
+    )
+    ac_dict["combat_siegeworks_pending"] = pending.siegeworks
+    ac_dict["combat_archer_prefire_pending"] = pending.archer_prefire
+    ac_dict["combat_siegeworks_dice"] = {
+        "attacker": pending.siegework_attacker_dice,
+        "defender": pending.siegework_defender_dice,
+    }
+    if pending.siegeworks:
         disp_att = get_siegework_round_attacker_display_units(
             attackers, ud, def_sh, defender_stronghold_hp=def_sh_hp_enrich,
             fuse_bomb=fuse_en,
