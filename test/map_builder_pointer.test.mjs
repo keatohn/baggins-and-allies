@@ -185,6 +185,85 @@ test('Builder selection takes precedence over an interrupted pan; groups move, d
   }
 });
 
+test('Seeds uses matching admin styles and a top-right Close on every tab', { skip: !browser, timeout: 20000 }, async () => {
+  const metadata = await (await fetch(`${browser}/json/version`)).json();
+  const manager = await connect(metadata.webSocketDebuggerUrl);
+  const { targetId } = await manager.call('Target.createTarget', { url: 'about:blank' });
+  const seedsFixture = new URL('../frontend/__seeds_ui_test.html', import.meta.url);
+  let page;
+  try {
+    const tabs = await (await fetch(`${browser}/json`)).json();
+    page = await connect(tabs.find((tab) => tab.id === targetId).webSocketDebuggerUrl);
+    const evaluate = async (expression) => {
+      const result = await page.call('Runtime.evaluate', { expression, returnByValue: true });
+      assert.ok(!result.exceptionDetails, JSON.stringify(result.exceptionDetails));
+      return result.result.value;
+    };
+    await writeFile(seedsFixture, `<html><body><div class="admin-page" id="root"></div><script type="module">
+      import React from 'react'; import {createRoot} from 'react-dom/client';
+      import {ScenarioLibraryPanel} from '/src/pages/admin/ScenarioLibraryPanel.tsx';
+      import '/src/index.css'; import '/src/pages/Admin.css';
+      window.library={units:{guard:{id:'guard',display_name:'Guard',faction:'good',archetype:'infantry',attack:5,defense:3,movement:1,health:1,cost:{power:3},specials:[]}},
+        factions:{good:{id:'good',display_name:'Allies',alliance:'good',capital:'shire',color:'#31572c'}},
+        territories:{shire:{id:'shire',display_name:'The Shire',produces:{power:2},ownable:true,is_stronghold:false}},
+        maps:{world:{shire:{id:'shire',terrain_type:'plains',adjacent:[]}}}};
+      window.fetch=async(input,init={})=>{const url=String(input);let data={};
+        if(url.includes('/scenario-library/preview')){window.reviewPayload=JSON.parse(init.body);data={changed_setups:['alpha'],changes:{alpha:{territories:{shire:{produces:{power:4}}}}}};}
+        else if(url.includes('/scenario-library')){if(init.method==='PUT'){window.library=JSON.parse(init.body);data={changed_setups:['alpha'],changes:{}};}else data=window.library;}
+        else if(url.includes('/catalog'))data={terrain_types:['plains'],archetypes:['infantry'],specials:[]};
+        return new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});};
+      createRoot(document.getElementById('root')).render(React.createElement(ScenarioLibraryPanel,{onClose:()=>{window.seedClosed=true},onSaved:()=>{window.seedSaved=true}}));
+      </script></body></html>`);
+    await page.call('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1100, deviceScaleFactor: 1, mobile: false });
+    await page.call('Page.navigate', { url: `${vite}/__seeds_ui_test.html` });
+    for (let attempt = 0; attempt < 60; attempt++) {
+      if (await evaluate("!!document.querySelector('.admin-entity__item')")) break;
+      await delay(100);
+    }
+    const button = (name) => `[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(name)})`;
+    for (const name of ['Units', 'Factions', 'Territories']) {
+      await evaluate(`${button(name)}.click()`);
+      await delay(100);
+      const styles = await evaluate(`(()=>{
+        const close=${button('Close')}, title=document.getElementById('admin-seeds-title');
+        const reference=document.querySelector('.admin-entity__toolbar button');
+        const r=close.getBoundingClientRect(), t=title.getBoundingClientRect();
+        const actions=[...document.querySelectorAll('.admin-modal__actions button')];
+        return {right:r.left>t.right,top:Math.abs(r.top-t.top)<20,labels:actions.map(b=>b.textContent.trim()),
+          family:getComputedStyle(reference).fontFamily,closeFamily:getComputedStyle(close).fontFamily,
+          actionFamilies:actions.map(b=>getComputedStyle(b).fontFamily),styled:actions.every(b=>b.classList.contains('admin-page__btn'))};})()`);
+      assert.deepEqual(styles.labels, ['Review', 'Save and Rebuild', 'Export']);
+      assert.ok(styles.right && styles.top, `${name}: Close must stay at the top right`);
+      assert.ok(styles.styled);
+      assert.equal(styles.closeFamily, styles.family);
+      assert.ok(styles.actionFamilies.every((family) => family === styles.family));
+      assert.ok(styles.family.includes('IM Fell English'), styles.family);
+    }
+    assert.equal(await evaluate("[...document.querySelectorAll('.admin-form__label')].some(l=>l.textContent==='Terrain type')"), false);
+    await evaluate(`(()=>{const row=[...document.querySelectorAll('.admin-form__row')].find(r=>r.querySelector('label')?.textContent==='Power production');
+      const input=row.querySelector('input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'4');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+    await delay(70);
+    assert.equal(await evaluate(`${button('Save and Rebuild')}.disabled`), true);
+    await evaluate(`${button('Review')}.click()`);
+    await delay(100);
+    assert.equal(await evaluate('window.reviewPayload.territories.shire.produces.power'), 4);
+    assert.equal(await evaluate('window.library.territories.shire.produces.power'), 2, 'Review must not save');
+    await evaluate(`${button('Save and Rebuild')}.click()`);
+    await delay(100);
+    assert.equal(await evaluate('window.library.territories.shire.produces.power'), 4);
+    assert.equal(await evaluate('window.seedSaved'), true);
+    const screenshot = await page.call('Page.captureScreenshot', { format: 'png' });
+    await writeFile('/private/tmp/baggins-seeds-territories.png', Buffer.from(screenshot.data, 'base64'));
+    await evaluate(`${button('Close')}.click()`);
+    assert.equal(await evaluate('window.seedClosed'), true);
+  } finally {
+    page?.close();
+    await manager.call('Target.closeTarget', { targetId });
+    manager.close();
+    await unlink(seedsFixture).catch(() => {});
+  }
+});
+
 test('Landscape border mode fills and paints only the clicked shared border', { skip: !browser, timeout: 20000 }, async () => {
   const metadata = await (await fetch(`${browser}/json/version`)).json();
   const manager = await connect(metadata.webSocketDebuggerUrl);

@@ -106,6 +106,7 @@
     "aerial_adjacent": [],
     "display_name": "Barad-Dûr",
     "id": "barad_dur",
+    "image": "barad_dur.png",
     "is_stronghold": true,
     "ownable": true,
     "produces": {
@@ -237,7 +238,9 @@
     "id": "dagorlad",
     "is_stronghold": false,
     "ownable": true,
-    "produces": {},
+    "produces": {
+      "power": 1
+    },
     "terrain_type": "wasteland"
   },
   "dale": {
@@ -287,7 +290,7 @@
     "is_stronghold": true,
     "ownable": true,
     "produces": {
-      "power": 5
+      "power": 4
     },
     "stronghold_base_health": 2,
     "terrain_type": "fortress"
@@ -372,6 +375,7 @@
     ],
     "display_name": "East Osgiliath",
     "id": "east_osgiliath",
+    "image": "osgiliath.png",
     "is_stronghold": true,
     "ownable": true,
     "produces": {
@@ -451,7 +455,9 @@
     "id": "emyn_muil",
     "is_stronghold": false,
     "ownable": true,
-    "produces": {},
+    "produces": {
+      "power": 1
+    },
     "terrain_type": "wasteland"
   },
   "enedwaith": {
@@ -651,7 +657,9 @@
     "id": "forodwaith",
     "is_stronghold": false,
     "ownable": true,
-    "produces": {},
+    "produces": {
+      "power": 1
+    },
     "terrain_type": "wasteland"
   },
   "gap_of_rohan": {
@@ -747,7 +755,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 3
+      "power": 2
     },
     "terrain_type": "fortress"
   },
@@ -761,10 +769,10 @@
     "aerial_adjacent": [],
     "display_name": "Haradwaith",
     "id": "haradwaith",
-    "is_stronghold": false,
+    "is_stronghold": true,
     "ownable": true,
     "produces": {
-      "power": 3
+      "power": 5
     },
     "stronghold_base_health": 1,
     "terrain_type": "desert"
@@ -877,7 +885,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 1
+      "power": 2
     },
     "terrain_type": "desert"
   },
@@ -1289,7 +1297,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 2
+      "power": 3
     },
     "terrain_type": "hills"
   },
@@ -1731,7 +1739,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 3
+      "power": 4
     },
     "stronghold_base_health": 1,
     "terrain_type": "city"
@@ -1824,8 +1832,9 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 2
+      "power": 1
     },
+    "stronghold_base_health": 1,
     "terrain_type": "desert"
   },
   "westemnet": {

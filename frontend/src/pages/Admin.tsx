@@ -1265,7 +1265,7 @@ export default function Admin() {
           onClose={() => { setMapsOpen(false); if (!setupDirty) loadBundle(selectedId); }}
         />
       ) : null}
-      {seedsOpen && <div className="admin-modal-overlay" role="presentation"><div className="admin-modal scenario-source" role="dialog" aria-modal="true" aria-label="Shared seeds"><h2>Shared seeds</h2><ScenarioLibraryPanel onSaved={() => { refreshList(); loadBundle(selectedId); }} /><button type="button" onClick={() => setSeedsOpen(false)}>Close</button></div></div>}
+      {seedsOpen && <ScenarioLibraryPanel onClose={() => setSeedsOpen(false)} onSaved={() => { refreshList(); if (!setupDirty) loadBundle(selectedId); }} />}
       {sourceOpen && <ScenarioSourceDialog setupId={selectedId} onClose={() => setSourceOpen(false)} onSaved={() => { refreshList(); loadBundle(selectedId); }} />}
       {resolveAsymmetriesOpen && (
         <div className="admin-modal-overlay" role="presentation" onClick={() => setResolveAsymmetriesOpen(false)}>

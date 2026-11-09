@@ -12,7 +12,7 @@ import yaml
 from backend.engine.definitions import DATA_DIR
 from backend.scenario_builder import (
     BUNDLE_KEYS, compile_scenario, extract_library, extract_source,
-    load_library, parse_source, resolve_source, write_library,
+    load_library, parse_source, resolve_source, upgrade_territory_sources, write_library,
 )
 from backend.setup_validation import validate_setup_payload
 
@@ -66,6 +66,7 @@ def main(argv=None) -> int:
         if args.command == "unpack":
             from backend.setup_ids import validate_setup_id
             state = json.loads(args.snapshot.read_text())
+            upgrade_territory_sources(state)
             library, sources = state["library"], state["sources"]
             bundles = {key: compile_scenario(source, library, sources.get) for key, source in sources.items()}
             for key in sources:

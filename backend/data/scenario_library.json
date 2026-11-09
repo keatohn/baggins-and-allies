@@ -2436,5 +2436,1506 @@
         "galadhrim.m4a"
       ]
     }
+  },
+  "territories": {
+    "andrast": {
+      "display_name": "Andrast",
+      "id": "andrast",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "anfalas": {
+      "display_name": "Anfalas",
+      "id": "anfalas",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "anorien": {
+      "display_name": "Anorien",
+      "id": "anorien",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "barad_dur": {
+      "display_name": "Barad-Dûr",
+      "id": "barad_dur",
+      "image": "barad_dur.png",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 12
+      },
+      "stronghold_base_health": 2
+    },
+    "belfalas": {
+      "display_name": "Belfalas",
+      "id": "belfalas",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "cair_andros": {
+      "display_name": "Cair Andros",
+      "id": "cair_andros",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 3
+      }
+    },
+    "cirith_ungol": {
+      "display_name": "Cirith Ungol",
+      "id": "cirith_ungol",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      }
+    },
+    "dagorlad": {
+      "display_name": "Dagorlad",
+      "id": "dagorlad",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "dead_marshes": {
+      "display_name": "Dead Marshes",
+      "id": "dead_marshes",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {}
+    },
+    "dol_amroth": {
+      "display_name": "Dol Amroth",
+      "id": "dol_amroth",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 4
+      },
+      "stronghold_base_health": 2
+    },
+    "druwaith_iaur": {
+      "display_name": "Drúwaith Iaur",
+      "id": "druwaith_iaur",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "dunharrow": {
+      "display_name": "Dunharrow",
+      "id": "dunharrow",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 3
+      }
+    },
+    "east_brown_lands": {
+      "display_name": "East Brown Lands",
+      "id": "east_brown_lands",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "east_osgiliath": {
+      "display_name": "East Osgiliath",
+      "id": "east_osgiliath",
+      "image": "osgiliath.png",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 3
+      },
+      "stronghold_base_health": 1
+    },
+    "eastemnet": {
+      "display_name": "Eastemnet",
+      "id": "eastemnet",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "eastfold": {
+      "display_name": "Eastfold",
+      "id": "eastfold",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      }
+    },
+    "edoras": {
+      "display_name": "Edoras",
+      "id": "edoras",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 5
+      },
+      "stronghold_base_health": 1
+    },
+    "emyn_muil": {
+      "display_name": "Emyn Muil",
+      "id": "emyn_muil",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "enedwaith": {
+      "display_name": "Enedwaith",
+      "id": "enedwaith",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "entwash": {
+      "display_name": "Entwash",
+      "id": "entwash",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "erech_lamedon": {
+      "display_name": "Erech-Lamedon",
+      "id": "erech_lamedon",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "fangorn": {
+      "display_name": "Fangorn",
+      "id": "fangorn",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 3
+      }
+    },
+    "far_harad": {
+      "display_name": "Far Harad",
+      "id": "far_harad",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "fenmarch": {
+      "display_name": "Fenmarch",
+      "id": "fenmarch",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "field_of_celebrant": {
+      "display_name": "Field of Celebrant",
+      "id": "field_of_celebrant",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "fords_of_isen": {
+      "display_name": "Fords of Isen",
+      "id": "fords_of_isen",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      }
+    },
+    "gap_of_rohan": {
+      "display_name": "Gap of Rohan",
+      "id": "gap_of_rohan",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      }
+    },
+    "gorgoroth": {
+      "display_name": "Gorgoroth",
+      "id": "gorgoroth",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "haradwaith": {
+      "display_name": "Haradwaith",
+      "id": "haradwaith",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 5
+      },
+      "stronghold_base_health": 1
+    },
+    "harondor": {
+      "display_name": "Harondor",
+      "id": "harondor",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "helms_deep": {
+      "display_name": "Helm's Deep",
+      "id": "helms_deep",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 3
+      },
+      "stronghold_base_health": 3
+    },
+    "isengard": {
+      "display_name": "Isengard",
+      "id": "isengard",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 12
+      },
+      "stronghold_base_health": 3
+    },
+    "khand": {
+      "display_name": "Khand",
+      "id": "khand",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      }
+    },
+    "lebennin": {
+      "display_name": "Lebennin",
+      "id": "lebennin",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "lossarnach": {
+      "display_name": "Lossarnach",
+      "id": "lossarnach",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "minas_morgul": {
+      "display_name": "Minas Morgul",
+      "id": "minas_morgul",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 7
+      },
+      "stronghold_base_health": 2
+    },
+    "minas_tirith": {
+      "display_name": "Minas Tirith",
+      "id": "minas_tirith",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 10
+      },
+      "stronghold_base_health": 4
+    },
+    "minhiriath": {
+      "display_name": "Minhiriath",
+      "id": "minhiriath",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "mount_doom": {
+      "display_name": "Mount Doom",
+      "id": "mount_doom",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      }
+    },
+    "near_harad": {
+      "display_name": "Near Harad",
+      "id": "near_harad",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "north_dunland": {
+      "display_name": "North Dunland",
+      "id": "north_dunland",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      }
+    },
+    "north_ithilien": {
+      "display_name": "North Ithilien",
+      "id": "north_ithilien",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      }
+    },
+    "nurn": {
+      "display_name": "Nurn",
+      "id": "nurn",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "pelargir": {
+      "display_name": "Pelargir",
+      "id": "pelargir",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 3
+      }
+    },
+    "pelennor": {
+      "display_name": "Pelennor",
+      "id": "pelennor",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      }
+    },
+    "rhun_hills": {
+      "display_name": "Rhûn Hills",
+      "id": "rhun_hills",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 3
+      }
+    },
+    "sea_zone_1": {
+      "display_name": "Sea Zone 1",
+      "id": "sea_zone_1",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "sea_zone_10": {
+      "display_name": "Sea Zone 10",
+      "id": "sea_zone_10",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "sea_zone_11": {
+      "display_name": "Sea Zone 11",
+      "id": "sea_zone_11",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "sea_zone_12": {
+      "display_name": "Sea Zone 12",
+      "id": "sea_zone_12",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "sea_zone_2": {
+      "display_name": "Sea Zone 2",
+      "id": "sea_zone_2",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "sea_zone_3": {
+      "display_name": "Sea Zone 3",
+      "id": "sea_zone_3",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "sea_zone_4": {
+      "display_name": "Sea Zone 4",
+      "id": "sea_zone_4",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "sea_zone_5": {
+      "display_name": "Sea Zone 5",
+      "id": "sea_zone_5",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "sea_zone_6": {
+      "display_name": "Sea Zone 6",
+      "id": "sea_zone_6",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "sea_zone_7": {
+      "display_name": "Sea Zone 7",
+      "id": "sea_zone_7",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "sea_zone_8": {
+      "display_name": "Sea Zone 8",
+      "id": "sea_zone_8",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "sea_zone_9": {
+      "display_name": "Sea Zone 9",
+      "id": "sea_zone_9",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "south_dunland": {
+      "display_name": "South Dunland",
+      "id": "south_dunland",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      }
+    },
+    "south_ithilien": {
+      "display_name": "South Ithilien",
+      "id": "south_ithilien",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      }
+    },
+    "the_black_gate": {
+      "display_name": "The Black Gate",
+      "id": "the_black_gate",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 4
+      },
+      "stronghold_base_health": 3
+    },
+    "the_wold": {
+      "display_name": "The Wold",
+      "id": "the_wold",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "udun": {
+      "display_name": "Udun",
+      "id": "udun",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "umbar": {
+      "display_name": "Umbar",
+      "id": "umbar",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 4
+      },
+      "stronghold_base_health": 1
+    },
+    "west_brown_lands": {
+      "display_name": "West Brown Lands",
+      "id": "west_brown_lands",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "west_march": {
+      "display_name": "West-march",
+      "id": "west_march",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "west_osgiliath": {
+      "display_name": "West Osgiliath",
+      "id": "west_osgiliath",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 3
+      }
+    },
+    "westemnet": {
+      "display_name": "Westemnet",
+      "id": "westemnet",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "westfold": {
+      "display_name": "Westfold",
+      "id": "westfold",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      }
+    },
+    "amon_lanc": {
+      "display_name": "Amon Lanc",
+      "id": "amon_lanc",
+      "image": "amon_lanc.png",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 3
+      },
+      "stronghold_base_health": 1
+    },
+    "anduin_central": {
+      "display_name": "Anduin Central",
+      "id": "anduin_central",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "anduin_north": {
+      "display_name": "Anduin North",
+      "id": "anduin_north",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "anduin_south": {
+      "display_name": "Anduin South",
+      "id": "anduin_south",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "anduin_valley": {
+      "display_name": "Anduin Valley",
+      "id": "anduin_valley",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      }
+    },
+    "celduin_valley": {
+      "display_name": "Celduin Valley",
+      "id": "celduin_valley",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "druwaith": {
+      "display_name": "Druwaith",
+      "id": "druwaith",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "east_calenardhon": {
+      "display_name": "East Calenardhon",
+      "id": "east_calenardhon",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "east_enedwaith": {
+      "display_name": "East Enedwaith",
+      "id": "east_enedwaith",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "east_eriador": {
+      "display_name": "East Eriador",
+      "id": "east_eriador",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "east_rhovanion": {
+      "display_name": "East Rhovanion",
+      "id": "east_rhovanion",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "ered_nimrais": {
+      "display_name": "Ered Nimrais",
+      "id": "ered_nimrais",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "eryn_vorn": {
+      "display_name": "Eryn Vorn",
+      "id": "eryn_vorn",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "ettenmoors": {
+      "display_name": "Ettenmoors",
+      "id": "ettenmoors",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "evendim_hills": {
+      "display_name": "Evendim Hills",
+      "id": "evendim_hills",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "falls_of_rauros": {
+      "display_name": "Falls of Rauros",
+      "id": "falls_of_rauros",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {
+        "power": 0
+      }
+    },
+    "forlindon": {
+      "display_name": "Forlindon",
+      "id": "forlindon",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "forodwaith": {
+      "display_name": "Forodwaith",
+      "id": "forodwaith",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "glanduin_valley": {
+      "display_name": "Glanduin Valley",
+      "id": "glanduin_valley",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "gundabad": {
+      "display_name": "Gundabad",
+      "id": "gundabad",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      }
+    },
+    "gwathlo_central": {
+      "display_name": "Gwathló Central",
+      "id": "gwathlo_central",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "gwathlo_north": {
+      "display_name": "Gwathló North",
+      "id": "gwathlo_north",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "gwathlo_south": {
+      "display_name": "Gwathló South",
+      "id": "gwathlo_south",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "harlindon": {
+      "display_name": "Harlindon",
+      "id": "harlindon",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "hithlaeglir": {
+      "display_name": "Hithlaeglir",
+      "id": "hithlaeglir",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "imladris": {
+      "display_name": "Imladris",
+      "id": "imladris",
+      "image": "rivendell.png",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 4
+      },
+      "stronghold_base_health": 1
+    },
+    "iron_hills": {
+      "display_name": "Iron Hills",
+      "id": "iron_hills",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      }
+    },
+    "ithilien": {
+      "display_name": "Ithilien",
+      "id": "ithilien",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "khazad_dum": {
+      "display_name": "Khazad-dûm",
+      "id": "khazad_dum",
+      "image": "khazad_dum.png",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 8
+      },
+      "stronghold_base_health": 3
+    },
+    "lithlad": {
+      "display_name": "Lithlad",
+      "id": "lithlad",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "lond_daer": {
+      "display_name": "Lond Daer",
+      "id": "lond_daer",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 3
+      }
+    },
+    "lorinand": {
+      "display_name": "Lorinand",
+      "id": "lorinand",
+      "image": "lothlorien.png",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 4
+      },
+      "stronghold_base_health": 2
+    },
+    "lune_valley": {
+      "display_name": "Lune Valley",
+      "id": "lune_valley",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "mithlond": {
+      "display_name": "Mithlond",
+      "id": "mithlond",
+      "image": "mithlond.png",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 10
+      },
+      "stronghold_base_health": 1
+    },
+    "morannon": {
+      "display_name": "Morannon",
+      "id": "morannon",
+      "image": "the_black_gate.png",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 4
+      },
+      "stronghold_base_health": 3
+    },
+    "nindalf": {
+      "display_name": "Nindalf",
+      "id": "nindalf",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "ninglor": {
+      "display_name": "Ninglor",
+      "id": "ninglor",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "north_eregion": {
+      "display_name": "North Eregion",
+      "id": "north_eregion",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "north_eriador": {
+      "display_name": "North Eriador",
+      "id": "north_eriador",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "north_greenwood": {
+      "display_name": "North Greenwood",
+      "id": "north_greenwood",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "north_rhun": {
+      "display_name": "North Rhûn",
+      "id": "north_rhun",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "numenor": {
+      "display_name": "Númenor",
+      "id": "numenor",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 20
+      }
+    },
+    "old_forest": {
+      "display_name": "Old Forest",
+      "id": "old_forest",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 3
+      }
+    },
+    "orodruin": {
+      "display_name": "Orodruin",
+      "id": "orodruin",
+      "image": "mount_doom.png",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 10
+      },
+      "stronghold_base_health": 1
+    },
+    "ost_in_edhil": {
+      "display_name": "Ost-In-Edhil",
+      "id": "ost_in_edhil",
+      "image": "ost_in_edhil.png",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 10
+      },
+      "stronghold_base_health": 2
+    },
+    "sea_zone_13": {
+      "display_name": "Sea Zone 13",
+      "id": "sea_zone_13",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "south_calenardhon": {
+      "display_name": "South Calenardhon",
+      "id": "south_calenardhon",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "south_eregion": {
+      "display_name": "South Eregion",
+      "id": "south_eregion",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "south_greenwood": {
+      "display_name": "South Greenwood",
+      "id": "south_greenwood",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "tharbad": {
+      "display_name": "Tharbad",
+      "id": "tharbad",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "tol_fuin": {
+      "display_name": "Tol Fuin",
+      "id": "tol_fuin",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "tower_hills": {
+      "display_name": "Tower Hills",
+      "id": "tower_hills",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "weather_hills": {
+      "display_name": "Weather Hills",
+      "id": "weather_hills",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "west_calenardhon": {
+      "display_name": "West Calenardhon",
+      "id": "west_calenardhon",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "west_enedwaith": {
+      "display_name": "West Enedwaith",
+      "id": "west_enedwaith",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "west_eriador": {
+      "display_name": "West Eriador",
+      "id": "west_eriador",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "west_rhovanion": {
+      "display_name": "West Rhovanion",
+      "id": "west_rhovanion",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "west_rhun": {
+      "display_name": "West Rhûn",
+      "id": "west_rhun",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      },
+      "stronghold_base_health": 1
+    },
+    "withered_heath": {
+      "display_name": "Withered Heath",
+      "id": "withered_heath",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "amon_sul": {
+      "display_name": "Weather Hills",
+      "id": "amon_sul",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "annuminas": {
+      "display_name": "Annuminas",
+      "id": "annuminas",
+      "image": "annuminas.png",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 8
+      },
+      "stronghold_base_health": 1
+    },
+    "east_harnen": {
+      "display_name": "East Harnen",
+      "id": "east_harnen",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "ered_luin": {
+      "display_name": "Ered Luin",
+      "id": "ered_luin",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "fornost": {
+      "display_name": "North Eriador",
+      "id": "fornost",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "minas_anor": {
+      "display_name": "Minas Anor",
+      "id": "minas_anor",
+      "image": "minas_tirith.png",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 3
+      },
+      "stronghold_base_health": 1
+    },
+    "minas_ithil": {
+      "display_name": "Minas Ithil",
+      "id": "minas_ithil",
+      "image": "minas_ithil.png",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 3
+      },
+      "stronghold_base_health": 1
+    },
+    "morgai": {
+      "display_name": "Morgai",
+      "id": "morgai",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "orthanc": {
+      "display_name": "Orthanc",
+      "id": "orthanc",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 3
+      }
+    },
+    "sea_zone_14": {
+      "display_name": "Sea Zone 14",
+      "id": "sea_zone_14",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "sea_zone_15": {
+      "display_name": "Sea Zone 15",
+      "id": "sea_zone_15",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "sea_zone_16": {
+      "display_name": "Sea Zone 16",
+      "id": "sea_zone_16",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "sea_zone_17": {
+      "display_name": "Sea Zone 17",
+      "id": "sea_zone_17",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "sea_zone_18": {
+      "display_name": "Sea Zone 18",
+      "id": "sea_zone_18",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "sea_zone_19": {
+      "display_name": "Sea Zone 19",
+      "id": "sea_zone_19",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "sea_zone_20": {
+      "display_name": "Sea Zone 20",
+      "id": "sea_zone_20",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "sea_zone_21": {
+      "display_name": "Sea Zone 21",
+      "id": "sea_zone_21",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {}
+    },
+    "tolfalas": {
+      "display_name": "Tolfalas",
+      "id": "tolfalas",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "west_harnen": {
+      "display_name": "West Harnen",
+      "id": "west_harnen",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      }
+    },
+    "angmar": {
+      "display_name": "Angmar",
+      "id": "angmar",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "bree_fornost": {
+      "display_name": "Bree-Fornost",
+      "id": "bree_fornost",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "carn_dum": {
+      "display_name": "Carn Dum",
+      "id": "carn_dum",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "carrock": {
+      "display_name": "Carrock",
+      "id": "carrock",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "dale": {
+      "display_name": "Dale",
+      "id": "dale",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      }
+    },
+    "dol_guldur": {
+      "display_name": "Dol Guldur",
+      "id": "dol_guldur",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 4
+      },
+      "stronghold_base_health": 2
+    },
+    "dorwinion": {
+      "display_name": "Dorwinion",
+      "id": "dorwinion",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      },
+      "stronghold_base_health": 1
+    },
+    "erebor": {
+      "display_name": "Erebor",
+      "id": "erebor",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 4
+      },
+      "stronghold_base_health": 2
+    },
+    "esgaroth": {
+      "display_name": "Esgaroth",
+      "id": "esgaroth",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      }
+    },
+    "gladden_fields": {
+      "display_name": "Gladden Fields",
+      "id": "gladden_fields",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "grey_havens": {
+      "display_name": "Grey Havens",
+      "id": "grey_havens",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 4
+      },
+      "stronghold_base_health": 1
+    },
+    "lothlorien": {
+      "display_name": "Lothlórien",
+      "id": "lothlorien",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 6
+      },
+      "stronghold_base_health": 1
+    },
+    "moria": {
+      "display_name": "Moria",
+      "id": "moria",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 5
+      },
+      "stronghold_base_health": 1
+    },
+    "north_downs": {
+      "display_name": "North Downs",
+      "id": "north_downs",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "north_mirkwood": {
+      "display_name": "North Mirkwood",
+      "id": "north_mirkwood",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "rhudaur": {
+      "display_name": "Rhudaur",
+      "id": "rhudaur",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "rivendell": {
+      "display_name": "Rivendell",
+      "id": "rivendell",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 8
+      },
+      "stronghold_base_health": 2
+    },
+    "south_downs": {
+      "display_name": "South Downs",
+      "id": "south_downs",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "south_mirkwood": {
+      "display_name": "South Mirkwood",
+      "id": "south_mirkwood",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      }
+    },
+    "the_shire": {
+      "display_name": "The Shire",
+      "id": "the_shire",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      }
+    },
+    "thranduils_halls": {
+      "display_name": "Thranduil's Halls",
+      "id": "thranduils_halls",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 3
+      }
+    }
   }
 }

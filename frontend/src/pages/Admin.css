@@ -4340,11 +4340,13 @@ body:has(.admin-modal--map-editor) .menu-scroll-overlay:not(.menu-scroll-overlay
 .scenario-field__default--overridden { opacity: .45; }
 .scenario-field input:not([type=checkbox]), .scenario-field textarea { width: 100%; box-sizing: border-box; }
 .scenario-library__body { border: 0; padding: 0; min-width: 0; }
+.admin-modal--seeds { width: min(100%, 72rem); max-height: min(92vh, 56rem); font-family: var(--font-parchment), Georgia, serif; }
+.admin-modal--seeds .balance-modal__header { align-items: center; }
+.admin-modal--seeds .admin-modal__actions { position: sticky; bottom: -1.25rem; padding: .75rem 0; background: var(--parchment-light); z-index: 1; }
+.scenario-library__review pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; max-height: 15rem; overflow: auto; }
 .scenario-source { width: min(1100px, 94vw); max-height: 90vh; overflow: auto; }
 .scenario-source > textarea { width: 100%; box-sizing: border-box; font-family: monospace; }
 .scenario-source pre, .scenario-library pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .scenario-source table { width: 100%; text-align: left; border-collapse: collapse; }
 .scenario-source th, .scenario-source td { padding: .4rem; border-bottom: 1px solid #7773; }
-.scenario-map-defaults { overflow: auto; padding: 1rem; }
-.scenario-map-fields { display: flex; flex-direction: column; align-items: start; gap: 1rem; padding: 1rem 0; }
 @media (max-width: 700px) { .scenario-field { grid-template-columns: 1fr; } }

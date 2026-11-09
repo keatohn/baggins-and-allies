@@ -173,12 +173,12 @@ units:
     seed: war_mumakil
     overrides:
       faction: mordor
+      cost:
+        power: 20
       specials:
       - ford_crosser
       - home
       - ram
-      cost:
-        power: 20
   rohan_peasant:
     seed: rohan_peasant
     overrides: {}
@@ -343,6 +343,24 @@ territory_overrides:
       $delete: true
   moria:
     is_stronghold: true
+  dol_guldur:
+    produces:
+      power: 5
+  gundabad:
+    produces:
+      power: 3
+  forodwaith:
+    produces:
+      power:
+        $delete: true
+  west_rhun:
+    stronghold_base_health:
+      $delete: true
+    produces:
+      power: 2
+  rhun_hills:
+    produces:
+      power: 2
   dorwinion:
     stronghold_base_health:
       $delete: true
@@ -350,9 +368,23 @@ territory_overrides:
     aerial_adjacent:
     - south_ithilien
     - east_osgiliath
+  east_osgiliath:
+    image:
+      $delete: true
+  barad_dur:
+    image:
+      $delete: true
   south_dunland:
     produces:
       power: 4
+  emyn_muil:
+    produces:
+      power:
+        $delete: true
+  dagorlad:
+    produces:
+      power:
+        $delete: true
   harondor:
     adjacent:
     - south_ithilien
@@ -361,12 +393,20 @@ territory_overrides:
     - near_harad
     - sea_zone_10
     - sea_zone_12
+  khand:
+    produces:
+      power: 1
   haradwaith:
     stronghold_base_health:
       $delete: true
+    is_stronghold: false
+    produces:
+      power: 3
   umbar:
     stronghold_base_health:
       $delete: true
+    produces:
+      power: 3
   sea_zone_11:
     adjacent:
     - sea_zone_8

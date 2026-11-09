@@ -1,6 +1,6 @@
 # Scenario authoring
 
-A scenario source (`setup.yaml`, or equivalent JSON) references shared **unit and faction seeds** and **map territory defaults**, then declares overrides. Compilation produces the existing seven documents: `manifest`, `units`, `territories`, `factions`, `camps`, `ports`, and `starting_setup`. Gameplay, saved games, and DB seeding continue to use those compiled documents. There is no inheritance resolution inside the engine.
+A scenario source (`setup.yaml`, or equivalent JSON) references shared **unit, faction, and territory seeds** and map geometry, then declares overrides. Territory seeds match map regions automatically by territory ID. Compilation produces the existing seven documents: `manifest`, `units`, `territories`, `factions`, `camps`, `ports`, and `starting_setup`. Gameplay, saved games, and DB seeding continue to use those compiled documents. There is no inheritance resolution inside the engine.
 
 ## Production data comes first
 
@@ -8,7 +8,7 @@ The checked-in setups are historical examples, **not an export of production**. 
 
 Defaults are voted per field, recursively for objects. Lists vote as whole values. Missing fields do not vote; an extracted removal override preserves their absence. Equal vote counts are resolved by lexicographic canonical JSON, independent of setup ordering. Every extracted source must compile to its original bundle. Later initialization preserves the stored library.
 
-Use **Admin → Seeds → Export live authoring data** to download the current library, scenario sources, and global catalog before authoring offline. Keep production backups outside git. To unpack the export:
+Use **Admin → Seeds → Export** to download the current library, scenario sources, and global catalog before authoring offline. Keep production backups outside git. To unpack the export:
 
 ```sh
 .venv/bin/python -m backend.tools.scenario unpack /path/to/scenario-authoring.json --output-root /tmp/live-scenarios
@@ -19,8 +19,8 @@ Use **Admin → Seeds → Export live authoring data** to download the current l
 
 ## Admin flow
 
-1. **Seeds:** edit shared unit or faction records with the existing field editors. **Review changes** shows affected scenarios and their compiled differences. **Save defaults and rebuild** validates first and updates the library and affected compiled setups in one transaction. Existing explicit overrides remain pinned, including overrides equal to the previous default. Existing games retain their snapshots.
-2. **Maps → Territory defaults:** edit territory name, image, default power production, stronghold, and ownable values. Add new map territory defaults here. Terrain stays in **Landscape** and adjacency stays in **Graph**, shared by setups as before. Existing map assets, positions, and decorations retain their editors.
+1. **Seeds → Units / Factions / Territories:** use the existing admin entity editors for all three seed types. The shared popup uses the standard admin tabs, fonts, buttons, and a top-right **Close**. Territory seeds hold names, images, power production, stronghold properties, and ownable values. Each map region with the same ID automatically inherits that seed; no map selector or manual linking is required.
+2. **Review / Save and Rebuild / Export:** pending edits across all three tabs are shared. Review computes affected scenarios and their differences without saving. Save and Rebuild compiles scenarios from the proposed seeds and their explicit overrides, validates them, and commits the seed library and changed setup definitions together. Any new validation error prevents the save. Overrides and publication status stay intact; active games keep their existing snapshots. This rebuild updates scenario data; app builds, server restarts, and deployments are separate operations. Export downloads saved authoring data. Terrain stays in **Maps → Landscape**, adjacency in **Maps → Graph**, and map positions/decorations retain their existing editors.
 3. **New setup:** create an empty draft, copy an existing setup, import a master bundle, or import declarative YAML/JSON (paste or select a file). Declarative imports always start inactive. Imported legacy bundles acquire a lossless source without replacing their values with seed defaults.
 4. **Setups → Units / Factions / Territories:** choose a record. Unchecked fields inherit the visible default; checking a field records an override. The inherited value remains visible and is dimmed when overridden. Uncheck to return to inheritance. Additional optional fields, seed aliases, custom records, and record removal are supported. Lists and complex optional values use JSON inputs. Raw JSON remains available for advanced editing.
 5. Edit manifest rules/victory, camps, ports, and starting ownership/deployment in their existing panels. Those edits are reconciled into the source when saved. Saving through the materialized forms flattens an inherited scenario; use the source editor to retain `extends`.
@@ -110,7 +110,9 @@ Install `requirements.txt` in `.venv` (includes PyYAML). These commands do not c
 .venv/bin/python -m backend.tools.scenario extract --setups backend/data/setups --output-root /tmp/extracted-scenarios
 ```
 
-The library stores units/factions in `backend/data/scenario_library.json`; map territory defaults live in `backend/data/maps/<map>/territories.json`. The setup source lives alongside committed compiled JSON. `--data-root DIR` selects a different library, map/default collection, catalog, and parent-source lookup. It must appear before the verb. Extraction never rewrites input JSON.
+The library stores units, factions, and territory seeds in `backend/data/scenario_library.json`. Map territory membership and geometry live in `backend/data/maps/<map>/territories.json`; their resolved metadata comes from the matching territory seed. The setup source lives alongside committed compiled JSON. `--data-root DIR` selects a different library, map collection, catalog, and parent-source lookup. It must appear before the verb. Extraction never rewrites input JSON.
+
+Existing DB authoring libraries are upgraded lazily without rewriting setup rows. If historical maps assigned different metadata to the same territory ID, those differences become explicit scenario overrides, preserving every compiled scenario and one-level `extends`. Existing generated YAML examples have been re-extracted against shared territory seeds; their seven compiled JSON documents remain identical.
 
 Tests compare all six sources against their existing compiled JSON. Historical errors are explicitly recorded in `test/fixtures/scenario_validation_baseline.json`: 31 for `wotla_1.0`, 3 for `wotr_exp_1.0`, 2 for `wotr_exp_1.1`. The other three scenarios validate cleanly. These waivers preserve historical data; CLI validation still reports and fails on them. Do not expand the baseline to hide newly introduced errors.
 
@@ -134,7 +136,7 @@ All endpoints require the existing admin authentication. Frontend requests retai
 
 | Method / backend path | Body / result |
 |---|---|
-| `GET /admin/scenario-library` | Current DB-derived units, factions, and maps |
+| `GET /admin/scenario-library` | Current DB-derived unit, faction, and territory seeds, plus maps matched by territory ID |
 | `POST /admin/scenario-library/preview` | Library object → `changed_setups`, per-setup compiled `changes`; no write |
 | `PUT /admin/scenario-library` | Same library object → validated atomic rebuild and impact report |
 | `GET /admin/scenarios/export` | Library, original sources, and catalog for offline work |

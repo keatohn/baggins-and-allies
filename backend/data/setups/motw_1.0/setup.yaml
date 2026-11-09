@@ -114,9 +114,9 @@ units:
   orc_warrior:
     seed: orc_warrior
     overrides:
-      defense: 2
       cost:
         power: 3
+      defense: 2
   easterling_pikeman:
     seed: easterling_pikeman
     overrides:
@@ -131,9 +131,9 @@ units:
     overrides:
       home_territory_ids:
         $delete: true
-      defense: 3
       cost:
         power: 4
+      defense: 3
   mordor_warg_rider:
     seed: mordor_warg_rider
     overrides: {}
@@ -263,7 +263,39 @@ territory_ids:
 - sea_zone_10
 - sea_zone_11
 - sea_zone_12
-territory_overrides: {}
+territory_overrides:
+  east_osgiliath:
+    image:
+      $delete: true
+  pelargir:
+    produces:
+      power: 4
+  minas_morgul:
+    produces:
+      power: 6
+  barad_dur:
+    image:
+      $delete: true
+  isengard:
+    produces:
+      power: 10
+  edoras:
+    produces:
+      power: 6
+  emyn_muil:
+    produces:
+      power:
+        $delete: true
+  dagorlad:
+    produces:
+      power:
+        $delete: true
+  haradwaith:
+    produces:
+      power: 4
+  umbar:
+    stronghold_base_health:
+      $delete: true
 camps:
   minas_tirith_camp:
     id: minas_tirith_camp

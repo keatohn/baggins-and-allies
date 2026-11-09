@@ -16,6 +16,26 @@ BUNDLE_KEYS = ("manifest", "units", "territories", "factions", "camps", "ports",
 SOURCE_KEYS = {"version", "extends", "map", "manifest", "units", "factions", "territory_ids",
                "territory_overrides", "camps", "ports", "starting_setup"}
 DELETE = {"$delete": True}
+MAP_TERRITORY_FIELDS = {"terrain_type", "adjacent", "aerial_adjacent", "ford_adjacent"}
+
+
+def prepare_territory_seeds(library: dict) -> None:
+    """Match map geometry to shared territory metadata by id. Preserve geometry."""
+    seeds = _object(library.setdefault("territories", {}), "library.territories")
+    grouped: dict[str, list[dict]] = {}
+    for map_id, records in _object(library.get("maps"), "library.maps").items():
+        _object(records, f"maps.{map_id}")
+        for tid, record in records.items():
+            _object(record, f"maps.{map_id}.{tid}")
+            grouped.setdefault(tid, []).append({k: v for k, v in record.items() if k not in MAP_TERRITORY_FIELDS})
+    for tid, records in grouped.items():
+        if tid not in seeds:
+            seeds[tid] = {**_majority(records), "id": tid}
+    for map_records in library["maps"].values():
+        for tid, record in map_records.items():
+            _object(seeds[tid], f"territories.{tid}")
+            resolved = {**deepcopy(seeds[tid]), **{k: deepcopy(v) for k, v in record.items() if k in MAP_TERRITORY_FIELDS}, "id": tid}
+            map_records[tid] = {key: resolved[key] for key in sorted(resolved)}
 
 
 def scenario_map_id(manifest: dict, setup_id: str) -> str:
@@ -75,10 +95,12 @@ def extract_library(bundles: dict[str, dict]) -> dict:
         for tid, record in bundle["territories"].items():
             maps.setdefault(map_id, {}).setdefault(tid, []).append(_object(record, f"territories.{tid}"))
         maps.setdefault(map_id, {})
-    return {
+    library = {
         **{section: {key: _majority(records) for key, records in sorted(groups.items())} for section, groups in grouped.items()},
         "maps": {key: {tid: _majority(records) for tid, records in sorted(groups.items())} for key, groups in sorted(maps.items())},
     }
+    prepare_territory_seeds(library)
+    return library
 
 
 def extract_source(bundle: dict, library: dict) -> dict:
@@ -163,6 +185,30 @@ def compile_scenario(source: dict, library: dict, lookup: Callable[[str], dict] 
     return {key: out[key] for key in BUNDLE_KEYS}
 
 
+def overlay_overrides(base: dict, change: dict) -> dict:
+    """Update override expressions, retaining deletion markers as expressions."""
+    out = deepcopy(base)
+    for key, value in change.items():
+        if isinstance(value, dict) and value != DELETE and isinstance(out.get(key), dict) and out[key] != DELETE:
+            out[key] = overlay_overrides(out[key], value)
+        else:
+            out[key] = deepcopy(value)
+    return out
+
+
+def upgrade_territory_sources(state: dict) -> None:
+    """Preserve legacy bundles and extends while lifting map metadata into seeds."""
+    library, sources = state["library"], state["sources"]
+    before = {key: compile_scenario(source, library, sources.get) for key, source in sources.items()}
+    prepare_territory_seeds(library)
+    for key in sorted(sources, key=lambda key: bool(sources[key].get("extends"))):
+        source = sources[key]
+        after = compile_scenario(source, library, sources.get)
+        changes = delta(after["territories"], before[key]["territories"])
+        if changes:
+            source["territory_overrides"] = overlay_overrides(source.get("territory_overrides", {}), changes)
+
+
 class _NoAliasLoader(yaml.SafeLoader):
     def __init__(self, stream):
         super().__init__(stream)
@@ -206,12 +252,13 @@ def parse_source(text: str) -> dict:
 def load_library(root: Path) -> dict:
     library = json.loads((root / "scenario_library.json").read_text())
     library["maps"] = {p.parent.name: json.loads(p.read_text()) for p in sorted((root / "maps").glob("*/territories.json"))}
+    prepare_territory_seeds(library)
     return library
 
 
 def write_library(root: Path, library: dict) -> None:
     root.mkdir(parents=True, exist_ok=True)
-    (root / "scenario_library.json").write_text(json.dumps({key: library[key] for key in ("units", "factions")}, indent=2, ensure_ascii=False) + "\n")
+    (root / "scenario_library.json").write_text(json.dumps({key: library[key] for key in ("units", "factions", "territories") if key in library}, indent=2, ensure_ascii=False) + "\n")
     for map_id, records in library["maps"].items():
         from backend.map_overrides import validate_map_base
         validate_map_base(map_id)

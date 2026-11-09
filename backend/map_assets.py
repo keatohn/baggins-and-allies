@@ -232,12 +232,13 @@ def save_map_asset(db: Session | None, map_base: str, payload: Any) -> dict[str,
     from backend.catalog import load_catalog
     terrain_types = load_catalog(db)["terrain_types"]
     default_terrain = "plains" if "plains" in terrain_types else next((t for t in terrain_types if t != "sea"), "sea")
-    def add_territories(records):
+    def add_territories(records, seeds=None):
         for territory in converted["territories"]:
             tid = territory["id"]
             records.setdefault(tid, {"id": tid, "display_name": territory["label"],
-                "terrain_type": overrides.get("terrain", {}).get(tid, default_terrain),
                 "produces": {"power": 0}, "ownable": True, "is_stronghold": False,
+                **(seeds or {}).get(tid, {}),
+                "terrain_type": overrides.get("terrain", {}).get(tid, default_terrain),
                 **{field: overrides["graph"].get(field, {}).get(tid, []) for field in ("adjacent", "aerial_adjacent", "ford_adjacent")}})
     if is_files_setup_source() or db is None:
         defaults_path = MAPS_DIR / base / "territories.json"
@@ -247,7 +248,10 @@ def save_map_asset(db: Session | None, map_base: str, payload: Any) -> dict[str,
                 raise ValueError("territory defaults must be an object")
         except (OSError, ValueError) as exc:
             raise MapBuilderError(f"could not read map territory defaults: {exc}") from exc
-        add_territories(defaults)
+        from backend.scenario_builder import load_library
+        from backend.engine.definitions import DATA_DIR
+        seeds = load_library(DATA_DIR).get("territories", {})
+        add_territories(defaults, seeds)
         _write_files(base, name, doc, svg)
         (MAPS_DIR / base / "overrides.json").write_text(json.dumps(overrides, indent=2) + "\n")
         defaults_path.write_text(json.dumps(defaults, indent=2) + "\n")
@@ -255,8 +259,10 @@ def save_map_asset(db: Session | None, map_base: str, payload: Any) -> dict[str,
         updated = datetime.utcnow()
     else:
         from backend.scenario_store import load_state, stage_state
+        from backend.scenario_builder import prepare_territory_seeds
         state = load_state(db)
-        add_territories(state["library"]["maps"].setdefault(base, {}))
+        add_territories(state["library"]["maps"].setdefault(base, {}), state["library"]["territories"])
+        prepare_territory_seeds(state["library"])
         stage_state(db, state)
         write_overrides(db, base, overrides)
         _mirror_graph_db(db, base, overrides["graph"])

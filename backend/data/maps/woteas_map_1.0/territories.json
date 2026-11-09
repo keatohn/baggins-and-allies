@@ -8,11 +8,13 @@
     "display_name": "Amon Lanc",
     "ford_adjacent": [],
     "id": "amon_lanc",
+    "image": "amon_lanc.png",
     "is_stronghold": false,
     "ownable": true,
     "produces": {
       "power": 3
     },
+    "stronghold_base_health": 1,
     "terrain_type": "forest"
   },
   "anduin_central": {
@@ -82,7 +84,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 1
+      "power": 2
     },
     "terrain_type": "valley"
   },
@@ -95,7 +97,7 @@
       "udun"
     ],
     "aerial_adjacent": [],
-    "display_name": "Barad-dûr",
+    "display_name": "Barad-Dûr",
     "ford_adjacent": [],
     "id": "barad_dur",
     "image": "barad_dur.png",
@@ -156,7 +158,7 @@
       "east_enedwaith"
     ],
     "aerial_adjacent": [],
-    "display_name": "Drúwaith",
+    "display_name": "Druwaith",
     "ford_adjacent": [],
     "id": "druwaith",
     "is_stronghold": false,
@@ -415,7 +417,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 3
+      "power": 1
     },
     "terrain_type": "forest"
   },
@@ -447,7 +449,7 @@
       "tharbad"
     ],
     "aerial_adjacent": [],
-    "display_name": "glanduin_valley",
+    "display_name": "Glanduin Valley",
     "ford_adjacent": [],
     "id": "glanduin_valley",
     "is_stronghold": false,
@@ -563,7 +565,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 3
+      "power": 1
     },
     "terrain_type": "forest"
   },
@@ -597,11 +599,13 @@
     "display_name": "Imladris",
     "ford_adjacent": [],
     "id": "imladris",
+    "image": "rivendell.png",
     "is_stronghold": false,
     "ownable": true,
     "produces": {
       "power": 4
     },
+    "stronghold_base_health": 1,
     "terrain_type": "valley"
   },
   "iron_hills": {
@@ -696,7 +700,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 4
+      "power": 3
     },
     "terrain_type": "city"
   },
@@ -709,14 +713,16 @@
       "ninglor"
     ],
     "aerial_adjacent": [],
-    "display_name": "Lórinand",
+    "display_name": "Lorinand",
     "ford_adjacent": [],
     "id": "lorinand",
+    "image": "lothlorien.png",
     "is_stronghold": false,
     "ownable": true,
     "produces": {
       "power": 4
     },
+    "stronghold_base_health": 2,
     "terrain_type": "forest"
   },
   "lune_valley": {
@@ -755,7 +761,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 2
+      "power": 1
     },
     "terrain_type": "forest"
   },
@@ -795,7 +801,7 @@
     "is_stronghold": true,
     "ownable": true,
     "produces": {
-      "power": 5
+      "power": 4
     },
     "stronghold_base_health": 3,
     "terrain_type": "fortress"
@@ -856,7 +862,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 2
+      "power": 1
     },
     "terrain_type": "mountains"
   },
@@ -944,7 +950,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 2
+      "power": 1
     },
     "terrain_type": "wasteland"
   },
@@ -1020,7 +1026,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 1
+      "power": 3
     },
     "terrain_type": "mountains"
   },
@@ -1273,7 +1279,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 3
+      "power": 1
     },
     "terrain_type": "forest"
   },
@@ -1362,7 +1368,7 @@
       "morannon"
     ],
     "aerial_adjacent": [],
-    "display_name": "Udûn",
+    "display_name": "Udun",
     "ford_adjacent": [],
     "id": "udun",
     "is_stronghold": false,
@@ -1426,7 +1432,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 2
+      "power": 1
     },
     "terrain_type": "forest"
   },
@@ -1487,6 +1493,7 @@
     "produces": {
       "power": 1
     },
+    "stronghold_base_health": 1,
     "terrain_type": "plains"
   },
   "withered_heath": {
