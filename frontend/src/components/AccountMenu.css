@@ -85,12 +85,14 @@
 .friends-list__avatar.tier-ring,
 .header-turn-ticker-portrait.tier-ring,
 .seat-card__avatar.tier-ring {
+  --tier-avatar-border-width: 3px;
   border-color: var(--tier-ring);
   border-width: 3px;
 }
 
 .profile-avatar-preview.tier-ring,
 .seat-card__avatar.tier-ring {
+  --tier-avatar-border-width: 6px;
   border-width: 6px;
 }
 

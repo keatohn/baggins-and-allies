@@ -4,6 +4,7 @@ import { api, getAuthToken, AUTH_CHANGED_EVENT } from '../services/api';
 import type { AuthPlayer, MyTurnGame } from '../services/api';
 import ProfileModal from './account/ProfileModal';
 import { tierRingProps } from './account/tierRing';
+import AvatarFrame from './account/AvatarFrame';
 import SettingsModal from './account/SettingsModal';
 import FriendsModal from './account/FriendsModal';
 import './AccountMenu.css';
@@ -151,6 +152,7 @@ export default function AccountMenu({ variant = 'menu' }: AccountMenuProps) {
               e.currentTarget.style.visibility = 'hidden';
             }}
           />
+          <AvatarFrame tier={player.tier} />
         </button>
         <button
           type="button"

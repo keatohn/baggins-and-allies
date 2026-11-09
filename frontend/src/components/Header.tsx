@@ -6,6 +6,7 @@ import StrongholdAllianceBar from './StrongholdAllianceBar';
 import AccountMenu from './AccountMenu';
 import SeatPlayerModal, { type SeatPortrait } from './account/SeatPlayerModal';
 import { tierRingProps } from './account/tierRing';
+import AvatarFrame from './account/AvatarFrame';
 import { useMenuScroll } from './MenuScrollContext';
 import { GameStatsModal, RingsOfPowerModal, UnitStatsModal, type RingsOfPowerData, type StatsRingMark, type UnitForStats } from './StatsModals';
 import './Header.css';
@@ -543,6 +544,7 @@ function Header({ gameState, turnOrderForTicker, factionData, factionStats, ring
                           onClick={() => setOpenSeat(seat)}
                         >
                           <img src={`/assets/units/${face.image}`} alt="" />
+                          <AvatarFrame tier={seat.tier} />
                         </button>
                       ) : computer ? (
                         <span

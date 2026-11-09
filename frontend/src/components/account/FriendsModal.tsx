@@ -6,6 +6,7 @@ import ModalShell from './ModalShell';
 import ProfileModal from './ProfileModal';
 import FriendsLeaderboard from './FriendsLeaderboard';
 import { tierRingProps } from './tierRing';
+import AvatarFrame from './AvatarFrame';
 
 const FALLBACK_AVATAR: PlayerAvatarSettings = { image: 'hobbit.png', color: '#2d5a27' };
 
@@ -43,6 +44,7 @@ function PersonIdentity({
       aria-hidden
     >
       <img src={`/assets/units/${face.image}`} alt="" />
+      <AvatarFrame tier={tier} />
     </span>
   );
   const name = <span className="friends-list__name">{username}</span>;

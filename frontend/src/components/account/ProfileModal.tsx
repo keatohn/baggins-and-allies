@@ -5,6 +5,7 @@ import type { AuthPlayer, AvatarIconChoice, PlayerStats } from '../../services/a
 import AvatarColorPicker from './AvatarColorPicker';
 import ModalShell from './ModalShell';
 import { tierRingProps } from './tierRing';
+import AvatarFrame from './AvatarFrame';
 
 interface ProfileModalProps {
   player: AuthPlayer;
@@ -244,6 +245,7 @@ export default function ProfileModal({ player, onPlayerChange, onClose, readOnly
               aria-hidden
             >
               <img className="profile-avatar-preview__img" src={`/assets/units/${avatarImage}`} alt="" />
+              <AvatarFrame tier={player.tier} />
             </div>
             {!readOnly && (
               <button

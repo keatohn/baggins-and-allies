@@ -4,6 +4,7 @@ import type { AuthPlayer, GamePlayerPortrait, PlayerProfileCard } from '../../se
 import ModalShell from './ModalShell';
 import ProfileModal from './ProfileModal';
 import { tierRingProps } from './tierRing';
+import AvatarFrame from './AvatarFrame';
 import '../AccountMenu.css';
 
 export interface SeatPortrait extends GamePlayerPortrait {
@@ -124,6 +125,7 @@ export default function SeatPlayerModal({ seat, onClose, onSeatChange }: SeatPla
           aria-hidden
         >
           <img src={`/assets/units/${face.image}`} alt="" />
+          <AvatarFrame tier={seat.tier} />
         </span>
         <p className="seat-card__name">{seat.username}</p>
         {loading && <p className="account-msg account-msg--subtle">Loading…</p>}

@@ -50,7 +50,7 @@ function newFrame(): ProgressionFrame {
   return {
     id: `frame_${Date.now().toString(36)}`,
     label: 'New frame',
-    src: '/avatar-frames/frame.png',
+    src: '/frames/frame.png',
   };
 }
 
@@ -283,13 +283,13 @@ export function TierXpPanel({
       <section>
         <h3 className="admin-form__subtitle">Frames</h3>
         <p className="admin-form__micro">
-          Circle frames for the profile image. Point each one at a file under /avatar-frames/ (for example
-          /avatar-frames/bronze_ring.png) or an https URL. No circle frames are in the game yet, so this
-          list starts empty. Removing a frame clears it from any tier that used it.
+          Transparent circle frames overlay profile pictures throughout the game. Use a file under
+          /frames/ (for example /frames/gold.png), /avatar-frames/, or an https image URL.
+          Add the frame here, assign it to a tier above, and save. Removing a frame clears its tier assignments.
         </p>
         {config.frames.length === 0 ? <p className="admin-form__micro">No frames yet.</p> : null}
         {config.frames.map((frame) => {
-          const showPreview = frame.src.startsWith('/avatar-frames/') || frame.src.startsWith('https://');
+          const showPreview = frame.src.startsWith('/frames/') || frame.src.startsWith('/avatar-frames/') || frame.src.startsWith('https://');
           return (
             <div key={frame.id} className="admin-form__card admin-tier-card">
               <div className="admin-tier-card__line">

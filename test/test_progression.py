@@ -149,6 +149,12 @@ def test_frame_path_and_tier_reference():
     https = dict(ok_frames[0])
     https["src"] = "https://cdn.example.com/bronze.png"
     normalize_progression({**cfg, "frames": [https], "tiers": [tier]})
+    local = {**ok_frames[0], "src": "/frames/gold.png"}
+    normalized = normalize_progression({**cfg, "frames": [local], "tiers": [tier]})
+    assert normalized["frames"][0]["src"] == "/frames/gold.png"
+    for invalid in ("/frames/../secret.png", "/frames/subdir/gold.png", "/frames/gold.png?x=1", "http://example.com/gold.png"):
+        with pytest.raises(ProgressionError):
+            normalize_progression({**cfg, "frames": [{**local, "src": invalid}], "tiers": [tier]})
 
 
 def test_fold_events_counts_strongholds_kills_and_battles():

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { compareLeaderboardValues, leaderboardValue } from './friendsLeaderboardOrder';
 import { tierRingProps } from './tierRing';
+import AvatarFrame from './AvatarFrame';
 import { api } from '../../services/api';
 import type { FriendUser, PlayerProfileCard, PlayerStats, PlayerStatsOverall } from '../../services/api';
 
@@ -124,6 +125,7 @@ export default function FriendsLeaderboard({ friends, onOpen }: {
                   <button type="button" className="friends-list__person" onClick={() => onOpen(profile)}>
                     <span className={`friends-list__avatar${ring.className}`} style={{ backgroundColor: avatar.color, ...ring.style }} aria-hidden>
                       <img src={`/assets/units/${avatar.image}`} alt="" />
+                      <AvatarFrame tier={profile.tier} />
                     </span>
                     <span className="friends-list__name">{profile.username}{self ? ' (you)' : ''}</span>
                   </button>

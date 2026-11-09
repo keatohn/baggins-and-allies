@@ -1,0 +1,46 @@
+.tier-avatar {
+  position: relative;
+}
+
+.profile-avatar-preview.tier-avatar,
+.seat-card__avatar.tier-avatar {
+  --tier-avatar-border-width: 6px;
+}
+
+/* Keep the original portrait size and ring/glow as the loading/error fallback.
+   Only loaded artwork opens the circle's clipping, so decorative tips stay visible. */
+.tier-avatar:has(> img.tier-avatar__frame--loaded),
+.tier-avatar.tier-ring:has(> img.tier-avatar__frame--loaded),
+.tier-avatar.tier-ring:has(> img.tier-avatar__frame--loaded):hover:not(:disabled) {
+  overflow: visible;
+  background-clip: padding-box;
+  border-color: transparent;
+  isolation: isolate;
+}
+
+.tier-avatar > img.tier-avatar__frame {
+  position: absolute;
+  inset: calc(-1 * var(--tier-avatar-border-width, 2px));
+  width: calc(100% + 2 * var(--tier-avatar-border-width, 2px));
+  height: calc(100% + 2 * var(--tier-avatar-border-width, 2px));
+  max-width: none;
+  object-fit: contain;
+  object-position: center;
+  display: block;
+  visibility: hidden;
+  pointer-events: none;
+  user-select: none;
+  z-index: 1;
+}
+
+.tier-avatar > img.tier-avatar__frame--loaded {
+  visibility: visible;
+}
+
+/* The frame may escape the circle; the portrait itself remains circular. */
+.tier-avatar:has(> .tier-avatar__frame--loaded) > img:not(.tier-avatar__frame) {
+  clip-path: circle(var(--tier-avatar-icon-clip, 64%));
+}
+
+.account-menu__btn--avatar.tier-avatar { --tier-avatar-icon-clip: 50%; }
+.header-turn-ticker-portrait.tier-avatar { --tier-avatar-icon-clip: 68%; }

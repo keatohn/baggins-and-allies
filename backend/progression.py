@@ -69,7 +69,7 @@ GLOWS = ("none", "soft", "pulse")
 _ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
-_FRAME_SRC_RE = re.compile(r"^/avatar-frames/[A-Za-z0-9][A-Za-z0-9_.+-]{0,80}$")
+_FRAME_SRC_RE = re.compile(r"^/(?:avatar-frames|frames)/[A-Za-z0-9][A-Za-z0-9_.+-]{0,80}$")
 _HTTPS_RE = re.compile(r"^https://[^\s<>]{1,180}$")
 
 DEFAULT_RULES: dict[str, int | float] = {
@@ -243,7 +243,7 @@ def _parse_frames(raw: Any) -> list[dict[str, str]]:
         src = _clean_src(item.get("src"))
         if not label or not src:
             raise ProgressionError(
-                "Each frame needs a label and an image path under /avatar-frames/ "
+                "Each frame needs a label and an image path under /frames/ or /avatar-frames/ "
                 "(for example /avatar-frames/bronze_ring.png) or an https URL."
             )
         raw_id = item.get("id")
