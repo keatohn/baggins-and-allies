@@ -562,6 +562,7 @@ export function MapBuilder() {
     const intentOf = createWheelNavIntentResolver();
     const handler = (e: WheelEvent) => {
       e.preventDefault();
+      if (boxRef.current || jointDragRef.current) return;
       const rect = el.getBoundingClientRect();
       const v = viewRef.current;
       if (intentOf(e) === 'pan') {
@@ -822,6 +823,12 @@ export function MapBuilder() {
   // --- pointer events ---------------------------------------------------------
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    // A missed release/cancel from the previous gesture must never hijack this one.
+    panRef.current = null;
+    boxRef.current = null;
+    jointDragRef.current = null;
+    downRef.current = null;
+    setSelectionBox(null);
     if (e.button === 1 || (e.button === 0 && spaceRef.current)) {
       e.preventDefault();
       panRef.current = { x: e.clientX, y: e.clientY, vx: viewRef.current.x, vy: viewRef.current.y, id: e.pointerId };
@@ -910,19 +917,6 @@ export function MapBuilder() {
       };
     }
 
-    const pan = panRef.current;
-    if (pan && e.pointerId === pan.id) {
-      paintView(
-        {
-          x: pan.vx + (e.clientX - pan.x),
-          y: pan.vy + (e.clientY - pan.y),
-          scale: viewRef.current.scale,
-        },
-        'soon',
-      );
-      return;
-    }
-
     const box = boxRef.current;
     if (box && e.pointerId === box.id) {
       const w = screenToWorld(e.clientX, e.clientY);
@@ -949,6 +943,19 @@ export function MapBuilder() {
       mutate((d) => {
         moveJoints(d, jd.snapshot, jd.ids, w.x - jd.start.x, w.y - jd.start.y);
       });
+      return;
+    }
+
+    const pan = panRef.current;
+    if (pan && e.pointerId === pan.id) {
+      paintView(
+        {
+          x: pan.vx + (e.clientX - pan.x),
+          y: pan.vy + (e.clientY - pan.y),
+          scale: viewRef.current.scale,
+        },
+        'soon',
+      );
       return;
     }
 
