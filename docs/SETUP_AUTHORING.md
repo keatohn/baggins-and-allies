@@ -117,10 +117,12 @@ Tests compare all six sources against their existing compiled JSON. Historical e
 The pure frontend override model and map node-selection regressions also run with Node 24:
 
 ```sh
-node --experimental-strip-types --test test/scenario-overrides.test.mjs test/map_builder_selection.test.mjs
+node --experimental-strip-types --test test/scenario-overrides.test.mjs test/map_builder_selection.test.mjs test/landscape_border.test.mjs
 ```
 
 In the map builder, deleting an intermediate node reconnects its two surviving neighbors. Deleting consecutive nodes simplifies the whole chain; duplicate edges and self loops are avoided. Junctions with more than two neighbors have no unambiguous replacement edge, so their incident edges are removed. Selecting and deleting an edge still removes that edge directly.
+
+In Maps → Landscape, Border mode targets the shared border between two territories automatically. Select mountain art and click near the shared edge to fill just that border. Painting locks to the shared border where the stroke starts, preventing wide brushes from spilling onto other edges or coasts. Repeated fills do not stack duplicate mountains, including when approached from the other territory. There is no separate border selector or additional placement mode.
 
 ## HTTP contract
 
