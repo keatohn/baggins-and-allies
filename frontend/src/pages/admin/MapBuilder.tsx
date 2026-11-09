@@ -28,7 +28,7 @@ type BuilderDoc = {
 };
 
 type Tool = 'select' | 'pen' | 'pencil' | 'label';
-type Selection = { kind: 'joint' | 'border' | 'label'; id: string } | { kind: 'joints'; ids: string[] } | null;
+type Selection = { kind: 'joint' | 'border' | 'label'; id: string } | { kind: 'joints'; ids: string[]; labelIds?: string[] } | null;
 const selectedJointIds = (selection: Selection): string[] => selection?.kind === 'joints' ? selection.ids : selection?.kind === 'joint' ? [selection.id] : [];
 
 const LEGACY_STORAGE_KEY = 'admin_map_builder_doc_v1';
@@ -49,7 +49,7 @@ const DEFAULT_W = 3500;
 const DEFAULT_H = 2600;
 
 const TOOL_HINTS: Record<Tool, string> = {
-  select: 'Double-click an edge to add a node · Drag a box to select nodes · Shift-click or Shift-drag adds nodes · drag selected nodes to move · Delete joins neighbors of intermediate nodes; select an edge or label dot to remove it · Space + drag or middle-drag pans',
+  select: 'Double-click an edge to add a node, or inside a region to select its nodes · Drag or arrow keys move selected nodes (Shift+arrow = 10 px) · Shift-click or Shift-drag adds nodes · Delete joins neighbors of intermediate nodes; select an edge or label dot to remove it · Space + drag or middle-drag pans',
   pen: 'Click to place points (endpoints snap onto joints or split borders they land on) · drag to pan · Enter or click the first point finishes · Esc cancels',
   pencil: 'Drag to draw a freehand border · ends snap and join the shared graph',
   label: 'Click inside a closed region to name it · click an existing label to edit · drag to pan',
@@ -452,7 +452,8 @@ export function MapBuilder() {
   const penRef = useRef<{ joints: string[]; snapshot: BuilderDoc | null }>({ joints: [], snapshot: null });
   const pencilRef = useRef<{ snapshot: BuilderDoc | null } | null>(null);
   const panRef = useRef<{ x: number; y: number; vx: number; vy: number; id: number } | null>(null);
-  const jointDragRef = useRef<{ ids: string[]; start: Pt; snapshot: BuilderDoc; moved: boolean } | null>(null);
+  const jointDragRef = useRef<{ ids: string[]; labelIds?: string[]; start: Pt; snapshot: BuilderDoc; moved: boolean } | null>(null);
+  const nudgingRef = useRef(false);
   const boxRef = useRef<{ start: Pt; end: Pt; previous: string[]; borderId: string | null; moved: boolean; id: number } | null>(null);
   const spaceRef = useRef(false);
   const downRef = useRef<{ x: number; y: number; id: number } | null>(null);
@@ -820,6 +821,17 @@ export function MapBuilder() {
     setStatus(sel.kind === 'label' ? 'Label removed' : 'Deleted');
   }, [mutate, pushHistory, selection]);
 
+  const selectRegionNodes = useCallback((point: Pt) => {
+    const drawing = docRef.current;
+    const rings = interiorRings(drawing);
+    const index = findRingIndex(rings, drawing.joints, point.x, point.y);
+    if (index === null) { setStatus('No closed region here'); return; }
+    const ids = [...new Set(rings[index].ring)];
+    const labelIds = Object.entries(drawing.labels).filter(([, label]) => findRingIndex(rings, drawing.joints, label.x, label.y) === index).map(([id]) => id);
+    setSelection({ kind: 'joints', ids, labelIds });
+    setStatus(`${ids.length} region nodes selected · drag or use arrow keys (Shift = 10 px) · shared nodes move with their neighbors`);
+  }, []);
+
   // --- pointer events ---------------------------------------------------------
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -869,9 +881,10 @@ export function MapBuilder() {
           return;
         }
         const ids = previous.includes(jid) ? previous : [jid];
-        setSelection({ kind: 'joints', ids });
+        const labelIds = previous.includes(jid) && selection?.kind === 'joints' ? selection.labelIds : undefined;
+        setSelection({ kind: 'joints', ids, labelIds });
         setStatus(null);
-        jointDragRef.current = { ids, start: w, snapshot: docRef.current, moved: false };
+        jointDragRef.current = { ids, labelIds, start: w, snapshot: docRef.current, moved: false };
         try {
           e.currentTarget.setPointerCapture(e.pointerId);
         } catch {
@@ -948,7 +961,7 @@ export function MapBuilder() {
         jd.moved = true;
       }
       mutate((d) => {
-        moveJoints(d, jd.snapshot, jd.ids, w.x - jd.start.x, w.y - jd.start.y);
+        moveJoints(d, jd.snapshot, jd.ids, w.x - jd.start.x, w.y - jd.start.y, jd.labelIds);
       });
       return;
     }
@@ -1095,12 +1108,14 @@ export function MapBuilder() {
       ) {
         return;
       }
-      if (labelDialog || jsonModal || svgModal || confirmBox) {
+      if (labelDialog || jsonModal || svgModal || confirmBox || saveBox || noteBox) {
         if (e.key === 'Escape') {
           setLabelDialog(null);
           setJsonModal(null);
           setSvgModal(null);
           setConfirmBox(null);
+          setSaveBox(null);
+          setNoteBox(null);
         }
         return;
       }
@@ -1110,6 +1125,23 @@ export function MapBuilder() {
         return;
       }
       const key = e.key.toLowerCase();
+      const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+      if (direction && toolRef.current === 'select' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const ids = selectedJointIds(selection);
+        if (!ids.length) return;
+        e.preventDefault();
+        const snapshot = docRef.current;
+        const next = cloneDoc(snapshot);
+        const step = e.shiftKey ? 10 : 1;
+        moveJoints(next, snapshot, ids, direction[0] * step, direction[1] * step, selection?.kind === 'joints' ? selection.labelIds : undefined);
+        if (!ids.some((id) => next.joints[id] && (next.joints[id].x !== snapshot.joints[id].x || next.joints[id].y !== snapshot.joints[id].y))) return;
+        if (!nudgingRef.current) pushHistory(snapshot);
+        nudgingRef.current = true;
+        docRef.current = next;
+        setDoc(next);
+        return;
+      }
+      nudgingRef.current = false;
       if ((e.ctrlKey || e.metaKey) && key === 'z') {
         e.preventDefault();
         if (e.shiftKey) redo();
@@ -1150,8 +1182,8 @@ export function MapBuilder() {
         }
       }
     };
-    const releaseSpace = (e: KeyboardEvent) => { if (e.code === 'Space') spaceRef.current = false; };
-    const blur = () => { spaceRef.current = false; };
+    const releaseSpace = (e: KeyboardEvent) => { if (e.code === 'Space') spaceRef.current = false; if (e.key.startsWith('Arrow')) nudgingRef.current = false; };
+    const blur = () => { spaceRef.current = false; nudgingRef.current = false; };
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', releaseSpace);
     window.addEventListener('blur', blur);
@@ -1160,7 +1192,7 @@ export function MapBuilder() {
       window.removeEventListener('keyup', releaseSpace);
       window.removeEventListener('blur', blur);
     };
-  }, [cancelStroke, confirmBox, deleteSelection, finishPen, jsonModal, labelDialog, redo, selection, svgModal, undo]);
+  }, [cancelStroke, confirmBox, deleteSelection, finishPen, jsonModal, labelDialog, noteBox, pushHistory, redo, saveBox, selection, svgModal, undo]);
 
   // --- header actions ---------------------------------------------------------
 
@@ -1972,7 +2004,7 @@ export function MapBuilder() {
             const point = screenToWorld(e.clientX, e.clientY);
             if (!point) return;
             const borderId = hitBorder(point);
-            if (!borderId) return;
+            if (!borderId) { selectRegionNodes(point); return; }
             const snapshot = docRef.current;
             const next = cloneDoc(snapshot);
             const result = splitBorderAtPoint(next, borderId, point, HIT_PX / viewRef.current.scale);
@@ -2105,6 +2137,7 @@ export function MapBuilder() {
           {selection ? (
             <span className="mapbuilder__sel">
               {selection.kind === 'joints' ? `${selection.ids.length} nodes selected` : `${selection.kind}: ${selection.id}`} · Delete to remove
+              {selection.kind === 'label' && <button type="button" className="admin-page__btn" onClick={() => { const label = docRef.current.labels[selection.id]; if (label) selectRegionNodes(label); }}>Select region nodes</button>}
             </span>
           ) : null}
         </div>

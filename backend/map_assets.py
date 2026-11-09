@@ -192,11 +192,74 @@ def load_map_svg(db: Session | None, map_base: str) -> str | None:
 def save_map_asset(db: Session | None, map_base: str, payload: Any) -> dict[str, Any]:
     base = _check_base(map_base)
     name, doc = _doc_from_payload(payload)
-    svg = _svg_for(doc)
+    converted = convert_map_builder(doc)
+    svg = converted["svg"]
+    previous = None
+    if _exists(db, base):
+        previous = convert_map_builder(load_map_asset(db, base)["doc"])["graph"]
+    from backend.map_overrides import (
+        load_map_overrides, normalize_map_overrides, validate_map_overrides,
+        _write_row as write_overrides, _mirror_graph_db, _mirror_graph_files,
+    )
     if is_files_setup_source() or db is None:
+        overrides_path = MAPS_DIR / base / "overrides.json"
+        try:
+            overrides = normalize_map_overrides(json.loads(overrides_path.read_text())) if overrides_path.is_file() else load_map_overrides(db, base)
+        except (OSError, ValueError) as exc:
+            raise MapBuilderError(f"could not read saved map overrides: {exc}") from exc
+    else:
+        overrides = load_map_overrides(db, base)
+    graph = overrides.get("graph")
+    if graph is None:
+        overrides["graph"] = converted["graph"]
+    elif previous is not None:
+        # Preserve manual removals and non-geometric links on unchanged geometry.
+        # Only newly shared/removed builder edges change the generated land links.
+        next_land = converted["graph"]["adjacent"]
+        old_land = previous["adjacent"]
+        land = graph.setdefault("adjacent", {})
+        for tid in set(old_land) | set(next_land):
+            neighbors = set(land.get(tid, []))
+            neighbors -= set(old_land.get(tid, [])) - set(next_land.get(tid, []))
+            for other in set(next_land.get(tid, [])) - set(old_land.get(tid, [])):
+                if other not in graph.get("aerial_adjacent", {}).get(tid, []) and other not in graph.get("ford_adjacent", {}).get(tid, []):
+                    neighbors.add(other)
+            land[tid] = sorted(neighbors)
+    try:
+        overrides = validate_map_overrides(overrides)
+    except MapOverridesError as exc:
+        raise MapBuilderError(str(exc)) from exc
+    from backend.catalog import load_catalog
+    terrain_types = load_catalog(db)["terrain_types"]
+    default_terrain = "plains" if "plains" in terrain_types else next((t for t in terrain_types if t != "sea"), "sea")
+    def add_territories(records):
+        for territory in converted["territories"]:
+            tid = territory["id"]
+            records.setdefault(tid, {"id": tid, "display_name": territory["label"],
+                "terrain_type": overrides.get("terrain", {}).get(tid, default_terrain),
+                "produces": {"power": 0}, "ownable": True, "is_stronghold": False,
+                **{field: overrides["graph"].get(field, {}).get(tid, []) for field in ("adjacent", "aerial_adjacent", "ford_adjacent")}})
+    if is_files_setup_source() or db is None:
+        defaults_path = MAPS_DIR / base / "territories.json"
+        try:
+            defaults = json.loads(defaults_path.read_text()) if defaults_path.is_file() else {}
+            if not isinstance(defaults, dict):
+                raise ValueError("territory defaults must be an object")
+        except (OSError, ValueError) as exc:
+            raise MapBuilderError(f"could not read map territory defaults: {exc}") from exc
+        add_territories(defaults)
         _write_files(base, name, doc, svg)
+        (MAPS_DIR / base / "overrides.json").write_text(json.dumps(overrides, indent=2) + "\n")
+        defaults_path.write_text(json.dumps(defaults, indent=2) + "\n")
+        _mirror_graph_files(base, overrides["graph"])
         updated = datetime.utcnow()
     else:
+        from backend.scenario_store import load_state, stage_state
+        state = load_state(db)
+        add_territories(state["library"]["maps"].setdefault(base, {}))
+        stage_state(db, state)
+        write_overrides(db, base, overrides)
+        _mirror_graph_db(db, base, overrides["graph"])
         _write_row(db, base, name, doc, svg)
         updated = _row(db, base).updated_at
     return {"ok": True, "map_base": base, "display_name": name, "updated_at": updated.isoformat() + "Z", "doc": doc}

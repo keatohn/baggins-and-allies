@@ -4,6 +4,7 @@ type Drawing = {
   height: number;
   joints: Record<string, Point>;
   borders: Record<string, { a: string; b: string }>;
+  labels?: Record<string, Point>;
 };
 
 /** Insert a node on an edge and preserve its two connections. */
@@ -52,7 +53,7 @@ export function jointsInBox(joints: Drawing['joints'], start: Point, end: Point,
 }
 
 /** Clamp the group as a whole, preserving spacing between nodes at the map edges. */
-export function moveJoints(drawing: Drawing, original: Drawing, ids: string[], dx: number, dy: number): void {
+export function moveJoints(drawing: Drawing, original: Drawing, ids: string[], dx: number, dy: number, labelIds: string[] = []): void {
   const points = ids.map((id) => original.joints[id]).filter(Boolean);
   if (!points.length) return;
   const offsetX = Math.max(-Math.min(...points.map((p) => p.x)), Math.min(dx, original.width - Math.max(...points.map((p) => p.x))));
@@ -60,6 +61,10 @@ export function moveJoints(drawing: Drawing, original: Drawing, ids: string[], d
   for (const id of ids) {
     const point = original.joints[id];
     if (point && drawing.joints[id]) drawing.joints[id] = { x: point.x + offsetX, y: point.y + offsetY };
+  }
+  for (const id of labelIds) {
+    const label = original.labels?.[id];
+    if (label && drawing.labels?.[id]) drawing.labels[id] = { ...label, x: label.x + offsetX, y: label.y + offsetY };
   }
 }
 

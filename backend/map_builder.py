@@ -297,7 +297,7 @@ def _build_svg(width: float, height: float, territories: list[dict[str, str]]) -
 def convert_map_builder(payload: Any) -> dict[str, Any]:
     """Validate a builder document and convert it to SVG territory paths.
 
-    Returns ``{ok, svg, territories, stats, warnings}``. Raises ``MapBuilderError``
+    Returns ``{ok, svg, territories, graph, stats, warnings}``. Raises ``MapBuilderError``
     on invalid input.
     """
     width, height, joints, borders, labels = _parse(payload)
@@ -341,10 +341,43 @@ def convert_map_builder(payload: Any) -> dict[str, Any]:
         territories.append({"id": tid, "label": labels[tid]["display_name"], "d": d})
 
     svg = _build_svg(width, height, territories)
+    # Faces are adjacent only when they share an edge, never just a joint.
+    edge_owners: dict[tuple[str, str], set[str]] = {}
+    neighbors: dict[str, set[str]] = {t["id"]: set() for t in territories}
+    for tid in neighbors:
+        ring = interior[assigned[tid]][1]
+        for a, b in zip(ring, ring[1:] + ring[:1]):
+            edge_owners.setdefault(tuple(sorted((a, b))), set()).add(tid)
+    for owners in edge_owners.values():
+        for tid in owners:
+            neighbors[tid].update(owners - {tid})
+    # A disconnected inner loop is an enclave: its other side belongs to the
+    # containing face, even though the outer ring does not traverse that loop.
+    for (a, b), owners in edge_owners.items():
+        if len(owners) != 1:
+            continue
+        start, end = joints[a], joints[b]
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        length = math.hypot(dx, dy)
+        if not length:
+            continue
+        epsilon = min(length * 0.001, max(width, height) * 1e-7)
+        x, y = (start[0] + end[0]) / 2, (start[1] + end[1]) / 2
+        sides = {_find_ring(x + sign * dy / length * epsilon, y - sign * dx / length * epsilon, interior, joints) for sign in (-1, 1)}
+        adjacent_owners = {ring_owner[index] for index in sides if index in ring_owner}
+        for tid in adjacent_owners:
+            if tid in neighbors:
+                neighbors[tid].update(adjacent_owners - {tid})
+    graph = {
+        "adjacent": {tid: sorted(ids) for tid, ids in neighbors.items()},
+        "aerial_adjacent": {tid: [] for tid in neighbors},
+        "ford_adjacent": {tid: [] for tid in neighbors},
+    }
     return {
         "ok": True,
         "svg": svg,
         "territories": territories,
+        "graph": graph,
         "stats": {
             "joints": len(joints),
             "borders": given_borders,

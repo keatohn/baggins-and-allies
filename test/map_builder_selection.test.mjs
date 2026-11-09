@@ -63,6 +63,17 @@ test('group movement clamps all edges while retaining relative spacing', () => {
   assert.deepEqual(doc.joints.b, { x: 30, y: 30 });
 });
 
+test('moving a selected region carries its labels by the same clamped offset', () => {
+  const original = { ...drawing(), labels: { region: { x: 25, y: 35, display_name: 'Region' }, neighbor: { x: 90, y: 90 } } };
+  const doc = structuredClone(original);
+  moveJoints(doc, original, ['a', 'b'], 10, 0, ['region']);
+  assert.deepEqual(doc.labels.region, { x: 35, y: 35, display_name: 'Region' });
+  assert.deepEqual(doc.labels.neighbor, original.labels.neighbor);
+  moveJoints(doc, original, ['a', 'b'], -100, -100, ['region']);
+  assert.deepEqual(doc.labels.region, { x: 15, y: 15, display_name: 'Region' });
+  assert.deepEqual(doc.joints.a, { x: 0, y: 0 });
+});
+
 test('bulk deletion removes incident borders and preserves unrelated geometry', () => {
   const doc = drawing();
   deleteJoints(doc, ['a', 'b']);

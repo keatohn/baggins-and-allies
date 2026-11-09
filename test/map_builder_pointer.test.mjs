@@ -97,6 +97,38 @@ test('Builder selection takes precedence over an interrupted pan; groups move, d
     await undo();
     assert.equal((await state()).nodes, 4);
     assert.equal(await evaluate("document.querySelectorAll('.mapbuilder__border').length"), 4);
+    const selectRegion = async () => {
+      const position = await point(250, 250);
+      await click(position);
+      await page.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...position, button: 'left', buttons: 1, clickCount: 2 });
+      await page.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...position, button: 'left', buttons: 0, clickCount: 2 });
+      await delay(70);
+      assert.equal((await state()).selected, 4);
+    };
+    const firstNode = () => evaluate("({x:+document.querySelector('.mapbuilder__joint').getAttribute('cx'),y:+document.querySelector('.mapbuilder__joint').getAttribute('cy')})");
+    const firstLabel = () => evaluate("({x:+document.querySelector('[data-label-id=first] circle').getAttribute('cx'),y:+document.querySelector('[data-label-id=first] circle').getAttribute('cy')})");
+    await selectRegion();
+    await page.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowRight', code: 'ArrowRight' });
+    await page.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowRight', code: 'ArrowRight', autoRepeat: true });
+    await page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowRight', code: 'ArrowRight' });
+    await delay(70);
+    assert.deepEqual(await firstNode(), { x: 102, y: 100 });
+    assert.deepEqual(await firstLabel(), { x: 177, y: 175 });
+    await undo();
+    assert.deepEqual(await firstNode(), { x: 100, y: 100 });
+    assert.deepEqual(await firstLabel(), { x: 175, y: 175 });
+    await selectRegion();
+    await page.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowDown', code: 'ArrowDown', modifiers: 8 });
+    await page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowDown', code: 'ArrowDown' });
+    await delay(70);
+    assert.deepEqual(await firstNode(), { x: 100, y: 110 });
+    assert.deepEqual(await firstLabel(), { x: 175, y: 185 });
+    await undo();
+    await selectRegion();
+    await drag(await point(100, 100), await point(110, 110));
+    assert.ok(Math.abs((await firstNode()).x - 110) < 1);
+    assert.ok(Math.abs((await firstLabel()).x - 185) < 1);
+    await undo();
     // Two preserved labels can occupy one face after a border is removed. A dot
     // must select its own label, rather than whichever label the face search finds first.
     await click(await point(225, 225));
