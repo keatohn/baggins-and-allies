@@ -757,7 +757,7 @@ def decide_purchase(ctx: AIContext):
             if randomness() > 0:
                 picked = pick_from_score_band(ranked)
             else:
-                picked = max(ranked, key=lambda item: (item[1], -item[0][1]))
+                picked = max(ranked, key=lambda item: (item[1], -item[0][1]))[0]
             if picked is not None:
                 return picked
         return (best_unit_id, best_cost)
@@ -812,7 +812,7 @@ def decide_purchase(ctx: AIContext):
             if randomness() > 0:
                 picked = pick_from_score_band(ranked)
             else:
-                picked = max(ranked, key=lambda item: (item[1], -item[0][1]))
+                picked = max(ranked, key=lambda item: (item[1], -item[0][1]))[0]
             if picked is not None:
                 best_unit_id, best_cost = picked
         if not best_unit_id or best_cost <= 0:
