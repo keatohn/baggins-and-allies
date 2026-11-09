@@ -44,7 +44,7 @@ test('Builder selection takes precedence over an interrupted pan; groups move, d
       assert.ok(!result.exceptionDetails, JSON.stringify(result.exceptionDetails));
       return result.result.value;
     };
-    const doc = { width: 1000, height: 800, joints: { a: { x: 100, y: 100 }, b: { x: 300, y: 100 }, c: { x: 300, y: 300 }, d: { x: 100, y: 300 } }, borders: { ab: { a: 'a', b: 'b' }, bc: { a: 'b', b: 'c' }, cd: { a: 'c', b: 'd' }, da: { a: 'd', b: 'a' } }, labels: {} };
+    const doc = { width: 1000, height: 800, joints: { a: { x: 100, y: 100 }, b: { x: 300, y: 100 }, c: { x: 300, y: 300 }, d: { x: 100, y: 300 } }, borders: { ab: { a: 'a', b: 'b' }, bc: { a: 'b', b: 'c' }, cd: { a: 'c', b: 'd' }, da: { a: 'd', b: 'a' } }, labels: { first: { x: 175, y: 175, display_name: 'First region' }, second: { x: 225, y: 225, display_name: 'Second region' } } };
     const store = JSON.stringify({ currentId: 'test', drafts: [{ id: 'test', name: 'Pointer regression', updated: 1, doc }] });
     await writeFile(fixture, `<html><body><div id="root"></div><script type="module">
       import React from 'react'; import { createRoot } from 'react-dom/client';
@@ -72,6 +72,40 @@ test('Builder selection takes precedence over an interrupted pan; groups move, d
       await delay(70);
     };
     const original = (await state()).transform;
+    const click = async (position) => {
+      await page.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...position, button: 'left', buttons: 1, clickCount: 1 });
+      await page.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...position, button: 'left', buttons: 0, clickCount: 1 });
+      await delay(70);
+    };
+    const remove = async (key = 'Delete') => {
+      await page.call('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: key === 'Delete' ? 46 : 8 });
+      await delay(70);
+    };
+    const undo = async () => {
+      await evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true}))");
+      await delay(70);
+    };
+    // Two preserved labels can occupy one face after a border is removed. A dot
+    // must select its own label, rather than whichever label the face search finds first.
+    await click(await point(225, 225));
+    assert.equal(await evaluate("document.querySelector('.mapbuilder__label--selected')?.dataset.labelId"), 'second');
+    await remove();
+    assert.equal(await evaluate("document.querySelectorAll('.mapbuilder__label').length"), 1);
+    assert.equal(await evaluate("!!document.querySelector('[data-label-id=first]')"), true);
+    assert.equal(await evaluate("document.querySelectorAll('.mapbuilder__border').length"), 4);
+    await undo();
+    // Removing a boundary opens the face but keeps both labels. The orphaned dot
+    // must still be selectable and deletable, with undo restoring it independently.
+    await click(await point(200, 100));
+    await remove();
+    assert.equal(await evaluate("document.querySelectorAll('.mapbuilder__label').length"), 2);
+    await click(await point(225, 225));
+    assert.equal(await evaluate("document.querySelector('.mapbuilder__label--selected')?.dataset.labelId"), 'second');
+    await remove('Backspace');
+    assert.equal(await evaluate("document.querySelectorAll('.mapbuilder__label').length"), 1);
+    await undo();
+    await undo();
+    assert.equal(await evaluate("document.querySelectorAll('.mapbuilder__label').length"), 2);
     const from = await point(50, 50), to = await point(350, 350);
     await drag(from, to, 'left', async () => assert.equal((await state()).box, true));
     assert.equal((await state()).selected, 4);

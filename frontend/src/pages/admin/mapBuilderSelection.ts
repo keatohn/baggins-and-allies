@@ -6,6 +6,20 @@ type Drawing = {
   borders: Record<string, { a: string; b: string }>;
 };
 
+/** Hit label anchors directly, including labels outside a closed region. */
+export function labelAtPoint(labels: Record<string, Point>, point: Point, radius: number): string | null {
+  let closest: string | null = null;
+  let distance = radius;
+  for (const [id, label] of Object.entries(labels)) {
+    const candidate = Math.hypot(label.x - point.x, label.y - point.y);
+    if (candidate <= distance) {
+      closest = id;
+      distance = candidate;
+    }
+  }
+  return closest;
+}
+
 export function jointsInBox(joints: Drawing['joints'], start: Point, end: Point, previous: string[] = []): string[] {
   const selected = new Set(previous.filter((id) => joints[id]));
   for (const [id, point] of Object.entries(joints)) {

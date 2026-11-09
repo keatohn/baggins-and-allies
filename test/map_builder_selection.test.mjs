@@ -1,11 +1,33 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { jointsInBox, moveJoints, deleteJoints } from '../frontend/src/pages/admin/mapBuilderSelection.ts';
+import { jointsInBox, moveJoints, deleteJoints, labelAtPoint } from '../frontend/src/pages/admin/mapBuilderSelection.ts';
 
 const drawing = () => ({
   width: 100, height: 100,
   joints: { a: { x: 10, y: 20 }, b: { x: 40, y: 50 }, c: { x: 80, y: 90 }, d: { x: 90, y: 90 } },
   borders: { ab: { a: 'a', b: 'b' }, bc: { a: 'b', b: 'c' }, cd: { a: 'c', b: 'd' } },
+});
+
+test('label dots can be targeted individually after regions merge or their borders disappear', () => {
+  const labels = { first: { x: 20, y: 20 }, second: { x: 40, y: 40 } };
+  assert.equal(labelAtPoint(labels, { x: 41, y: 40 }, 7), 'second');
+  assert.equal(labelAtPoint(labels, { x: 21, y: 20 }, 7), 'first');
+  assert.equal(labelAtPoint(labels, { x: 80, y: 80 }, 7), null);
+  assert.equal(labelAtPoint({}, { x: 20, y: 20 }, 7), null);
+});
+
+test('label hit tolerance stays constant in screen pixels when zoom changes', () => {
+  const labels = { region: { x: 40, y: 40 } };
+  for (const scale of [0.25, 1, 4]) {
+    assert.equal(labelAtPoint(labels, { x: 40 + 6 / scale, y: 40 }, 7 / scale), 'region');
+    assert.equal(labelAtPoint(labels, { x: 40 + 8 / scale, y: 40 }, 7 / scale), null);
+  }
+});
+
+test('node deletion leaves named region dots in place', () => {
+  const doc = { ...drawing(), labels: { region: { x: 50, y: 50, display_name: 'Region' } } };
+  deleteJoints(doc, ['b', 'c']);
+  assert.deepEqual(doc.labels, { region: { x: 50, y: 50, display_name: 'Region' } });
 });
 
 test('box selection works in either direction and includes edge nodes', () => {
