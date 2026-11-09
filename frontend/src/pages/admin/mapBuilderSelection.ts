@@ -29,8 +29,48 @@ export function moveJoints(drawing: Drawing, original: Drawing, ids: string[], d
 
 export function deleteJoints(drawing: Drawing, ids: string[]): void {
   const selected = new Set(ids);
+  const neighbors = new Map<string, Set<string>>();
+  const removed = Object.entries(drawing.borders).filter(([, border]) => selected.has(border.a) || selected.has(border.b));
+  for (const border of Object.values(drawing.borders)) {
+    if (!drawing.joints[border.a] || !drawing.joints[border.b] || border.a === border.b) continue;
+    if (!neighbors.has(border.a)) neighbors.set(border.a, new Set());
+    if (!neighbors.has(border.b)) neighbors.set(border.b, new Set());
+    neighbors.get(border.a)!.add(border.b);
+    neighbors.get(border.b)!.add(border.a);
+  }
+  // Only intermediate nodes have an unambiguous pair of neighbors. Traverse whole
+  // selected chains before mutating so bulk deletion is independent of selection order.
+  const intermediate = new Set(ids.filter((id) => neighbors.get(id)?.size === 2));
+  const visited = new Set<string>();
+  const bridges: { id: string; a: string; b: string }[] = [];
+  for (const start of intermediate) {
+    if (visited.has(start)) continue;
+    const component = new Set<string>();
+    const endpoints = new Set<string>();
+    const pending = [start];
+    while (pending.length) {
+      const id = pending.pop()!;
+      if (visited.has(id)) continue;
+      visited.add(id);
+      component.add(id);
+      for (const neighbor of neighbors.get(id)!) {
+        if (intermediate.has(neighbor)) pending.push(neighbor);
+        else if (!selected.has(neighbor)) endpoints.add(neighbor);
+      }
+    }
+    if (endpoints.size === 2) {
+      const [a, b] = [...endpoints].sort();
+      const borderId = removed.find(([, border]) => component.has(border.a) || component.has(border.b))![0];
+      bridges.push({ id: borderId, a, b });
+    }
+  }
   for (const id of selected) delete drawing.joints[id];
-  for (const [id, border] of Object.entries(drawing.borders)) {
-    if (selected.has(border.a) || selected.has(border.b)) delete drawing.borders[id];
+  for (const [id] of removed) delete drawing.borders[id];
+  const edgeKey = (a: string, b: string) => JSON.stringify([a, b].sort());
+  const connected = new Set(Object.values(drawing.borders).map(({ a, b }) => edgeKey(a, b)));
+  for (const { id, a, b } of bridges) {
+    if (connected.has(edgeKey(a, b))) continue;
+    drawing.borders[id] = { a, b };
+    connected.add(edgeKey(a, b));
   }
 }

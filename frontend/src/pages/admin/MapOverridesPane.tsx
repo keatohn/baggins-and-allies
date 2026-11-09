@@ -42,6 +42,7 @@ import {
   type TerritoryPathData,
 } from './territoryGraph';
 import { MapBuilder } from './MapBuilder';
+import { ScenarioLibraryPanel } from './ScenarioLibraryPanel';
 
 type Pt = { x: number; y: number };
 type Dict = Record<string, Record<string, unknown>>;
@@ -338,7 +339,7 @@ export function MapOverridesPane({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
-  const [editorTab, setEditorTab] = useState<'icon' | 'landscape' | 'builder' | 'graph'>('icon');
+  const [editorTab, setEditorTab] = useState<'icon' | 'landscape' | 'builder' | 'graph' | 'defaults'>('icon');
   const [edgeField, setEdgeField] = useState<TerritoryEdgeField>('adjacent');
   const [terrainTypes, setTerrainTypes] = useState<string[]>([]);
   const [manifest, setManifest] = useState<LandscapeManifest>({});
@@ -2497,6 +2498,7 @@ export function MapOverridesPane({
               >
                 Graph
               </button>
+              <button type="button" className={`admin-mapview__toggle-btn${editorTab === 'defaults' ? ' admin-mapview__toggle-btn--active' : ''}`} aria-pressed={editorTab === 'defaults'} onClick={() => setEditorTab('defaults')}>Territory defaults</button>
             </div>
             <label className="admin-graph__prop">
               Map
@@ -2517,7 +2519,7 @@ export function MapOverridesPane({
             <MapTextureSlider />
           </div>
           <div className="admin-graph__header-actions">
-            {editorTab === 'builder' ? null : (
+            {editorTab === 'builder' || editorTab === 'defaults' ? null : (
               <>
                 <button
                   type="button"
@@ -2682,7 +2684,9 @@ export function MapOverridesPane({
         {loading || overridesLoading ? <p className="admin-form__micro">Loading map…</p> : null}
         {err ? <p className="admin-page__error">{err}</p> : null}
         {saveError ? <p className="admin-page__error">{saveError}</p> : null}
-        {!loading && !overridesLoading && !err && editorTab === 'builder' ? (
+        {!loading && !overridesLoading && !err && editorTab === 'defaults' ? (
+          <div className="admin-graph__body scenario-map-defaults"><ScenarioLibraryPanel mapBase={mapBase} /></div>
+        ) : !loading && !overridesLoading && !err && editorTab === 'builder' ? (
           <div className="admin-graph__body">
             <MapBuilder />
           </div>

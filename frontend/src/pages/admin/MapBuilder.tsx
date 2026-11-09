@@ -49,7 +49,7 @@ const DEFAULT_W = 3500;
 const DEFAULT_H = 2600;
 
 const TOOL_HINTS: Record<Tool, string> = {
-  select: 'Drag a box to select nodes · Shift-click or Shift-drag adds nodes · drag selected nodes to move · Delete removes · Space + drag or middle-drag pans',
+  select: 'Drag a box to select nodes · Shift-click or Shift-drag adds nodes · drag selected nodes to move · Delete joins neighbors of intermediate nodes; select an edge to remove it · Space + drag or middle-drag pans',
   pen: 'Click to place points (endpoints snap onto joints or split borders they land on) · drag to pan · Enter or click the first point finishes · Esc cancels',
   pencil: 'Drag to draw a freehand border · ends snap and join the shared graph',
   label: 'Click inside a closed region to name it · click an existing label to edit · drag to pan',

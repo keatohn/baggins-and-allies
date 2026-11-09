@@ -47,3 +47,51 @@ test('bulk deletion removes incident borders and preserves unrelated geometry', 
   assert.deepEqual(Object.keys(doc.joints), ['c', 'd']);
   assert.deepEqual(doc.borders, { cd: { a: 'c', b: 'd' } });
 });
+
+const edges = (doc) => Object.values(doc.borders).map(({ a, b }) => [a, b].sort().join('-')).sort();
+
+test('deleting an intermediate node joins its neighbors and preserves other borders', () => {
+  const doc = drawing();
+  deleteJoints(doc, ['b']);
+  assert.deepEqual(Object.keys(doc.joints), ['a', 'c', 'd']);
+  assert.deepEqual(edges(doc), ['a-c', 'c-d']);
+  assert.deepEqual(doc.borders.cd, { a: 'c', b: 'd' });
+});
+
+test('bulk deletion reconnects a selected chain independently of selection order', () => {
+  const forward = drawing(), reverse = drawing();
+  deleteJoints(forward, ['b', 'c']);
+  deleteJoints(reverse, ['c', 'b']);
+  assert.deepEqual(edges(forward), ['a-d']);
+  assert.deepEqual(forward, reverse);
+});
+
+test('existing edges are not duplicated when a node is removed from a triangle', () => {
+  const doc = drawing();
+  doc.borders.ca = { a: 'c', b: 'a' };
+  deleteJoints(doc, ['b']);
+  assert.deepEqual(doc.borders, { ca: { a: 'c', b: 'a' }, cd: { a: 'c', b: 'd' } });
+});
+
+test('deleting a junction does not invent connections between its branches', () => {
+  const doc = drawing();
+  doc.borders.bd = { a: 'b', b: 'd' };
+  deleteJoints(doc, ['b']);
+  assert.deepEqual(doc.borders, { cd: { a: 'c', b: 'd' } });
+});
+
+test('deleting a complete closed loop leaves no dangling borders or self edges', () => {
+  const doc = drawing();
+  doc.borders.da = { a: 'd', b: 'a' };
+  deleteJoints(doc, ['a', 'b', 'c', 'd']);
+  assert.deepEqual(doc.joints, {});
+  assert.deepEqual(doc.borders, {});
+});
+
+test('separate selected segments retain their individual surviving neighbors', () => {
+  const doc = drawing();
+  doc.joints.e = { x: 95, y: 95 };
+  doc.borders.de = { a: 'd', b: 'e' };
+  deleteJoints(doc, ['b', 'd', 'missing']);
+  assert.deepEqual(edges(doc), ['a-c', 'c-e']);
+});

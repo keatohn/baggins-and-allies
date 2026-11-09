@@ -312,6 +312,9 @@ def init_db():
         seed_map_assets_if_empty(db)
         seed_map_texture_if_empty(db)
         seed_map_terrain_if_missing(db)
+        from backend.scenario_store import initialize as initialize_scenario_authoring
+
+        initialize_scenario_authoring(db)
         seed_progression_if_empty(db)
         seed_profile_defaults_if_empty(db)
     finally:
