@@ -13,6 +13,7 @@ from backend.api.auth import get_current_admin, get_current_player, hash_passwor
 from backend.api.database import Base, get_db
 from backend.api.main import app
 from backend.api.models import Player
+from backend.progression import load_progression
 
 
 @pytest.fixture()
@@ -105,6 +106,9 @@ def test_register_includes_avatar_defaults(make_client, players):
 
 def test_patch_avatar_merges_and_returns(make_client, players, db_session):
     _admin, user = players
+    cfg = load_progression(db_session)
+    user.xp = int(cfg["tiers"][-1]["min_xp"])
+    db_session.commit()
     client = make_client(user)
     r = client.patch("/auth/me", json={"avatar": {"image": "sauron.png"}})
     assert r.status_code == 200
