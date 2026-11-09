@@ -535,6 +535,9 @@ class CombatRequest(BaseModel):
     sea_zone_id: str | None = None  # For sea raid: attackers are in this sea zone, target is territory_id (land)
     # When False, bomb carriers skip the siegeworks round (no detonation); pairing survives until standard combat
     fuse_bomb: bool = True
+    # Round-0 pill choices: apply to any round this initiate resolves and persist on active_combat
+    casualty_order: str | None = None  # "best_unit" | "best_attack"
+    must_conquer: bool | None = None
 
 
 class ContinueCombatRequest(BaseModel):
@@ -6532,6 +6535,8 @@ def do_initiate_combat(
         terror_reroll_count=payload.get("terror_reroll_count"),
         sea_zone_id=request.sea_zone_id,
         fuse_bomb=request.fuse_bomb,
+        casualty_order=request.casualty_order,
+        must_conquer=request.must_conquer,
     )
 
     validation = validate_action(state, action, ud, td, fd, cd, port_d)

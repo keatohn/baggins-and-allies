@@ -2767,6 +2767,14 @@ def _handle_initiate_combat(
     fuse_bomb = action.payload.get("fuse_bomb", True)
     if not isinstance(fuse_bomb, bool):
         fuse_bomb = True
+    # Attacker's round-0 pill choices: apply to any round this action resolves and
+    # persist on active_combat (same contract as continue_combat's payload).
+    init_casualty_order = action.payload.get("casualty_order")
+    if init_casualty_order not in ("best_unit", "best_attack"):
+        init_casualty_order = "best_unit"
+    init_must_conquer = action.payload.get("must_conquer")
+    if not isinstance(init_must_conquer, bool):
+        init_must_conquer = False
 
     # Validate no active combat
     if state.active_combat is not None:
@@ -3106,8 +3114,8 @@ def _handle_initiate_combat(
             combat_log=[prefire_log_entry],
             attackers_have_rolled=False,
             sea_zone_id=sea_zone_id,
-            casualty_order_attacker="best_unit",
-            must_conquer=False,
+            casualty_order_attacker=init_casualty_order,
+            must_conquer=init_must_conquer,
             initial_attacker_instance_ids=attacker_instance_ids,
             initial_defender_instance_ids=defender_instance_ids,
             cumulative_hits_received_by_attacker=0,
@@ -3222,7 +3230,7 @@ def _handle_initiate_combat(
             attacker_units, defender_units, unit_defs, dice_rolls,
             stat_modifiers_attacker=attacker_mods or None,
             stat_modifiers_defender=defender_mods or None,
-            casualty_order_attacker="best_unit",
+            casualty_order_attacker=init_casualty_order,
             casualty_order_defender=defender_casualty_order,
             defender_stronghold_hp=defender_stronghold_hp_cur_sw,
             defender_territory_is_stronghold=defender_territory_is_stronghold_early,
@@ -3378,8 +3386,8 @@ def _handle_initiate_combat(
             combat_log=combat_log_prefix,
             attackers_have_rolled=False if archer_prefire_follows else True,
             sea_zone_id=sea_zone_id,
-            casualty_order_attacker="best_unit",
-            must_conquer=False,
+            casualty_order_attacker=init_casualty_order,
+            must_conquer=init_must_conquer,
             initial_attacker_instance_ids=attacker_instance_ids,
             initial_defender_instance_ids=defender_instance_ids,
             cumulative_hits_received_by_attacker=round_result_sw.defender_hits,
@@ -3405,6 +3413,7 @@ def _handle_initiate_combat(
             prefire_penalty_delta=archer_prefire_penalty,
             hp_shield=ring_hp_shield,
             defender_effective_dice_override=ring_def_dice,
+            casualty_order_attacker=init_casualty_order,
         )
         # Group defender dice for UI (archers at defense-1 or defense+0, merged with terrain)
         archer_stat_modifiers = prefire_stat_modifiers(
@@ -3532,8 +3541,8 @@ def _handle_initiate_combat(
             combat_log=[prefire_log_entry],
             attackers_have_rolled=False,
             sea_zone_id=sea_zone_id,
-            casualty_order_attacker="best_unit",
-            must_conquer=False,
+            casualty_order_attacker=init_casualty_order,
+            must_conquer=init_must_conquer,
             initial_attacker_instance_ids=[u.instance_id for u in attacker_units],
             initial_defender_instance_ids=defender_instance_ids,
             cumulative_hits_received_by_attacker=round_result.defender_hits,
@@ -3617,9 +3626,9 @@ def _handle_initiate_combat(
         attacker_effective_dice_override=att_effective_dice,
         attacker_effective_attack_override=att_attack_override or None,
         bombikazi_self_destruct_ids=att_self_destruct,
-        casualty_order_attacker="best_unit",
+        casualty_order_attacker=init_casualty_order,
         casualty_order_defender=defender_casualty_order,
-        must_conquer=False,
+        must_conquer=init_must_conquer,
         is_naval_combat_attacker=is_naval_combat_attacker,
         is_naval_combat_defender=is_naval_combat_defender,
         defender_stronghold_hp=defender_stronghold_hp,
@@ -3729,8 +3738,8 @@ def _handle_initiate_combat(
         round_number=1,
         combat_log=full_combat_log_init,
         sea_zone_id=sea_zone_id,
-        casualty_order_attacker="best_unit",
-        must_conquer=False,
+        casualty_order_attacker=init_casualty_order,
+        must_conquer=init_must_conquer,
         initial_attacker_instance_ids=attacker_instance_ids,
         initial_defender_instance_ids=defender_instance_ids,
         cumulative_hits_received_by_attacker=prefix_cum_att + round_result.defender_hits,
