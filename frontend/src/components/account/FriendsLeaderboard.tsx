@@ -94,11 +94,11 @@ export default function FriendsLeaderboard({ friends, onOpen }: {
     <section className="friends-leaderboard" aria-label="Friends leaderboard" aria-busy={loading}>
       <h3 className="account-section__title">Leaderboard</h3>
       <div className="friends-leaderboard__filters">
-        <label>Alliance<select className="account-stats__select" value={alliance} onChange={(e) => setAlliance(e.target.value as typeof alliance)}>
-          <option value="">All alliances</option><option value="good">Good</option><option value="evil">Evil</option>
-        </select></label>
         <label>Scenario<select className="account-stats__select" value={scenario} onChange={(e) => { setScenario(e.target.value); setFaction(''); setFactionOptions([]); }}>
           <option value="">All scenarios</option>{scenarioOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select></label>
+        <label>Alliance<select className="account-stats__select" value={alliance} onChange={(e) => setAlliance(e.target.value as typeof alliance)}>
+          <option value="">All alliances</option><option value="good">Good</option><option value="evil">Evil</option>
         </select></label>
         {scenario && <label>Faction<select className="account-stats__select" value={faction} disabled={loading} onChange={(e) => setFaction(e.target.value)}>
           <option value="">All factions</option>{factionOptions.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
