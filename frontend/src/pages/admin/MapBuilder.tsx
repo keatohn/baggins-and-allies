@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { api } from '../../services/api';
 import { createWheelNavIntentResolver, wheelZoomScaleMultiplier } from '../../utils/wheelNavIntent';
+import { jointsInBox, moveJoints, deleteJoints } from './mapBuilderSelection';
 import { fetchMapSvgText } from './territoryGraph';
 
 /**
@@ -27,7 +28,8 @@ type BuilderDoc = {
 };
 
 type Tool = 'select' | 'pen' | 'pencil' | 'label';
-type Selection = { kind: 'joint' | 'border' | 'label'; id: string } | null;
+type Selection = { kind: 'joint' | 'border' | 'label'; id: string } | { kind: 'joints'; ids: string[] } | null;
+const selectedJointIds = (selection: Selection): string[] => selection?.kind === 'joints' ? selection.ids : selection?.kind === 'joint' ? [selection.id] : [];
 
 const LEGACY_STORAGE_KEY = 'admin_map_builder_doc_v1';
 const DRAFTS_KEY = 'admin_map_builder_drafts_v1';
@@ -47,7 +49,7 @@ const DEFAULT_W = 3500;
 const DEFAULT_H = 2600;
 
 const TOOL_HINTS: Record<Tool, string> = {
-  select: 'Drag joints to move them · click a border to select · click inside a territory to show its name · Delete removes · drag the background to pan',
+  select: 'Drag a box to select nodes · Shift-click or Shift-drag adds nodes · drag selected nodes to move · Delete removes · Space + drag or middle-drag pans',
   pen: 'Click to place points (endpoints snap onto joints or split borders they land on) · drag to pan · Enter or click the first point finishes · Esc cancels',
   pencil: 'Drag to draw a freehand border · ends snap and join the shared graph',
   label: 'Click inside a closed region to name it · click an existing label to edit · drag to pan',
@@ -401,6 +403,7 @@ export function MapBuilder() {
   const [future, setFuture] = useState<BuilderDoc[]>([]);
   const [tool, setTool] = useState<Tool>('select');
   const [selection, setSelection] = useState<Selection>(null);
+  const [selectionBox, setSelectionBox] = useState<{ start: Pt; end: Pt } | null>(null);
   const [view, setView] = useState({ x: 0, y: 0, scale: 1 });
   const [sizeDraft, setSizeDraft] = useState({ w: String(doc.width), h: String(doc.height) });
   const [status, setStatus] = useState<string | null>(null);
@@ -449,7 +452,9 @@ export function MapBuilder() {
   const penRef = useRef<{ joints: string[]; snapshot: BuilderDoc | null }>({ joints: [], snapshot: null });
   const pencilRef = useRef<{ snapshot: BuilderDoc | null } | null>(null);
   const panRef = useRef<{ x: number; y: number; vx: number; vy: number; id: number } | null>(null);
-  const jointDragRef = useRef<{ id: string; snapshot: BuilderDoc; moved: boolean } | null>(null);
+  const jointDragRef = useRef<{ ids: string[]; start: Pt; snapshot: BuilderDoc; moved: boolean } | null>(null);
+  const boxRef = useRef<{ start: Pt; end: Pt; previous: string[]; borderId: string | null; moved: boolean; id: number } | null>(null);
+  const spaceRef = useRef(false);
   const downRef = useRef<{ x: number; y: number; id: number } | null>(null);
 
   useEffect(() => {
@@ -801,11 +806,8 @@ export function MapBuilder() {
     if (!sel) return;
     const snapshot = docRef.current;
     mutate((d) => {
-      if (sel.kind === 'joint') {
-        delete d.joints[sel.id];
-        for (const [bid, b] of Object.entries(d.borders)) {
-          if (b.a === sel.id || b.b === sel.id) delete d.borders[bid];
-        }
+      if (sel.kind === 'joint' || sel.kind === 'joints') {
+        deleteJoints(d, selectedJointIds(sel));
       } else if (sel.kind === 'border') {
         delete d.borders[sel.id];
       } else {
@@ -820,7 +822,8 @@ export function MapBuilder() {
   // --- pointer events ---------------------------------------------------------
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.button === 1) {
+    if (e.button === 1 || (e.button === 0 && spaceRef.current)) {
+      e.preventDefault();
       panRef.current = { x: e.clientX, y: e.clientY, vx: viewRef.current.x, vy: viewRef.current.y, id: e.pointerId };
       try {
         e.currentTarget.setPointerCapture(e.pointerId);
@@ -850,8 +853,18 @@ export function MapBuilder() {
     if (t === 'select') {
       const jid = hitJoint(w);
       if (jid) {
-        setSelection({ kind: 'joint', id: jid });
-        jointDragRef.current = { id: jid, snapshot: docRef.current, moved: false };
+        const previous = selectedJointIds(selection);
+        if (e.shiftKey) {
+          const ids = previous.includes(jid) ? previous.filter((id) => id !== jid) : [...previous, jid];
+          setSelection(ids.length ? { kind: 'joints', ids } : null);
+          downRef.current = null;
+          setStatus(null);
+          return;
+        }
+        const ids = previous.includes(jid) ? previous : [jid];
+        setSelection({ kind: 'joints', ids });
+        setStatus(null);
+        jointDragRef.current = { ids, start: w, snapshot: docRef.current, moved: false };
         try {
           e.currentTarget.setPointerCapture(e.pointerId);
         } catch {
@@ -859,12 +872,8 @@ export function MapBuilder() {
         }
         return;
       }
-      const bid = hitBorder(w);
-      if (bid) {
-        setSelection({ kind: 'border', id: bid });
-        return;
-      }
-      panRef.current = { x: e.clientX, y: e.clientY, vx: viewRef.current.x, vy: viewRef.current.y, id: e.pointerId };
+      boxRef.current = { start: w, end: w, previous: e.shiftKey ? selectedJointIds(selection) : [], borderId: hitBorder(w), moved: false, id: e.pointerId };
+      setStatus(null);
       try {
         e.currentTarget.setPointerCapture(e.pointerId);
       } catch {
@@ -914,20 +923,31 @@ export function MapBuilder() {
       return;
     }
 
+    const box = boxRef.current;
+    if (box && e.pointerId === box.id) {
+      const w = screenToWorld(e.clientX, e.clientY);
+      const down = downRef.current;
+      if (!w || !down) return;
+      box.end = w;
+      box.moved ||= Math.hypot(e.clientX - down.x, e.clientY - down.y) > CLICK_PX;
+      if (box.moved) {
+        setSelectionBox({ start: box.start, end: w });
+        const ids = jointsInBox(docRef.current.joints, box.start, w, box.previous);
+        setSelection(ids.length ? { kind: 'joints', ids } : null);
+      }
+      return;
+    }
+
     const jd = jointDragRef.current;
     if (jd && e.pointerId === (downRef.current?.id ?? -1)) {
       const w = screenToWorld(e.clientX, e.clientY);
       if (!w) return;
       if (!jd.moved) {
-        const d0 = docRef.current.joints[jd.id];
-        if (d0 && Math.hypot(d0.x - w.x, d0.y - w.y) < 1 / viewRef.current.scale) return;
+        if (Math.hypot(jd.start.x - w.x, jd.start.y - w.y) < 1 / viewRef.current.scale) return;
         jd.moved = true;
       }
       mutate((d) => {
-        const j = d.joints[jd.id];
-        if (!j) return;
-        j.x = clamp(w.x, 0, d.width);
-        j.y = clamp(w.y, 0, d.height);
+        moveJoints(d, jd.snapshot, jd.ids, w.x - jd.start.x, w.y - jd.start.y);
       });
       return;
     }
@@ -946,10 +966,22 @@ export function MapBuilder() {
   };
 
   const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const box = boxRef.current;
+    if (box && e.pointerId === box.id) {
+      // Include the release position, even if the browser coalesced the last move.
+      onPointerMove(e);
+      boxRef.current = null;
+      setSelectionBox(null);
+      downRef.current = null;
+      if (!box.moved && !e.shiftKey) {
+        if (box.borderId) setSelection({ kind: 'border', id: box.borderId });
+        else selectRegionLabel(screenToWorld(e.clientX, e.clientY));
+      }
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+      return;
+    }
     const pan = panRef.current;
     if (pan && e.pointerId === pan.id) {
-      const down = downRef.current;
-      const moved = !down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > CLICK_PX;
       panRef.current = null;
       downRef.current = null;
       try {
@@ -957,15 +989,16 @@ export function MapBuilder() {
       } catch {
         /* ignore */
       }
-      if (!moved && toolRef.current === 'select') selectRegionLabel(screenToWorld(e.clientX, e.clientY));
       return;
     }
 
     const jd = jointDragRef.current;
-    if (jd) {
+    if (jd && e.pointerId === downRef.current?.id) {
+      onPointerMove(e);
       jointDragRef.current = null;
       if (jd.moved) pushHistory(jd.snapshot);
       downRef.current = null;
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
       return;
     }
 
@@ -1012,6 +1045,12 @@ export function MapBuilder() {
   };
 
   const onPointerCancel = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (boxRef.current?.id === e.pointerId) {
+      const ids = boxRef.current.previous;
+      setSelection(ids.length ? { kind: 'joints', ids } : null);
+      boxRef.current = null;
+      setSelectionBox(null);
+    }
     if (panRef.current?.id === e.pointerId) panRef.current = null;
     if (jointDragRef.current) {
       const jd = jointDragRef.current;
@@ -1051,6 +1090,11 @@ export function MapBuilder() {
         }
         return;
       }
+      if (e.code === 'Space') {
+        e.preventDefault();
+        spaceRef.current = true;
+        return;
+      }
       const key = e.key.toLowerCase();
       if ((e.ctrlKey || e.metaKey) && key === 'z') {
         e.preventDefault();
@@ -1065,6 +1109,16 @@ export function MapBuilder() {
       }
       if (e.key === 'Escape') {
         cancelStroke();
+        const drag = jointDragRef.current;
+        if (drag) {
+          docRef.current = drag.snapshot;
+          setDoc(drag.snapshot);
+          jointDragRef.current = null;
+        }
+        panRef.current = null;
+        boxRef.current = null;
+        setSelectionBox(null);
+        downRef.current = null;
         setSelection(null);
         return;
       }
@@ -1082,8 +1136,16 @@ export function MapBuilder() {
         }
       }
     };
+    const releaseSpace = (e: KeyboardEvent) => { if (e.code === 'Space') spaceRef.current = false; };
+    const blur = () => { spaceRef.current = false; };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keyup', releaseSpace);
+    window.addEventListener('blur', blur);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', releaseSpace);
+      window.removeEventListener('blur', blur);
+    };
   }, [cancelStroke, confirmBox, deleteSelection, finishPen, jsonModal, labelDialog, redo, selection, svgModal, undo]);
 
   // --- header actions ---------------------------------------------------------
@@ -1979,7 +2041,7 @@ export function MapBuilder() {
 
               {/* Joints */}
               {jointList.map(([jid, j]) => {
-                const sel = selection?.kind === 'joint' && selection.id === jid;
+                const sel = selectedJointIds(selection).includes(jid);
                 const inPen = penJoints.includes(jid);
                 return (
                   <circle
@@ -1993,6 +2055,14 @@ export function MapBuilder() {
                   />
                 );
               })}
+              {selectionBox && <rect
+                x={Math.min(selectionBox.start.x, selectionBox.end.x)}
+                y={Math.min(selectionBox.start.y, selectionBox.end.y)}
+                width={Math.abs(selectionBox.end.x - selectionBox.start.x)}
+                height={Math.abs(selectionBox.end.y - selectionBox.start.y)}
+                fill="rgba(65, 115, 170, 0.15)" stroke="#4173aa" strokeWidth={k}
+                strokeDasharray={`${5 * k} ${3 * k}`} pointerEvents="none"
+              />}
             </svg>
           </div>
         </div>
@@ -2001,7 +2071,7 @@ export function MapBuilder() {
           <span className="mapbuilder__hint">{status ?? TOOL_HINTS[tool]}</span>
           {selection ? (
             <span className="mapbuilder__sel">
-              {selection.kind}: {selection.id} · Delete to remove
+              {selection.kind === 'joints' ? `${selection.ids.length} nodes selected` : `${selection.kind}: ${selection.id}`} · Delete to remove
             </span>
           ) : null}
         </div>
