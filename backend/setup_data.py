@@ -368,7 +368,7 @@ def create_setup(
     return {"id": new_id}
 
 
-def create_setup_from_bundle(db: Session, new_id: str, bundle: dict[str, Any]) -> dict[str, Any]:
+def create_setup_from_bundle(db: Session, new_id: str, bundle: dict[str, Any], *, commit: bool = True) -> dict[str, Any]:
     """Insert a new setup from a master JSON object (same keys as PUT /admin/setups/{id})."""
     err = validate_setup_id(new_id)
     if err:
@@ -399,14 +399,17 @@ def create_setup_from_bundle(db: Session, new_id: str, bundle: dict[str, Any]) -
     )
     db.add(row)
     try:
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
     except IntegrityError:
         db.rollback()
         raise ValueError("A setup with this id already exists") from None
     return {"id": new_id}
 
 
-def save_setup_bundle(db: Session, setup_id: str, payload: dict[str, Any]) -> None:
+def save_setup_bundle(db: Session, setup_id: str, payload: dict[str, Any], authoring_source: dict | None = None) -> None:
     """Persist validated payload; manifest.id is forced to setup_id (immutable id)."""
     row = db.query(Setup).filter(Setup.id == setup_id).first()
     if not row:
@@ -415,6 +418,27 @@ def save_setup_bundle(db: Session, setup_id: str, payload: dict[str, Any]) -> No
     manifest["id"] = setup_id
     payload = dict(payload)
     payload["manifest"] = manifest
+
+    from backend.scenario_store import load_state, source_for_bundle, stage_state
+    from backend.scenario_builder import compile_scenario
+
+    state = load_state(db)
+    source = authoring_source if authoring_source is not None else state["sources"][setup_id]
+    source = source_for_bundle(source, payload, state["library"], state["sources"].get)
+    if compile_scenario(source, state["library"]) != {key: payload[key] for key in (
+        "manifest", "units", "territories", "factions", "camps", "ports", "starting_setup"
+    )}:
+        raise ValueError("Authoring source does not compile to the submitted bundle")
+    state["sources"][setup_id] = source
+    from backend.scenario_store import compile_all, stage_bundle
+    compiled = compile_all(state)
+    for child_id, child_source in state["sources"].items():
+        if child_source.get("extends") == setup_id:
+            errors = validate_setup_payload(compiled[child_id], _catalog(db))
+            if errors:
+                raise ValueError(f"{child_id}: " + "; ".join(errors))
+            stage_bundle(db, child_id, compiled[child_id])
+    stage_state(db, state)
 
     row.manifest_json = json.dumps(manifest, ensure_ascii=False)
     row.units_json = json.dumps(payload["units"], ensure_ascii=False)
@@ -433,6 +457,13 @@ def delete_setup(db: Session, setup_id: str) -> None:
     row = db.query(Setup).filter(Setup.id == setup_id).first()
     if not row:
         raise ValueError("setup not found")
+    from backend.scenario_store import load_state, stage_state
+    state = load_state(db)
+    children = [key for key, source in state["sources"].items() if source.get("extends") == setup_id]
+    if children:
+        raise ValueError("Cannot delete a scenario inherited by: " + ", ".join(children))
+    state["sources"].pop(setup_id, None)
+    stage_state(db, state)
     db.delete(row)
     db.commit()
 

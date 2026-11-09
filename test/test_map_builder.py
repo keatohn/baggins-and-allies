@@ -105,6 +105,74 @@ def test_split_regions_get_one_path_each():
         assert d.count("M") == 1
 
 
+def test_shared_borders_generate_symmetric_adjacency():
+    doc = split_doc(labels={"west": {"display_name": "West", "x": 250, "y": 400}, "east": {"display_name": "East", "x": 750, "y": 400}})
+    graph = convert_map_builder(doc)["graph"]
+    assert graph["adjacent"] == {"east": ["west"], "west": ["east"]}
+    assert graph["aerial_adjacent"] == {"east": [], "west": []}
+    assert graph["ford_adjacent"] == {"east": [], "west": []}
+    # Extra nodes along a shared border do not alter the territory connection.
+    doc["joints"]["center"] = {"x": 500, "y": 400}
+    doc["borders"]["mid"] = {"a": "tm", "b": "center"}
+    doc["borders"]["mid2"] = {"a": "center", "b": "bm"}
+    assert convert_map_builder(doc)["graph"] == graph
+
+
+def test_save_generates_graph_and_preserves_manual_changes(db_session, monkeypatch):
+    monkeypatch.setenv("SETUP_SOURCE", "db")
+    from backend.map_assets import save_map_asset
+    from backend.map_overrides import load_map_overrides, save_map_overrides
+    doc = split_doc(labels={"west": {"display_name": "West", "x": 250, "y": 400}, "east": {"display_name": "East", "x": 750, "y": 400}})
+    save_map_asset(db_session, "adjacency_test", {"doc": doc})
+    overrides = load_map_overrides(db_session, "adjacency_test")
+    assert overrides["graph"]["adjacent"] == {"east": ["west"], "west": ["east"]}
+    from backend.scenario_store import load_state
+    defaults = load_state(db_session)["library"]["maps"]["adjacency_test"]
+    assert set(defaults) == {"east", "west"}
+    assert defaults["west"]["adjacent"] == ["east"]
+    assert defaults["west"]["produces"] == {"power": 0}
+    # A hand-authored impassable border stays impassable on subsequent saves.
+    overrides["graph"]["adjacent"] = {"east": [], "west": []}
+    save_map_overrides(db_session, "adjacency_test", overrides)
+    save_map_asset(db_session, "adjacency_test", {"doc": doc})
+    assert load_map_overrides(db_session, "adjacency_test")["graph"]["adjacent"] == {"east": [], "west": []}
+
+
+def test_incremental_map_drawing_generates_new_connections(db_session, monkeypatch):
+    monkeypatch.setenv("SETUP_SOURCE", "db")
+    from backend.map_assets import save_map_asset
+    from backend.map_overrides import load_map_overrides
+    save_map_asset(db_session, "incremental_map", {"doc": frame_doc(labels={"west": {"display_name": "West", "x": 250, "y": 400}})})
+    doc = split_doc(labels={"west": {"display_name": "West", "x": 250, "y": 400}, "east": {"display_name": "East", "x": 750, "y": 400}})
+    save_map_asset(db_session, "incremental_map", {"doc": doc})
+    assert load_map_overrides(db_session, "incremental_map")["graph"]["adjacent"] == {"east": ["west"], "west": ["east"]}
+
+
+def test_regions_touching_at_a_node_are_not_adjacent():
+    doc = frame_doc(labels={"nw": {"display_name": "NW", "x": 100, "y": 100}, "se": {"display_name": "SE", "x": 900, "y": 700}})
+    doc["joints"].update({"tm": {"x": 500, "y": 0}, "bm": {"x": 500, "y": 800}, "lm": {"x": 0, "y": 400}, "rm": {"x": 1000, "y": 400}, "center": {"x": 500, "y": 400}})
+    doc["borders"] = {"t1": {"a": "tl", "b": "tm"}, "t2": {"a": "tm", "b": "tr"}, "r1": {"a": "tr", "b": "rm"}, "r2": {"a": "rm", "b": "br"}, "b1": {"a": "br", "b": "bm"}, "b2": {"a": "bm", "b": "bl"}, "l1": {"a": "bl", "b": "lm"}, "l2": {"a": "lm", "b": "tl"}, "v1": {"a": "tm", "b": "center"}, "v2": {"a": "center", "b": "bm"}, "h1": {"a": "lm", "b": "center"}, "h2": {"a": "center", "b": "rm"}}
+    assert convert_map_builder(doc)["graph"]["adjacent"] == {"nw": [], "se": []}
+
+
+def test_enclave_shares_its_border_with_the_surrounding_region():
+    doc = frame_doc(labels={"outer": {"display_name": "Outer", "x": 100, "y": 100}, "inner": {"display_name": "Inner", "x": 500, "y": 400}})
+    doc["joints"].update({"i1": {"x": 400, "y": 300}, "i2": {"x": 600, "y": 300}, "i3": {"x": 600, "y": 500}, "i4": {"x": 400, "y": 500}})
+    doc["borders"].update({"i12": {"a": "i1", "b": "i2"}, "i23": {"a": "i2", "b": "i3"}, "i34": {"a": "i3", "b": "i4"}, "i41": {"a": "i4", "b": "i1"}})
+    assert convert_map_builder(doc)["graph"]["adjacent"] == {"inner": ["outer"], "outer": ["inner"]}
+
+
+def test_drawing_changes_remove_generated_connections(db_session, monkeypatch):
+    monkeypatch.setenv("SETUP_SOURCE", "db")
+    from backend.map_assets import save_map_asset
+    from backend.map_overrides import load_map_overrides
+    labels = {"west": {"display_name": "West", "x": 250, "y": 400}, "east": {"display_name": "East", "x": 750, "y": 400}}
+    save_map_asset(db_session, "remove_connection", {"doc": split_doc(labels=labels)})
+    save_map_asset(db_session, "remove_connection", {"doc": frame_doc(labels=labels)})
+    graph = load_map_overrides(db_session, "remove_connection")["graph"]["adjacent"]
+    assert graph["west"] == [] and graph["east"] == []
+
+
 def test_split_keeps_label_on_each_side():
     doc = split_doc(
         labels={
@@ -544,6 +612,9 @@ def test_save_map_asset_files_source(tmp_path, monkeypatch):
     saved = map_assets.save_map_asset(None, "files_map_1.0", {"display_name": "Files Map", "doc": doc})
     assert saved["display_name"] == "Files Map"
     assert (tmp_path / "files_map_1.0" / "builder.json").is_file()
+    import json
+    defaults = json.loads((tmp_path / "files_map_1.0" / "territories.json").read_text())
+    assert defaults["the_shire"]["display_name"] == "The Shire"
     svg = (tmp_path / "files_map_1.0" / "map.svg").read_text(encoding="utf-8")
     assert 'id="the_shire"' in svg
     assert map_assets.load_map_svg(None, "files_map_1.0") == svg
@@ -556,4 +627,5 @@ def test_save_map_asset_files_source(tmp_path, monkeypatch):
     assert not (tmp_path / "files_map_1.0" / "builder.json").exists()
     assert (tmp_path / "files_map_1.0" / "overrides.json").is_file()
     map_assets.delete_map_asset(None, "files_map_1.1")
-    assert not (tmp_path / "files_map_1.1").exists()
+    assert not (tmp_path / "files_map_1.1" / "builder.json").exists()
+    assert (tmp_path / "files_map_1.1" / "overrides.json").is_file()  # Generated graph remains map data.

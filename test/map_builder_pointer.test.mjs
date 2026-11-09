@@ -44,7 +44,7 @@ test('Builder selection takes precedence over an interrupted pan; groups move, d
       assert.ok(!result.exceptionDetails, JSON.stringify(result.exceptionDetails));
       return result.result.value;
     };
-    const doc = { width: 1000, height: 800, joints: { a: { x: 100, y: 100 }, b: { x: 300, y: 100 }, c: { x: 300, y: 300 }, d: { x: 100, y: 300 } }, borders: { ab: { a: 'a', b: 'b' }, bc: { a: 'b', b: 'c' }, cd: { a: 'c', b: 'd' }, da: { a: 'd', b: 'a' } }, labels: {} };
+    const doc = { width: 1000, height: 800, joints: { a: { x: 100, y: 100 }, b: { x: 300, y: 100 }, c: { x: 300, y: 300 }, d: { x: 100, y: 300 } }, borders: { ab: { a: 'a', b: 'b' }, bc: { a: 'b', b: 'c' }, cd: { a: 'c', b: 'd' }, da: { a: 'd', b: 'a' } }, labels: { first: { x: 175, y: 175, display_name: 'First region' }, second: { x: 225, y: 225, display_name: 'Second region' } } };
     const store = JSON.stringify({ currentId: 'test', drafts: [{ id: 'test', name: 'Pointer regression', updated: 1, doc }] });
     await writeFile(fixture, `<html><body><div id="root"></div><script type="module">
       import React from 'react'; import { createRoot } from 'react-dom/client';
@@ -72,6 +72,84 @@ test('Builder selection takes precedence over an interrupted pan; groups move, d
       await delay(70);
     };
     const original = (await state()).transform;
+    const click = async (position) => {
+      await page.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...position, button: 'left', buttons: 1, clickCount: 1 });
+      await page.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...position, button: 'left', buttons: 0, clickCount: 1 });
+      await delay(70);
+    };
+    const remove = async (key = 'Delete') => {
+      await page.call('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: key === 'Delete' ? 46 : 8 });
+      await delay(70);
+    };
+    const undo = async () => {
+      await evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true}))");
+      await delay(70);
+    };
+    const edgePoint = await point(200, 100);
+    await click(edgePoint);
+    await page.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...edgePoint, button: 'left', buttons: 1, clickCount: 2 });
+    await page.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...edgePoint, button: 'left', buttons: 0, clickCount: 2 });
+    await delay(70);
+    assert.equal((await state()).nodes, 5);
+    const split = await evaluate(`(()=>{const n=document.querySelector('.mapbuilder__joint--selected');return {x:+n.getAttribute('cx'),y:+n.getAttribute('cy'),edges:[...document.querySelectorAll('.mapbuilder__border')].map(l=>[+l.getAttribute('x1'),+l.getAttribute('y1'),+l.getAttribute('x2'),+l.getAttribute('y2')])}})()`);
+    assert.ok(Math.abs(split.x - 200) < 1 && Math.abs(split.y - 100) < 1);
+    assert.equal(split.edges.filter(([x1,y1,x2,y2]) => (Math.abs(x1-200)<1 && y1===100) || (Math.abs(x2-200)<1 && y2===100)).length, 2);
+    await undo();
+    assert.equal((await state()).nodes, 4);
+    assert.equal(await evaluate("document.querySelectorAll('.mapbuilder__border').length"), 4);
+    const selectRegion = async () => {
+      const position = await point(250, 250);
+      await click(position);
+      await page.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...position, button: 'left', buttons: 1, clickCount: 2 });
+      await page.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...position, button: 'left', buttons: 0, clickCount: 2 });
+      await delay(70);
+      assert.equal((await state()).selected, 4);
+    };
+    const firstNode = () => evaluate("({x:+document.querySelector('.mapbuilder__joint').getAttribute('cx'),y:+document.querySelector('.mapbuilder__joint').getAttribute('cy')})");
+    const firstLabel = () => evaluate("({x:+document.querySelector('[data-label-id=first] circle').getAttribute('cx'),y:+document.querySelector('[data-label-id=first] circle').getAttribute('cy')})");
+    await selectRegion();
+    await page.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowRight', code: 'ArrowRight' });
+    await page.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowRight', code: 'ArrowRight', autoRepeat: true });
+    await page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowRight', code: 'ArrowRight' });
+    await delay(70);
+    assert.deepEqual(await firstNode(), { x: 102, y: 100 });
+    assert.deepEqual(await firstLabel(), { x: 177, y: 175 });
+    await undo();
+    assert.deepEqual(await firstNode(), { x: 100, y: 100 });
+    assert.deepEqual(await firstLabel(), { x: 175, y: 175 });
+    await selectRegion();
+    await page.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowDown', code: 'ArrowDown', modifiers: 8 });
+    await page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowDown', code: 'ArrowDown' });
+    await delay(70);
+    assert.deepEqual(await firstNode(), { x: 100, y: 110 });
+    assert.deepEqual(await firstLabel(), { x: 175, y: 185 });
+    await undo();
+    await selectRegion();
+    await drag(await point(100, 100), await point(110, 110));
+    assert.ok(Math.abs((await firstNode()).x - 110) < 1);
+    assert.ok(Math.abs((await firstLabel()).x - 185) < 1);
+    await undo();
+    // Two preserved labels can occupy one face after a border is removed. A dot
+    // must select its own label, rather than whichever label the face search finds first.
+    await click(await point(225, 225));
+    assert.equal(await evaluate("document.querySelector('.mapbuilder__label--selected')?.dataset.labelId"), 'second');
+    await remove();
+    assert.equal(await evaluate("document.querySelectorAll('.mapbuilder__label').length"), 1);
+    assert.equal(await evaluate("!!document.querySelector('[data-label-id=first]')"), true);
+    assert.equal(await evaluate("document.querySelectorAll('.mapbuilder__border').length"), 4);
+    await undo();
+    // Removing a boundary opens the face but keeps both labels. The orphaned dot
+    // must still be selectable and deletable, with undo restoring it independently.
+    await click(await point(200, 100));
+    await remove();
+    assert.equal(await evaluate("document.querySelectorAll('.mapbuilder__label').length"), 2);
+    await click(await point(225, 225));
+    assert.equal(await evaluate("document.querySelector('.mapbuilder__label--selected')?.dataset.labelId"), 'second');
+    await remove('Backspace');
+    assert.equal(await evaluate("document.querySelectorAll('.mapbuilder__label').length"), 1);
+    await undo();
+    await undo();
+    assert.equal(await evaluate("document.querySelectorAll('.mapbuilder__label').length"), 2);
     const from = await point(50, 50), to = await point(350, 350);
     await drag(from, to, 'left', async () => assert.equal((await state()).box, true));
     assert.equal((await state()).selected, 4);
@@ -104,5 +182,81 @@ test('Builder selection takes precedence over an interrupted pan; groups move, d
     await manager.call('Target.closeTarget', { targetId });
     manager.close();
     await unlink(fixture).catch(() => {});
+  }
+});
+
+test('Landscape border mode fills and paints only the clicked shared border', { skip: !browser, timeout: 20000 }, async () => {
+  const metadata = await (await fetch(`${browser}/json/version`)).json();
+  const manager = await connect(metadata.webSocketDebuggerUrl);
+  const { targetId } = await manager.call('Target.createTarget', { url: 'about:blank' });
+  const landscapeFixture = new URL('../frontend/__landscape_border_test.html', import.meta.url);
+  let page;
+  try {
+    const tabs = await (await fetch(`${browser}/json`)).json();
+    page = await connect(tabs.find((tab) => tab.id === targetId).webSocketDebuggerUrl);
+    const evaluate = async (expression) => {
+      const result = await page.call('Runtime.evaluate', { expression, returnByValue: true });
+      assert.ok(!result.exceptionDetails, JSON.stringify(result.exceptionDetails));
+      return result.result.value;
+    };
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"><path id="a" d="M20 20H140V180H20Z"/><path id="b" d="M140 20H260V180H140Z"/><path id="c" d="M260 20H380V180H260Z"/></svg>';
+    await writeFile(landscapeFixture, `<html><body><div id="root"></div><script type="module">
+      import React from 'react'; import {createRoot} from 'react-dom/client';
+      import {MapOverridesPane} from '/src/pages/admin/MapOverridesPane.tsx'; import '/src/pages/Admin.css';
+      const svg=${JSON.stringify(svg)};
+      window.fetch=async (input,init={})=>{
+        const url=String(input); let data={};
+        if(init.method==='PUT'){window.saved=JSON.parse(init.body);data={overrides:window.saved};}
+        else if(url.includes('.svg'))return new Response(svg,{headers:{'Content-Type':'image/svg+xml'}});
+        else if(url.includes('/admin/maps'))data={maps:['wotr_map_1.2']};
+        else if(url.includes('/admin/setups'))data={setups:[]};
+        else if(url.includes('/overrides'))data={overrides:{territories:{}}};
+        else if(url.includes('/catalog'))data={terrain_types:['plains','mountains'],archetypes:[],specials:[]};
+        else if(url.includes('/landscape/manifest'))data={mountains:['mountain.png']};
+        return new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});
+      };
+      const territories=Object.fromEntries(['a','b','c'].map(id=>[id,{id,display_name:id,terrain_type:'plains',adjacent:[],produces:{power:0}}]));
+      createRoot(document.getElementById('root')).render(React.createElement(MapOverridesPane,{territories,onClose:()=>{}}));
+      </script></body></html>`);
+    await page.call('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1100, deviceScaleFactor: 1, mobile: false });
+    await page.call('Page.navigate', { url: `${vite}/__landscape_border_test.html` });
+    for (let attempt = 0; attempt < 60; attempt++) {
+      if (await evaluate("!!document.querySelector('path.admin-graph__path[data-tid=a]')")) break;
+      await delay(100);
+    }
+    await delay(500);
+    await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Landscape').click()");
+    await delay(150);
+    await evaluate("[...document.querySelectorAll('label')].find(l=>l.textContent.includes('Border mode')).querySelector('input').click()");
+    await delay(70);
+    await evaluate("document.querySelector('.mapov-landscape__thumb').click()");
+    await delay(70);
+    const point = (x, y) => evaluate(`(()=>{const p=new DOMPoint(${x},${y}).matrixTransform(document.querySelector('path.admin-graph__path[data-tid=a]').getScreenCTM());return {x:p.x,y:p.y}})()`);
+    const mouse = (type, position, buttons) => page.call('Input.dispatchMouseEvent', { type, ...position, button: 'left', buttons, clickCount: 1 });
+    const click = async (position) => { await mouse('mousePressed', position, 1); await mouse('mouseReleased', position, 0); await delay(80); };
+    const count = () => evaluate("document.querySelectorAll('.mapov-placement').length");
+    await click(await point(135, 100));
+    const filled = await count();
+    assert.ok(filled >= 3, `Expected a filled shared border, got ${filled} pieces`);
+    await click(await point(135, 100));
+    assert.equal(await count(), filled, 'repeated clicks do not stack mountains');
+    await click(await point(25, 100));
+    assert.equal(await count(), filled, 'coastline does not fill the remaining outline');
+    await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Paint').click()");
+    await delay(70);
+    await mouse('mousePressed', await point(135, 60), 1);
+    await mouse('mouseMoved', await point(255, 150), 1);
+    await delay(70);
+    await mouse('mouseReleased', await point(255, 150), 0);
+    await delay(70);
+    await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Save').click()");
+    await delay(100);
+    const pieces = await evaluate("Object.values(window.saved.landscape.territories).flat()");
+    assert.ok(pieces.every((p) => Math.abs(p.x - 140) < 0.1 && p.y >= 20 && p.y <= 180), JSON.stringify(pieces));
+  } finally {
+    page?.close();
+    await manager.call('Target.closeTarget', { targetId });
+    manager.close();
+    await unlink(landscapeFixture).catch(() => {});
   }
 });

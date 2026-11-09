@@ -1,0 +1,1278 @@
+{
+  "andrast": {
+    "adjacent": [
+      "anfalas",
+      "druwaith_iaur",
+      "sea_zone_5",
+      "sea_zone_8"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Andrast",
+    "id": "andrast",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "mountains"
+  },
+  "anfalas": {
+    "adjacent": [
+      "dol_amroth",
+      "erech_lamedon",
+      "andrast",
+      "sea_zone_8"
+    ],
+    "aerial_adjacent": [
+      "dunharrow",
+      "west_march",
+      "westfold"
+    ],
+    "display_name": "Anfalas",
+    "id": "anfalas",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "grassland"
+  },
+  "anorien": {
+    "adjacent": [
+      "fenmarch",
+      "entwash",
+      "cair_andros",
+      "west_osgiliath",
+      "pelennor"
+    ],
+    "aerial_adjacent": [
+      "minas_tirith",
+      "lossarnach",
+      "north_ithilien",
+      "east_osgiliath"
+    ],
+    "display_name": "Anorien",
+    "id": "anorien",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "grassland"
+  },
+  "barad_dur": {
+    "adjacent": [
+      "mount_doom",
+      "gorgoroth",
+      "nurn"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Barad-Dûr",
+    "id": "barad_dur",
+    "is_stronghold": true,
+    "ownable": true,
+    "produces": {
+      "power": 12
+    },
+    "stronghold_base_health": 2,
+    "terrain_type": "fortress"
+  },
+  "belfalas": {
+    "adjacent": [
+      "lebennin",
+      "erech_lamedon",
+      "dol_amroth",
+      "sea_zone_8",
+      "sea_zone_11"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Belfalas",
+    "id": "belfalas",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "grassland"
+  },
+  "cair_andros": {
+    "adjacent": [
+      "anorien",
+      "north_ithilien"
+    ],
+    "aerial_adjacent": [
+      "west_osgiliath",
+      "east_osgiliath",
+      "entwash",
+      "dead_marshes"
+    ],
+    "display_name": "Cair Andros",
+    "id": "cair_andros",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 3
+    },
+    "terrain_type": "fortress"
+  },
+  "cirith_ungol": {
+    "adjacent": [
+      "minas_morgul",
+      "gorgoroth",
+      "udun"
+    ],
+    "aerial_adjacent": [
+      "north_ithilien"
+    ],
+    "display_name": "Cirith Ungol",
+    "id": "cirith_ungol",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 2
+    },
+    "terrain_type": "fortress"
+  },
+  "dagorlad": {
+    "adjacent": [
+      "dead_marshes",
+      "the_black_gate",
+      "north_ithilien",
+      "rhun_hills",
+      "east_brown_lands"
+    ],
+    "aerial_adjacent": [
+      "udun"
+    ],
+    "display_name": "Dagorlad",
+    "id": "dagorlad",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {},
+    "terrain_type": "wasteland"
+  },
+  "dead_marshes": {
+    "adjacent": [
+      "emyn_muil",
+      "dagorlad",
+      "north_ithilien"
+    ],
+    "aerial_adjacent": [
+      "eastemnet",
+      "entwash",
+      "cair_andros"
+    ],
+    "display_name": "Dead Marshes",
+    "id": "dead_marshes",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {},
+    "terrain_type": "marsh"
+  },
+  "dol_amroth": {
+    "adjacent": [
+      "anfalas",
+      "belfalas",
+      "erech_lamedon",
+      "sea_zone_8"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Dol Amroth",
+    "id": "dol_amroth",
+    "is_stronghold": true,
+    "ownable": true,
+    "produces": {
+      "power": 4
+    },
+    "stronghold_base_health": 2,
+    "terrain_type": "city"
+  },
+  "druwaith_iaur": {
+    "adjacent": [
+      "andrast",
+      "west_march",
+      "fords_of_isen",
+      "sea_zone_4"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Drúwaith Iaur",
+    "id": "druwaith_iaur",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "forest"
+  },
+  "dunharrow": {
+    "adjacent": [
+      "edoras",
+      "erech_lamedon",
+      "westfold"
+    ],
+    "aerial_adjacent": [
+      "anfalas"
+    ],
+    "display_name": "Dunharrow",
+    "id": "dunharrow",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 3
+    },
+    "terrain_type": "mountains"
+  },
+  "east_brown_lands": {
+    "adjacent": [
+      "west_brown_lands",
+      "dagorlad",
+      "rhun_hills"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "East Brown Lands",
+    "id": "east_brown_lands",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "wasteland"
+  },
+  "east_osgiliath": {
+    "adjacent": [
+      "west_osgiliath",
+      "north_ithilien",
+      "south_ithilien",
+      "sea_zone_12"
+    ],
+    "aerial_adjacent": [
+      "pelennor",
+      "anorien",
+      "cair_andros"
+    ],
+    "display_name": "East Osgiliath",
+    "id": "east_osgiliath",
+    "is_stronghold": true,
+    "ownable": true,
+    "produces": {
+      "power": 3
+    },
+    "stronghold_base_health": 1,
+    "terrain_type": "city"
+  },
+  "eastemnet": {
+    "adjacent": [
+      "westemnet",
+      "the_wold",
+      "entwash",
+      "eastfold"
+    ],
+    "aerial_adjacent": [
+      "dead_marshes"
+    ],
+    "display_name": "Eastemnet",
+    "id": "eastemnet",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "plains"
+  },
+  "eastfold": {
+    "adjacent": [
+      "edoras",
+      "eastemnet",
+      "westemnet",
+      "entwash",
+      "fenmarch"
+    ],
+    "aerial_adjacent": [
+      "erech_lamedon",
+      "lebennin"
+    ],
+    "display_name": "Eastfold",
+    "id": "eastfold",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 2
+    },
+    "terrain_type": "plains"
+  },
+  "edoras": {
+    "adjacent": [
+      "westemnet",
+      "eastfold",
+      "dunharrow",
+      "westfold"
+    ],
+    "aerial_adjacent": [
+      "erech_lamedon"
+    ],
+    "display_name": "Edoras",
+    "id": "edoras",
+    "is_stronghold": true,
+    "ownable": true,
+    "produces": {
+      "power": 6
+    },
+    "stronghold_base_health": 1,
+    "terrain_type": "city"
+  },
+  "emyn_muil": {
+    "adjacent": [
+      "dead_marshes",
+      "the_wold",
+      "west_brown_lands"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Emyn Muil",
+    "id": "emyn_muil",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {},
+    "terrain_type": "wasteland"
+  },
+  "enedwaith": {
+    "adjacent": [
+      "north_dunland",
+      "south_dunland",
+      "minhiriath",
+      "fords_of_isen",
+      "sea_zone_2"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Enedwaith",
+    "id": "enedwaith",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "hills"
+  },
+  "entwash": {
+    "adjacent": [
+      "eastfold",
+      "eastemnet",
+      "anorien",
+      "fenmarch"
+    ],
+    "aerial_adjacent": [
+      "dead_marshes",
+      "cair_andros"
+    ],
+    "display_name": "Entwash",
+    "id": "entwash",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "marsh"
+  },
+  "erech_lamedon": {
+    "adjacent": [
+      "anfalas",
+      "dunharrow",
+      "belfalas",
+      "lebennin",
+      "dol_amroth"
+    ],
+    "aerial_adjacent": [
+      "eastfold",
+      "edoras"
+    ],
+    "display_name": "Erech-Lamedon",
+    "id": "erech_lamedon",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "mountains"
+  },
+  "fangorn": {
+    "adjacent": [
+      "isengard",
+      "the_wold",
+      "westemnet",
+      "gap_of_rohan"
+    ],
+    "aerial_adjacent": [
+      "north_dunland",
+      "south_dunland"
+    ],
+    "display_name": "Fangorn",
+    "id": "fangorn",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 3
+    },
+    "terrain_type": "forest"
+  },
+  "far_harad": {
+    "adjacent": [
+      "haradwaith",
+      "umbar"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Far Harad",
+    "id": "far_harad",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "desert"
+  },
+  "fenmarch": {
+    "adjacent": [
+      "eastfold",
+      "entwash",
+      "anorien"
+    ],
+    "aerial_adjacent": [
+      "lebennin"
+    ],
+    "display_name": "Fenmarch",
+    "id": "fenmarch",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "marsh"
+  },
+  "field_of_celebrant": {
+    "adjacent": [
+      "the_wold"
+    ],
+    "aerial_adjacent": [
+      "west_brown_lands",
+      "north_dunland"
+    ],
+    "display_name": "Field of Celebrant",
+    "id": "field_of_celebrant",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "plains"
+  },
+  "fords_of_isen": {
+    "adjacent": [
+      "enedwaith",
+      "south_dunland",
+      "isengard",
+      "gap_of_rohan",
+      "west_march",
+      "druwaith_iaur",
+      "sea_zone_4"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Fords of Isen",
+    "id": "fords_of_isen",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 2
+    },
+    "terrain_type": "valley"
+  },
+  "gap_of_rohan": {
+    "adjacent": [
+      "isengard",
+      "westfold",
+      "west_march",
+      "westemnet",
+      "fangorn",
+      "fords_of_isen",
+      "helms_deep"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Gap of Rohan",
+    "id": "gap_of_rohan",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 2
+    },
+    "terrain_type": "plains"
+  },
+  "gorgoroth": {
+    "adjacent": [
+      "udun",
+      "cirith_ungol",
+      "minas_morgul",
+      "mount_doom",
+      "barad_dur",
+      "nurn"
+    ],
+    "aerial_adjacent": [
+      "south_ithilien"
+    ],
+    "display_name": "Gorgoroth",
+    "id": "gorgoroth",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "wasteland"
+  },
+  "haradwaith": {
+    "adjacent": [
+      "far_harad",
+      "near_harad",
+      "umbar",
+      "harondor"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Haradwaith",
+    "id": "haradwaith",
+    "is_stronghold": true,
+    "ownable": true,
+    "produces": {
+      "power": 4
+    },
+    "stronghold_base_health": 1,
+    "terrain_type": "desert"
+  },
+  "harondor": {
+    "adjacent": [
+      "south_ithilien",
+      "umbar",
+      "haradwaith",
+      "near_harad",
+      "sea_zone_9",
+      "sea_zone_11",
+      "sea_zone_12"
+    ],
+    "aerial_adjacent": [
+      "nurn",
+      "lebennin"
+    ],
+    "display_name": "Harondor",
+    "id": "harondor",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "desert"
+  },
+  "helms_deep": {
+    "adjacent": [
+      "gap_of_rohan",
+      "westfold"
+    ],
+    "aerial_adjacent": [
+      "west_march"
+    ],
+    "display_name": "Helm's Deep",
+    "id": "helms_deep",
+    "is_stronghold": true,
+    "ownable": true,
+    "produces": {
+      "power": 3
+    },
+    "stronghold_base_health": 3,
+    "terrain_type": "fortress"
+  },
+  "isengard": {
+    "adjacent": [
+      "south_dunland",
+      "fangorn",
+      "gap_of_rohan",
+      "fords_of_isen"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Isengard",
+    "id": "isengard",
+    "is_stronghold": true,
+    "ownable": true,
+    "produces": {
+      "power": 10
+    },
+    "stronghold_base_health": 3,
+    "terrain_type": "fortress"
+  },
+  "khand": {
+    "adjacent": [
+      "near_harad",
+      "nurn"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Khand",
+    "id": "khand",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 2
+    },
+    "terrain_type": "desert"
+  },
+  "lebennin": {
+    "adjacent": [
+      "lossarnach",
+      "belfalas",
+      "pelargir",
+      "erech_lamedon",
+      "sea_zone_11",
+      "sea_zone_12"
+    ],
+    "aerial_adjacent": [
+      "fenmarch",
+      "eastfold",
+      "harondor"
+    ],
+    "display_name": "Lebennin",
+    "id": "lebennin",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "grassland"
+  },
+  "lossarnach": {
+    "adjacent": [
+      "pelennor",
+      "lebennin",
+      "pelargir",
+      "minas_tirith",
+      "sea_zone_12"
+    ],
+    "aerial_adjacent": [
+      "south_ithilien",
+      "anorien"
+    ],
+    "display_name": "Lossarnach",
+    "id": "lossarnach",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "grassland"
+  },
+  "minas_morgul": {
+    "adjacent": [
+      "north_ithilien",
+      "south_ithilien",
+      "cirith_ungol",
+      "gorgoroth"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Minas Morgul",
+    "id": "minas_morgul",
+    "is_stronghold": true,
+    "ownable": true,
+    "produces": {
+      "power": 6
+    },
+    "stronghold_base_health": 2,
+    "terrain_type": "fortress"
+  },
+  "minas_tirith": {
+    "adjacent": [
+      "pelennor",
+      "lossarnach"
+    ],
+    "aerial_adjacent": [
+      "anorien"
+    ],
+    "display_name": "Minas Tirith",
+    "id": "minas_tirith",
+    "is_stronghold": true,
+    "ownable": true,
+    "produces": {
+      "power": 10
+    },
+    "stronghold_base_health": 4,
+    "terrain_type": "city"
+  },
+  "minhiriath": {
+    "adjacent": [
+      "enedwaith",
+      "north_dunland",
+      "sea_zone_2"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Minhiriath",
+    "id": "minhiriath",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "wasteland"
+  },
+  "mount_doom": {
+    "adjacent": [
+      "udun",
+      "gorgoroth",
+      "barad_dur"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Mount Doom",
+    "id": "mount_doom",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 2
+    },
+    "terrain_type": "volcano"
+  },
+  "near_harad": {
+    "adjacent": [
+      "khand",
+      "haradwaith",
+      "harondor"
+    ],
+    "aerial_adjacent": [
+      "nurn"
+    ],
+    "display_name": "Near Harad",
+    "id": "near_harad",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "desert"
+  },
+  "north_dunland": {
+    "adjacent": [
+      "enedwaith",
+      "minhiriath",
+      "south_dunland"
+    ],
+    "aerial_adjacent": [
+      "fangorn",
+      "the_wold",
+      "field_of_celebrant"
+    ],
+    "display_name": "North Dunland",
+    "id": "north_dunland",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 2
+    },
+    "terrain_type": "hills"
+  },
+  "north_ithilien": {
+    "adjacent": [
+      "minas_morgul",
+      "south_ithilien",
+      "east_osgiliath",
+      "dead_marshes",
+      "dagorlad",
+      "cair_andros"
+    ],
+    "aerial_adjacent": [
+      "anorien",
+      "west_osgiliath",
+      "udun",
+      "cirith_ungol"
+    ],
+    "display_name": "North Ithilien",
+    "id": "north_ithilien",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 2
+    },
+    "terrain_type": "forest"
+  },
+  "nurn": {
+    "adjacent": [
+      "gorgoroth",
+      "barad_dur",
+      "khand"
+    ],
+    "aerial_adjacent": [
+      "rhun_hills",
+      "near_harad",
+      "harondor",
+      "south_ithilien"
+    ],
+    "display_name": "Nurn",
+    "id": "nurn",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "wasteland"
+  },
+  "pelargir": {
+    "adjacent": [
+      "lebennin",
+      "lossarnach",
+      "sea_zone_12"
+    ],
+    "aerial_adjacent": [
+      "south_ithilien"
+    ],
+    "display_name": "Pelargir",
+    "id": "pelargir",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 4
+    },
+    "terrain_type": "city"
+  },
+  "pelennor": {
+    "adjacent": [
+      "minas_tirith",
+      "west_osgiliath",
+      "lossarnach",
+      "anorien",
+      "sea_zone_12"
+    ],
+    "aerial_adjacent": [
+      "south_ithilien",
+      "east_osgiliath"
+    ],
+    "display_name": "Pelennor",
+    "id": "pelennor",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 2
+    },
+    "terrain_type": "grassland"
+  },
+  "rhun_hills": {
+    "adjacent": [
+      "east_brown_lands",
+      "dagorlad"
+    ],
+    "aerial_adjacent": [
+      "nurn"
+    ],
+    "display_name": "Rhûn Hills",
+    "id": "rhun_hills",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 3
+    },
+    "terrain_type": "hills"
+  },
+  "sea_zone_1": {
+    "adjacent": [
+      "sea_zone_2",
+      "sea_zone_3"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Sea Zone 1",
+    "id": "sea_zone_1",
+    "is_stronghold": false,
+    "ownable": false,
+    "produces": {},
+    "terrain_type": "sea"
+  },
+  "sea_zone_10": {
+    "adjacent": [
+      "sea_zone_7",
+      "sea_zone_9",
+      "umbar"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Sea Zone 10",
+    "id": "sea_zone_10",
+    "is_stronghold": false,
+    "ownable": false,
+    "produces": {},
+    "terrain_type": "sea"
+  },
+  "sea_zone_11": {
+    "adjacent": [
+      "sea_zone_8",
+      "sea_zone_9",
+      "sea_zone_12",
+      "belfalas",
+      "lebennin",
+      "harondor"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Sea Zone 11",
+    "id": "sea_zone_11",
+    "is_stronghold": false,
+    "ownable": false,
+    "produces": {},
+    "terrain_type": "sea"
+  },
+  "sea_zone_12": {
+    "adjacent": [
+      "sea_zone_11",
+      "lebennin",
+      "pelargir",
+      "lossarnach",
+      "pelennor",
+      "west_osgiliath",
+      "east_osgiliath",
+      "south_ithilien",
+      "harondor"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Sea Zone 12",
+    "id": "sea_zone_12",
+    "is_stronghold": false,
+    "ownable": false,
+    "produces": {},
+    "terrain_type": "sea"
+  },
+  "sea_zone_2": {
+    "adjacent": [
+      "sea_zone_1",
+      "sea_zone_4",
+      "minhiriath",
+      "enedwaith"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Sea Zone 2",
+    "id": "sea_zone_2",
+    "is_stronghold": false,
+    "ownable": false,
+    "produces": {},
+    "terrain_type": "sea"
+  },
+  "sea_zone_3": {
+    "adjacent": [
+      "sea_zone_1",
+      "sea_zone_4",
+      "sea_zone_5"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Sea Zone 3",
+    "id": "sea_zone_3",
+    "is_stronghold": false,
+    "ownable": false,
+    "produces": {},
+    "terrain_type": "sea"
+  },
+  "sea_zone_4": {
+    "adjacent": [
+      "sea_zone_2",
+      "sea_zone_3",
+      "sea_zone_5",
+      "fords_of_isen",
+      "druwaith_iaur"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Sea Zone 4",
+    "id": "sea_zone_4",
+    "is_stronghold": false,
+    "ownable": false,
+    "produces": {},
+    "terrain_type": "sea"
+  },
+  "sea_zone_5": {
+    "adjacent": [
+      "sea_zone_3",
+      "sea_zone_4",
+      "sea_zone_6",
+      "sea_zone_8",
+      "andrast"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Sea Zone 5",
+    "id": "sea_zone_5",
+    "is_stronghold": false,
+    "ownable": false,
+    "produces": {},
+    "terrain_type": "sea"
+  },
+  "sea_zone_6": {
+    "adjacent": [
+      "sea_zone_5",
+      "sea_zone_7",
+      "sea_zone_8",
+      "sea_zone_9"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Sea Zone 6",
+    "id": "sea_zone_6",
+    "is_stronghold": false,
+    "ownable": false,
+    "produces": {},
+    "terrain_type": "sea"
+  },
+  "sea_zone_7": {
+    "adjacent": [
+      "sea_zone_6",
+      "sea_zone_9",
+      "sea_zone_10"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Sea Zone 7",
+    "id": "sea_zone_7",
+    "is_stronghold": false,
+    "ownable": false,
+    "produces": {},
+    "terrain_type": "sea"
+  },
+  "sea_zone_8": {
+    "adjacent": [
+      "sea_zone_5",
+      "sea_zone_6",
+      "sea_zone_9",
+      "sea_zone_11",
+      "andrast",
+      "anfalas",
+      "belfalas",
+      "dol_amroth"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Sea Zone 8",
+    "id": "sea_zone_8",
+    "is_stronghold": false,
+    "ownable": false,
+    "produces": {},
+    "terrain_type": "sea"
+  },
+  "sea_zone_9": {
+    "adjacent": [
+      "sea_zone_6",
+      "sea_zone_7",
+      "sea_zone_8",
+      "sea_zone_10",
+      "sea_zone_11",
+      "harondor"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Sea Zone 9",
+    "id": "sea_zone_9",
+    "is_stronghold": false,
+    "ownable": false,
+    "produces": {},
+    "terrain_type": "sea"
+  },
+  "south_dunland": {
+    "adjacent": [
+      "enedwaith",
+      "isengard",
+      "north_dunland",
+      "fords_of_isen"
+    ],
+    "aerial_adjacent": [
+      "fangorn"
+    ],
+    "display_name": "South Dunland",
+    "id": "south_dunland",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 2
+    },
+    "terrain_type": "hills"
+  },
+  "south_ithilien": {
+    "adjacent": [
+      "north_ithilien",
+      "east_osgiliath",
+      "minas_morgul",
+      "harondor",
+      "sea_zone_12"
+    ],
+    "aerial_adjacent": [
+      "pelennor",
+      "lossarnach",
+      "pelargir",
+      "gorgoroth",
+      "nurn",
+      "west_osgiliath"
+    ],
+    "display_name": "South Ithilien",
+    "id": "south_ithilien",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 2
+    },
+    "terrain_type": "forest"
+  },
+  "the_black_gate": {
+    "adjacent": [
+      "dagorlad",
+      "udun"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "The Black Gate",
+    "id": "the_black_gate",
+    "is_stronghold": true,
+    "ownable": true,
+    "produces": {
+      "power": 4
+    },
+    "stronghold_base_health": 3,
+    "terrain_type": "fortress"
+  },
+  "the_wold": {
+    "adjacent": [
+      "eastemnet",
+      "fangorn",
+      "west_brown_lands",
+      "field_of_celebrant",
+      "westemnet",
+      "emyn_muil"
+    ],
+    "aerial_adjacent": [
+      "north_dunland"
+    ],
+    "display_name": "The Wold",
+    "id": "the_wold",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "plains"
+  },
+  "udun": {
+    "adjacent": [
+      "the_black_gate",
+      "gorgoroth",
+      "mount_doom",
+      "cirith_ungol"
+    ],
+    "aerial_adjacent": [
+      "north_ithilien",
+      "dagorlad"
+    ],
+    "display_name": "Udun",
+    "id": "udun",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "wasteland"
+  },
+  "umbar": {
+    "adjacent": [
+      "harondor",
+      "far_harad",
+      "haradwaith",
+      "sea_zone_10"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Umbar",
+    "id": "umbar",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 4
+    },
+    "terrain_type": "city"
+  },
+  "west_brown_lands": {
+    "adjacent": [
+      "east_brown_lands",
+      "emyn_muil",
+      "the_wold"
+    ],
+    "aerial_adjacent": [
+      "field_of_celebrant"
+    ],
+    "display_name": "West Brown Lands",
+    "id": "west_brown_lands",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "wasteland"
+  },
+  "west_march": {
+    "adjacent": [
+      "druwaith_iaur",
+      "fords_of_isen",
+      "gap_of_rohan"
+    ],
+    "aerial_adjacent": [
+      "anfalas",
+      "westfold",
+      "helms_deep"
+    ],
+    "display_name": "West-march",
+    "id": "west_march",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "marsh"
+  },
+  "west_osgiliath": {
+    "adjacent": [
+      "pelennor",
+      "anorien",
+      "east_osgiliath",
+      "sea_zone_12"
+    ],
+    "aerial_adjacent": [
+      "north_ithilien",
+      "south_ithilien",
+      "cair_andros"
+    ],
+    "display_name": "West Osgiliath",
+    "id": "west_osgiliath",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 3
+    },
+    "terrain_type": "city"
+  },
+  "westemnet": {
+    "adjacent": [
+      "westfold",
+      "eastemnet",
+      "edoras",
+      "eastfold",
+      "fangorn",
+      "gap_of_rohan",
+      "the_wold"
+    ],
+    "aerial_adjacent": [],
+    "display_name": "Westemnet",
+    "id": "westemnet",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 1
+    },
+    "terrain_type": "plains"
+  },
+  "westfold": {
+    "adjacent": [
+      "gap_of_rohan",
+      "westemnet",
+      "helms_deep",
+      "edoras",
+      "dunharrow"
+    ],
+    "aerial_adjacent": [
+      "west_march",
+      "anfalas"
+    ],
+    "display_name": "Westfold",
+    "id": "westfold",
+    "is_stronghold": false,
+    "ownable": true,
+    "produces": {
+      "power": 2
+    },
+    "terrain_type": "plains"
+  }
+}

@@ -1,0 +1,768 @@
+version: 1
+map: wotr_map_1.0
+manifest:
+  id: wotr_exp_1.0
+  display_name: War of the Ring - Expanded
+  is_active: false
+  map_asset: wotr_map_1.0
+  context:
+    year: TA 3019
+    map: Middle-earth
+    faction_count: 8
+    factions:
+    - Isengard
+    - Rohan
+    - Mordor
+    - Gondor
+    - Rhûn
+    - Erebor
+    - Harad
+    - Elves
+  victory_criteria:
+    strongholds:
+      good: 10
+      evil: 10
+  camp_cost: 10
+  stronghold_repair_cost: 2
+  prefire_penalty: true
+  lobby_music:
+  - fellowship.m4a
+  menu_order: 2
+units:
+  hobbit:
+    seed: hobbit
+    overrides:
+      defense: 2
+  galadhrim_archer:
+    seed: galadhrim_archer
+    overrides: {}
+  rivendell_warrior:
+    seed: rivendell_warrior
+    overrides: {}
+  lindon_ship:
+    seed: lindon_ship
+    overrides:
+      specials:
+        $delete: true
+  rivendell_knight:
+    seed: rivendell_knight
+    overrides:
+      cost:
+        power: 8
+      attack: 6
+  ent:
+    seed: ent
+    overrides:
+      cost:
+        power: 17
+  eagle:
+    seed: eagle
+    overrides:
+      cost:
+        power: 18
+  laketown_archer:
+    seed: laketown_archer
+    overrides: {}
+  knight_of_dale:
+    seed: knight_of_dale
+    overrides: {}
+  mirkwood_elf:
+    seed: mirkwood_elf
+    overrides:
+      specials:
+      - archer
+      - forest
+      - home
+      cost:
+        power: 4
+  dwarf_warrior:
+    seed: dwarf_warrior
+    overrides:
+      home_territory_ids:
+        $delete: true
+  iron_hills_shieldbearer:
+    seed: iron_hills_shieldbearer
+    overrides: {}
+  iron_hills_goat_rider:
+    seed: iron_hills_goat_rider
+    overrides:
+      cost:
+        power: 7
+  gondor_archer:
+    seed: gondor_archer
+    overrides:
+      attack: 2
+  gondor_soldier:
+    seed: gondor_soldier
+    overrides: {}
+  citadel_guard:
+    seed: citadel_guard
+    overrides:
+      cost:
+        power: 5
+  ithilien_ranger:
+    seed: ithilien_ranger
+    overrides:
+      cost:
+        power: 6
+      attack: 4
+  captain_of_gondor:
+    seed: captain_of_gondor
+    overrides:
+      cost:
+        power: 7
+  gondor_knight:
+    seed: gondor_knight
+    overrides:
+      home_territory_ids:
+        $delete: true
+      cost:
+        power: 7
+  gondor_ship:
+    seed: gondor_ship
+    overrides:
+      specials:
+        $delete: true
+  trebuchet:
+    seed: trebuchet
+    overrides: {}
+  corsair_of_umbar:
+    seed: corsair_of_umbar
+    overrides:
+      cost:
+        power: 2
+      attack: 1
+  haradrim_archer:
+    seed: haradrim_archer
+    overrides:
+      home_territory_ids:
+        $delete: true
+      cost:
+        power: 2
+  haradrim_warrior:
+    seed: haradrim_warrior
+    overrides:
+      cost:
+        power: 3
+      attack: 2
+  khandish_rider:
+    seed: khandish_rider
+    overrides:
+      defense: 3
+  black_ship:
+    seed: black_ship
+    overrides:
+      specials:
+        $delete: true
+  war_mumakil:
+    seed: war_mumakil
+    overrides:
+      home_territory_ids:
+        $delete: true
+      cost:
+        power: 22
+  siege_ladder:
+    seed: siege_ladder
+    overrides:
+      cost:
+        power: 3
+  dunland_wildman:
+    seed: dunland_wildman
+    overrides: {}
+  uruk_crossbowman:
+    seed: uruk_crossbowman
+    overrides: {}
+  urukhai_warrior:
+    seed: urukhai_warrior
+    overrides:
+      defense: 3
+      cost:
+        power: 4
+  uruk_pikeman:
+    seed: uruk_pikeman
+    overrides:
+      cost:
+        power: 5
+  berserker:
+    seed: berserker
+    overrides:
+      cost:
+        power: 6
+  battering_ram:
+    seed: battering_ram
+    overrides:
+      cost:
+        power: 6
+      dice: 3
+  isengard_warg_rider:
+    seed: isengard_warg_rider
+    overrides:
+      cost:
+        power: 7
+  bomb:
+    seed: bomb
+    overrides:
+      cost:
+        power: 14
+      attack: 6
+  morgul_orc:
+    seed: morgul_orc
+    overrides: {}
+  orc_archer:
+    seed: orc_archer
+    overrides:
+      cost:
+        power: 2
+  morannon_orc:
+    seed: morannon_orc
+    overrides: {}
+  mordor_warg_rider:
+    seed: mordor_warg_rider
+    overrides: {}
+  grond:
+    seed: grond
+    overrides:
+      cost:
+        power: 10
+      attack: 5
+  catapult:
+    seed: catapult
+    overrides:
+      specials:
+      - terror
+      cost:
+        power: 12
+  armored_troll:
+    seed: armored_troll
+    overrides:
+      cost:
+        power: 14
+  nazgul:
+    seed: nazgul
+    overrides:
+      cost:
+        power: 17
+  easterling_archer:
+    seed: easterling_archer
+    overrides: {}
+  easterling_warrior:
+    seed: easterling_warrior
+    overrides: {}
+  easterling_pikeman:
+    seed: easterling_pikeman
+    overrides:
+      home_territory_ids:
+        $delete: true
+      cost:
+        power: 5
+  easterling_captain:
+    seed: easterling_captain
+    overrides:
+      cost:
+        power: 7
+      archetype: captain
+  easterling_kataphrakt:
+    seed: easterling_kataphrakt
+    overrides:
+      cost:
+        power: 7
+  archer_chariot:
+    seed: archer_chariot
+    overrides: {}
+  rohan_peasant:
+    seed: rohan_peasant
+    overrides: {}
+  rohirrim_archer:
+    seed: rohirrim_archer
+    overrides:
+      cost:
+        power: 2
+  rohirrim_soldier:
+    seed: rohirrim_soldier
+    overrides: {}
+  royal_guard:
+    seed: royal_guard
+    overrides:
+      cost:
+        power: 5
+  rider_of_rohan:
+    seed: rider_of_rohan
+    overrides:
+      cost:
+        power: 6
+  rohirrim_archer_rider:
+    seed: rohirrim_archer_rider
+    overrides:
+      cost:
+        power: 6
+      attack: 4
+  marshal_of_the_riddermark:
+    seed: marshal_of_the_riddermark
+    overrides:
+      cost:
+        power: 9
+  goblin:
+    seed: goblin
+    overrides: {}
+  cave_troll:
+    seed: cave_troll
+    overrides: {}
+  dragon:
+    seed: dragon
+    overrides:
+      specials: []
+  spider:
+    seed: spider
+    overrides: {}
+  barrowwight:
+    seed: barrowwight
+    overrides: {}
+factions:
+  mordor:
+    seed: mordor
+    overrides: {}
+  isengard:
+    seed: isengard
+    overrides: {}
+  gondor:
+    seed: gondor
+    overrides: {}
+  rohan:
+    seed: rohan
+    overrides: {}
+  elves:
+    seed: elves
+    overrides: {}
+  erebor:
+    seed: erebor
+    overrides: {}
+  harad:
+    seed: harad
+    overrides: {}
+  rhun:
+    seed: rhun
+    overrides: {}
+  neutral:
+    seed: neutral
+    overrides: {}
+territory_ids:
+- forlindon
+- harlindon
+- the_shire
+- grey_havens
+- tower_hills
+- lune_valley
+- bree_fornost
+- south_downs
+- north_downs
+- evendim_hills
+- angmar
+- carn_dum
+- weather_hills
+- rivendell
+- lothlorien
+- gladden_fields
+- anduin_valley
+- carrock
+- moria
+- north_eregion
+- south_eregion
+- fangorn
+- dol_guldur
+- south_mirkwood
+- north_mirkwood
+- thranduils_halls
+- rhudaur
+- gundabad
+- forodwaith
+- minhiriath
+- erebor
+- dale
+- esgaroth
+- celduin_valley
+- withered_heath
+- iron_hills
+- north_rhun
+- west_rhun
+- rhun_hills
+- dorwinion
+- minas_tirith
+- pelennor
+- anorien
+- west_osgiliath
+- east_osgiliath
+- south_ithilien
+- north_ithilien
+- lossarnach
+- lebennin
+- pelargir
+- belfalas
+- anfalas
+- andrast
+- erech_lamedon
+- druwaith_iaur
+- minas_morgul
+- the_black_gate
+- barad_dur
+- mount_doom
+- gorgoroth
+- nurn
+- udun
+- cirith_ungol
+- isengard
+- south_dunland
+- north_dunland
+- gap_of_rohan
+- westfold
+- westemnet
+- edoras
+- helms_deep
+- dunharrow
+- eastfold
+- eastemnet
+- entwash
+- the_wold
+- dead_marshes
+- emyn_muil
+- dagorlad
+- enedwaith
+- fords_of_isen
+- west_march
+- east_brown_lands
+- west_brown_lands
+- harondor
+- khand
+- near_harad
+- far_harad
+- haradwaith
+- umbar
+- sea_zone_1
+- sea_zone_2
+- sea_zone_3
+- sea_zone_4
+- sea_zone_5
+- sea_zone_6
+- sea_zone_7
+- sea_zone_8
+- sea_zone_9
+- sea_zone_10
+- sea_zone_11
+- sea_zone_12
+territory_overrides: {}
+camps:
+  rivendell_camp:
+    id: rivendell_camp
+    territory_id: rivendell
+  lothlorien_camp:
+    id: lothlorien_camp
+    territory_id: lothlorien
+  dol_guldur_camp:
+    id: dol_guldur_camp
+    territory_id: dol_guldur
+  erebor_camp:
+    id: erebor_camp
+    territory_id: erebor
+  dorwinion_camp:
+    id: dorwinion_camp
+    territory_id: dorwinion
+  minas_tirith_camp:
+    id: minas_tirith_camp
+    territory_id: minas_tirith
+  west_osgiliath_camp:
+    id: west_osgiliath_camp
+    territory_id: west_osgiliath
+  minas_morgul_camp:
+    id: minas_morgul_camp
+    territory_id: minas_morgul
+  barad_dur_camp:
+    id: barad_dur_camp
+    territory_id: barad_dur
+  isengard_camp:
+    id: isengard_camp
+    territory_id: isengard
+  edoras_camp:
+    id: edoras_camp
+    territory_id: edoras
+  dunharrow_camp:
+    id: dunharrow_camp
+    territory_id: dunharrow
+  haradwaith_camp:
+    id: haradwaith_camp
+    territory_id: haradwaith
+ports:
+  grey_havens_port:
+    id: grey_havens_port
+    territory_id: grey_havens
+  pelargir_port:
+    id: pelargir_port
+    territory_id: pelargir
+  umbar_port:
+    id: umbar_port
+    territory_id: umbar
+starting_setup:
+  turn_order:
+  - isengard
+  - rohan
+  - mordor
+  - gondor
+  - rhun
+  - erebor
+  - harad
+  - elves
+  territory_owners:
+    forlindon: elves
+    harlindon: elves
+    the_shire: elves
+    grey_havens: elves
+    rivendell: elves
+    lothlorien: elves
+    fangorn: elves
+    dol_guldur: mordor
+    thranduils_halls: erebor
+    rhudaur: elves
+    gundabad: mordor
+    erebor: erebor
+    dale: erebor
+    esgaroth: erebor
+    iron_hills: erebor
+    north_rhun: rhun
+    west_rhun: rhun
+    rhun_hills: rhun
+    dorwinion: rhun
+    minas_tirith: gondor
+    pelennor: gondor
+    anorien: gondor
+    west_osgiliath: gondor
+    east_osgiliath: gondor
+    south_ithilien: gondor
+    north_ithilien: gondor
+    lossarnach: gondor
+    lebennin: gondor
+    pelargir: gondor
+    belfalas: gondor
+    anfalas: gondor
+    andrast: gondor
+    erech_lamedon: gondor
+    minas_morgul: mordor
+    the_black_gate: mordor
+    barad_dur: mordor
+    mount_doom: mordor
+    gorgoroth: mordor
+    nurn: mordor
+    udun: mordor
+    cirith_ungol: mordor
+    isengard: isengard
+    south_dunland: isengard
+    fords_of_isen: rohan
+    gap_of_rohan: rohan
+    westfold: rohan
+    westemnet: rohan
+    edoras: rohan
+    helms_deep: rohan
+    dunharrow: rohan
+    eastfold: rohan
+    eastemnet: rohan
+    entwash: rohan
+    the_wold: rohan
+    west_march: rohan
+    khand: harad
+    near_harad: harad
+    far_harad: harad
+    haradwaith: harad
+    umbar: harad
+  starting_units:
+    the_shire:
+    - unit_id: hobbit
+      count: 1
+    grey_havens:
+    - unit_id: rivendell_warrior
+      count: 1
+    south_downs:
+    - unit_id: barrowwight
+      count: 1
+    rivendell:
+    - unit_id: rivendell_knight
+      count: 1
+    - unit_id: rivendell_warrior
+      count: 1
+    lothlorien:
+    - unit_id: galadhrim_archer
+      count: 2
+    carrock:
+    - unit_id: goblin
+      count: 2
+    moria:
+    - unit_id: goblin
+      count: 10
+    - unit_id: cave_troll
+      count: 1
+    fangorn:
+    - unit_id: ent
+      count: 3
+    dol_guldur:
+    - unit_id: mordor_warg_rider
+      count: 3
+    - unit_id: orc_archer
+      count: 2
+    south_mirkwood:
+    - unit_id: spider
+      count: 1
+    north_mirkwood:
+    - unit_id: spider
+      count: 1
+    thranduils_halls:
+    - unit_id: mirkwood_elf
+      count: 2
+    gundabad:
+    - unit_id: mordor_warg_rider
+      count: 1
+    - unit_id: orc_archer
+      count: 1
+    erebor:
+    - unit_id: dwarf_warrior
+      count: 2
+    dale:
+    - unit_id: knight_of_dale
+      count: 1
+    esgaroth:
+    - unit_id: laketown_archer
+      count: 1
+    withered_heath:
+    - unit_id: dragon
+      count: 1
+    iron_hills:
+    - unit_id: iron_hills_shieldbearer
+      count: 2
+    north_rhun:
+    - unit_id: easterling_warrior
+      count: 1
+    west_rhun:
+    - unit_id: easterling_warrior
+      count: 2
+    rhun_hills:
+    - unit_id: easterling_warrior
+      count: 1
+    - unit_id: easterling_pikeman
+      count: 1
+    dorwinion:
+    - unit_id: easterling_warrior
+      count: 2
+    - unit_id: easterling_pikeman
+      count: 2
+    - unit_id: easterling_kataphrakt
+      count: 1
+    minas_tirith:
+    - unit_id: trebuchet
+      count: 1
+    - unit_id: citadel_guard
+      count: 1
+    - unit_id: gondor_archer
+      count: 1
+    - unit_id: gondor_soldier
+      count: 1
+    west_osgiliath:
+    - unit_id: gondor_soldier
+      count: 1
+    east_osgiliath:
+    - unit_id: gondor_archer
+      count: 1
+    - unit_id: gondor_soldier
+      count: 3
+    south_ithilien:
+    - unit_id: ithilien_ranger
+      count: 2
+    north_ithilien:
+    - unit_id: ithilien_ranger
+      count: 3
+    lebennin:
+    - unit_id: gondor_soldier
+      count: 1
+    pelargir:
+    - unit_id: gondor_soldier
+      count: 2
+    belfalas:
+    - unit_id: gondor_soldier
+      count: 1
+    anfalas:
+    - unit_id: gondor_soldier
+      count: 1
+    minas_morgul:
+    - unit_id: nazgul
+      count: 1
+    - unit_id: morgul_orc
+      count: 5
+    the_black_gate:
+    - unit_id: armored_troll
+      count: 1
+    - unit_id: morannon_orc
+      count: 2
+    - unit_id: orc_archer
+      count: 1
+    barad_dur:
+    - unit_id: morannon_orc
+      count: 3
+    - unit_id: orc_archer
+      count: 1
+    cirith_ungol:
+    - unit_id: morgul_orc
+      count: 1
+    - unit_id: morannon_orc
+      count: 1
+    isengard:
+    - unit_id: uruk_crossbowman
+      count: 2
+    - unit_id: uruk_pikeman
+      count: 3
+    - unit_id: urukhai_warrior
+      count: 6
+    - unit_id: berserker
+      count: 1
+    - unit_id: isengard_warg_rider
+      count: 3
+    south_dunland:
+    - unit_id: dunland_wildman
+      count: 3
+    fords_of_isen:
+    - unit_id: rider_of_rohan
+      count: 2
+    westfold:
+    - unit_id: rohan_peasant
+      count: 2
+    westemnet:
+    - unit_id: rohan_peasant
+      count: 1
+    edoras:
+    - unit_id: royal_guard
+      count: 1
+    - unit_id: rohirrim_soldier
+      count: 2
+    helms_deep:
+    - unit_id: rohirrim_archer
+      count: 1
+    dunharrow:
+    - unit_id: rohirrim_soldier
+      count: 1
+    eastfold:
+    - unit_id: rohan_peasant
+      count: 1
+    eastemnet:
+    - unit_id: rider_of_rohan
+      count: 3
+    - unit_id: rohirrim_archer_rider
+      count: 1
+    khand:
+    - unit_id: khandish_rider
+      count: 1
+    far_harad:
+    - unit_id: war_mumakil
+      count: 1
+    - unit_id: haradrim_warrior
+      count: 2
+    - unit_id: haradrim_archer
+      count: 2
+    umbar:
+    - unit_id: corsair_of_umbar
+      count: 2
+    sea_zone_11:
+    - unit_id: black_ship
+      count: 1

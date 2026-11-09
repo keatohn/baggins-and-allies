@@ -1,0 +1,466 @@
+version: 1
+map: wotla_map_1.1
+manifest:
+  id: wotla_1.0
+  display_name: War of the Last Alliance
+  is_active: true
+  map_asset: wotla_map_1.1
+  context:
+    year: SA 3434
+    map: Middle-earth
+    faction_count: 7
+    factions:
+    - Númenor
+    - Mordor
+    - Noldor
+    - Rhûn
+    - Silvan
+    - Harad
+    - Khazad-dûm
+  victory_criteria:
+    strongholds:
+      good: 10
+      evil: 8
+  camp_cost: 10
+  stronghold_repair_cost: 2
+  prefire_penalty: false
+  lobby_music:
+  - fellowship.m4a
+  menu_order: 4
+units:
+  black_numenorean_knight:
+    seed: black_numenorean_knight
+    overrides: {}
+  haradrim_archer:
+    seed: haradrim_archer
+    overrides:
+      home_territory_ids:
+        $delete: true
+  corsair_of_umbar:
+    seed: corsair_of_umbar
+    overrides: {}
+  black_ship:
+    seed: black_ship
+    overrides: {}
+  war_mumakil:
+    seed: war_mumakil
+    overrides:
+      home_territory_ids:
+        $delete: true
+  haradrim_warrior:
+    seed: haradrim_warrior
+    overrides: {}
+  khazad_warrior:
+    seed: khazad_warrior
+    overrides: {}
+  durin:
+    seed: durin
+    overrides: {}
+  khazad_ballista:
+    seed: khazad_ballista
+    overrides: {}
+  khazad_guard:
+    seed: khazad_guard
+    overrides: {}
+  khazad_archer:
+    seed: khazad_archer
+    overrides: {}
+  orc_warrior:
+    seed: orc_warrior
+    overrides: {}
+  orc_archer:
+    seed: orc_archer
+    overrides: {}
+  warg_rider:
+    seed: warg_rider
+    overrides: {}
+  armored_troll:
+    seed: armored_troll
+    overrides: {}
+  sauron:
+    seed: sauron
+    overrides: {}
+  battering_ram:
+    seed: battering_ram
+    overrides:
+      faction: mordor
+  catapult:
+    seed: catapult
+    overrides: {}
+  ringwraith:
+    seed: ringwraith
+    overrides: {}
+  witch_king:
+    seed: witch_king
+    overrides: {}
+  noldor_warrior:
+    seed: noldor_warrior
+    overrides: {}
+  noldor_archer:
+    seed: noldor_archer
+    overrides: {}
+  noldor_knight:
+    seed: noldor_knight
+    overrides: {}
+  lindon_ship:
+    seed: lindon_ship
+    overrides:
+      faction: noldor
+  lindon_spearman:
+    seed: lindon_spearman
+    overrides: {}
+  gil_galad:
+    seed: gil_galad
+    overrides: {}
+  elrond:
+    seed: elrond
+    overrides: {}
+  numenor_archer:
+    seed: numenor_archer
+    overrides: {}
+  numenor_soldier:
+    seed: numenor_soldier
+    overrides: {}
+  numenor_knight:
+    seed: numenor_knight
+    overrides: {}
+  numenor_ship:
+    seed: numenor_ship
+    overrides: {}
+  elendil:
+    seed: elendil
+    overrides: {}
+  isildur:
+    seed: isildur
+    overrides: {}
+  numenor_captain:
+    seed: numenor_captain
+    overrides: {}
+  numenor_spearman:
+    seed: numenor_spearman
+    overrides: {}
+  easterling_pikeman:
+    seed: easterling_pikeman
+    overrides:
+      home_territory_ids:
+        $delete: true
+  easterling_archer:
+    seed: easterling_archer
+    overrides: {}
+  easterling_warrior:
+    seed: easterling_warrior
+    overrides: {}
+  easterling_captain:
+    seed: easterling_captain
+    overrides: {}
+  archer_chariot:
+    seed: archer_chariot
+    overrides: {}
+  silvan_archer:
+    seed: silvan_archer
+    overrides: {}
+  silvan_warrior:
+    seed: silvan_warrior
+    overrides: {}
+  wood_elf_scout:
+    seed: wood_elf_scout
+    overrides: {}
+  oropher:
+    seed: oropher
+    overrides: {}
+  greenwood_knight:
+    seed: greenwood_knight
+    overrides: {}
+  dragon:
+    seed: dragon
+    overrides: {}
+  goblin:
+    seed: goblin
+    overrides: {}
+  spider:
+    seed: spider
+    overrides: {}
+  cave_troll:
+    seed: cave_troll
+    overrides: {}
+  ent:
+    seed: ent
+    overrides:
+      faction: neutral
+      cost:
+        power: 0
+      purchasable: false
+factions:
+  numenor:
+    seed: numenor
+    overrides: {}
+  mordor:
+    seed: mordor
+    overrides: {}
+  noldor:
+    seed: noldor
+    overrides: {}
+  rhun:
+    seed: rhun
+    overrides:
+      capital: west_rhun
+  silvan:
+    seed: silvan
+    overrides: {}
+  harad:
+    seed: harad
+    overrides:
+      capital: umbar
+  khazad_dum:
+    seed: khazad_dum
+    overrides: {}
+  neutral:
+    seed: neutral
+    overrides: {}
+territory_ids:
+- west_harnen
+- east_harnen
+- pelargir
+- south_ithilien
+- andrast
+- pelennor
+- morgai
+- south_calenardhon
+- druwaith
+- north_ithilien
+- udun
+- dagorlad
+- emyn_muil
+- glanduin_valley
+- south_greenwood
+- harlindon
+- ninglor
+- celduin_valley
+- tower_hills
+- khazad_dum
+- mithlond
+- ettenmoors
+- evendim_hills
+- north_greenwood
+- iron_hills
+- lune_valley
+- forlindon
+- withered_heath
+- morannon
+- amon_lanc
+- minas_ithil
+- khand
+- near_harad
+- haradwaith
+- far_harad
+- umbar
+- east_osgiliath
+- west_osgiliath
+- orthanc
+- anorien
+- lossarnach
+- lebennin
+- belfalas
+- anfalas
+- west_calenardhon
+- fangorn
+- east_calenardhon
+- field_of_celebrant
+- east_rhovanion
+- west_rhovanion
+- anduin_valley
+- lond_daer
+- minhiriath
+- east_eriador
+- west_eriador
+- sea_zone_2
+- sea_zone_3
+- sea_zone_7
+- sea_zone_8
+- sea_zone_15
+- sea_zone_16
+- sea_zone_17
+- sea_zone_18
+- sea_zone_20
+- lorinand
+- west_rhun
+- rhun_hills
+- south_eregion
+- north_eregion
+- sea_zone_6
+- sea_zone_9
+- sea_zone_21
+- sea_zone_19
+- nurn
+- erech_lamedon
+- west_enedwaith
+- east_enedwaith
+- orodruin
+- gorgoroth
+- hithlaeglir
+- gundabad
+- imladris
+- annuminas
+- minas_anor
+- sea_zone_13
+- sea_zone_4
+- sea_zone_5
+- sea_zone_14
+- tolfalas
+- tol_fuin
+- sea_zone_1
+- sea_zone_12
+- sea_zone_11
+- sea_zone_10
+- barad_dur
+- tharbad
+- anduin_central
+- anduin_north
+- anduin_south
+- eryn_vorn
+- falls_of_rauros
+- forodwaith
+- lithlad
+- nindalf
+- fornost
+- north_rhun
+- old_forest
+- amon_sul
+- ered_luin
+territory_overrides: {}
+camps:
+  numenor_camp:
+    id: numenor_camp
+    territory_id: numenor
+  minas_anor_camp:
+    id: minas_anor_camp
+    territory_id: minas_anor
+  pelargir_camp:
+    id: pelargir_camp
+    territory_id: pelargir
+  annuminas_camp:
+    id: annuminas_camp
+    territory_id: annuminas
+  fornost_camp:
+    id: fornost_camp
+    territory_id: north_eriador
+  barad_dur_camp:
+    id: barad_dur_camp
+    territory_id: barad_dur
+  minas_ithil_camp:
+    id: minas_ithil_camp
+    territory_id: minas_ithil
+  the_black_gate_camp:
+    id: the_black_gate_camp
+    territory_id: morannon
+  ost_in_edhil_camp:
+    id: ost_in_edhil_camp
+    territory_id: ost_in_edhil
+  rivendell_camp:
+    id: rivendell_camp
+    territory_id: imladris
+  mithlond_camp:
+    id: mithlond_camp
+    territory_id: mithlond
+  west_rhun_camp:
+    id: west_rhun_camp
+    territory_id: west_rhun
+  lothlorien_camp:
+    id: lothlorien_camp
+    territory_id: lorinand
+  amon_lanc_camp:
+    id: amon_lanc_camp
+    territory_id: amon_lanc
+  umbar_camp:
+    id: umbar_camp
+    territory_id: umbar
+  khazad_dum_camp:
+    id: khazad_dum_camp
+    territory_id: khazad_dum
+ports:
+  numenor_port:
+    id: numenor_port
+    territory_id: numenor
+  mithlond_port:
+    id: mithlond_port
+    territory_id: mithlond
+  pelargir_port:
+    id: pelargir_port
+    territory_id: pelargir
+  umbar_port:
+    id: umbar_port
+    territory_id: umbar
+  lond_daer_port:
+    id: lond_daer_port
+    territory_id: lond_daer
+starting_setup:
+  turn_order:
+  - mordor
+  - dunedain
+  - noldor
+  - rhun
+  - silvan
+  - harad
+  - khazad_dum
+  territory_owners:
+    pelargir: dunedain
+    minas_anor: dunedain
+    east_osgiliath: dunedain
+    west_osgiliath: dunedain
+    anorien: dunedain
+    lossarnach: dunedain
+    lebennin: dunedain
+    belfalas: dunedain
+    anfalas: dunedain
+    andrast: dunedain
+    erech_lamedon: dunedain
+    pelennor: dunedain
+    tolfalas: dunedain
+    lond_daer: dunedain
+    south_ithilien: dunedain
+    north_ithilien: dunedain
+    annuminas: dunedain
+    amon_sul: dunedain
+    fornost: dunedain
+    west_eriador: dunedain
+    east_eriador: dunedain
+    evendim_hills: dunedain
+    minhiriath: dunedain
+    tower_hills: dunedain
+    barad_dur: mordor
+    gorgoroth: mordor
+    orodruin: mordor
+    nurn: mordor
+    udun: mordor
+    morannon: mordor
+    minas_ithil: mordor
+    morgai: mordor
+    dagorlad: mordor
+    imladris: noldor
+    mithlond: noldor
+    forlindon: noldor
+    harlindon: noldor
+    lune_valley: noldor
+    north_eregion: noldor
+    south_eregion: noldor
+    west_rhun: rhun
+    rhun_hills: rhun
+    east_rhovanion: rhun
+    west_rhovanion: rhun
+    celduin_valley: rhun
+    lorinand: silvan
+    north_greenwood: silvan
+    south_greenwood: silvan
+    amon_lanc: silvan
+    anduin_valley: silvan
+    ninglor: silvan
+    umbar: harad
+    haradwaith: harad
+    near_harad: harad
+    far_harad: harad
+    west_harnen: harad
+    east_harnen: harad
+    khand: harad
+    khazad_dum: khazad_dum
+    iron_hills: khazad_dum
+  starting_units: {}

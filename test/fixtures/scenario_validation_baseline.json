@@ -1,0 +1,47 @@
+{
+  "motw_1.0": [],
+  "woteas_1.0": [],
+  "wotla_1.0": [
+    "camp \"fornost_camp\" territory_id must be a known territory",
+    "camp \"numenor_camp\" territory_id must be a known territory",
+    "camp \"ost_in_edhil_camp\" territory_id must be a known territory",
+    "faction \"numenor\" capital \"numenor\" is not a known territory",
+    "port \"numenor_port\" territory_id must be a known territory",
+    "starting_setup.territory_owners[\"amon_sul\"] must be a known faction",
+    "starting_setup.territory_owners[\"andrast\"] must be a known faction",
+    "starting_setup.territory_owners[\"anfalas\"] must be a known faction",
+    "starting_setup.territory_owners[\"annuminas\"] must be a known faction",
+    "starting_setup.territory_owners[\"anorien\"] must be a known faction",
+    "starting_setup.territory_owners[\"belfalas\"] must be a known faction",
+    "starting_setup.territory_owners[\"east_eriador\"] must be a known faction",
+    "starting_setup.territory_owners[\"east_osgiliath\"] must be a known faction",
+    "starting_setup.territory_owners[\"erech_lamedon\"] must be a known faction",
+    "starting_setup.territory_owners[\"evendim_hills\"] must be a known faction",
+    "starting_setup.territory_owners[\"fornost\"] must be a known faction",
+    "starting_setup.territory_owners[\"lebennin\"] must be a known faction",
+    "starting_setup.territory_owners[\"lond_daer\"] must be a known faction",
+    "starting_setup.territory_owners[\"lossarnach\"] must be a known faction",
+    "starting_setup.territory_owners[\"minas_anor\"] must be a known faction",
+    "starting_setup.territory_owners[\"minhiriath\"] must be a known faction",
+    "starting_setup.territory_owners[\"north_ithilien\"] must be a known faction",
+    "starting_setup.territory_owners[\"pelargir\"] must be a known faction",
+    "starting_setup.territory_owners[\"pelennor\"] must be a known faction",
+    "starting_setup.territory_owners[\"south_ithilien\"] must be a known faction",
+    "starting_setup.territory_owners[\"tolfalas\"] must be a known faction",
+    "starting_setup.territory_owners[\"tower_hills\"] must be a known faction",
+    "starting_setup.territory_owners[\"west_eriador\"] must be a known faction",
+    "starting_setup.territory_owners[\"west_osgiliath\"] must be a known faction",
+    "starting_setup.turn_order contains unknown faction \"dunedain\"",
+    "territory graph asymmetry: \"dagorlad\" lists \"anduin_south\" in aerial_adjacent, but \"anduin_south\" does not list \"dagorlad\""
+  ],
+  "wotr_1.1": [],
+  "wotr_exp_1.0": [
+    "territory graph asymmetry: \"fords_of_isen\" lists \"sea_zone_6\" in adjacent, but \"sea_zone_6\" does not list \"fords_of_isen\"",
+    "territory graph asymmetry: \"pelennor\" lists \"south_ithilien\" in ford_adjacent, but \"south_ithilien\" does not list \"pelennor\"",
+    "territory graph asymmetry: \"sea_zone_6\" lists \"enedwaith\" in adjacent, but \"enedwaith\" does not list \"sea_zone_6\""
+  ],
+  "wotr_exp_1.1": [
+    "territory graph asymmetry: \"north_ithilien\" lists \"pelennor\" in adjacent, but \"pelennor\" does not list \"north_ithilien\"",
+    "territory graph asymmetry: \"pelennor\" lists \"north_ithilien\" in aerial_adjacent, but \"north_ithilien\" does not list \"pelennor\""
+  ]
+}

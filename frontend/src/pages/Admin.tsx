@@ -3,7 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import MenuLink from '../components/MenuLink';
 import { useMenuScroll } from '../components/MenuScrollContext';
 import { api, getAuthToken, getResolvedApiBase, usesViteApiProxy } from '../services/api';
-import type { AdminSetupBundle, AdminSetupListItem, AuthPlayer, Catalog, UnitFormulas } from '../services/api';
+import type { AdminSetupBundle, AdminSetupListItem, AuthPlayer, Catalog, ScenarioLibrary, UnitFormulas } from '../services/api';
+import { ScenarioOverrides } from './admin/ScenarioOverrides';
+import { sourceForRecords } from './admin/scenarioOverridesModel';
+import { ScenarioLibraryPanel } from './admin/ScenarioLibraryPanel';
+import { ScenarioSourceDialog } from './admin/ScenarioSourceDialog';
 import {
   CampsPanel,
   FactionsPanel,
@@ -136,8 +140,10 @@ function CreateSetupDialog({
 }) {
   const [newId, setNewId] = useState('');
   const [duplicateFrom, setDuplicateFrom] = useState('');
-  const [createMode, setCreateMode] = useState<'empty' | 'copy' | 'import'>('empty');
+  const [createMode, setCreateMode] = useState<'empty' | 'copy' | 'import' | 'source'>('empty');
   const [masterJsonText, setMasterJsonText] = useState('');
+  const [mapToCreate, setMapToCreate] = useState('');
+  const [creationLibrary, setCreationLibrary] = useState<ScenarioLibrary | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -147,6 +153,8 @@ function CreateSetupDialog({
       setDuplicateFrom('');
       setCreateMode('empty');
       setMasterJsonText('');
+      setMapToCreate('');
+      api.adminGetScenarioLibrary().then(setCreationLibrary).catch(() => setCreationLibrary(null));
       setErr(null);
     }
   }, [open]);
@@ -166,7 +174,13 @@ function CreateSetupDialog({
     setBusy(true);
     setErr(null);
     try {
-      if (createMode === 'import') {
+      if (createMode === 'empty' && mapToCreate) {
+        await api.adminCreateSetup({ id, source: JSON.stringify({ version: 1, map: mapToCreate,
+          manifest: { id, display_name: id, map_asset: mapToCreate, is_active: false }, units: {}, factions: {},
+          camps: {}, ports: {}, starting_setup: { turn_order: [], territory_owners: {}, starting_units: {} } }) });
+      } else if (createMode === 'source') {
+        await api.adminCreateSetup({ id, source: masterJsonText });
+      } else if (createMode === 'import') {
         let parsed: unknown;
         const jsonText = normalizeImportedMasterJsonText(masterJsonText) || '{}';
         try {
@@ -258,6 +272,7 @@ function CreateSetupDialog({
               />
               Import JSON
             </label>
+            <label className="admin-form__radio-label"><input type="radio" name="admin-create-mode" checked={createMode === 'source'} onChange={() => setCreateMode('source')} />Scenario YAML / JSON</label>
           </div>
         </div>
         <div className="admin-form__row">
@@ -273,6 +288,7 @@ function CreateSetupDialog({
             placeholder="e.g. my_scenario_1"
           />
         </div>
+        {createMode === 'empty' && <div className="admin-form__row"><label className="admin-form__label" htmlFor="admin-new-map">Map defaults</label><select id="admin-new-map" value={mapToCreate} onChange={(e) => setMapToCreate(e.target.value)}><option value="">Empty draft</option>{Object.keys(creationLibrary?.maps ?? {}).sort().map((id) => <option key={id}>{id}</option>)}</select></div>}
         {createMode === 'copy' ? (
           <div className="admin-form__row">
             <label className="admin-form__label" htmlFor="admin-dup-from">
@@ -293,10 +309,10 @@ function CreateSetupDialog({
             </select>
           </div>
         ) : null}
-        {createMode === 'import' ? (
+        {createMode === 'import' || createMode === 'source' ? (
           <div className="admin-form__row admin-form__row--stack">
             <label className="admin-form__label" htmlFor="admin-master-json">
-              Bundle JSON
+              {createMode === 'source' ? 'Declarative scenario source' : 'Bundle JSON'}
             </label>
             <textarea
               id="admin-master-json"
@@ -307,8 +323,9 @@ function CreateSetupDialog({
               onChange={(e) => setMasterJsonText(e.target.value)}
             />
             <p className="admin-form__micro">
-              Keys: {MASTER_BUNDLE_KEYS.join(', ')}
+              {createMode === 'source' ? 'Reference shared seeds and a map, then declare only your overrides. Imported scenarios start as drafts.' : `Keys: ${MASTER_BUNDLE_KEYS.join(', ')}`}
             </p>
+            <input type="file" accept=".json,.yaml,.yml" aria-label="Import scenario file" onChange={(e) => { const file = e.target.files?.[0]; if (file) file.text().then(setMasterJsonText).catch(() => setErr('Could not read file.')); }} />
           </div>
         ) : null}
         {err ? <div className="admin-page__error">{err}</div> : null}
@@ -345,6 +362,9 @@ export default function Admin() {
   const [loadingBundle, setLoadingBundle] = useState(false);
   const [mapViewOpen, setMapViewOpen] = useState(false);
   const [mapsOpen, setMapsOpen] = useState(false);
+  const [seedsOpen, setSeedsOpen] = useState(false);
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const [scenarioLibrary, setScenarioLibrary] = useState<ScenarioLibrary | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [resolveAsymmetriesOpen, setResolveAsymmetriesOpen] = useState(false);
@@ -502,11 +522,12 @@ export default function Admin() {
     setDiscarded(false);
     setSavedBundle(null);
     setLoadError(null);
-    api
-      .adminGetSetup(id)
-      .then((b) => {
+    Promise.all([api.adminGetSetup(id), api.adminGetScenarioSource(id)])
+      .then(([b, authoring]) => {
+        setScenarioLibrary(authoring.library);
         const next = cloneSetupBundle({
           ...b,
+          authoring_source: authoring.resolved_source,
           manifest: { ...b.manifest, id: b.id },
         } as AdminSetupBundle);
         setBundle(next);
@@ -600,8 +621,11 @@ export default function Admin() {
       return;
     }
     if (!selectedId || !bundle) return;
+    const invalidOverride = document.querySelector<HTMLTextAreaElement>('.scenario-overrides textarea:invalid');
+    if (invalidOverride) { invalidOverride.reportValidity(); return; }
     const body = {
       manifest: { ...(bundle.manifest as Record<string, unknown>), id: selectedId },
+      authoring_source: bundle.authoring_source,
       units: bundle.units as DictEntityMap,
       territories: bundle.territories as DictEntityMap,
       factions: bundle.factions as DictEntityMap,
@@ -848,6 +872,9 @@ export default function Admin() {
           return null;
       }
     }
+    if (!useJson && scenarioLibrary && bundle.authoring_source && (activeTab === 'units' || activeTab === 'factions' || activeTab === 'territories')) {
+      return <ScenarioOverrides key={`${selectedId}:${activeTab}`} section={activeTab} source={sourceForRecords(bundle, scenarioLibrary)!} library={scenarioLibrary} onChange={(records, source) => setBundle((current) => current ? { ...current, [activeTab]: records, authoring_source: source } : null)} />;
+    }
     switch (activeTab) {
       case 'manifest':
         return (
@@ -931,6 +958,7 @@ export default function Admin() {
     { label: 'Formulas', active: formulasOpen, onClick: () => openSection('formulas') },
     { label: 'Games', active: gamesOpen, onClick: () => setGamesOpen(true) },
     { label: 'Maps', active: mapsOpen, onClick: () => setMapsOpen(true) },
+    { label: 'Seeds', active: seedsOpen, onClick: () => setSeedsOpen(true) },
     { label: 'Query', active: queryOpen, onClick: () => openSection('query') },
     {
       label: 'Setups',
@@ -1117,6 +1145,7 @@ export default function Admin() {
             ))}
           </div>
           <div className="admin-page__tab-previews">
+            <button type="button" className="admin-page__tab" disabled={!bundle || setupDirty} title={setupDirty ? 'Save or discard form changes before editing the source' : 'Edit declarative YAML / JSON'} onClick={() => setSourceOpen(true)}>Scenario source</button>
             <button
               type="button"
               className="admin-page__tab"
@@ -1233,9 +1262,11 @@ export default function Admin() {
         <MapOverridesPane
           territories={(bundle?.territories as DictEntityMap) ?? {}}
           setupId={selectedId}
-          onClose={() => setMapsOpen(false)}
+          onClose={() => { setMapsOpen(false); if (!setupDirty) loadBundle(selectedId); }}
         />
       ) : null}
+      {seedsOpen && <div className="admin-modal-overlay" role="presentation"><div className="admin-modal scenario-source" role="dialog" aria-modal="true" aria-label="Shared seeds"><h2>Shared seeds</h2><ScenarioLibraryPanel onSaved={() => { refreshList(); loadBundle(selectedId); }} /><button type="button" onClick={() => setSeedsOpen(false)}>Close</button></div></div>}
+      {sourceOpen && <ScenarioSourceDialog setupId={selectedId} onClose={() => setSourceOpen(false)} onSaved={() => { refreshList(); loadBundle(selectedId); }} />}
       {resolveAsymmetriesOpen && (
         <div className="admin-modal-overlay" role="presentation" onClick={() => setResolveAsymmetriesOpen(false)}>
           <div

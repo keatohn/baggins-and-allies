@@ -42,6 +42,8 @@ import {
   type TerritoryPathData,
 } from './territoryGraph';
 import { MapBuilder } from './MapBuilder';
+import { ScenarioLibraryPanel } from './ScenarioLibraryPanel';
+import { nearestPointOnBorder, pointsAlongBorder, sharedBorderAtPoint, type SharedBorderTarget } from './sharedBorder';
 
 type Pt = { x: number; y: number };
 type Dict = Record<string, Record<string, unknown>>;
@@ -338,12 +340,13 @@ export function MapOverridesPane({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
-  const [editorTab, setEditorTab] = useState<'icon' | 'landscape' | 'builder' | 'graph'>('icon');
+  const [editorTab, setEditorTab] = useState<'icon' | 'landscape' | 'builder' | 'graph' | 'defaults'>('icon');
   const [edgeField, setEdgeField] = useState<TerritoryEdgeField>('adjacent');
   const [terrainTypes, setTerrainTypes] = useState<string[]>([]);
   const [manifest, setManifest] = useState<LandscapeManifest>({});
   const [placing, setPlacing] = useState<{ cat: string; img: string } | null>(null);
   const [borderMode, setBorderMode] = useState(false);
+  const borderStrokeRef = useRef<SharedBorderTarget | null | undefined>(undefined);
   const [freePlacement, setFreePlacement] = useState(false);
   const [artMode, setArtMode] = useState<'landscape' | 'landmarks'>('landscape');
   const [selectedPlacement, setSelectedPlacement] = useState<{ tid: string; index: number } | null>(null);
@@ -982,6 +985,7 @@ export function MapOverridesPane({
     }
     if (landscape && cursorMode === 'paint') {
       armGesture('landscape');
+      borderStrokeRef.current = undefined;
       const el = wrapRef.current;
       if (!el) return;
       paintPointerRef.current = e.pointerId;
@@ -1589,6 +1593,14 @@ export function MapOverridesPane({
     [selected, landscapeFor],
   );
 
+  const borderAt = useCallback((tid: string, point: Pt) => {
+    try {
+      const outlines = [...document.querySelectorAll<SVGPathElement>('path.admin-graph__path')]
+        .filter((path) => path.dataset.tid).map((path) => ({ id: path.dataset.tid!, path }));
+      return sharedBorderAtPoint(tid, outlines, point);
+    } catch { return null; }
+  }, []);
+
   const tryPlaceLandscape = useCallback(
     (clientX: number, clientY: number) => {
       if (!placing) return false;
@@ -1596,16 +1608,30 @@ export function MapOverridesPane({
       if (!tid) return false;
       const vb = viewportToViewBox(clientX, clientY);
       if (!vb) return false;
-      let x = vb.x;
-      let y = vb.y;
+      const x = vb.x;
+      const y = vb.y;
       const snapBorder = artMode === 'landscape' && borderMode;
       if (snapBorder) {
-        const pathEl = territoryPathEl(tid);
-        if (!pathEl) return false;
-        const snapped = nearestPointOnOutline(pathEl, x, y);
-        if (!snapped) return false;
-        x = snapped.x;
-        y = snapped.y;
+        const border = borderAt(tid, vb);
+        if (!border) { setSaveError('Click a shared border between two territories.'); return false; }
+        const candidates = pointsAlongBorder(border.segments, PAINT_MIN_DIST * Math.max(1, paintScale));
+        updateLandscape((prev) => {
+          const map = { ...prev?.territories };
+          const key = resolveTid(map, border.territory) ?? border.territory;
+          const list = [...(map[key] ?? [])];
+          const existing = Object.values(map).flat();
+          let total = existing.length;
+          for (const point of candidates) {
+            if (list.length >= 50 || total >= 2500) break;
+            if (existing.some((p) => p.cat === placing.cat && Math.hypot(p.x - point.x, p.y - point.y) < PAINT_MIN_DIST)) continue;
+            const piece: LandscapePlacement = { cat: placing.cat, img: placing.img, ...point, layer: 'border', s: paintScale, ...(placing.cat === 'mountains' && mountainDarkness ? { darkness: mountainDarkness } : {}) };
+            list.push(piece); existing.push(piece); total++;
+          }
+          map[key] = list;
+          return { territories: map };
+        });
+        setSaveError(null); setSelected(border.territory); setSelectedPlacement(null);
+        return true;
       } else if (!freePlacement) {
         const pathEl = territoryPathEl(tid);
         if (pathEl && !isPointInTerritoryPath(pathEl, x, y)) return false;
@@ -1630,19 +1656,19 @@ export function MapOverridesPane({
       setSelectedPlacement({ tid: key, index: (current?.landscape?.territories?.[key]?.length ?? 0) });
       return true;
     },
-    [placing, mountainDarkness, artMode, freePlacement, selected, borderMode, viewportToViewBox, current, updateLandscape],
+    [placing, mountainDarkness, artMode, freePlacement, selected, borderMode, borderAt, paintScale, viewportToViewBox, current, updateLandscape],
   );
 
   /**
    * Paint-mode stamp: fills a disk of `paintRadius` viewBox units (0 = a single
    * point) around the cursor. Candidates are tested against the territory under
-   * the cursor only; border mode snaps them to the outline. Points closer than
+   * the cursor only; border mode locks to the shared edge where the stroke starts. Points closer than
    * PAINT_MIN_DIST to an existing piece are skipped so re-tracing never stacks.
    */
   const paintStampAt = useCallback(
     (clientX: number, clientY: number) => {
       if (!placing) return;
-      const tid = territoryIdFromPoint(clientX, clientY) ?? (freePlacement ? selected : null);
+      let tid = territoryIdFromPoint(clientX, clientY) ?? (freePlacement ? selected : null);
       if (!tid) return;
       const pathEl = territoryPathEl(tid);
       if (!pathEl && !freePlacement) return;
@@ -1650,6 +1676,14 @@ export function MapOverridesPane({
       if (!vb) return;
       const radius = paintRadius;
       const snapBorder = artMode === 'landscape' && borderMode;
+      let border: SharedBorderTarget | null = null;
+      if (snapBorder) {
+        if (borderStrokeRef.current === undefined) borderStrokeRef.current = borderAt(tid, vb);
+        border = borderStrokeRef.current;
+        if (!border) { setSaveError('Start painting on a shared border between two territories.'); return; }
+        setSaveError(null);
+        tid = border.territory;
+      }
       const offsets: Pt[] = [{ x: 0, y: 0 }];
       if (radius > 0) {
         const step = Math.min(PAINT_MIN_DIST, radius);
@@ -1668,8 +1702,8 @@ export function MapOverridesPane({
       for (const o of offsets) {
         let x = vb.x + o.x;
         let y = vb.y + o.y;
-        if (snapBorder && pathEl) {
-          const snapped = nearestPointOnOutline(pathEl, x, y);
+        if (snapBorder && border) {
+          const snapped = nearestPointOnBorder(border.segments, { x, y });
           if (!snapped) continue;
           // In brush mode only keep outline points within reach of the cursor.
           if (radius > 0 && Math.hypot(snapped.x - vb.x, snapped.y - vb.y) > radius) continue;
@@ -1690,9 +1724,11 @@ export function MapOverridesPane({
         const list = [...(map[key] ?? [])];
         const before = list.length;
         const minD2 = PAINT_MIN_DIST * PAINT_MIN_DIST;
+        const allPieces = Object.values(map).flat();
         for (const p of accepted) {
-          if (list.length >= 50) break;
-          const tooClose = list.some((q) => (q.x - p.x) ** 2 + (q.y - p.y) ** 2 < minD2);
+          if (list.length >= 50 || allPieces.length + list.length - before >= 2500) break;
+          const tooClose = list.some((q) => (q.x - p.x) ** 2 + (q.y - p.y) ** 2 < minD2)
+            || (snapBorder && allPieces.some((q) => q.cat === cat && (q.x - p.x) ** 2 + (q.y - p.y) ** 2 < minD2));
           if (tooClose) continue;
           list.push({ cat, img, x: p.x, y: p.y, layer, s: paintScale, ...(cat === 'mountains' && mountainDarkness ? { darkness: mountainDarkness } : {}) });
         }
@@ -1703,7 +1739,7 @@ export function MapOverridesPane({
       setSelected(tid);
       setSelectedPlacement(null);
     },
-    [placing, mountainDarkness, artMode, freePlacement, selected, paintRadius, paintScale, borderMode, viewportToViewBox, updateLandscape],
+    [placing, mountainDarkness, artMode, freePlacement, selected, paintRadius, paintScale, borderMode, borderAt, viewportToViewBox, updateLandscape],
   );
 
   const setFocus = (tid: string, focus: 'calculated' | 'override') => {
@@ -2497,6 +2533,7 @@ export function MapOverridesPane({
               >
                 Graph
               </button>
+              <button type="button" className={`admin-mapview__toggle-btn${editorTab === 'defaults' ? ' admin-mapview__toggle-btn--active' : ''}`} aria-pressed={editorTab === 'defaults'} onClick={() => setEditorTab('defaults')}>Territory defaults</button>
             </div>
             <label className="admin-graph__prop">
               Map
@@ -2517,7 +2554,7 @@ export function MapOverridesPane({
             <MapTextureSlider />
           </div>
           <div className="admin-graph__header-actions">
-            {editorTab === 'builder' ? null : (
+            {editorTab === 'builder' || editorTab === 'defaults' ? null : (
               <>
                 <button
                   type="button"
@@ -2682,7 +2719,9 @@ export function MapOverridesPane({
         {loading || overridesLoading ? <p className="admin-form__micro">Loading map…</p> : null}
         {err ? <p className="admin-page__error">{err}</p> : null}
         {saveError ? <p className="admin-page__error">{saveError}</p> : null}
-        {!loading && !overridesLoading && !err && editorTab === 'builder' ? (
+        {!loading && !overridesLoading && !err && editorTab === 'defaults' ? (
+          <div className="admin-graph__body scenario-map-defaults"><ScenarioLibraryPanel mapBase={mapBase} /></div>
+        ) : !loading && !overridesLoading && !err && editorTab === 'builder' ? (
           <div className="admin-graph__body">
             <MapBuilder />
           </div>
@@ -2723,12 +2762,14 @@ export function MapOverridesPane({
                         checked={borderMode}
                         onChange={(e) => {
                           setBorderMode(e.target.checked);
+                          setSaveError(null);
                           if (e.target.checked) setFreePlacement(false);
                         }}
                       />
-                      Border mode (snap to outline)
+                      Border mode (between two territories)
                     </label>
                   ) : null}
+                  {artMode === 'landscape' && borderMode && <p className="admin-form__micro">Click a shared border to fill just that border. Painting stays on the border where your stroke starts.</p>}
                   <label className="admin-page__checkbox-label" title="Place and drag across territory boundaries. Select a territory first when placing outside territory shapes.">
                     <input
                       type="checkbox"

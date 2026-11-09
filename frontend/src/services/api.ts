@@ -917,7 +917,27 @@ export interface AdminSetupBundle {
   camps: Record<string, unknown>;
   ports: Record<string, unknown>;
   starting_setup: Record<string, unknown>;
+  authoring_source?: ScenarioSource;
 }
+
+export type EntityRecords = Record<string, Record<string, unknown>>;
+export interface ScenarioLibrary { units: EntityRecords; factions: EntityRecords; maps: Record<string, EntityRecords> }
+export interface SeedEntry { seed?: string; overrides?: Record<string, unknown> }
+export interface ScenarioSource {
+  version?: number;
+  extends?: string;
+  map: string;
+  manifest: Record<string, unknown>;
+  units: Record<string, SeedEntry>;
+  factions: Record<string, SeedEntry>;
+  territory_ids?: string[];
+  territory_overrides?: EntityRecords;
+  camps?: Record<string, unknown>;
+  ports?: Record<string, unknown>;
+  starting_setup?: Record<string, unknown>;
+}
+export interface ScenarioValidation { valid: boolean; errors: string[]; bundle: AdminSetupBundle | null }
+export interface ScenarioImpact { changed_setups: string[]; changes: Record<string, unknown> }
 
 export type AdminSetupSavePayload = Omit<AdminSetupBundle, 'id'>;
 
@@ -1688,6 +1708,13 @@ export const api = {
       body: JSON.stringify(body),
     }),
   adminGetSetup: (setupId: string) => fetchJson<AdminSetupBundle>(`/admin/setups/${encodeURIComponent(setupId)}`),
+  adminGetScenarioSource: (id: string) => fetchJson<{ source: ScenarioSource; resolved_source: ScenarioSource; library: ScenarioLibrary }>(`/admin/setups/${encodeURIComponent(id)}/source`),
+  adminSaveScenarioSource: (id: string, source: string) => fetchJson(`/admin/setups/${encodeURIComponent(id)}/source`, { method: 'PUT', body: JSON.stringify({ source }) }),
+  adminValidateScenario: (source: string) => fetchJson<ScenarioValidation>('/admin/setups/validate', { method: 'POST', body: JSON.stringify({ source }) }),
+  adminGetScenarioLibrary: () => fetchJson<ScenarioLibrary>('/admin/scenario-library'),
+  adminPreviewScenarioLibrary: (library: ScenarioLibrary) => fetchJson<ScenarioImpact>('/admin/scenario-library/preview', { method: 'POST', body: JSON.stringify(library) }),
+  adminSaveScenarioLibrary: (library: ScenarioLibrary) => fetchJson<ScenarioImpact>('/admin/scenario-library', { method: 'PUT', body: JSON.stringify(library) }),
+  adminExportScenarios: () => fetchJson('/admin/scenarios/export'),
   adminPutSetup: (setupId: string, body: AdminSetupSavePayload) =>
     fetchJson<{ ok: boolean; id: string }>(`/admin/setups/${encodeURIComponent(setupId)}`, {
       method: 'PUT',
@@ -1695,6 +1722,7 @@ export const api = {
     }),
   adminCreateSetup: (body: {
     id: string;
+    source?: string;
     duplicate_from?: string | null;
     /** Master JSON: same keys as setup files (manifest, units, …). Mutually exclusive with duplicate_from. */
     bundle?: AdminSetupSavePayload | null;
@@ -1706,6 +1734,7 @@ export const api = {
       body: JSON.stringify({
         id: body.id.trim(),
         duplicate_from: body.duplicate_from?.trim() || null,
+        ...(body.source != null ? { source: body.source } : {}),
         ...(body.bundle_json != null && body.bundle_json !== ''
           ? { bundle_json: body.bundle_json }
           : body.bundle != null
