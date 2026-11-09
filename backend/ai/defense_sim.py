@@ -17,7 +17,12 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from typing import TYPE_CHECKING
 
-from backend.engine.combat_sim import SimOptions, run_simulation
+from backend.engine.combat_sim import (
+    SimOptions,
+    run_simulation,
+    sim_prefire_penalty,
+    sim_stronghold_initial_hp,
+)
 from backend.engine.movement import _is_water_zone, get_reachable_territories_for_unit
 from backend.engine.queries import _is_water_boat
 from backend.engine.state import Unit
@@ -137,14 +142,17 @@ def _land_defenders_for_hold_sim(
     return _our_land_defender_units(state, territory_id, faction_id, ud, fd)
 
 
-def _sim_options_for_territory(tdef) -> SimOptions:
-    if tdef and getattr(tdef, "is_stronghold", False):
-        return SimOptions(
-            must_conquer=True,
-            casualty_order_attacker="best_attack",
-            casualty_order_defender="best_unit",
-        )
-    return SimOptions()
+def _sim_options_for_territory(state, territory_id: str, tdef) -> SimOptions:
+    """Sim options mirroring live rules: must_conquer/best_attack on strongholds, plus the
+    territory's current wall HP and the setup manifest prefire flag."""
+    is_stronghold = bool(tdef and getattr(tdef, "is_stronghold", False))
+    return SimOptions(
+        must_conquer=is_stronghold,
+        casualty_order_attacker="best_attack" if is_stronghold else "best_unit",
+        casualty_order_defender="best_unit",
+        stronghold_initial_hp=sim_stronghold_initial_hp(state, territory_id, tdef),
+        prefire_penalty=sim_prefire_penalty(state),
+    )
 
 
 def enemy_units_reaching_by_faction(
@@ -251,6 +259,8 @@ def worst_case_defender_hold_probability(
     ud: dict[str, "UnitDefinition"],
     td: dict[str, "TerritoryDefinition"],
     *,
+    # Required: wall HP + prefire flag come from the live state (sim/live parity).
+    state: "GameState",
     n_trials: int | None = None,
     result_cache: dict[tuple, float | None] | None = None,
 ) -> float | None:
@@ -259,13 +269,21 @@ def worst_case_defender_hold_probability(
     None only on sim failure.
     """
     n = n_trials if n_trials is not None else COMBAT_SIM_TRIALS
-    cache_key = (territory_id, _defender_stack_tuple(def_stacks), n)
-    if result_cache is not None and cache_key in result_cache:
-        return result_cache[cache_key]
-
     tdef = td.get(territory_id)
     if not tdef:
         return None
+    opts = _sim_options_for_territory(state, territory_id, tdef)
+    # Options depend on state (wall HP, prefire flag): keep them in the cache key so a
+    # reused cache can never score with another state's walls/manifest.
+    cache_key = (
+        territory_id,
+        _defender_stack_tuple(def_stacks),
+        n,
+        opts.stronghold_initial_hp,
+        opts.prefire_penalty,
+    )
+    if result_cache is not None and cache_key in result_cache:
+        return result_cache[cache_key]
     if not by_faction_units:
         if result_cache is not None:
             result_cache[cache_key] = 1.0
@@ -277,7 +295,6 @@ def worst_case_defender_hold_probability(
             result_cache[cache_key] = val
         return val
 
-    opts = _sim_options_for_territory(tdef)
     p_min = 1.0
     ran = False
     for _fac, units in by_faction_units.items():
@@ -379,13 +396,13 @@ def defender_marginal_hold_metrics(
         pb = p_before_cache[to_tid]
     else:
         pb = worst_case_defender_hold_probability(
-            def_before, to_tid, bf, ud, td, n_trials=n_trials
+            def_before, to_tid, bf, ud, td, state=state, n_trials=n_trials
         )
         if p_before_cache is not None and pb is not None:
             p_before_cache[to_tid] = pb
 
     pa = worst_case_defender_hold_probability(
-        def_after, to_tid, bf, ud, td, n_trials=n_trials
+        def_after, to_tid, bf, ud, td, state=state, n_trials=n_trials
     )
     if pb is None or pa is None:
         return (None, None, None)
@@ -431,7 +448,7 @@ def defender_hold_probability_after_hypothetical_departure(
     ]
     def_stacks = _units_to_stacks(remaining, ud)
     return worst_case_defender_hold_probability(
-        def_stacks, from_tid, bf, ud, td, n_trials=n_trials
+        def_stacks, from_tid, bf, ud, td, state=state, n_trials=n_trials
     )
 
 
@@ -459,7 +476,7 @@ def defender_hold_probability_sim(
         _land_defenders_for_hold_sim(state, territory_id, faction_id, fd, ud), ud
     )
     return worst_case_defender_hold_probability(
-        def_stacks, territory_id, bf, ud, td, n_trials=n_trials
+        def_stacks, territory_id, bf, ud, td, state=state, n_trials=n_trials
     )
 
 
@@ -512,12 +529,12 @@ def holding_origin_beats_counterattack_into_threat(
         else float(margin)
     )
     p_hold = worst_case_defender_hold_probability(
-        def_origin, from_tid, by_f, ud, td, n_trials=n_trials
+        def_origin, from_tid, by_f, ud, td, state=state, n_trials=n_trials
     )
     if p_hold is None:
         return False
     tdef_to = td.get(to_tid)
-    opts = _sim_options_for_territory(tdef_to)
+    opts = _sim_options_for_territory(state, to_tid, tdef_to)
     n = n_trials if n_trials is not None else COMBAT_SIM_TRIALS
     try:
         sim_att = run_simulation(
@@ -615,6 +632,7 @@ def marginal_hold_delta_add_land_unit(
         bf,
         ud,
         td,
+        state=state,
         n_trials=n,
         result_cache=hold_prob_cache,
     )
@@ -624,6 +642,7 @@ def marginal_hold_delta_add_land_unit(
         bf,
         ud,
         td,
+        state=state,
         n_trials=n,
         result_cache=hold_prob_cache,
     )

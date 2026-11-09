@@ -7,7 +7,13 @@ import random
 from collections import Counter
 
 from backend.engine.actions import continue_combat, end_phase, initiate_combat, retreat
-from backend.engine.combat_sim import SimOptions, SimResult, run_simulation
+from backend.engine.combat_sim import (
+    SimOptions,
+    SimResult,
+    run_simulation,
+    sim_prefire_penalty,
+    sim_stronghold_initial_hp,
+)
 from backend.engine.movement import _is_water_zone
 from backend.engine.queries import (
     get_retreat_options,
@@ -44,16 +50,42 @@ def _split_trials_for_casualty_compare() -> tuple[int, int]:
     return n_a, n_b
 
 
-def _casualty_order_pair_options(is_stronghold: bool) -> tuple[SimOptions, SimOptions]:
-    """SimOptions for best_attack vs best_unit (stronghold: must_conquer)."""
+def _casualty_order_pair_options(
+    state, territory_id: str, tdef, is_stronghold: bool
+) -> tuple[SimOptions, SimOptions]:
+    """SimOptions for best_attack vs best_unit (stronghold: must_conquer).
+
+    Both options carry the live wall HP and the manifest prefire flag so the two sims
+    differ only in casualty order.
+    """
+    hp = sim_stronghold_initial_hp(state, territory_id, tdef)
+    prefire_penalty = sim_prefire_penalty(state)
     if is_stronghold:
         return (
-            SimOptions(must_conquer=True, casualty_order_attacker="best_attack"),
-            SimOptions(must_conquer=True, casualty_order_attacker="best_unit"),
+            SimOptions(
+                must_conquer=True,
+                casualty_order_attacker="best_attack",
+                stronghold_initial_hp=hp,
+                prefire_penalty=prefire_penalty,
+            ),
+            SimOptions(
+                must_conquer=True,
+                casualty_order_attacker="best_unit",
+                stronghold_initial_hp=hp,
+                prefire_penalty=prefire_penalty,
+            ),
         )
     return (
-        SimOptions(casualty_order_attacker="best_attack"),
-        SimOptions(casualty_order_attacker="best_unit"),
+        SimOptions(
+            casualty_order_attacker="best_attack",
+            stronghold_initial_hp=hp,
+            prefire_penalty=prefire_penalty,
+        ),
+        SimOptions(
+            casualty_order_attacker="best_unit",
+            stronghold_initial_hp=hp,
+            prefire_penalty=prefire_penalty,
+        ),
     )
 
 
@@ -194,7 +226,7 @@ def decide_initiate_combat(ctx: AIContext):
         try:
             if COMBAT_COMPARE_CASUALTY_ORDERS:
                 n_a, n_b = _split_trials_for_casualty_compare()
-                oa, ob = _casualty_order_pair_options(is_sh)
+                oa, ob = _casualty_order_pair_options(state, tid, tdef, is_sh)
                 sim_a = run_simulation(
                     att_stacks,
                     def_stacks,
@@ -217,11 +249,12 @@ def decide_initiate_combat(ctx: AIContext):
                 sb = _initiate_net_score(sim_b, tid, terr, ctx)
                 score = sb if sb > sa + 1e-9 else sa
             else:
-                opts = None
-                if is_sh:
-                    opts = SimOptions(
-                        must_conquer=True, casualty_order_attacker="best_attack"
-                    )
+                opts = SimOptions(
+                    must_conquer=is_sh,
+                    casualty_order_attacker="best_attack" if is_sh else "best_unit",
+                    stronghold_initial_hp=sim_stronghold_initial_hp(state, tid, tdef),
+                    prefire_penalty=sim_prefire_penalty(state),
+                )
                 sim = run_simulation(
                     att_stacks,
                     def_stacks,
@@ -323,7 +356,9 @@ def decide_combat(ctx: AIContext):
     chosen_order: str | None = None
     if COMBAT_COMPARE_CASUALTY_ORDERS:
         n_attack, n_unit = _split_trials_for_casualty_compare()
-        opt_attack, opt_unit = _casualty_order_pair_options(is_stronghold)
+        opt_attack, opt_unit = _casualty_order_pair_options(
+            state, combat.territory_id, tdef_combat, is_stronghold
+        )
         sim_attack = run_simulation(
             att_stacks,
             def_stacks,
@@ -351,10 +386,13 @@ def decide_combat(ctx: AIContext):
             sim_result = sim_attack
             chosen_order = "best_attack"
     else:
-        sim_opts = (
-            SimOptions(must_conquer=True, casualty_order_attacker="best_attack")
-            if is_stronghold
-            else None
+        sim_opts = SimOptions(
+            must_conquer=is_stronghold,
+            casualty_order_attacker="best_attack" if is_stronghold else "best_unit",
+            stronghold_initial_hp=sim_stronghold_initial_hp(
+                state, combat.territory_id, tdef_combat
+            ),
+            prefire_penalty=sim_prefire_penalty(state),
         )
         sim_result = run_simulation(
             att_stacks,
@@ -504,6 +542,7 @@ def _mcts_continue_or_retreat(ctx: AIContext, rng: random.Random | None):
         casualty_order_attacker="best_attack" if is_stronghold else "best_unit",
         is_sea_raid=sea_raid,
         stronghold_initial_hp=hp,
+        prefire_penalty=sim_prefire_penalty(state),
     )
     try:
         sim = run_simulation(
@@ -611,10 +650,5 @@ def _live_battle_stacks(ctx: AIContext, combat) -> tuple[list[dict], list[dict],
             u for u in defenders if participates_in_sea_hex_naval_combat(u, ctx.unit_defs.get(u.unit_id))
         ]
     is_stronghold = bool(tdef and getattr(tdef, "is_stronghold", False))
-    hp = None
-    if is_stronghold and tdef is not None:
-        base = int(getattr(tdef, "stronghold_base_health", 0) or 0)
-        if base > 0:
-            cur = getattr(territory, "stronghold_current_health", None) if territory is not None else None
-            hp = int(cur) if cur is not None else base
+    hp = sim_stronghold_initial_hp(state, combat.territory_id, tdef)
     return _units_to_stacks(attackers), _units_to_stacks(defenders), is_stronghold, hp, bool(sea_zone_id)
