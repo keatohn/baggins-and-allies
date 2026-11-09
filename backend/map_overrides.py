@@ -21,6 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator
 
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from backend.engine.definitions import DATA_DIR, SETUPS_DIR
@@ -500,6 +501,19 @@ def _stored_raw(db: Session | None, map_base: str) -> Any:
     return row
 
 
+def _readable_db(db: Session | None) -> Session | None:
+    if db is None:
+        return None
+    from backend.api.models import MapOverride, Setup
+
+    inspector = inspect(db.get_bind())
+    if not inspector.has_table(MapOverride.__tablename__):
+        return None
+    if not inspector.has_table(Setup.__tablename__):
+        return None
+    return db
+
+
 def load_map_overrides(db: Session | None, map_base: str) -> dict[str, Any]:
     """Stored overrides for a map; ``{"territories": {}}`` when none exist.
 
@@ -507,6 +521,7 @@ def load_map_overrides(db: Session | None, map_base: str) -> dict[str, Any]:
     filled from the setups that use this map (only where they agree). That fill is not
     written here.
     """
+    db = _readable_db(db)
     raw = _stored_raw(db, map_base)
     data = normalize_map_overrides(raw)
     if not (isinstance(raw, dict) and "terrain" in raw):

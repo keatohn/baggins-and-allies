@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -549,6 +550,8 @@ def icon_faction_hits(db: Session | None) -> dict[str, list[tuple[str, str, str]
 # ----- Optional DB: helpers used from definitions.py (no Session in tests) -----
 
 def db_has_any_setup(db: Session) -> bool:
+    if not inspect(db.get_bind()).has_table(Setup.__tablename__):
+        return False
     return db.query(Setup).first() is not None
 
 
