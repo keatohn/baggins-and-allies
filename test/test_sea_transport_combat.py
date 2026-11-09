@@ -2967,6 +2967,43 @@ def test_avoid_forced_full_boat_sail_not_tracked(wotr_defs):
     assert ve.valid, ve.error
 
 
+def test_avoid_forced_rejected_when_intruder_is_allied(wotr_defs):
+    """A boat sharing a sea with an ALLIED tagged intruder is not in a standoff: it must
+    not get the avoid_forced escape, which would sail it into an empty sea with no
+    idle-sail follow-up (an M7 bypass granted for no enemy at all)."""
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    ship_def = unit_defs.get("lindon_ship")
+    if ship_def is not None:
+        setattr(ship_def, "transport_capacity", 2)
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    state.territories["sea_zone_11"].units.clear()
+    state.territories["sea_zone_10"].units.clear()
+    ship = _make_unit(state, "elves", "lindon_ship", unit_defs)
+    ally_intruder = _make_unit(state, "gondor", "gondor_ship", unit_defs)
+    state.territories["sea_zone_11"].units.extend([ship, ally_intruder])
+    state.naval_mobilization_intruder_instance_ids = [ally_intruder.instance_id]
+    state.current_faction = "elves"
+    state.phase = "combat_move"
+
+    sail = move_units(
+        "elves", "sea_zone_11", "sea_zone_10", [ship.instance_id],
+        move_type="sail", avoid_forced_naval_combat=True,
+    )
+    v = validate_action(state, sail, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    # Rejected either at reachability (the forced dist-1 escape hatch must not
+    # apply) or at the avoid_forced subset check — no free escape either way.
+    assert not v.valid, v.error
+    assert v.error in (
+        "At least one unit (naval or aerial) must be able to reach the destination",
+        "avoid_forced_naval_combat only applies to boats that must fight or leave the mobilization standoff",
+    ), v.error
+
+
 def test_full_boat_chain_sail_without_offload_pending_blocks_phase_end(wotr_defs):
     """M7 bypass 2 (chain route): a chain sail declared without its offload follow-up
     (engine-level call — no server-attached offload pending) must be tracked and block

@@ -390,17 +390,25 @@ def get_forced_naval_combat_instance_ids(
     intruder_set = set(intruders)
     avoided = set(getattr(state, "avoided_forced_naval_combat_instance_ids", None) or [])
 
-    seas_with_intruder: set[str] = set()
+    # Only a HOSTILE intruder creates the standoff. A tagged boat sharing a zone
+    # with its own faction's boats (or an allied faction's) is not an enemy there;
+    # forcing them would hand out a fight-or-leave obligation — and the
+    # avoid_forced escape that skips idle-sail tracking — with no enemy present.
+    hostile_intruder_seas: set[str] = set()
     for tid, terr in state.territories.items():
         tkey = resolve_territory_key_in_state(state, tid, territory_defs)
         tdef = territory_defs.get(tkey) or territory_defs.get(tid)
         if not tdef or not _is_water_zone(tdef):
             continue
-        if any(u.instance_id in intruder_set for u in terr.units):
-            seas_with_intruder.add(tkey)
+        for u in terr.units:
+            if u.instance_id not in intruder_set:
+                continue
+            if water_combat_unit_side(u, faction_id, unit_defs, faction_defs) == "defender":
+                hostile_intruder_seas.add(tkey)
+                break
 
     out: list[str] = []
-    for sea_id in seas_with_intruder:
+    for sea_id in hostile_intruder_seas:
         terr = state.territories.get(sea_id)
         if not terr:
             continue

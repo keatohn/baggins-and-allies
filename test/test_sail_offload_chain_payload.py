@@ -32,7 +32,7 @@ STAGING_SEA = "sea_zone_3"  # only sea adjacent to harlindon; adjacent to sea_zo
 TARGET_LAND = "harlindon"
 SHIP_ID = "noldor_lindon_ship_t1"
 HERO_ID = "noldor_gil_galad_t1"
-INTRUDER_ID = "numenor_intruder_t1"
+INTRUDER_ID = "sauron_intruder_t1"
 RING_ID = "narya"
 
 
@@ -105,7 +105,7 @@ def _unit(iid, uid, movement=9, loaded_onto=None):
 
 def _arrange_chain(db_session, game_id, player_id):
     """Combat move as noldor: ship+hero embarked in sea_zone_5, ring there, an enemy
-    intruder boat sharing the zone (so the ship is forced to fight or flee), target
+    intruder sharing the zone (so the ship is forced to fight or flee), target
     harlindon reachable only via a sail to sea_zone_3 (chain required)."""
     row = _state_row(db_session, game_id)
     players_list = json.loads(row.players)
@@ -130,7 +130,9 @@ def _arrange_chain(db_session, game_id, player_id):
     territories[ORIGIN_SEA]["units"] = [
         _unit(SHIP_ID, "lindon_ship"),
         _unit(HERO_ID, "gil_galad", loaded_onto=SHIP_ID),
-        _unit(INTRUDER_ID, "numenor_ship"),
+        # Hostile intruder: only a different-alliance tagged boat creates the
+        # standoff (numenor_ship is good like noldor, so it never would).
+        _unit(INTRUDER_ID, "orc_warrior"),
     ]
     territories[STAGING_SEA]["units"] = []
     territories[TARGET_LAND]["units"] = []
