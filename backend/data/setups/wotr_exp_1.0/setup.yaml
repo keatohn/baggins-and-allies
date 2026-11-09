@@ -69,12 +69,12 @@ units:
   mirkwood_elf:
     seed: mirkwood_elf
     overrides:
+      cost:
+        power: 4
       specials:
       - archer
       - forest
       - home
-      cost:
-        power: 4
   dwarf_warrior:
     seed: dwarf_warrior
     overrides:
@@ -175,9 +175,9 @@ units:
   urukhai_warrior:
     seed: urukhai_warrior
     overrides:
-      defense: 3
       cost:
         power: 4
+      defense: 3
   uruk_pikeman:
     seed: uruk_pikeman
     overrides:
@@ -228,10 +228,10 @@ units:
   catapult:
     seed: catapult
     overrides:
-      specials:
-      - terror
       cost:
         power: 12
+      specials:
+      - terror
   armored_troll:
     seed: armored_troll
     overrides:
@@ -258,9 +258,9 @@ units:
   easterling_captain:
     seed: easterling_captain
     overrides:
+      archetype: captain
       cost:
         power: 7
-      archetype: captain
   easterling_kataphrakt:
     seed: easterling_kataphrakt
     overrides:
@@ -448,7 +448,66 @@ territory_ids:
 - sea_zone_10
 - sea_zone_11
 - sea_zone_12
-territory_overrides: {}
+territory_overrides:
+  grey_havens:
+    stronghold_base_health:
+      $delete: true
+    produces:
+      power: 5
+  lothlorien:
+    produces:
+      power: 7
+  moria:
+    stronghold_base_health:
+      $delete: true
+  forodwaith:
+    produces:
+      power:
+        $delete: true
+  erebor:
+    produces:
+      power: 5
+  dale:
+    produces:
+      power: 3
+  iron_hills:
+    produces:
+      power: 3
+  north_rhun:
+    produces:
+      power: 2
+  west_rhun:
+    stronghold_base_health:
+      $delete: true
+    produces:
+      power: 3
+  dorwinion:
+    is_stronghold: true
+    produces:
+      power: 6
+  east_osgiliath:
+    image:
+      $delete: true
+  barad_dur:
+    image:
+      $delete: true
+  north_dunland:
+    produces:
+      power: 1
+  emyn_muil:
+    produces:
+      power:
+        $delete: true
+  dagorlad:
+    produces:
+      power:
+        $delete: true
+  near_harad:
+    produces:
+      power: 2
+  umbar:
+    stronghold_base_health:
+      $delete: true
 camps:
   rivendell_camp:
     id: rivendell_camp

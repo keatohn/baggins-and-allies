@@ -69,6 +69,7 @@
     "aerial_adjacent": [],
     "display_name": "Barad-Dûr",
     "id": "barad_dur",
+    "image": "barad_dur.png",
     "is_stronghold": true,
     "ownable": true,
     "produces": {
@@ -148,7 +149,9 @@
     "id": "dagorlad",
     "is_stronghold": false,
     "ownable": true,
-    "produces": {},
+    "produces": {
+      "power": 1
+    },
     "terrain_type": "wasteland"
   },
   "dead_marshes": {
@@ -252,6 +255,7 @@
     ],
     "display_name": "East Osgiliath",
     "id": "east_osgiliath",
+    "image": "osgiliath.png",
     "is_stronghold": true,
     "ownable": true,
     "produces": {
@@ -315,7 +319,7 @@
     "is_stronghold": true,
     "ownable": true,
     "produces": {
-      "power": 6
+      "power": 5
     },
     "stronghold_base_health": 1,
     "terrain_type": "city"
@@ -331,7 +335,9 @@
     "id": "emyn_muil",
     "is_stronghold": false,
     "ownable": true,
-    "produces": {},
+    "produces": {
+      "power": 1
+    },
     "terrain_type": "wasteland"
   },
   "enedwaith": {
@@ -537,7 +543,7 @@
     "is_stronghold": true,
     "ownable": true,
     "produces": {
-      "power": 4
+      "power": 5
     },
     "stronghold_base_health": 1,
     "terrain_type": "desert"
@@ -596,7 +602,7 @@
     "is_stronghold": true,
     "ownable": true,
     "produces": {
-      "power": 10
+      "power": 12
     },
     "stronghold_base_health": 3,
     "terrain_type": "fortress"
@@ -673,7 +679,7 @@
     "is_stronghold": true,
     "ownable": true,
     "produces": {
-      "power": 6
+      "power": 7
     },
     "stronghold_base_health": 2,
     "terrain_type": "fortress"
@@ -825,7 +831,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 4
+      "power": 3
     },
     "terrain_type": "city"
   },
@@ -1173,6 +1179,7 @@
     "produces": {
       "power": 4
     },
+    "stronghold_base_health": 1,
     "terrain_type": "city"
   },
   "west_brown_lands": {

@@ -160,7 +160,7 @@ def test_default_updates_preview_then_rebuild_inheritors_and_preserve_overrides(
     library = deepcopy(load_state(db)["library"])
     library["units"]["guard"]["attack"] = 7
     library["factions"]["good"]["display_name"] = "Allies"
-    library["maps"]["world"]["shire"]["produces"]["power"] = 4
+    library["territories"]["shire"]["produces"]["power"] = 4
     impact = update_library(db, library)
     assert set(impact["changed_setups"]) == {"alpha", "beta", "gamma"}
     assert json.loads(db.get(Setup, "alpha").units_json)["guard"]["attack"] == 5
@@ -338,3 +338,103 @@ def test_map_authority_is_reflected_in_sources_and_checked_in_dry_run(client, db
     source.setdefault("territory_overrides", {})["shire"] = {"terrain_type": "plains"}
     assert client.post("/admin/setups/validate", json={"source": source}).json()["valid"] is False
     assert client.put("/admin/setups/alpha/source", json={"source": source}).status_code == 400
+
+
+def test_territory_seeds_update_matching_maps_by_id_and_keep_scenario_overrides(db):
+    initialize(db)
+    source = load_state(db)["sources"]["beta"]
+    source.setdefault("territory_overrides", {})["shire"] = {"produces": {"power": 9}}
+    save_source(db, "beta", source)
+    library = deepcopy(load_state(db)["library"])
+    library["maps"]["another_map"] = deepcopy(library["maps"]["world"])
+    library["territories"]["shire"]["produces"]["power"] = 7
+    impact = update_library(db, library)
+    assert set(impact["changed_setups"]) == {"alpha", "gamma"}
+    assert json.loads(db.get(Setup, "alpha").territories_json)["shire"]["produces"]["power"] == 2
+    update_library(db, library, apply=True)
+    state = load_state(db)
+    for records in state["library"]["maps"].values():
+        assert records["shire"]["produces"]["power"] == 7
+    assert get_admin_setup_bundle(db, "alpha")["territories"]["shire"]["produces"]["power"] == 7
+    assert get_admin_setup_bundle(db, "beta")["territories"]["shire"]["produces"]["power"] == 9
+    bad = deepcopy(state["library"])
+    del bad["territories"]["shire"]
+    with pytest.raises(ValueError, match="still used by maps"):
+        update_library(db, bad, apply=True)
+
+
+def test_legacy_map_metadata_becomes_lossless_scenario_overrides(db):
+    beta = db.get(Setup, "beta")
+    manifest = json.loads(beta.manifest_json)
+    manifest["map_asset"] = "other"
+    beta.manifest_json = json.dumps(manifest)
+    territories = json.loads(beta.territories_json)
+    territories["shire"]["produces"]["power"] = 5
+    beta.territories_json = json.dumps(territories)
+    db.commit()
+    bundles = {key: {k: v for k, v in get_admin_setup_bundle(db, key).items() if k != "id"} for key in ("alpha", "beta", "gamma")}
+    legacy = extract_library(bundles)
+    del legacy["territories"]
+    legacy["maps"]["other"] = deepcopy(bundles["beta"]["territories"])
+    sources = {key: extract_source(bundle, legacy) for key, bundle in bundles.items()}
+    sources["beta"] = {"extends": "alpha", "map": "other", "manifest": bundles["beta"]["manifest"]}
+    db.add(AppSetting(key=SETTING, value_json=json.dumps({"library": legacy, "sources": sources})))
+    db.commit()
+    original_rows = {row.id: row.territories_json for row in db.query(Setup).all()}
+    initialize(db)
+    state = load_state(db)
+    assert compile_all(state) == bundles
+    assert {row.id: row.territories_json for row in db.query(Setup).all()} == original_rows
+    assert state["sources"]["beta"]["extends"] == "alpha"
+    assert state["sources"]["beta"]["territory_overrides"]["shire"]["produces"]["power"] == 5
+
+
+def test_new_map_region_uses_existing_territory_seed_automatically(db):
+    from backend.map_assets import save_map_asset
+    initialize(db)
+    library = deepcopy(load_state(db)["library"])
+    library["territories"]["future"] = {"id": "future", "display_name": "Seed name", "produces": {"power": 4}, "ownable": True}
+    update_library(db, library, apply=True)
+    drawing = {"width": 100, "height": 100,
+        "joints": {"a": {"x": 0, "y": 0}, "b": {"x": 100, "y": 0}, "c": {"x": 100, "y": 100}, "d": {"x": 0, "y": 100}},
+        "borders": {"ab": {"a": "a", "b": "b"}, "bc": {"a": "b", "b": "c"}, "cd": {"a": "c", "b": "d"}, "da": {"a": "d", "b": "a"}},
+        "labels": {"future": {"display_name": "Drawing name", "x": 50, "y": 50}}}
+    save_map_asset(db, "future_map", {"doc": drawing})
+    record = load_state(db)["library"]["maps"]["future_map"]["future"]
+    assert record["display_name"] == "Seed name"
+    assert record["produces"] == {"power": 4}
+    assert record["terrain_type"] == "plains"
+
+
+def test_rebuild_compares_resolved_sources_to_saved_scenario_definitions(db):
+    initialize(db)
+    state = load_state(db)
+    state["sources"]["alpha"]["units"]["guard"]["overrides"]["attack"] = 8
+    # A drawing/source can be newer than the saved gameplay definition.
+    db.get(AppSetting, SETTING).value_json = json.dumps(state)
+    db.commit()
+    assert update_library(db, deepcopy(state["library"]))["changed_setups"] == ["alpha"]
+    assert get_admin_setup_bundle(db, "alpha")["units"]["guard"]["attack"] == 5
+    update_library(db, deepcopy(state["library"]), apply=True)
+    assert get_admin_setup_bundle(db, "alpha")["units"]["guard"]["attack"] == 8
+
+
+def test_cli_unpack_preserves_legacy_map_metadata(tmp_path):
+    bundles = {"alpha": example("alpha"), "beta": example("beta")}
+    bundles["beta"]["manifest"]["map_asset"] = "other"
+    bundles["beta"]["territories"]["shire"]["produces"]["power"] = 5
+    library = extract_library(bundles)
+    del library["territories"]
+    library["maps"]["other"] = deepcopy(bundles["beta"]["territories"])
+    state = {"library": library, "sources": {key: extract_source(bundle, library) for key, bundle in bundles.items()},
+             "catalog": json.loads((DATA_DIR / "catalog.json").read_text())}
+    path = tmp_path / "legacy-export.json"
+    path.write_text(json.dumps(state))
+    root = tmp_path / "offline"
+    assert main(["unpack", str(path), "--output-root", str(root)]) == 0
+    current_library = load_library(root)
+    assert "shire" in current_library["territories"]
+    for key, bundle in bundles.items():
+        source = parse_source((root / "setups" / key / "setup.yaml").read_text())
+        assert compile_scenario(source, current_library) == bundle
+        assert read_bundle(root / "setups" / key) == bundle

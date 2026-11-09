@@ -187,9 +187,9 @@ units:
     seed: ent
     overrides:
       faction: neutral
+      purchasable: false
       cost:
         power: 0
-      purchasable: false
 factions:
   numenor:
     seed: numenor
@@ -327,7 +327,71 @@ territory_ids:
 - old_forest
 - amon_sul
 - ered_luin
-territory_overrides: {}
+territory_overrides:
+  pelennor:
+    produces:
+      power: 1
+  udun:
+    display_name: Udûn
+  south_greenwood:
+    produces:
+      power: 2
+  harlindon:
+    produces:
+      power: 3
+  celduin_valley:
+    produces:
+      power: 2
+  khazad_dum:
+    image:
+      $delete: true
+  mithlond:
+    stronghold_base_health: 2
+  north_greenwood:
+    produces:
+      power: 2
+  forlindon:
+    produces:
+      power: 2
+  amon_lanc:
+    is_stronghold: true
+    produces:
+      power: 6
+  umbar:
+    is_stronghold: true
+  belfalas:
+    produces:
+      power: 2
+  lorinand:
+    is_stronghold: true
+    produces:
+      power: 8
+  west_rhun:
+    display_name: Rhûn
+    is_stronghold: true
+    produces:
+      power: 6
+  rhun_hills:
+    produces:
+      power: 4
+  south_eregion:
+    produces:
+      power: 2
+  north_eregion:
+    produces:
+      power: 2
+  imladris:
+    is_stronghold: true
+    produces:
+      power: 5
+  barad_dur:
+    display_name: Barad-dûr
+  falls_of_rauros:
+    produces:
+      power:
+        $delete: true
+  north_rhun:
+    display_name: North Rhun
 camps:
   numenor_camp:
     id: numenor_camp

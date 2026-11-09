@@ -378,6 +378,16 @@ territory_overrides:
   moria:
     stronghold_base_health:
       $delete: true
+  dol_guldur:
+    produces:
+      power: 5
+  gundabad:
+    produces:
+      power: 3
+  forodwaith:
+    produces:
+      power:
+        $delete: true
   erebor:
     produces:
       power: 5
@@ -391,15 +401,14 @@ territory_overrides:
     produces:
       power: 2
   west_rhun:
-    produces:
-      power: 3
-  rhun_hills:
+    stronghold_base_health:
+      $delete: true
     produces:
       power: 3
   dorwinion:
+    is_stronghold: true
     produces:
       power: 6
-    is_stronghold: true
   pelennor:
     adjacent:
     - minas_tirith
@@ -407,19 +416,24 @@ territory_overrides:
     - lossarnach
     - anorien
     - sea_zone_12
-  khand:
+  east_osgiliath:
+    image:
+      $delete: true
+  barad_dur:
+    image:
+      $delete: true
+  emyn_muil:
     produces:
-      power: 2
+      power:
+        $delete: true
+  dagorlad:
+    produces:
+      power:
+        $delete: true
   near_harad:
     produces:
       power: 2
-  haradwaith:
-    produces:
-      power: 5
-    is_stronghold: true
   umbar:
-    produces:
-      power: 4
     is_stronghold: true
 camps:
   rivendell_camp:

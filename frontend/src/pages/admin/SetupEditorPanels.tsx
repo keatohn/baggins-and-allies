@@ -1965,10 +1965,12 @@ function powerFromProduces(produces: unknown): number {
 export function TerritoriesPanel({
   territories,
   terrainTypes,
+  seedMode = false,
   onChange,
 }: {
   territories: Record<string, Record<string, unknown>>;
   terrainTypes: string[];
+  seedMode?: boolean;
   onChange: (next: Record<string, Record<string, unknown>>) => void;
 }) {
   return (
@@ -1987,7 +1989,7 @@ export function TerritoriesPanel({
             'Image',
             <TerritoryImageField value={t.image} onApply={(image) => patch({ image })} />,
           )}
-          {fieldRow(
+          {!seedMode && fieldRow(
             'Terrain type',
             <CatalogSelect
               value={t.terrain_type}
@@ -1996,15 +1998,15 @@ export function TerritoriesPanel({
               onChange={(terrain_type) => patch({ terrain_type })}
             />,
           )}
-          {fieldRow(
+          {!seedMode && fieldRow(
             'Adjacent (one id per line or comma-separated)',
             <MultilineIdList value={t.adjacent} onApply={(ids) => patch({ adjacent: ids })} />,
           )}
-          {fieldRow(
+          {!seedMode && fieldRow(
             'Aerial adjacent',
             <MultilineIdList value={t.aerial_adjacent} onApply={(ids) => patch({ aerial_adjacent: ids })} />,
           )}
-          {fieldRow(
+          {!seedMode && fieldRow(
             'Ford adjacent',
             <MultilineIdList value={t.ford_adjacent} onApply={(ids) => patch({ ford_adjacent: ids })} />,
           )}

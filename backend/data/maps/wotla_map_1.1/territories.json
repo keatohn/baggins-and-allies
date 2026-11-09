@@ -10,10 +10,10 @@
     "ford_adjacent": [],
     "id": "amon_lanc",
     "image": "amon_lanc.png",
-    "is_stronghold": true,
+    "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 6
+      "power": 3
     },
     "stronghold_base_health": 1,
     "terrain_type": "forest"
@@ -199,7 +199,7 @@
       "orodruin"
     ],
     "aerial_adjacent": [],
-    "display_name": "Barad-dûr",
+    "display_name": "Barad-Dûr",
     "ford_adjacent": [],
     "id": "barad_dur",
     "image": "barad_dur.png",
@@ -228,7 +228,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 2
+      "power": 1
     },
     "terrain_type": "grassland"
   },
@@ -247,7 +247,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 2
+      "power": 1
     },
     "terrain_type": "valley"
   },
@@ -547,7 +547,9 @@
     "id": "falls_of_rauros",
     "is_stronghold": false,
     "ownable": false,
-    "produces": {},
+    "produces": {
+      "power": 0
+    },
     "terrain_type": "river"
   },
   "fangorn": {
@@ -628,7 +630,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 2
+      "power": 1
     },
     "terrain_type": "forest"
   },
@@ -770,7 +772,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 3
+      "power": 1
     },
     "terrain_type": "forest"
   },
@@ -806,10 +808,10 @@
     "ford_adjacent": [],
     "id": "imladris",
     "image": "rivendell.png",
-    "is_stronghold": true,
+    "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 5
+      "power": 4
     },
     "stronghold_base_health": 1,
     "terrain_type": "forest"
@@ -860,6 +862,7 @@
     "display_name": "Khazad-dûm",
     "ford_adjacent": [],
     "id": "khazad_dum",
+    "image": "khazad_dum.png",
     "is_stronghold": true,
     "ownable": true,
     "produces": {
@@ -944,10 +947,10 @@
     "ford_adjacent": [],
     "id": "lorinand",
     "image": "lothlorien.png",
-    "is_stronghold": true,
+    "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 8
+      "power": 4
     },
     "stronghold_base_health": 2,
     "terrain_type": "forest"
@@ -1073,7 +1076,7 @@
     "produces": {
       "power": 10
     },
-    "stronghold_base_health": 2,
+    "stronghold_base_health": 1,
     "terrain_type": "city"
   },
   "morannon": {
@@ -1188,7 +1191,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 2
+      "power": 1
     },
     "terrain_type": "mountains"
   },
@@ -1207,7 +1210,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 2
+      "power": 1
     },
     "terrain_type": "forest"
   },
@@ -1240,7 +1243,7 @@
       "withered_heath"
     ],
     "aerial_adjacent": [],
-    "display_name": "North Rhun",
+    "display_name": "North Rhûn",
     "ford_adjacent": [],
     "id": "north_rhun",
     "is_stronghold": false,
@@ -1366,7 +1369,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 1
+      "power": 2
     },
     "terrain_type": "grassland"
   },
@@ -1385,7 +1388,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 4
+      "power": 3
     },
     "terrain_type": "hills"
   },
@@ -1786,7 +1789,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 2
+      "power": 1
     },
     "terrain_type": "forest"
   },
@@ -1806,7 +1809,7 @@
     "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 2
+      "power": 1
     },
     "terrain_type": "forest"
   },
@@ -1924,7 +1927,7 @@
     "aerial_adjacent": [
       "dagorlad"
     ],
-    "display_name": "Udûn",
+    "display_name": "Udun",
     "ford_adjacent": [],
     "id": "udun",
     "is_stronghold": false,
@@ -1944,7 +1947,7 @@
     "display_name": "Umbar",
     "ford_adjacent": [],
     "id": "umbar",
-    "is_stronghold": true,
+    "is_stronghold": false,
     "ownable": true,
     "produces": {
       "power": 4
@@ -2084,13 +2087,13 @@
       "rhun_hills"
     ],
     "aerial_adjacent": [],
-    "display_name": "Rhûn",
+    "display_name": "West Rhûn",
     "ford_adjacent": [],
     "id": "west_rhun",
-    "is_stronghold": true,
+    "is_stronghold": false,
     "ownable": true,
     "produces": {
-      "power": 6
+      "power": 1
     },
     "stronghold_base_health": 1,
     "terrain_type": "plains"

@@ -11,7 +11,11 @@ import json
 from sqlalchemy.orm import Session
 
 from backend.api.models import AppSetting, Setup
-from backend.scenario_builder import DELETE, compile_scenario, delta, extract_library, extract_source, resolve_source, scenario_map_id
+from backend.scenario_builder import (
+    DELETE, MAP_TERRITORY_FIELDS, compile_scenario, delta, extract_library, extract_source,
+    overlay_overrides as _overlay, prepare_territory_seeds, resolve_source,
+    scenario_map_id, upgrade_territory_sources,
+)
 from backend.setup_validation import validate_setup_payload
 
 SETTING = "scenario_authoring_v1"
@@ -57,6 +61,9 @@ def load_state(db: Session) -> dict:
                 raise ValueError(f"Cannot extract {setup_id} without changing its compiled bundle")
             state["sources"][setup_id] = source
     state["sources"] = {key: value for key, value in state["sources"].items() if key in bundles}
+    # Lift legacy per-map metadata into ID-based seeds without changing any setup.
+    # Differences become explicit scenario overrides; one-level extends is retained.
+    upgrade_territory_sources(state)
     return state
 
 
@@ -73,17 +80,6 @@ def initialize(db: Session) -> None:
     """Freeze the first library from current DB data, without rewriting any setup."""
     stage_state(db, load_state(db))
     db.commit()
-
-
-def _overlay(base: dict, change: dict) -> dict:
-    """Update override expressions, keeping removal markers as expressions."""
-    out = deepcopy(base)
-    for key, value in change.items():
-        if isinstance(value, dict) and value != {"$delete": True} and isinstance(out.get(key), dict) and out[key] != {"$delete": True}:
-            out[key] = _overlay(out[key], value)
-        else:
-            out[key] = deepcopy(value)
-    return out
 
 
 def source_for_bundle(source: dict, bundle: dict, library: dict, lookup=None) -> dict:
@@ -160,6 +156,18 @@ def update_library(db: Session, library: dict, *, apply: bool = False) -> dict:
             if not isinstance(key, str) or not isinstance(record, dict):
                 raise ValueError(f"library.{section} entries must be objects with string ids")
     state = load_state(db)
+    if not isinstance(library.get("territories"), dict):
+        raise ValueError("library.territories must be an object")
+    for tid, record in library["territories"].items():
+        if not isinstance(record, dict) or record.get("id") != tid:
+            raise ValueError(f"Territory seed {tid!r} id must match its key")
+        if record.keys() & MAP_TERRITORY_FIELDS:
+            raise ValueError("Territory seeds hold metadata; edit terrain and connections in Maps")
+    for records in library["maps"].values():
+        missing = records.keys() - library["territories"].keys()
+        if missing:
+            raise ValueError("Territory seeds still used by maps: " + ", ".join(sorted(missing)))
+    prepare_territory_seeds(library)
     for map_id, records in library["maps"].items():
         from backend.map_overrides import validate_map_base
         validate_map_base(map_id)
@@ -181,7 +189,7 @@ def update_library(db: Session, library: dict, *, apply: bool = False) -> dict:
     new_library_errors = library_errors(library) - library_errors(state["library"])
     if new_library_errors:
         raise ValueError("Invalid defaults: " + "; ".join(sorted(new_library_errors)))
-    before = compile_all(state)
+    before = _bundles(db)
     state["library"] = library
     after = compile_all(state)
     catalog = load_catalog(db)
