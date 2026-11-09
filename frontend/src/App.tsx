@@ -3754,6 +3754,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       const res = isFirstRound
         ? await api.initiateCombat(GAME_ID, activeCombat.territory, activeCombat.sea_zone_id, {
           fuse_bomb: fuseBomb !== false,
+          casualty_order: casualtyOrder,
+          must_conquer: mustConquer,
         })
         : await api.continueCombat(GAME_ID, { casualty_order: casualtyOrder, must_conquer: mustConquer });
       setBackendState(res.state);

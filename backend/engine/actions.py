@@ -112,6 +112,8 @@ def initiate_combat(
     terror_reroll_count: int | None = None,
     sea_zone_id: str | None = None,  # For sea raid: attackers are in this sea zone, target is territory_id (land)
     fuse_bomb: bool = True,
+    casualty_order: str | None = None,  # "best_unit" | "best_attack" for this battle
+    must_conquer: bool | None = None,
 ) -> Action:
     """
     Initiate combat in a contested territory.
@@ -126,6 +128,10 @@ def initiate_combat(
     - Other units allied with the attacker are non-participating bystanders
 
     dice_rolls must be provided for round 1 (deterministic, no RNG in reducer).
+
+    casualty_order / must_conquer: attacker choices made on the round-0 pills; they
+    apply to any round resolved by this action and persist on active_combat, exactly
+    like continue_combat.
 
     After round 1, if both sides have survivors, attacker must choose:
     - continue_combat (fight another round)
@@ -149,6 +155,10 @@ def initiate_combat(
         payload["sea_zone_id"] = sea_zone_id
     if not fuse_bomb:
         payload["fuse_bomb"] = False
+    if casualty_order is not None:
+        payload["casualty_order"] = casualty_order
+    if must_conquer is not None:
+        payload["must_conquer"] = must_conquer
     return Action(type="initiate_combat", faction=faction, payload=payload)
 
 
