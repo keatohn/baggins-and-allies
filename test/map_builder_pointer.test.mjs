@@ -85,6 +85,18 @@ test('Builder selection takes precedence over an interrupted pan; groups move, d
       await evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true}))");
       await delay(70);
     };
+    const edgePoint = await point(200, 100);
+    await click(edgePoint);
+    await page.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...edgePoint, button: 'left', buttons: 1, clickCount: 2 });
+    await page.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...edgePoint, button: 'left', buttons: 0, clickCount: 2 });
+    await delay(70);
+    assert.equal((await state()).nodes, 5);
+    const split = await evaluate(`(()=>{const n=document.querySelector('.mapbuilder__joint--selected');return {x:+n.getAttribute('cx'),y:+n.getAttribute('cy'),edges:[...document.querySelectorAll('.mapbuilder__border')].map(l=>[+l.getAttribute('x1'),+l.getAttribute('y1'),+l.getAttribute('x2'),+l.getAttribute('y2')])}})()`);
+    assert.ok(Math.abs(split.x - 200) < 1 && Math.abs(split.y - 100) < 1);
+    assert.equal(split.edges.filter(([x1,y1,x2,y2]) => (Math.abs(x1-200)<1 && y1===100) || (Math.abs(x2-200)<1 && y2===100)).length, 2);
+    await undo();
+    assert.equal((await state()).nodes, 4);
+    assert.equal(await evaluate("document.querySelectorAll('.mapbuilder__border').length"), 4);
     // Two preserved labels can occupy one face after a border is removed. A dot
     // must select its own label, rather than whichever label the face search finds first.
     await click(await point(225, 225));

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { api } from '../../services/api';
 import { createWheelNavIntentResolver, wheelZoomScaleMultiplier } from '../../utils/wheelNavIntent';
-import { jointsInBox, moveJoints, deleteJoints, labelAtPoint } from './mapBuilderSelection';
+import { jointsInBox, moveJoints, deleteJoints, labelAtPoint, splitBorderAtPoint } from './mapBuilderSelection';
 import { fetchMapSvgText } from './territoryGraph';
 
 /**
@@ -49,7 +49,7 @@ const DEFAULT_W = 3500;
 const DEFAULT_H = 2600;
 
 const TOOL_HINTS: Record<Tool, string> = {
-  select: 'Drag a box to select nodes · Shift-click or Shift-drag adds nodes · drag selected nodes to move · Delete joins neighbors of intermediate nodes; select an edge or label dot to remove it · Space + drag or middle-drag pans',
+  select: 'Double-click an edge to add a node · Drag a box to select nodes · Shift-click or Shift-drag adds nodes · drag selected nodes to move · Delete joins neighbors of intermediate nodes; select an edge or label dot to remove it · Space + drag or middle-drag pans',
   pen: 'Click to place points (endpoints snap onto joints or split borders they land on) · drag to pan · Enter or click the first point finishes · Esc cancels',
   pencil: 'Drag to draw a freehand border · ends snap and join the shared graph',
   label: 'Click inside a closed region to name it · click an existing label to edit · drag to pan',
@@ -1967,6 +1967,25 @@ export function MapBuilder() {
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerCancel}
+          onDoubleClick={(e) => {
+            if (toolRef.current !== 'select' || e.button !== 0 || spaceRef.current) return;
+            const point = screenToWorld(e.clientX, e.clientY);
+            if (!point) return;
+            const borderId = hitBorder(point);
+            if (!borderId) return;
+            const snapshot = docRef.current;
+            const next = cloneDoc(snapshot);
+            const result = splitBorderAtPoint(next, borderId, point, HIT_PX / viewRef.current.scale);
+            if (!result) return;
+            e.preventDefault();
+            if (result.created) {
+              docRef.current = next;
+              setDoc(next);
+              pushHistory(snapshot);
+            }
+            setSelection({ kind: 'joint', id: result.jointId });
+            setStatus(result.created ? 'Node added on edge' : 'Existing node selected');
+          }}
         >
           <div
             ref={worldRef}

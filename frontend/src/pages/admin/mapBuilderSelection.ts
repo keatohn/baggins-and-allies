@@ -6,6 +6,28 @@ type Drawing = {
   borders: Record<string, { a: string; b: string }>;
 };
 
+/** Insert a node on an edge and preserve its two connections. */
+export function splitBorderAtPoint(drawing: Drawing, borderId: string, point: Point, endpointTolerance = 0): { jointId: string; created: boolean } | null {
+  const border = drawing.borders[borderId];
+  if (!border || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+  const a = drawing.joints[border.a], b = drawing.joints[border.b];
+  if (!a || !b) return null;
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const length2 = dx * dx + dy * dy;
+  const t = length2 ? Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / length2)) : 0;
+  const position = { x: a.x + t * dx, y: a.y + t * dy };
+  if (Math.hypot(position.x - a.x, position.y - a.y) <= endpointTolerance) return { jointId: border.a, created: false };
+  if (Math.hypot(position.x - b.x, position.y - b.y) <= endpointTolerance) return { jointId: border.b, created: false };
+  let jointIndex = 1, borderIndex = 1;
+  while (`j${jointIndex}` in drawing.joints) jointIndex++;
+  while (`b${borderIndex}` in drawing.borders) borderIndex++;
+  const jointId = `j${jointIndex}`;
+  drawing.joints[jointId] = position;
+  drawing.borders[borderId] = { a: border.a, b: jointId };
+  drawing.borders[`b${borderIndex}`] = { a: jointId, b: border.b };
+  return { jointId, created: true };
+}
+
 /** Hit label anchors directly, including labels outside a closed region. */
 export function labelAtPoint(labels: Record<string, Point>, point: Point, radius: number): string | null {
   let closest: string | null = null;

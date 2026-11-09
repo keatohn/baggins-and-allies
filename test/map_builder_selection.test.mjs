@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { jointsInBox, moveJoints, deleteJoints, labelAtPoint } from '../frontend/src/pages/admin/mapBuilderSelection.ts';
+import { jointsInBox, moveJoints, deleteJoints, labelAtPoint, splitBorderAtPoint } from '../frontend/src/pages/admin/mapBuilderSelection.ts';
 
 const drawing = () => ({
   width: 100, height: 100,
@@ -71,6 +71,36 @@ test('bulk deletion removes incident borders and preserves unrelated geometry', 
 });
 
 const edges = (doc) => Object.values(doc.borders).map(({ a, b }) => [a, b].sort().join('-')).sort();
+
+test('splitting an edge projects the click onto it and connects the new node to both endpoints', () => {
+  const doc = drawing();
+  const result = splitBorderAtPoint(doc, 'ab', { x: 26, y: 34 });
+  assert.equal(result.created, true);
+  assert.deepEqual(doc.joints[result.jointId], { x: 25, y: 35 });
+  assert.deepEqual(doc.borders.ab, { a: 'a', b: result.jointId });
+  assert.ok(Object.values(doc.borders).some((edge) => edge.a === result.jointId && edge.b === 'b'));
+  assert.deepEqual(doc.borders.bc, { a: 'b', b: 'c' });
+  deleteJoints(doc, [result.jointId]);
+  assert.deepEqual(edges(doc), ['a-b', 'b-c', 'c-d']);
+});
+
+test('splitting at or near an endpoint reuses it without duplicate nodes or edges', () => {
+  const doc = drawing();
+  const original = structuredClone(doc);
+  assert.deepEqual(splitBorderAtPoint(doc, 'ab', { x: 10, y: 20 }), { jointId: 'a', created: false });
+  assert.deepEqual(splitBorderAtPoint(doc, 'ab', { x: 39, y: 49 }, 7), { jointId: 'b', created: false });
+  assert.deepEqual(doc, original);
+});
+
+test('edge splitting does not overwrite existing ids or modify missing edges', () => {
+  const doc = drawing();
+  doc.joints.j1 = { x: 0, y: 0 };
+  doc.borders.b1 = { a: 'c', b: 'd' };
+  assert.equal(splitBorderAtPoint(doc, 'missing', { x: 25, y: 35 }), null);
+  assert.deepEqual(splitBorderAtPoint(doc, 'ab', { x: 25, y: 35 }), { jointId: 'j2', created: true });
+  assert.deepEqual(doc.joints.j1, { x: 0, y: 0 });
+  assert.deepEqual(doc.borders.b1, { a: 'c', b: 'd' });
+});
 
 test('deleting an intermediate node joins its neighbors and preserves other borders', () => {
   const doc = drawing();
