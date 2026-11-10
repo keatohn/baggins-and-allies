@@ -5523,8 +5523,9 @@ def _handle_skip_turn(
     camp_defs: dict[str, CampDefinition] | None = None,
 ) -> tuple[GameState, list[GameEvent]]:
     """
-    Force end current faction's turn from any phase. Used by forfeit when a player leaves on their turn.
+    Force end current faction's turn from any phase.
     Clears phase-specific state (active combat, pending moves, etc.) then runs _handle_end_turn.
+    Not used by forfeit (the new owner continues the turn in place); kept for compatibility.
     """
     # Clear blockers so _handle_end_turn can run
     state.active_combat = None
@@ -5536,7 +5537,7 @@ def _handle_skip_turn(
     state.avoided_forced_naval_combat_instance_ids = []
     state.naval_mobilization_intruder_instance_ids = []
     # Raid staging never outlives the combat phase (same invariant as _handle_end_phase):
-    # skip_turn bypasses that cleanup, so clear the maps here too or a forfeit mid-combat
+    # skip_turn bypasses that cleanup, so clear the maps here too or a mid-combat skip
     # leaves territory_sea_raid_* live into later turns (stale sea_zone_id tags, wrong
     # retreat veto / Sea Raider bonus once the staging boat has sailed elsewhere).
     for attr in (
@@ -5597,7 +5598,7 @@ def _handle_end_turn(
             )
             events.extend(mob_flush_events)
 
-    # Units still in the pool had no legal destination (or this is a forfeit).
+    # Units still in the pool had no legal destination.
     state.faction_purchased_units[state.current_faction] = []
 
     # Income for the ending faction from territories they own now (requires capital)
