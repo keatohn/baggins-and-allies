@@ -190,6 +190,13 @@ def empty_round_special_payload() -> dict[str, bool]:
     return {json_key: False for _, json_key in _ENGINE_SPECIAL_TO_PAYLOAD}
 
 
+# Hard cap on units per stack when converting sim/API stack payloads to synthetic Unit
+# lists. Unvalidated counts (e.g. count=10**9 from a raw API caller) would allocate
+# unbounded Unit objects and OOM the worker. Matches the simulator panel's per-stack
+# input max (SIM_COUNT_INPUT_MAX = 999); real game stacks are far below this.
+MAX_STACK_COUNT = 999
+
+
 def stacks_to_synthetic_units(
     attacker_stacks: list[dict[str, Any]],  # [{"unit_id": str, "count": int}, ...]
     defender_stacks: list[dict[str, Any]],
@@ -201,12 +208,13 @@ def stacks_to_synthetic_units(
 
     Health/movement mirror unit_defs so multi-HP units (trolls) keep their real HP;
     unknown unit_ids are kept with the 1 HP / 0 movement fallback (never skipped).
+    Each stack's count is clamped to [0, MAX_STACK_COUNT].
     """
     attacker_units: list[Unit] = []
     idx = 0
     for s in attacker_stacks:
         unit_id = (s.get("unit_id") or "").strip()
-        count = max(0, int(s.get("count") or 0))
+        count = max(0, min(int(s.get("count") or 0), MAX_STACK_COUNT))
         ud = unit_defs.get(unit_id)
         base_health = int(getattr(ud, "health", 1) or 1) if ud else 1
         base_movement = int(getattr(ud, "movement", 0) or 0) if ud else 0
@@ -224,7 +232,7 @@ def stacks_to_synthetic_units(
     idx = 0
     for s in defender_stacks:
         unit_id = (s.get("unit_id") or "").strip()
-        count = max(0, int(s.get("count") or 0))
+        count = max(0, min(int(s.get("count") or 0), MAX_STACK_COUNT))
         ud = unit_defs.get(unit_id)
         base_health = int(getattr(ud, "health", 1) or 1) if ud else 1
         base_movement = int(getattr(ud, "movement", 0) or 0) if ud else 0

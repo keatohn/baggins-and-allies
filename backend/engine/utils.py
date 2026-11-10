@@ -605,6 +605,7 @@ def generate_dice_rolls_for_units(
     seed: int | None = None,
     effective_dice_override: dict[str, int] | None = None,
     exclude_archetypes: set[str] | None = None,
+    rng: random.Random | None = None,
 ) -> list[int]:
     """
     Generate dice rolls for a list of Unit instances.
@@ -612,11 +613,18 @@ def generate_dice_rolls_for_units(
     or effective_dice_override[instance_id] when provided (e.g. bombikazi: 0 for paired bombikazi, 0 for unpaired bomb).
     When exclude_archetypes is set (e.g. {"siegework"}), those units get no dice — they only roll in the siegeworks round.
 
+    rng: optional private Random instance (combat sim). When provided, `seed` is ignored and the
+    global `random` module is never read or mutated — concurrent callers cannot bleed state
+    into each other. When omitted, legacy behavior: `seed` seeds the global module.
+
     Returns:
         List of dice rolls (1 to DICE_SIDES per roll)
     """
-    if seed is not None:
-        random.seed(seed)
+    source: Any = rng
+    if source is None:
+        if seed is not None:
+            random.seed(seed)
+        source = random
 
     skip = exclude_archetypes or set()
     rolls = []
@@ -630,7 +638,7 @@ def generate_dice_rolls_for_units(
             else (getattr(unit_def, "dice", 1) if unit_def else 1)
         )
         for _ in range(dice_count):
-            rolls.append(random.randint(1, DICE_SIDES))
+            rolls.append(source.randint(1, DICE_SIDES))
     return rolls
 
 
@@ -641,6 +649,7 @@ def generate_combat_rolls_for_units(
     seed: int | None = None,
     attacker_effective_dice_override: dict[str, int] | None = None,
     exclude_archetypes: set[str] | None = None,
+    rng: random.Random | None = None,
 ) -> dict[str, list[int]]:
     """
     Generate dice rolls for both sides of a combat using Unit instances.
@@ -652,6 +661,8 @@ def generate_combat_rolls_for_units(
         seed: Optional random seed (applies to both sides)
         attacker_effective_dice_override: Optional instance_id -> dice count for attackers (e.g. bombikazi)
         exclude_archetypes: Archetypes that do not roll in this phase (e.g. siegework outside the siegeworks round).
+        rng: Optional private Random instance (combat sim); when provided, `seed` is ignored and
+            the global random module is untouched.
 
     Returns:
         Dict with "attacker" and "defender" roll lists
@@ -660,6 +671,7 @@ def generate_combat_rolls_for_units(
         attacker_units, unit_defs, seed,
         effective_dice_override=attacker_effective_dice_override,
         exclude_archetypes=exclude_archetypes,
+        rng=rng,
     )
 
     # Use a different seed for defender if seed was provided
@@ -667,6 +679,7 @@ def generate_combat_rolls_for_units(
     defender_rolls = generate_dice_rolls_for_units(
         defender_units, unit_defs, defender_seed,
         exclude_archetypes=exclude_archetypes,
+        rng=rng,
     )
 
     return {

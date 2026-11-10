@@ -229,8 +229,11 @@ def run_one_battle(
         BattleOutcome with winner, retreat, conquered, rounds, casualties by unit_id.
     """
     opts = options or SimOptions()
-    if seed is not None:
-        random.seed(seed)
+    # Private per-battle RNG: never seeds or reads the global `random` module, so
+    # concurrent simulations cannot bleed state into each other (or into the AI),
+    # while `seed` stays fully reproducible (Random(seed) inits identically to
+    # random.seed(seed), so seeded trial sequences are unchanged).
+    rng = random.Random(seed)
     pdelta = -1 if opts.prefire_penalty else 0
     max_rounds_cap = opts.max_rounds if opts.max_rounds is not None else DEFAULT_MAX_ROUNDS
 
@@ -279,9 +282,10 @@ def run_one_battle(
             use_paired_fused_siegework_rules=True,
         )
         dice = generate_combat_rolls_for_units(
-            attacker_units, defender_units, unit_defs, seed=None,
+            attacker_units, defender_units, unit_defs,
             attacker_effective_dice_override=stealth_eff_dice,
             exclude_archetypes={"siegework"},
+            rng=rng,
         )
         spec_stealth = compute_battle_specials_and_modifiers(
             attacker_units,
@@ -376,9 +380,9 @@ def run_one_battle(
             )
             def_sw = get_siegework_defender_rolling_units(defender_units, unit_defs)
             siege_att_rolls = (
-                [random.randint(1, DICE_SIDES) for _ in range(siegework_att_dice)] if siegework_att_dice > 0 else []
+                [rng.randint(1, DICE_SIDES) for _ in range(siegework_att_dice)] if siegework_att_dice > 0 else []
             )
-            siege_def_rolls = [random.randint(1, DICE_SIDES) for _ in range(siegework_def_dice)] if def_sw else []
+            siege_def_rolls = [rng.randint(1, DICE_SIDES) for _ in range(siegework_def_dice)] if def_sw else []
             siege_dice_rolls = {"attacker": siege_att_rolls, "defender": siege_def_rolls}
             siege_result, stronghold_hp, ladder_count = resolve_siegeworks_round(
                 attacker_units,
@@ -480,7 +484,9 @@ def run_one_battle(
         # --- Archer prefire: after siegework so surviving archers reflect casualties (e.g. bomb overflow). ---
         defender_archer_units = [u for u in defender_units if archer_prefire_eligible(unit_defs.get(u.unit_id))]
         if attacker_units and defender_archer_units:
-            dice = generate_combat_rolls_for_units(attacker_units, defender_units, unit_defs, seed=None)
+            dice = generate_combat_rolls_for_units(
+                attacker_units, defender_units, unit_defs, rng=rng,
+            )
             spec_archer = compute_battle_specials_and_modifiers(
                 attacker_units,
                 defender_units,
@@ -605,9 +611,10 @@ def run_one_battle(
                 attacker_units, unit_defs, ladder_set, attacker_mods, att_attack_override or None,
             )
         dice_rolls = generate_combat_rolls_for_units(
-            attacker_units, defender_units, unit_defs, seed=None,
+            attacker_units, defender_units, unit_defs,
             attacker_effective_dice_override=att_effective_dice,
             exclude_archetypes={"siegework"},
+            rng=rng,
         )
 
         # Round 1 terror: light cancels all opposing terror, else hope cancels 1 each, then cap at 3 defender hit dice re-rolled
@@ -625,7 +632,7 @@ def run_one_battle(
                 defender_rolls = list(dice_rolls.get("defender", []))
                 for idx in terror_indices:
                     if idx < len(defender_rolls):
-                        defender_rolls[idx] = random.randint(1, DICE_SIDES)
+                        defender_rolls[idx] = rng.randint(1, DICE_SIDES)
                 dice_rolls = {**dice_rolls, "defender": defender_rolls}
 
         round_result, stronghold_hp = resolve_combat_round(
