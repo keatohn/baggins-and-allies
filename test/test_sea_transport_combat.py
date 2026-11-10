@@ -19,6 +19,7 @@ from backend.engine.actions import (
     end_phase,
     retreat,
     cancel_move,
+    skip_turn,
 )
 import backend.engine.reducer as reducer_mod
 from backend.engine.reducer import apply_action, get_state_after_pending_moves
@@ -3150,6 +3151,38 @@ def test_stale_sea_raid_staging_cleared_at_combat_phase_end(wotr_defs):
     # Capture flushed...
     assert state.territories["harondor"].owner == "harad"
     # ...and no raid staging survives past the combat phase.
+    assert state.territory_sea_raid_from == {}
+    assert state.territory_sea_raid_faction == {}
+    assert state.territory_sea_raid_passenger_instance_ids == {}
+
+
+def test_skip_turn_forfeit_clears_sea_raid_staging(wotr_defs):
+    """
+    Naval audit L9 residual: skip_turn (forfeit) must also clear raid staging.
+    _handle_end_phase clears territory_sea_raid_* when the combat phase ends
+    normally, but skip_turn bypasses that path — without the matching clear in
+    _handle_skip_turn, a forfeit mid-combat leaves staging live into later turns
+    (wrong sea_zone_id tags, stale Sea Raider bonus / retreat veto once the
+    staging boat has sailed elsewhere).
+    """
+    (state, ship, raider, unit_defs, territory_defs,
+     faction_defs, camp_defs, port_defs) = _hostile_staging_offload_state(
+        wotr_defs, enemy_ship=False, defenders=False
+    )
+    state = get_state_after_pending_moves(
+        state, "combat_move", unit_defs, territory_defs, faction_defs
+    )
+    assert state.territory_sea_raid_from.get("harondor") == "sea_zone_11"
+    assert state.territory_sea_raid_faction.get("harondor") == "harad"
+    assert state.territory_sea_raid_passenger_instance_ids.get("harondor"), (
+        "test preconditions: staging must be recorded before the forfeit"
+    )
+    state.phase = "combat"
+    state.current_faction = "harad"
+
+    state, _events = apply_action(
+        state, skip_turn("harad"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+    )
     assert state.territory_sea_raid_from == {}
     assert state.territory_sea_raid_faction == {}
     assert state.territory_sea_raid_passenger_instance_ids == {}
