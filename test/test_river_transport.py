@@ -424,6 +424,34 @@ def test_mobilizing_onto_hostile_river_forces_the_defender_to_fight_or_leave():
     assert forced == ["enemy_1"]
 
 
+def test_forced_naval_ignores_non_hostile_intruder():
+    """Only a HOSTILE tagged intruder creates the fight-or-leave obligation.
+
+    A boat sharing a water zone with its own faction's intruder (or an allied
+    faction's) is not in a standoff — listing it forced would grant a spurious
+    avoid_forced escape (and the dist-1 pathfinding hole) for no enemy at all.
+    """
+    state, unit_defs, territory_defs, faction_defs, _camps, _ports = _board()
+    river = state.territories["river_anduin"]
+    river.units.append(_piece("gondor_intruder", "boat"))
+    river.units.append(_piece("gondor_fleet", "boat"))
+    river.units.append(_piece("rohan_fleet", "ally_boat"))
+    state.naval_mobilization_intruder_instance_ids = ["gondor_intruder"]
+
+    assert get_forced_naval_combat_instance_ids(
+        state, "gondor", unit_defs, territory_defs, faction_defs
+    ) == []
+    assert get_forced_naval_combat_instance_ids(
+        state, "rohan", unit_defs, territory_defs, faction_defs
+    ) == []
+
+    # Control: a genuine enemy sharing the zone keeps its obligation.
+    river.units.append(_piece("mordor_defender", "enemy_boat"))
+    assert get_forced_naval_combat_instance_ids(
+        state, "mordor", unit_defs, territory_defs, faction_defs
+    ) == ["mordor_defender"]
+
+
 def test_river_raid_initiate_accepts_river_zone():
     """A raid staged from a river uses the same initiate path as a sea raid."""
     state, unit_defs, territory_defs, faction_defs, camps, ports = _board()
