@@ -650,6 +650,7 @@ def generate_combat_rolls_for_units(
     attacker_effective_dice_override: dict[str, int] | None = None,
     exclude_archetypes: set[str] | None = None,
     rng: random.Random | None = None,
+    defender_effective_dice_override: dict[str, int] | None = None,
 ) -> dict[str, list[int]]:
     """
     Generate dice rolls for both sides of a combat using Unit instances.
@@ -662,7 +663,9 @@ def generate_combat_rolls_for_units(
         attacker_effective_dice_override: Optional instance_id -> dice count for attackers (e.g. bombikazi)
         exclude_archetypes: Archetypes that do not roll in this phase (e.g. siegework outside the siegeworks round).
         rng: Optional private Random instance (combat sim); when provided, `seed` is ignored and
-            the global random module is untouched.
+            the global random module is never read or mutated.
+        defender_effective_dice_override: Optional instance_id -> dice count for defenders
+            (e.g. ring bonus dice — same contract as the attacker override).
 
     Returns:
         Dict with "attacker" and "defender" roll lists
@@ -678,6 +681,7 @@ def generate_combat_rolls_for_units(
     defender_seed = seed + 1 if seed is not None else None
     defender_rolls = generate_dice_rolls_for_units(
         defender_units, unit_defs, defender_seed,
+        effective_dice_override=defender_effective_dice_override,
         exclude_archetypes=exclude_archetypes,
         rng=rng,
     )
