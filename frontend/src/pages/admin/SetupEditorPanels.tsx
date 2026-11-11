@@ -1242,7 +1242,8 @@ function MapAssetField({
     return () => window.removeEventListener('admin-maps-changed', load);
   }, []);
   const currentMap = String(manifest.map_asset ?? '');
-  const mapOptions = [...new Set([currentMap, ...maps].filter(Boolean))];
+  const mapOptions = [...new Set([currentMap, ...maps].filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
   return (
     <>
       <select
