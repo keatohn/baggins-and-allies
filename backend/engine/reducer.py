@@ -2797,6 +2797,17 @@ def _handle_initiate_combat(
         sea_def = territory_defs.get(sea_zone_id)
         if not sea_zone or not sea_def or not _is_water_zone(sea_def):
             raise ValueError(f"Invalid sea zone: {sea_zone_id}")
+        if _is_water_zone(territory_defs.get(territory_id)):
+            raise ValueError("Sea raid target must be land territory")
+        # Issue #92: a sea raid staged from a hostile sea zone must wait for the forced
+        # naval battle there — raiders stay embarked until the fleet survives that fight.
+        # apply_action does not run full validate_action, so this guard must live here too.
+        if staging_zone_blocks_sea_raid(
+            state, sea_zone_id, attacker_faction, unit_defs, faction_defs, territory_defs
+        ):
+            raise ValueError(
+                f"Naval battle in {sea_zone_id} must be resolved before sea raid on {territory_id}"
+            )
         # Skip adjacency when this territory was recorded as sea-raided (offload already applied)
         sea_raid_from = getattr(state, "territory_sea_raid_from", None) or {}
         if sea_raid_from.get(territory_id) != sea_zone_id:

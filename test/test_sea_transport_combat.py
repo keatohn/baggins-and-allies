@@ -2606,6 +2606,45 @@ def test_sea_raid_initiate_rejected_while_staging_naval_unresolved(wotr_defs):
     assert vr_naval.valid, vr_naval.error
 
 
+def test_sea_raid_apply_action_rejected_while_staging_naval_unresolved(wotr_defs):
+    """
+    Issue #92 defense-in-depth: apply_action must reject the blocked sea raid itself.
+    validate_action already gates this, but apply_action does not run full validation —
+    the reducer has to enforce the staging gate (same pattern as the H1 allied-land guard).
+    """
+    (state, ship, raider, unit_defs, territory_defs,
+     faction_defs, camp_defs, port_defs) = _hostile_staging_offload_state(wotr_defs)
+    state = get_state_after_pending_moves(
+        state, "combat_move", unit_defs, territory_defs, faction_defs
+    )
+    state.phase = "combat"
+    state.current_faction = "harad"
+    assert staging_zone_blocks_sea_raid(
+        state, "sea_zone_11", "harad", unit_defs, faction_defs, territory_defs
+    )
+
+    raid = initiate_combat(
+        "harad", "harondor", {"attacker": [6], "defender": [6]},
+        sea_zone_id="sea_zone_11",
+    )
+    with pytest.raises(ValueError, match="(?i)naval battle"):
+        apply_action(
+            state, raid,
+            unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+        )
+
+    # Sea raid onto a water target must also fail in the reducer (validate-only before).
+    sea_target = initiate_combat(
+        "harad", "sea_zone_8", {"attacker": [6], "defender": [6]},
+        sea_zone_id="sea_zone_11",
+    )
+    with pytest.raises(ValueError, match="must be land"):
+        apply_action(
+            state, sea_target,
+            unit_defs, territory_defs, faction_defs, camp_defs, port_defs,
+        )
+
+
 def test_naval_win_disembarks_surviving_staged_raiders(wotr_defs):
     """
     Issue #92: after the forced naval battle is won, surviving staged passengers disembark
