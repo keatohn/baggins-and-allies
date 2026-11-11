@@ -349,5 +349,5 @@ def end_turn(faction: str) -> Action:
 
 
 def skip_turn(faction: str) -> Action:
-    """Force end current faction's turn from any phase. Used by forfeit when a player leaves on their turn."""
+    """Force end current faction's turn from any phase. Not used by forfeit (the new owner continues the turn in place)."""
     return Action(type="skip_turn", faction=faction, payload={})
