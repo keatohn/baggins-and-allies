@@ -9,6 +9,7 @@ H3 (combat audit): bombikazi self-destruct only ever affects units that are stil
 """
 from collections import Counter
 from types import SimpleNamespace
+import random
 
 import pytest
 
@@ -196,10 +197,18 @@ def test_archer_prefire_killed_bombikazi_does_not_roll_or_detonate(defs):
     ]
     assert prefire_rounds and berserker_id in prefire_rounds[0].attacker_casualties
 
-    # round-1 dice exactly as the API generates them: the dead bombikazi must not roll
+    # round-1 dice exactly as the API generates them: the dead bombikazi must not roll.
+    # The API helper draws from the global RNG, which made this test flaky (the 1-HP bomb
+    # died whenever the archer rolled <= its defense 2). Pin that single draw (seed 0 => 7,
+    # a miss) and restore the prior stream so other tests are unaffected.
     from backend.api.main import _generate_dice_rolls_for_active_combat
 
-    dice = _generate_dice_rolls_for_active_combat(state, unit_defs, territory_defs, faction_defs)
+    saved_rng = random.getstate()
+    random.seed(0)
+    try:
+        dice = _generate_dice_rolls_for_active_combat(state, unit_defs, territory_defs, faction_defs)
+    finally:
+        random.setstate(saved_rng)
     assert dice["attacker"] == []
 
     action2 = continue_combat("isengard", dice)
