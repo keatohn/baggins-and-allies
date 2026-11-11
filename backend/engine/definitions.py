@@ -201,6 +201,12 @@ def _setup_dir(setup_id: str) -> Path:
 
 def read_setup_manifest(setup_id: str) -> dict[str, Any] | None:
     """Load manifest.json for a setup folder. Returns None if missing or invalid."""
+    canonical = _setup_dir(setup_id) / "setup.json"
+    if canonical.is_file():
+        try:
+            return json.loads(canonical.read_text())["manifest"]
+        except (ValueError, OSError, KeyError):
+            return None
     manifest_path = _setup_dir(setup_id) / "manifest.json"
     if not manifest_path.is_file():
         return None
@@ -263,31 +269,16 @@ def list_setups(*, include_admin: bool = False) -> list[dict]:
         if not d.is_dir():
             continue
         setup_id = d.name
-        if not (d / "starting_setup.json").exists():
-            continue
-        manifest_path = d / "manifest.json"
-        if not manifest_path.exists():
-            continue
-        try:
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                m = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        m = read_setup_manifest(setup_id)
+        if not m:
             continue
         if not shown_on_create_menu(m, include_admin=include_admin):
             continue
         ctx = m.get("context")
         if not isinstance(ctx, dict) or not ctx:
             continue
-        factions: dict[str, Any] = {}
-        factions_path = d / "factions.json"
-        if factions_path.is_file():
-            try:
-                with open(factions_path, "r", encoding="utf-8") as f:
-                    loaded = json.load(f)
-                if isinstance(loaded, dict):
-                    factions = loaded
-            except (json.JSONDecodeError, OSError):
-                factions = {}
+        from backend.scenario_builder import read_setup_bundle
+        factions = read_setup_bundle(d)["factions"]
         entry = scenario_menu_entry(m, setup_id, factions)
         rows.append((menu_order_sort_value(m), str(entry["id"]), entry))
     rows.sort(key=lambda t: (t[0], t[1]))
@@ -302,16 +293,12 @@ def load_setup(setup_id: str) -> dict:
     setup_dir = _setup_dir(setup_id)
     if not setup_dir.exists() or not setup_dir.is_dir():
         raise FileNotFoundError(f"Setup not found: {setup_id}")
-    starting_path = setup_dir / "starting_setup.json"
-    if not starting_path.exists():
-        raise FileNotFoundError(f"starting_setup.json not found in setup: {setup_id}")
-    with open(starting_path, "r") as f:
-        starting_setup = json.load(f)
-    manifest_path = setup_dir / "manifest.json"
-    if manifest_path.exists():
+    from backend.scenario_builder import read_setup_bundle
+    bundle = read_setup_bundle(setup_dir)
+    starting_setup = bundle["starting_setup"]
+    m = bundle["manifest"]
+    if m:
         try:
-            with open(manifest_path, "r") as f:
-                m = json.load(f)
             result = {
                 "id": m.get("id", setup_id),
                 "display_name": m.get("display_name", setup_id),
@@ -648,9 +635,9 @@ def load_static_definitions(
     else:
         raise ValueError("Either data_dir or setup_id must be provided")
 
-    # Load units
-    with open(data_dir / "units.json", "r") as f:
-        units_data = json.load(f)
+    from backend.scenario_builder import read_setup_bundle
+    bundle = read_setup_bundle(data_dir)
+    units_data = bundle["units"]
 
     units = {}
     for unit_id, data in units_data.items():
@@ -678,8 +665,7 @@ def load_static_definitions(
         )
 
     # Load territories
-    with open(data_dir / "territories.json", "r") as f:
-        territories_data = json.load(f)
+    territories_data = bundle["territories"]
 
     territories = {}
     for territory_id, data in territories_data.items():
@@ -698,17 +684,15 @@ def load_static_definitions(
         )
 
     # Load factions
-    with open(data_dir / "factions.json", "r") as f:
-        factions_data = json.load(f)
+    factions_data = bundle["factions"]
 
     factions = factions_from_json(factions_data)
 
     # Load camps (mobilization points; each has a territory, destroyed when territory is captured)
     camps = {}
     camps_path = data_dir / "camps.json"
-    if camps_path.exists():
-        with open(camps_path, "r") as f:
-            camps_data = json.load(f)
+    if bundle["camps"]:
+        camps_data = bundle["camps"]
         for camp_id, data in camps_data.items():
             camps[camp_id] = CampDefinition(
                 id=data["id"],
@@ -717,9 +701,8 @@ def load_static_definitions(
     # Load ports (naval mobilization points; immutable, not destroyed on conquest)
     ports = {}
     ports_path = data_dir / "ports.json"
-    if ports_path.exists():
-        with open(ports_path, "r") as f:
-            ports_data = json.load(f)
+    if bundle["ports"]:
+        ports_data = bundle["ports"]
         for port_id, data in ports_data.items():
             ports[port_id] = PortDefinition(
                 id=data["id"],
@@ -818,5 +801,5 @@ def load_starting_setup(data_dir: Path | str | None = None, setup_id: str | None
         path = _setup_dir(setup_id) / "starting_setup.json"
     else:
         return load_setup(_default_setup_id())["starting_setup"]
-    with open(path, "r") as f:
-        return json.load(f)
+    from backend.scenario_builder import read_setup_bundle
+    return read_setup_bundle(path.parent)["starting_setup"]

@@ -233,6 +233,11 @@ def _setup_documents(db: Session | None) -> Iterable[tuple[str, dict[str, Any], 
         if not SETUPS_DIR.is_dir():
             return
         for folder in sorted(SETUPS_DIR.iterdir()):
+            if (folder / "setup.json").is_file():
+                from backend.scenario_builder import read_setup_bundle
+                bundle = read_setup_bundle(folder)
+                yield folder.name, bundle["units"], bundle["territories"], {}
+                continue
             docs = []
             for name in ("units.json", "territories.json"):
                 try:

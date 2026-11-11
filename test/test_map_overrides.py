@@ -735,3 +735,23 @@ def test_reported_missing_landmarks_round_trip(make_client, players, image):
     assert saved.status_code == 200
     reloaded = client.get("/maps/wotr_map_1.2/overrides").json()["overrides"]
     assert reloaded["landscape"]["territories"]["mordor"] == [placement]
+
+
+def test_file_graph_save_updates_shared_defaults_without_duplicating_setup_geometry(tmp_path, monkeypatch):
+    from backend import map_overrides
+    maps = tmp_path / "maps"
+    setups = tmp_path / "setups"
+    (maps / "world").mkdir(parents=True)
+    (setups / "alpha").mkdir(parents=True)
+    records = {"shire": {"id": "shire", "adjacent": []}, "bree": {"id": "bree", "adjacent": []}}
+    (maps / "world" / "territories.json").write_text(json.dumps(records))
+    source = {"manifest": {"id": "alpha", "map_asset": "world"}, "territories": {"shire": {"seed": "shire", "overrides": {"produces": {"power": 4}}}}}
+    (setups / "alpha" / "setup.json").write_text(json.dumps(source))
+    monkeypatch.setattr(map_overrides, "MAPS_DIR", maps)
+    monkeypatch.setattr(map_overrides, "SETUPS_DIR", setups)
+    monkeypatch.setattr(map_overrides, "is_files_setup_source", lambda: True)
+    map_overrides.save_map_overrides(None, "world", {"graph": {"adjacent": {"shire": ["bree"], "bree": ["shire"]}}})
+    assert json.loads((maps / "world" / "territories.json").read_text())["shire"]["adjacent"] == ["bree"]
+    updated = json.loads((setups / "alpha" / "setup.json").read_text())
+    assert updated == source
+    assert not (setups / "alpha" / "territories.json").exists()

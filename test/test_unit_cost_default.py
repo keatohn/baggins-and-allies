@@ -34,10 +34,8 @@ def test_set_cost_is_kept():
 
 def test_save_flags_a_unit_missing_its_stats():
     root = Path(__file__).resolve().parent.parent / "backend" / "data" / "setups" / "woteas_1.0"
-    payload = {}
-    for key in ("manifest", "units", "territories", "factions", "camps", "ports", "starting_setup"):
-        path = root / f"{key}.json"
-        payload[key] = json.loads(path.read_text()) if path.exists() else {}
+    from backend.scenario_builder import read_setup_bundle
+    payload = read_setup_bundle(root)
     faction = next(iter(payload["factions"]))
     payload["units"]["celebrimbor"] = {"id": "celebrimbor", "faction": faction}
     errors = validate_setup_payload(payload)

@@ -70,6 +70,10 @@ def _catalog(db: Session | None) -> dict[str, Any]:
 
 def import_setup_folder_to_dicts(setup_dir: Path) -> dict[str, Any] | None:
     """Load all setup JSON from a folder; returns None if not a complete setup."""
+    if (setup_dir / "setup.json").is_file():
+        from backend.scenario_builder import read_setup_bundle
+        bundle = read_setup_bundle(setup_dir)
+        return {"id": bundle["manifest"].get("id", setup_dir.name), **bundle}
     manifest_path = setup_dir / "manifest.json"
     starting_path = setup_dir / "starting_setup.json"
     if not manifest_path.is_file() or not starting_path.is_file():
@@ -127,6 +131,16 @@ def seed_setups_if_empty(db: Session) -> int:
         db.add(row)
         n += 1
     if n:
+        # An empty database starts from the exact canonical files and their seeds,
+        # not a second majority-derived authoring representation.
+        from backend.api.models import AppSetting
+        from backend.scenario_store import SETTING
+        from backend.scenario_builder import canonical_setup, load_library
+        canonical_files = sorted(SETUPS_DIR.glob("*/setup.json"))
+        if canonical_files and not db.query(AppSetting).filter(AppSetting.key == SETTING).first():
+            state = {"library": load_library(SETUPS_DIR.parent), "setups": {
+                path.parent.name: canonical_setup(json.loads(path.read_text())) for path in canonical_files}}
+            db.add(AppSetting(key=SETTING, value_json=json.dumps(state, ensure_ascii=False)))
         db.commit()
     return n
 
@@ -222,6 +236,13 @@ def list_setups_menu_from_db(db: Session, *, include_admin: bool = False) -> lis
 
 
 def list_all_setups_admin(db: Session) -> list[dict[str, Any]]:
+    if is_files_setup_source():
+        from backend.engine.definitions import read_setup_manifest
+        return [{"id": folder.name, "display_name": manifest.get("display_name", folder.name),
+                 "map_asset": manifest.get("map_asset") or folder.name, "is_active": manifest.get("is_active"),
+                 "updated_at": None}
+                for folder in sorted(SETUPS_DIR.iterdir()) if (folder / "setup.json").is_file()
+                if (manifest := read_setup_manifest(folder.name))]
     rows = db.query(Setup).order_by(Setup.id).all()
     out = []
     for row in rows:
@@ -409,47 +430,13 @@ def create_setup_from_bundle(db: Session, new_id: str, bundle: dict[str, Any], *
     return {"id": new_id}
 
 
-def save_setup_bundle(db: Session, setup_id: str, payload: dict[str, Any], authoring_source: dict | None = None) -> None:
-    """Persist validated payload; manifest.id is forced to setup_id (immutable id)."""
-    row = db.query(Setup).filter(Setup.id == setup_id).first()
-    if not row:
-        raise ValueError("setup not found")
-    manifest = dict(payload["manifest"])
-    manifest["id"] = setup_id
-    payload = dict(payload)
-    payload["manifest"] = manifest
-
-    from backend.scenario_store import load_state, source_for_bundle, stage_state
-    from backend.scenario_builder import compile_scenario
-
+def save_setup_bundle(db: Session, setup_id: str, payload: dict[str, Any]) -> None:
+    """Compatibility import for callers holding resolved runtime records."""
+    from backend.scenario_store import load_state, save_definition
+    from backend.scenario_builder import setup_from_bundle
     state = load_state(db)
-    source = authoring_source if authoring_source is not None else state["sources"][setup_id]
-    source = source_for_bundle(source, payload, state["library"], state["sources"].get)
-    if compile_scenario(source, state["library"]) != {key: payload[key] for key in (
-        "manifest", "units", "territories", "factions", "camps", "ports", "starting_setup"
-    )}:
-        raise ValueError("Authoring source does not compile to the submitted bundle")
-    state["sources"][setup_id] = source
-    from backend.scenario_store import compile_all, stage_bundle
-    compiled = compile_all(state)
-    for child_id, child_source in state["sources"].items():
-        if child_source.get("extends") == setup_id:
-            errors = validate_setup_payload(compiled[child_id], _catalog(db))
-            if errors:
-                raise ValueError(f"{child_id}: " + "; ".join(errors))
-            stage_bundle(db, child_id, compiled[child_id])
-    stage_state(db, state)
-
-    row.manifest_json = json.dumps(manifest, ensure_ascii=False)
-    row.units_json = json.dumps(payload["units"], ensure_ascii=False)
-    row.territories_json = json.dumps(payload["territories"], ensure_ascii=False)
-    row.factions_json = json.dumps(payload["factions"], ensure_ascii=False)
-    row.camps_json = json.dumps(payload["camps"], ensure_ascii=False)
-    row.ports_json = json.dumps(payload["ports"], ensure_ascii=False)
-    row.starting_setup_json = json.dumps(payload["starting_setup"], ensure_ascii=False)
-    row.specials_json = EMPTY_SPECIALS_JSON
-    row.updated_at = datetime.utcnow()
-    db.commit()
+    setup = setup_from_bundle(payload, state["library"], state["setups"].get(setup_id))
+    save_definition(db, setup_id, setup)
 
 
 def delete_setup(db: Session, setup_id: str) -> None:
@@ -459,10 +446,11 @@ def delete_setup(db: Session, setup_id: str) -> None:
         raise ValueError("setup not found")
     from backend.scenario_store import load_state, stage_state
     state = load_state(db)
-    children = [key for key, source in state["sources"].items() if source.get("extends") == setup_id]
-    if children:
-        raise ValueError("Cannot delete a scenario inherited by: " + ", ".join(children))
-    state["sources"].pop(setup_id, None)
+    state["setups"].pop(setup_id, None)
+    if is_files_setup_source():
+        path = SETUPS_DIR / setup_id / "setup.json"
+        if path.is_file():
+            path.unlink()
     stage_state(db, state)
     db.delete(row)
     db.commit()
@@ -509,7 +497,7 @@ def list_all_unit_icons(db: Session | None) -> list[str]:
             if not d.is_dir():
                 continue
             try:
-                _add_units(_read_json_file(d / "units.json"))
+                _add_units(import_setup_folder_to_dicts(d)["units"])
             except (OSError, ValueError, json.JSONDecodeError):
                 continue
     return sorted(icons)
@@ -541,7 +529,9 @@ def _iter_setup_units_and_factions(db: Session | None):
         if not folder.is_dir():
             continue
         try:
-            yield _read_json_file(folder / "units.json"), _read_json_file(folder / "factions.json")
+            bundle = import_setup_folder_to_dicts(folder)
+            if bundle:
+                yield bundle["units"], bundle["factions"]
         except (OSError, ValueError, json.JSONDecodeError):
             continue
 
@@ -581,7 +571,7 @@ def icon_faction_hits(db: Session | None) -> dict[str, list[tuple[str, str, str]
 # ----- Optional DB: helpers used from definitions.py (no Session in tests) -----
 
 def db_has_any_setup(db: Session) -> bool:
-    if not inspect(db.get_bind()).has_table(Setup.__tablename__):
+    if not inspect(db.connection()).has_table(Setup.__tablename__):
         return False
     return db.query(Setup).first() is not None
 

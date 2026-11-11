@@ -65,8 +65,8 @@ def _load_setup(setup_id: str = SETUP_ID):
 
     ud, td, fd, cd, port_d = load_static_definitions(setup_id=setup_id)
     setup = load_starting_setup(setup_id=setup_id)
-    manifest = json.loads(
-        (pathlib.Path("backend/data/setups") / setup_id / "manifest.json").read_text()
+    setup_document = json.loads(
+        (pathlib.Path("backend/data/setups") / setup_id / "setup.json").read_text()
     )
     state = initialize_game_state(
         faction_defs=fd,
@@ -74,9 +74,9 @@ def _load_setup(setup_id: str = SETUP_ID):
         unit_defs=ud,
         starting_setup=setup,
         camp_defs=cd,
-        victory_criteria=manifest.get("victory_criteria"),
-        camp_cost=manifest.get("camp_cost"),
-        stronghold_repair_cost=manifest.get("stronghold_repair_cost"),
+        victory_criteria=setup_document["manifest"].get("victory_criteria"),
+        camp_cost=setup_document["manifest"].get("camp_cost"),
+        stronghold_repair_cost=setup_document["manifest"].get("stronghold_repair_cost"),
     )
     return state, ud, td, fd, cd, port_d
 

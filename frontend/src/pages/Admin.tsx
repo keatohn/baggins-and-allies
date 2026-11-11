@@ -5,9 +5,8 @@ import { useMenuScroll } from '../components/MenuScrollContext';
 import { api, getAuthToken, getResolvedApiBase, usesViteApiProxy } from '../services/api';
 import type { AdminSetupBundle, AdminSetupListItem, AuthPlayer, Catalog, ScenarioLibrary, UnitFormulas } from '../services/api';
 import { ScenarioOverrides } from './admin/ScenarioOverrides';
-import { sourceForRecords } from './admin/scenarioOverridesModel';
+import { setupForRecords, resolveSetup, withScenarioMap } from './admin/scenarioOverridesModel';
 import { ScenarioLibraryPanel } from './admin/ScenarioLibraryPanel';
-import { ScenarioSourceDialog } from './admin/ScenarioSourceDialog';
 import {
   CampsPanel,
   FactionsPanel,
@@ -140,7 +139,7 @@ function CreateSetupDialog({
 }) {
   const [newId, setNewId] = useState('');
   const [duplicateFrom, setDuplicateFrom] = useState('');
-  const [createMode, setCreateMode] = useState<'empty' | 'copy' | 'import' | 'source'>('empty');
+  const [createMode, setCreateMode] = useState<'empty' | 'copy' | 'import' | 'setup'>('empty');
   const [masterJsonText, setMasterJsonText] = useState('');
   const [mapToCreate, setMapToCreate] = useState('');
   const [creationLibrary, setCreationLibrary] = useState<ScenarioLibrary | null>(null);
@@ -175,11 +174,12 @@ function CreateSetupDialog({
     setErr(null);
     try {
       if (createMode === 'empty' && mapToCreate) {
-        await api.adminCreateSetup({ id, source: JSON.stringify({ version: 1, map: mapToCreate,
+        await api.adminCreateSetup({ id, setup: JSON.stringify({
           manifest: { id, display_name: id, map_asset: mapToCreate, is_active: false }, units: {}, factions: {},
+          territories: Object.fromEntries(Object.keys(creationLibrary?.maps[mapToCreate] ?? {}).map(id => [id, { seed: id }])),
           camps: {}, ports: {}, starting_setup: { turn_order: [], territory_owners: {}, starting_units: {} } }) });
-      } else if (createMode === 'source') {
-        await api.adminCreateSetup({ id, source: masterJsonText });
+      } else if (createMode === 'setup') {
+        await api.adminCreateSetup({ id, setup: masterJsonText });
       } else if (createMode === 'import') {
         let parsed: unknown;
         const jsonText = normalizeImportedMasterJsonText(masterJsonText) || '{}';
@@ -272,7 +272,7 @@ function CreateSetupDialog({
               />
               Import JSON
             </label>
-            <label className="admin-form__radio-label"><input type="radio" name="admin-create-mode" checked={createMode === 'source'} onChange={() => setCreateMode('source')} />Scenario YAML / JSON</label>
+            <label className="admin-form__radio-label"><input type="radio" name="admin-create-mode" checked={createMode === 'setup'} onChange={() => setCreateMode('setup')} />Setup JSON (seed references)</label>
           </div>
         </div>
         <div className="admin-form__row">
@@ -309,10 +309,10 @@ function CreateSetupDialog({
             </select>
           </div>
         ) : null}
-        {createMode === 'import' || createMode === 'source' ? (
+        {createMode === 'import' || createMode === 'setup' ? (
           <div className="admin-form__row admin-form__row--stack">
             <label className="admin-form__label" htmlFor="admin-master-json">
-              {createMode === 'source' ? 'Declarative scenario source' : 'Bundle JSON'}
+              {createMode === 'setup' ? 'Setup JSON' : 'Bundle JSON'}
             </label>
             <textarea
               id="admin-master-json"
@@ -323,9 +323,9 @@ function CreateSetupDialog({
               onChange={(e) => setMasterJsonText(e.target.value)}
             />
             <p className="admin-form__micro">
-              {createMode === 'source' ? 'Reference shared seeds and a map, then declare only your overrides. Imported scenarios start as drafts.' : `Keys: ${MASTER_BUNDLE_KEYS.join(', ')}`}
+              {createMode === 'setup' ? 'Selected seeds, optional overrides, and starting positions. Imported setups start as drafts.' : `Keys: ${MASTER_BUNDLE_KEYS.join(', ')}`}
             </p>
-            <input type="file" accept=".json,.yaml,.yml" aria-label="Import scenario file" onChange={(e) => { const file = e.target.files?.[0]; if (file) file.text().then(setMasterJsonText).catch(() => setErr('Could not read file.')); }} />
+            <input type="file" accept=".json,application/json" aria-label="Import setup JSON" onChange={(e) => { const file = e.target.files?.[0]; if (file) file.text().then(setMasterJsonText).catch(() => setErr('Could not read file.')); }} />
           </div>
         ) : null}
         {err ? <div className="admin-page__error">{err}</div> : null}
@@ -363,7 +363,6 @@ export default function Admin() {
   const [mapViewOpen, setMapViewOpen] = useState(false);
   const [mapsOpen, setMapsOpen] = useState(false);
   const [seedsOpen, setSeedsOpen] = useState(false);
-  const [sourceOpen, setSourceOpen] = useState(false);
   const [scenarioLibrary, setScenarioLibrary] = useState<ScenarioLibrary | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -522,14 +521,11 @@ export default function Admin() {
     setDiscarded(false);
     setSavedBundle(null);
     setLoadError(null);
-    Promise.all([api.adminGetSetup(id), api.adminGetScenarioSource(id)])
-      .then(([b, authoring]) => {
-        setScenarioLibrary(authoring.library);
-        const next = cloneSetupBundle({
-          ...b,
-          authoring_source: authoring.resolved_source,
-          manifest: { ...b.manifest, id: b.id },
-        } as AdminSetupBundle);
+    api.adminGetSetup(id)
+      .then((b) => {
+        const { library, ...loaded } = b;
+        setScenarioLibrary(library ?? null);
+        const next = cloneSetupBundle(loaded);
         setBundle(next);
         setSavedBundle(cloneSetupBundle(next));
       })
@@ -623,16 +619,8 @@ export default function Admin() {
     if (!selectedId || !bundle) return;
     const invalidOverride = document.querySelector<HTMLTextAreaElement>('.scenario-overrides textarea:invalid');
     if (invalidOverride) { invalidOverride.reportValidity(); return; }
-    const body = {
-      manifest: { ...(bundle.manifest as Record<string, unknown>), id: selectedId },
-      authoring_source: bundle.authoring_source,
-      units: bundle.units as DictEntityMap,
-      territories: bundle.territories as DictEntityMap,
-      factions: bundle.factions as DictEntityMap,
-      camps: bundle.camps as DictEntityMap,
-      ports: bundle.ports as DictEntityMap,
-      starting_setup: bundle.starting_setup as Record<string, unknown>,
-    };
+    if (!scenarioLibrary) return;
+    const body = setupForRecords(bundle, scenarioLibrary);
     setSaving(true);
     try {
       await api.adminPutSetup(selectedId, body);
@@ -729,6 +717,25 @@ export default function Admin() {
       setDeleteError(e instanceof Error ? e.message : 'Delete failed');
       setDeleting(false);
     }
+  };
+
+  const changeManifest = async (m: Record<string, unknown>) => {
+    if (!bundle) return;
+    if (m.map_asset === bundle.manifest.map_asset) {
+      setBundle({ ...bundle, manifest: { ...m, id: selectedId } });
+      return;
+    }
+    if (!m.map_asset || !window.confirm('Change this setup’s map? This replaces the territory list, terrain and adjacency. Matching territories keep their ownership, units and metadata overrides. Territories outside the new map lose their placements, ownership, camps and ports; removed capitals are cleared. New territories start unowned with no units. Save the setup to apply these changes.')) return;
+    setLoadingBundle(true);
+    try {
+      const library = await api.adminGetScenarioLibrary();
+      const next = withScenarioMap(bundle, library, String(m.map_asset));
+      setScenarioLibrary(library);
+      setBundle({ ...next, manifest: { ...m, id: selectedId } });
+      setSaveError(null);
+      setSaveOk(false);
+    } catch (e) { setSaveError(e instanceof Error ? e.message : String(e)); }
+    finally { setLoadingBundle(false); }
   };
 
   const renderTabBody = () => {
@@ -855,13 +862,13 @@ export default function Admin() {
       const j = (v: unknown, fn: (p: unknown) => void) => <JsonTabEditor value={v} onChange={fn} />;
       switch (activeTab) {
         case 'manifest':
-          return j(bundle.manifest, (p) => setBundle((b) => (b ? { ...b, manifest: p as typeof b.manifest } : null)));
+          return j(bundle.manifest, (p) => { void changeManifest(p as Record<string, unknown>); });
         case 'units':
-          return j(bundle.units, (p) => setBundle((b) => (b ? { ...b, units: p as typeof b.units } : null)));
+          return scenarioLibrary ? j(setupForRecords(bundle, scenarioLibrary).units, (p) => setBundle(resolveSetup({ ...setupForRecords(bundle, scenarioLibrary), units: p as NonNullable<typeof bundle.setup>['units'] }, scenarioLibrary))) : null;
         case 'territories':
-          return j(bundle.territories, (p) => setBundle((b) => (b ? { ...b, territories: p as typeof b.territories } : null)));
+          return scenarioLibrary ? j(setupForRecords(bundle, scenarioLibrary).territories, (p) => setBundle(resolveSetup({ ...setupForRecords(bundle, scenarioLibrary), territories: p as NonNullable<typeof bundle.setup>['territories'] }, scenarioLibrary))) : null;
         case 'factions':
-          return j(bundle.factions, (p) => setBundle((b) => (b ? { ...b, factions: p as typeof b.factions } : null)));
+          return scenarioLibrary ? j(setupForRecords(bundle, scenarioLibrary).factions, (p) => setBundle(resolveSetup({ ...setupForRecords(bundle, scenarioLibrary), factions: p as NonNullable<typeof bundle.setup>['factions'] }, scenarioLibrary))) : null;
         case 'camps':
           return j(bundle.camps, (p) => setBundle((b) => (b ? { ...b, camps: p as typeof b.camps } : null)));
         case 'ports':
@@ -872,8 +879,8 @@ export default function Admin() {
           return null;
       }
     }
-    if (!useJson && scenarioLibrary && bundle.authoring_source && (activeTab === 'units' || activeTab === 'factions' || activeTab === 'territories')) {
-      return <ScenarioOverrides key={`${selectedId}:${activeTab}`} section={activeTab} source={sourceForRecords(bundle, scenarioLibrary)!} library={scenarioLibrary} onChange={(records, source) => setBundle((current) => current ? { ...current, [activeTab]: records, authoring_source: source } : null)} />;
+    if (!useJson && scenarioLibrary && bundle.setup && (activeTab === 'units' || activeTab === 'factions' || activeTab === 'territories')) {
+      return <ScenarioOverrides key={`${selectedId}:${activeTab}`} section={activeTab} source={setupForRecords(bundle, scenarioLibrary)} library={scenarioLibrary} onChange={(records, source) => setBundle((current) => current ? { ...current, [activeTab]: records, setup: source } : null)} />;
     }
     switch (activeTab) {
       case 'manifest':
@@ -883,9 +890,7 @@ export default function Admin() {
             manifest={bundle.manifest as Record<string, unknown>}
             territoryIds={Object.keys((bundle.territories as Record<string, unknown>) ?? {}).sort()}
             territoryPower={printedTerritoryPower(bundle.territories)}
-            onManifestChange={(m) =>
-              setBundle((b) => (b ? { ...b, manifest: { ...m, id: selectedId } as typeof b.manifest } : null))
-            }
+            onManifestChange={changeManifest}
           />
         );
       case 'units':
@@ -1145,7 +1150,11 @@ export default function Admin() {
             ))}
           </div>
           <div className="admin-page__tab-previews">
-            <button type="button" className="admin-page__tab" disabled={!bundle || setupDirty} title={setupDirty ? 'Save or discard form changes before editing the source' : 'Edit declarative YAML / JSON'} onClick={() => setSourceOpen(true)}>Scenario source</button>
+            <button type="button" className="admin-page__tab" disabled={!bundle || !scenarioLibrary} onClick={() => {
+              if (!bundle || !scenarioLibrary) return;
+              const url = URL.createObjectURL(new Blob([JSON.stringify(setupForRecords(bundle, scenarioLibrary), null, 2) + '\n'], { type: 'application/json' }));
+              const link = document.createElement('a'); link.href = url; link.download = `${selectedId}.json`; link.click(); URL.revokeObjectURL(url);
+            }}>Download setup JSON</button>
             <button
               type="button"
               className="admin-page__tab"
@@ -1266,7 +1275,6 @@ export default function Admin() {
         />
       ) : null}
       {seedsOpen && <ScenarioLibraryPanel onClose={() => setSeedsOpen(false)} onSaved={() => { refreshList(); if (!setupDirty) loadBundle(selectedId); }} />}
-      {sourceOpen && <ScenarioSourceDialog setupId={selectedId} onClose={() => setSourceOpen(false)} onSaved={() => { refreshList(); loadBundle(selectedId); }} />}
       {resolveAsymmetriesOpen && (
         <div className="admin-modal-overlay" role="presentation" onClick={() => setResolveAsymmetriesOpen(false)}>
           <div

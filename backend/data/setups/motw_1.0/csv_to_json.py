@@ -1,28 +1,8 @@
 #!/usr/bin/env python3
-"""
-Generate JSON setup files for motw_1.0 from CSVs (same column layout as wotr_1.1).
+"""Import unit/faction/territory CSV records into canonical setup.json.
 
-Place in this directory (any of the listed names):
-  units.csv or motw_units.csv — columns (row 1 = header):
-    id, display_name, faction, archetype, attack, defense, rolls, moves, health,
-    transport, purchasable, cost power, tags, specials, home_territory_ids, icon
-
-  terr.csv, territories.csv, or motw_terr.csv — columns:
-    id, display_name, terrain_type, produces_power, is_stronghold,
-    stronghold_base_health, ownable, adjacent, aerial_adjacent,
-    starting_setup_faction, starting_setup_units
-
-starting_setup_units examples: "2 hobbit" or "1 rivendell_knight, 3 rivendell_warrior"
-
-Run from repo root or this folder:
-  python3 backend/data/setups/motw_1.0/csv_to_json.py
-  python3 backend/data/setups/motw_1.0/csv_to_json.py --units-only   # only units.json (ignore terr CSV if present)
-
-If no terr.csv / territories.csv / motw_terr.csv is present, only units.json is written (no error).
-
-Writes (when territory CSV exists): units.json, territories.json, starting_setup.json, factions.json
-Always writes units.json when a units CSV exists.
-Does not overwrite: manifest.json, camps.json, ports.json (edit those by hand). Specials live in backend/data/catalog.json.
+Geometry belongs to the selected map. --units-only edits just unit selections
+and overrides; the importer never creates duplicate resolved setup files.
 """
 from __future__ import annotations
 
@@ -267,73 +247,40 @@ def build_factions_json(
     return out
 
 
+def _require_units_csv():
+    path = _first_existing_csv(*UNITS_CSV_NAMES)
+    if path is None:
+        raise ValueError(f"No units CSV in {SETUP_DIR}")
+    return path
+
+
 def main() -> None:
-    units_only = "--units-only" in sys.argv
-
-    units_path = _first_existing_csv(*UNITS_CSV_NAMES)
-    if units_path is None:
-        print(f"ERROR: No units CSV in {SETUP_DIR}. Expected one of: {UNITS_CSV_NAMES}", file=sys.stderr)
-        sys.exit(1)
-    print(f"Using units CSV: {units_path.name}")
-    units_rows = load_units_csv(units_path)
+    sys.path.insert(0, str(SETUP_DIR.parents[3]))
+    from backend.tools.scenario import update_setup_sections
+    units_rows = load_units_csv(_require_units_csv())
     if not units_rows:
-        print("ERROR: No unit rows after header.", file=sys.stderr)
-        sys.exit(1)
-    units_by_id = {u["id"]: u for u in units_rows}
-    with open(SETUP_DIR / "units.json", "w", encoding="utf-8") as f:
-        json.dump(units_by_id, f, indent=2)
-    print(f"Wrote units.json ({len(units_by_id)} units)")
-
-    if units_only:
-        print("Skipping territories, starting_setup, factions (--units-only).")
+        raise ValueError("No unit rows after header")
+    updates = {"units": {unit["id"]: unit for unit in units_rows}}
+    if "--units-only" in sys.argv:
+        update_setup_sections(SETUP_DIR, updates)
+        print("Updated setup.json units")
         return
-
     terr_csv = _first_existing_csv(*TERR_CSV_NAMES)
-    if terr_csv is None:
-        print(
-            f"No territories CSV (expected one of: {TERR_CSV_NAMES}); "
-            "skipping territories.json, starting_setup.json, factions.json."
-        )
-        return
-    print(f"Using territories CSV: {terr_csv.name}")
-    terr_rows, owners, units_by_terr, turn_order = load_territories_csv(terr_csv)
-    # Neutral is a faction for units / ownership, not a seat in turn_order (matches wotr setups).
-    turn_order = [f for f in turn_order if f != "neutral"]
-    territories_by_id: dict[str, dict] = {}
-    for t in terr_rows:
-        tid = t["id"]
-        if tid not in territories_by_id:
-            territories_by_id[tid] = t
-    with open(SETUP_DIR / "territories.json", "w", encoding="utf-8") as f:
-        json.dump(territories_by_id, f, indent=2)
-    print(f"Wrote territories.json ({len(territories_by_id)} territories)")
-
-    faction_ids = _faction_ids_from_units(units_rows) | set(owners.values())
-    faction_ids.discard("")
-    if "neutral" in owners.values():
-        faction_ids.add("neutral")
-
-    # Append factions that appear only in units.csv (no owned territory row yet)
-    for fid in sorted(faction_ids):
-        if fid not in turn_order and fid != "neutral":
-            turn_order.append(fid)
-
-    setup = {
-        "turn_order": turn_order,
-        "territory_owners": owners,
-        "starting_units": {tid: lst for tid, lst in units_by_terr.items()},
-    }
-    with open(SETUP_DIR / "starting_setup.json", "w", encoding="utf-8") as f:
-        json.dump(setup, f, indent=2)
-    print(
-        f"Wrote starting_setup.json: turn_order={len(turn_order)} factions, "
-        f"{len(owners)} owners, {len(units_by_terr)} territories with stacks"
-    )
-
-    factions = build_factions_json(faction_ids, owners, turn_order)
-    with open(SETUP_DIR / "factions.json", "w", encoding="utf-8") as f:
-        json.dump(factions, f, indent=2)
-    print(f"Wrote factions.json ({len(factions)} factions) — review alliance, capitals, icons, and colors.")
+    if terr_csv is not None:
+        terr_rows, owners, stacks, turn_order = load_territories_csv(terr_csv)
+        faction_ids = _faction_ids_from_units(units_rows) | set(owners.values())
+        faction_ids.discard("")
+        turn_order = [fid for fid in turn_order if fid != "neutral"]
+        for fid in sorted(faction_ids):
+            if fid not in turn_order and fid != "neutral":
+                turn_order.append(fid)
+        updates["factions"] = build_factions_json(faction_ids, owners, turn_order)
+        updates["starting_setup"] = {"turn_order": turn_order, "territory_owners": owners, "starting_units": stacks}
+        updates["territories"] = {}
+        for territory in terr_rows:
+            updates["territories"].setdefault(territory["id"], territory)
+    update_setup_sections(SETUP_DIR, updates)
+    print("Updated setup.json seed selections, overrides and starting positions")
 
 
 if __name__ == "__main__":

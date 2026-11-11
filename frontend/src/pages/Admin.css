@@ -74,6 +74,8 @@
 
 /* Tab buttons: same parchment feel as sub-page Menu, compact. */
 .admin-page__tab {
+  white-space: nowrap;
+  line-height: 1.4;
   padding: 0.28rem 0.55rem;
   font-family: var(--font-parchment), Georgia, serif;
   font-size: 0.78rem;
@@ -491,8 +493,8 @@
 }
 
 .admin-page__tabs-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   column-gap: 1rem;
   row-gap: 0.65rem;
@@ -507,7 +509,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 0.3rem;
 }
 
@@ -4410,11 +4412,6 @@ body:has(.admin-modal--map-editor) .menu-scroll-overlay:not(.menu-scroll-overlay
 .admin-modal--seeds .balance-modal__header { align-items: center; }
 .admin-modal--seeds .admin-modal__actions { position: sticky; bottom: -1.25rem; padding: .75rem 0; background: var(--parchment-light); z-index: 1; }
 .scenario-library__review pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; max-height: 15rem; overflow: auto; }
-.scenario-source { width: min(1100px, 94vw); max-height: 90vh; overflow: auto; }
-.scenario-source > textarea { width: 100%; box-sizing: border-box; font-family: monospace; }
-.scenario-source pre, .scenario-library pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-.scenario-source table { width: 100%; text-align: left; border-collapse: collapse; }
-.scenario-source th, .scenario-source td { padding: .4rem; border-bottom: 1px solid #7773; }
 @media (max-width: 700px) { .scenario-field { grid-template-columns: 1fr; } }
 
 /* Setup selection shares the Seeds sidebar and admin dialog controls. */

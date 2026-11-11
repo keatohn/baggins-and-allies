@@ -1,73 +1,111 @@
-"""Admin authoring state; gameplay continues to consume compiled Setup rows.
+"""Canonical compact setup JSON plus generated gameplay snapshots.
 
-An AppSetting keeps this additive: no existing setup columns or games are migrated.
-First use derives defaults from *database* setups, never the historical file catalog.
+The library and setup definitions are authoritative. Setup rows contain generated
+runtime data only; editing never reconciles two competing documents.
 """
 from __future__ import annotations
-
 from copy import deepcopy
 import json
-
+from pathlib import Path
+import re
+import xml.etree.ElementTree as ET
 from sqlalchemy.orm import Session
-
 from backend.api.models import AppSetting, Setup
 from backend.scenario_builder import (
-    DELETE, MAP_TERRITORY_FIELDS, compile_scenario, delta, extract_library, extract_source,
-    overlay_overrides as _overlay, prepare_territory_seeds, resolve_source,
-    scenario_map_id, upgrade_territory_sources,
+    BUNDLE_KEYS, MAP_TERRITORY_FIELDS, canonical_setup, compile_setup, delta,
+    extract_library, load_library, migrate_legacy_setups, prepare_territory_seeds,
+    read_setup_bundle, scenario_map_id, setup_from_bundle, write_library, write_setup,
 )
 from backend.setup_validation import validate_setup_payload
 
 SETTING = "scenario_authoring_v1"
 
+def _include_map_seed_choices(db: Session, state: dict) -> None:
+    """Offer matching SVG regions without expanding existing scenario selections."""
+    from backend.map_assets import load_map_svg
+    from backend.map_overrides import apply_map_graph, apply_map_terrain
+    library = state["library"]
+    label_key = "{http://www.inkscape.org/namespaces/inkscape}label"
+    for map_id, records in library["maps"].items():
+        svg = load_map_svg(db, map_id)
+        if not svg:
+            path = Path(__file__).resolve().parents[1] / "frontend" / "public" / f"{map_id}.svg"
+            if path.is_file():
+                svg = path.read_text(encoding="utf-8")
+        if not svg:
+            continue
+        try:
+            root = ET.fromstring(svg)
+        except ET.ParseError:
+            continue
+        region_root = next((el for el in root.iter() if el.tag.rsplit('}', 1)[-1] == 'g' and el.get(label_key) == 'svg_borders'), root)
+        matches = set()
+        for el in region_root.iter():
+            if el.tag.rsplit('}', 1)[-1] != 'path' or not el.get('d'):
+                continue
+            tid = (el.get('id') or '').strip()
+            if not tid or re.fullmatch(r'path\d+', tid, re.I):
+                tid = re.sub(r'\s+', '_', el.get(label_key, '').lower()).replace("'", '').replace('-', '_')
+            matches.add(tid.lower())
+        additions = (matches & library.get("territories", {}).keys()) - records.keys()
+        if not additions:
+            continue
+        from backend.catalog import load_catalog
+        terrain_types = load_catalog(db)["terrain_types"]
+        default_terrain = "plains" if "plains" in terrain_types else next((t for t in terrain_types if t != "sea"), "sea")
+        for tid in sorted(additions):
+            records[tid] = {**deepcopy(library["territories"][tid]), "terrain_type": default_terrain,
+                            "adjacent": [], "aerial_adjacent": [], "ford_adjacent": []}
+        apply_map_terrain(records, map_id, db)
+        apply_map_graph(records, map_id, db)
+
 
 def _bundles(db: Session) -> dict[str, dict]:
-    from backend.setup_data import get_admin_setup_bundle
-    return {row.id: {key: value for key, value in get_admin_setup_bundle(db, row.id).items() if key != "id"}
+    from backend.setup_data import is_files_setup_source
+    from backend.engine.definitions import SETUPS_DIR
+    if is_files_setup_source():
+        return {folder.name: read_setup_bundle(folder) for folder in sorted(SETUPS_DIR.iterdir()) if (folder / "setup.json").is_file()}
+    return {row.id: {section: json.loads(getattr(row, f"{section}_json")) for section in BUNDLE_KEYS}
             for row in db.query(Setup).order_by(Setup.id).all()}
 
 
 def load_state(db: Session) -> dict:
-    row = db.query(AppSetting).filter(AppSetting.key == SETTING).first()
-    bundles = _bundles(db)
-    if row:
-        state = json.loads(row.value_json)
-    else:
-        state = {"library": extract_library(bundles), "sources": {}}
-    library = state["library"]
-    # Terrain/topology remain owned by the existing map editor and runtime loader.
-    # Reflect edits made there in authoring defaults, including DB-only map assets.
+    from backend.setup_data import is_files_setup_source
+    from backend.engine.definitions import DATA_DIR, SETUPS_DIR
     from backend.map_overrides import apply_map_graph, apply_map_terrain
-    for map_id, records in library["maps"].items():
-        previous = deepcopy(records)
+    if is_files_setup_source():
+        state = {"library": load_library(DATA_DIR), "setups": {
+            folder.name: canonical_setup(json.loads((folder / "setup.json").read_text()))
+            for folder in sorted(SETUPS_DIR.iterdir()) if (folder / "setup.json").is_file()}}
+    else:
+        row = db.query(AppSetting).filter(AppSetting.key == SETTING).first()
+        bundles = _bundles(db)
+        state = migrate_legacy_setups(json.loads(row.value_json)) if row else {"library": extract_library(bundles), "setups": {}}
+        for key, bundle in bundles.items():
+            if key in state["setups"]:
+                continue
+            map_id = scenario_map_id(bundle["manifest"], key)
+            state["library"]["maps"].setdefault(map_id, {}).update({
+                tid: value for tid, value in bundle["territories"].items() if tid not in state["library"]["maps"].get(map_id, {})})
+            state["setups"][key] = setup_from_bundle(bundle, state["library"])
+        state["setups"] = {key: value for key, value in state["setups"].items() if key in bundles}
+    prepare_territory_seeds(state["library"])
+    for map_id, records in state["library"]["maps"].items():
         apply_map_terrain(records, map_id, db)
         apply_map_graph(records, map_id, db)
-        for source in state["sources"].values():
-            if source.get("map") != map_id:
-                continue
-            for tid, patch in source.get("territory_overrides", {}).items():
-                for field in ("terrain_type", "adjacent", "aerial_adjacent", "ford_adjacent"):
-                    if previous.get(tid, {}).get(field) != records.get(tid, {}).get(field):
-                        patch.pop(field, None)
-    # New/imported legacy bundles acquire a source without modifying their contents.
-    for setup_id, bundle in bundles.items():
-        if setup_id not in state["sources"]:
-            map_id = scenario_map_id(bundle["manifest"], setup_id)
-            library["maps"].setdefault(map_id, {}).update({
-                key: value for key, value in bundle["territories"].items() if key not in library["maps"].get(map_id, {})
-            })
-            source = extract_source(bundle, library)
-            if compile_scenario(source, library) != bundle:
-                raise ValueError(f"Cannot extract {setup_id} without changing its compiled bundle")
-            state["sources"][setup_id] = source
-    state["sources"] = {key: value for key, value in state["sources"].items() if key in bundles}
-    # Lift legacy per-map metadata into ID-based seeds without changing any setup.
-    # Differences become explicit scenario overrides; one-level extends is retained.
-    upgrade_territory_sources(state)
+    _include_map_seed_choices(db, state)
     return state
 
 
 def stage_state(db: Session, state: dict) -> None:
+    from backend.setup_data import is_files_setup_source
+    from backend.engine.definitions import DATA_DIR, SETUPS_DIR
+    state = {"library": state["library"], "setups": {key: canonical_setup(value) for key, value in state["setups"].items()}}
+    if is_files_setup_source():
+        write_library(DATA_DIR, state["library"])
+        for key, setup in state["setups"].items():
+            write_setup(SETUPS_DIR / key, setup)
+        return
     row = db.query(AppSetting).filter(AppSetting.key == SETTING).first()
     value = json.dumps(state, ensure_ascii=False)
     if row:
@@ -77,161 +115,140 @@ def stage_state(db: Session, state: dict) -> None:
 
 
 def initialize(db: Session) -> None:
-    """Freeze the first library from current DB data, without rewriting any setup."""
-    stage_state(db, load_state(db))
+    from backend.setup_data import is_files_setup_source
+    state = load_state(db)
+    stage_state(db, state)
+    db.flush()
+    if not is_files_setup_source():
+        for map_id in state["library"]["maps"]:
+            sync_map(db, map_id)
     db.commit()
-
-
-def source_for_bundle(source: dict, bundle: dict, library: dict, lookup=None) -> dict:
-    """Reconcile legacy form edits while preserving explicit overrides (even equal defaults).
-
-    Editing a materialized bundle flattens extends, so future parent edits cannot undo it.
-    The dedicated source editor preserves extends instead.
-    """
-    source = resolve_source(source, lookup)
-    previous = compile_scenario(source, library)
-    map_id = scenario_map_id(bundle["manifest"], bundle["manifest"]["id"])
-    if map_id != source["map"]:
-        return extract_source(bundle, library)
-    for section in ("units", "factions"):
-        for key in list(source.get(section, {})):
-            if key not in bundle[section]:
-                del source[section][key]
-        for key, record in bundle[section].items():
-            if key not in previous[section]:
-                source.setdefault(section, {})[key] = {
-                    **({"seed": key} if key in library[section] else {}),
-                    "overrides": delta(library[section].get(key, {}), record),
-                }
-            elif record != previous[section][key]:
-                entry = source[section][key]
-                entry["overrides"] = _overlay(entry.get("overrides", {}), delta(previous[section][key], record))
-    if "territory_ids" in source or bundle["territories"].keys() != library["maps"].get(map_id, {}).keys():
-        source["territory_ids"] = list(bundle["territories"])
-    overrides = source.setdefault("territory_overrides", {})
-    for key in list(overrides):
-        if key not in bundle["territories"]:
-            del overrides[key]
-    for key, record in bundle["territories"].items():
-        if key not in previous["territories"]:
-            overrides[key] = delta(library["maps"].get(map_id, {}).get(key, {}), record)
-        elif record != previous["territories"][key]:
-            overrides[key] = _overlay(overrides.get(key, {}), delta(previous["territories"][key], record))
-    for key in ("manifest", "camps", "ports", "starting_setup"):
-        source[key] = deepcopy(bundle[key])
-    if "map_asset" not in source["manifest"]:
-        source["manifest"]["map_asset"] = deepcopy(DELETE)
-    return source
 
 
 def stage_bundle(db: Session, setup_id: str, bundle: dict) -> None:
     from datetime import datetime, timezone
-    from backend.scenario_builder import BUNDLE_KEYS
-    row = db.query(Setup).filter(Setup.id == setup_id).one()
+    row = db.query(Setup).filter(Setup.id == setup_id).first()
+    if row is None:
+        return
     for key in BUNDLE_KEYS:
         setattr(row, f"{key}_json", json.dumps(bundle[key], ensure_ascii=False))
     row.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def compile_all(state: dict) -> dict[str, dict]:
-    return {key: compile_scenario(source, state["library"], state["sources"].get)
-            for key, source in state["sources"].items()}
+    return {key: compile_setup(setup, state["library"]) for key, setup in state["setups"].items()}
 
 
 def map_authority_errors(db: Session, bundle: dict) -> list[str]:
-    from backend.map_overrides import apply_map_graph, apply_map_terrain
-    effective = deepcopy(bundle["territories"])
-    map_id = scenario_map_id(bundle["manifest"], bundle["manifest"].get("id", ""))
-    apply_map_terrain(effective, map_id, db)
-    apply_map_graph(effective, map_id, db)
-    return ["Edit map terrain and connections in Maps → Landscape / Graph"] if effective != bundle["territories"] else []
+    # Geography can only enter resolved data through the map library.
+    return []
+
+
+def with_map(setup: dict, library: dict, map_id: str) -> dict:
+    if map_id not in library["maps"]:
+        raise ValueError(f"Unknown map: {map_id}. Save the map in Maps first.")
+    out = canonical_setup(setup)
+    out["manifest"]["map_asset"] = map_id
+    ids = library["maps"][map_id].keys()
+    out["territories"] = {tid: out["territories"].get(tid, {"seed": tid}) for tid in ids}
+    for field in ("territory_owners", "starting_units"):
+        out["starting_setup"][field] = {tid: value for tid, value in out["starting_setup"].get(field, {}).items() if tid in ids}
+    for section in ("camps", "ports"):
+        out[section] = {key: value for key, value in out[section].items() if value.get("territory_id") in ids}
+    for entry in out["factions"].values():
+        faction = library["factions"].get(entry.get("seed"), {})
+        capital = entry.get("overrides", {}).get("capital", faction.get("capital"))
+        if isinstance(capital, str) and capital and capital not in ids:
+            entry.setdefault("overrides", {})["capital"] = None
+    return canonical_setup(out)
+
+
+def save_definition(db: Session, setup_id: str, setup: dict) -> dict:
+    from backend.catalog import load_catalog
+    state = load_state(db)
+    if setup_id not in state["setups"]:
+        raise ValueError("Setup not found")
+    setup = canonical_setup(setup)
+    setup["manifest"]["id"] = setup_id
+    map_id = scenario_map_id(setup["manifest"], setup_id)
+    previous_map = scenario_map_id(state["setups"][setup_id]["manifest"], setup_id)
+    if map_id != previous_map:
+        setup = with_map(setup, state["library"], map_id)
+    bundle = compile_setup(setup, state["library"])
+    errors = validate_setup_payload(bundle, load_catalog(db))
+    if errors:
+        raise ValueError("; ".join(errors))
+    state["setups"][setup_id] = setup
+    stage_bundle(db, setup_id, bundle)
+    stage_state(db, state)
+    db.commit()
+    return {"setup": setup, "bundle": bundle}
+
+
+def sync_map(db: Session, map_id: str) -> None:
+    """Update geography without applying unrelated pending/invalid seed changes."""
+    state = load_state(db)
+    snapshots = _bundles(db)
+    for key, setup in state["setups"].items():
+        if scenario_map_id(setup["manifest"], key) == map_id:
+            snapshot = snapshots.get(key)
+            if snapshot is None:
+                continue
+            for tid, record in snapshot["territories"].items():
+                geography = state["library"]["maps"][map_id].get(tid, {})
+                for field in MAP_TERRITORY_FIELDS:
+                    if field in geography:
+                        record[field] = deepcopy(geography[field])
+            stage_bundle(db, key, snapshot)
+    stage_state(db, state)
 
 
 def update_library(db: Session, library: dict, *, apply: bool = False) -> dict:
     from backend.catalog import load_catalog
-    for section in ("units", "factions", "maps"):
+    for section in ("units", "factions", "territories", "maps"):
         if not isinstance(library.get(section), dict):
             raise ValueError(f"library.{section} must be an object")
-        for key, record in library[section].items():
-            if not isinstance(key, str) or not isinstance(record, dict):
-                raise ValueError(f"library.{section} entries must be objects with string ids")
+        if any(not isinstance(key, str) or not isinstance(record, dict) for key, record in library[section].items()):
+            raise ValueError(f"library.{section} entries must be objects with string ids")
     state = load_state(db)
-    if not isinstance(library.get("territories"), dict):
-        raise ValueError("library.territories must be an object")
     for tid, record in library["territories"].items():
-        if not isinstance(record, dict) or record.get("id") != tid:
-            raise ValueError(f"Territory seed {tid!r} id must match its key")
-        if record.keys() & MAP_TERRITORY_FIELDS:
-            raise ValueError("Territory seeds hold metadata; edit terrain and connections in Maps")
-    for records in library["maps"].values():
-        missing = records.keys() - library["territories"].keys()
-        if missing:
-            raise ValueError("Territory seeds still used by maps: " + ", ".join(sorted(missing)))
-    prepare_territory_seeds(library)
+        if record.get("id") != tid or record.keys() & MAP_TERRITORY_FIELDS:
+            raise ValueError(f"Territory seed {tid}: use matching id and metadata only; edit geometry in Maps")
     for map_id, records in library["maps"].items():
         from backend.map_overrides import validate_map_base
         validate_map_base(map_id)
+        missing = records.keys() - library["territories"].keys()
+        if missing:
+            raise ValueError("Territory seeds still used by maps: " + ", ".join(sorted(missing)))
         for tid, record in records.items():
-            if not isinstance(tid, str) or not isinstance(record, dict):
+            if not isinstance(record, dict):
                 raise ValueError("Map territory defaults must be records keyed by territory id")
             old = state["library"]["maps"].get(map_id, {}).get(tid)
-            if old and any(old.get(field) != record.get(field) for field in ("terrain_type", "adjacent", "aerial_adjacent", "ford_adjacent")):
-                raise ValueError("Edit map terrain and connections in Maps → Landscape / Graph")
-    def library_errors(value):
-        territories = {}
-        for records in value["maps"].values():
-            territories.update(records)
-        # Seed references are checked globally; scenario-specific faction remaps,
-        # capitals and home territories are still validated on compiled scenarios.
-        return set(validate_setup_payload({"manifest": {"id": "seed_catalog"}, "units": value["units"],
-            "factions": value["factions"], "territories": territories, "camps": {}, "ports": {},
-            "starting_setup": {"turn_order": [], "territory_owners": {}, "starting_units": {}}}, load_catalog(db)))
-    new_library_errors = library_errors(library) - library_errors(state["library"])
-    if new_library_errors:
-        raise ValueError("Invalid defaults: " + "; ".join(sorted(new_library_errors)))
+            if old and any(old.get(field) != record.get(field) for field in MAP_TERRITORY_FIELDS):
+                raise ValueError("Edit map terrain and connections in Maps")
+    prepare_territory_seeds(library)
     before = _bundles(db)
     state["library"] = library
     after = compile_all(state)
     catalog = load_catalog(db)
-    changed = []
-    for setup_id, bundle in after.items():
-        if before[setup_id] == bundle:
+    territories = {tid: record for records in library["maps"].values() for tid, record in records.items()}
+    seed_errors = validate_setup_payload({"manifest": {"id": "seed_catalog"}, "units": library["units"], "factions": library["factions"],
+        "territories": territories, "camps": {}, "ports": {}, "starting_setup": {}}, catalog)
+    warnings = {"seeds": seed_errors} if seed_errors else {}
+    changed, skipped = [], []
+    for key, bundle in after.items():
+        errors = validate_setup_payload(bundle, catalog)
+        if errors:
+            warnings[key] = errors
+        if before.get(key) == bundle:
             continue
-        # Historical validation failures do not authorize any new failure.
-        new_errors = set(validate_setup_payload(bundle, catalog)) - set(validate_setup_payload(before[setup_id], catalog))
-        if new_errors:
-            raise ValueError(f"{setup_id}: " + "; ".join(sorted(new_errors)))
-        changed.append(setup_id)
+        changed.append(key)
+        if errors:
+            skipped.append(key)
+        elif apply:
+            stage_bundle(db, key, bundle)
     if apply:
-        for setup_id in changed:
-            stage_bundle(db, setup_id, after[setup_id])
         stage_state(db, state)
         db.commit()
-    return {"changed_setups": changed, "changes": {
-        key: delta(before[key], after[key]) for key in changed
-    }}
-
-
-def save_source(db: Session, setup_id: str, source: dict) -> dict:
-    from backend.catalog import load_catalog
-    state = load_state(db)
-    if setup_id not in state["sources"]:
-        raise ValueError("Setup not found")
-    state["sources"][setup_id] = source
-    bundles = compile_all(state)
-    target = bundles[setup_id]
-    if target["manifest"].get("id") != setup_id:
-        raise ValueError("manifest.id must match the setup id")
-    errors = validate_setup_payload(target, load_catalog(db)) + map_authority_errors(db, target)
-    if errors:
-        raise ValueError("; ".join(errors))
-    before = _bundles(db)
-    for key, bundle in bundles.items():
-        if key == setup_id or bundle != before[key]:
-            new_errors = set(validate_setup_payload(bundle, load_catalog(db))) - set(validate_setup_payload(before[key], load_catalog(db)))
-            if new_errors:
-                raise ValueError(f"{key}: " + "; ".join(sorted(new_errors)))
-            stage_bundle(db, key, bundle)
-    stage_state(db, state)
-    db.commit()
-    return target
+    return {"changed_setups": changed, "skipped_setups": skipped, "warnings": warnings,
+            "changes": {key: delta(before.get(key, {}), after[key]) for key in changed}}

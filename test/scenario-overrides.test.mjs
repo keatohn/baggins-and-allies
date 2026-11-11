@@ -1,65 +1,85 @@
-// Node 24's built-in type stripping runs the pure form model without a new framework.
+// Node's built-in type stripping runs the pure form model without a new framework.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { resolve, sourceForRecords, scenarioSelectionOptions, withScenarioSelection } from '../frontend/src/pages/admin/scenarioOverridesModel.ts';
+import { resolve, resolveSetup, setupForRecords, scenarioSelectionOptions, withScenarioSelection, withScenarioMap } from '../frontend/src/pages/admin/scenarioOverridesModel.ts';
+const library = {
+  units: { guard: { id: 'guard', attack: 5, cost: { power: 3 }, specials: ['heal'] }, archer: { id: 'archer', attack: 2 } },
+  factions: { good: { id: 'good', capital: 'shire' }, evil: { id: 'evil' } },
+  territories: {},
+  maps: { world: { shire: { id: 'shire', display_name: 'The Shire', adjacent: [] }, removed: { id: 'removed', adjacent: [] } },
+    new: { shire: { id: 'shire', adjacent: ['bree'] }, bree: { id: 'bree', adjacent: ['shire'] } } },
+};
+const example = () => ({
+  manifest: { id: 'alpha', map_asset: 'world' },
+  units: { guard: { seed: 'guard', overrides: { attack: 5 } } }, factions: { good: { seed: 'good' } },
+  territories: { shire: { seed: 'shire', overrides: { display_name: 'Home' } }, removed: { seed: 'removed' } },
+  camps: { gone: { territory_id: 'removed' }, retained: { territory_id: 'shire' } }, ports: {},
+  starting_setup: { turn_order: ['good'], territory_owners: { shire: 'good', removed: 'good' }, starting_units: { shire: [{ unit_id: 'guard', count: 1 }], removed: [] } },
+});
 
-test('the form resolves recursive overrides, list replacement, null and removal', () => {
+test('recursive overrides retain list replacement, null and removal semantics', () => {
   const defaults = { cost: { power: 3, other: 1 }, specials: ['heal'], home: ['shire'], optional: 2 };
-  const overrides = { cost: { power: 5 }, specials: [], home: null, optional: { $delete: true } };
-  assert.deepEqual(resolve(defaults, overrides), { cost: { power: 5, other: 1 }, specials: [], home: null });
+  assert.deepEqual(resolve(defaults, { cost: { power: 5 }, specials: [], home: null, optional: { $delete: true } }), { cost: { power: 5, other: 1 }, specials: [], home: null });
   assert.deepEqual(defaults.specials, ['heal']);
 });
 
-test('raw JSON edits preserve explicit equal overrides and map inheritance', () => {
-  const library = { units: { guard: { id: 'guard', attack: 5, cost: { power: 3 } } }, factions: {}, maps: { world: { shire: { id: 'shire', produces: { power: 2 } } } } };
-  const source = { map: 'world', manifest: { id: 'alpha' }, units: { guard: { seed: 'guard', overrides: { attack: 5 } } }, factions: {} };
-  const bundle = { authoring_source: source, units: { guard: { id: 'guard', attack: 5, cost: { power: 8 } } }, factions: {}, territories: { shire: { id: 'shire', produces: { power: 2 } } } };
-  const edited = sourceForRecords(bundle, library);
-  assert.deepEqual(edited.units.guard.overrides, { attack: 5, cost: { power: 8 } });
-  assert.equal(edited.territory_ids, undefined);
-  assert.deepEqual(source.units.guard.overrides, { attack: 5 });
-  delete edited.units.guard.overrides.attack;
-  assert.equal(resolve(library.units.guard, edited.units.guard.overrides).attack, 5);
-  assert.equal(resolve({ ...library.units.guard, attack: 7 }, edited.units.guard.overrides).attack, 7);
+test('controls edit one compact setup and preserve pinned equal overrides', () => {
+  const setup = example();
+  const bundle = resolveSetup(setup, library);
+  bundle.units.guard.cost.power = 8;
+  const compact = setupForRecords(bundle, library);
+  assert.deepEqual(compact.units.guard.overrides, { attack: 5, cost: { power: 8 } });
+  assert.deepEqual(compact.territories.shire, { seed: 'shire', overrides: { display_name: 'Home' } });
+  assert.equal(resolveSetup(compact, { ...library, units: { ...library.units, guard: { ...library.units.guard, attack: 9 } } }).units.guard.attack, 5);
 });
 
-test('seed aliases, custom records and deleted optional fields stay consistent', () => {
-  const library = { units: { guard: { id: 'guard', attack: 5, home: ['shire'] } }, factions: {}, maps: { world: {} } };
-  const source = { map: 'world', manifest: {}, units: { ally: { seed: 'guard', overrides: {} } }, factions: {} };
-  const bundle = { authoring_source: source, units: { ally: { id: 'ally', attack: 5 }, custom: { id: 'custom', attack: 9 } }, factions: {}, territories: {} };
-  const edited = sourceForRecords(bundle, library);
-  assert.deepEqual(edited.units.ally.overrides, { home: { $delete: true } });
-  assert.deepEqual(edited.units.custom, { overrides: { id: 'custom', attack: 9 } });
-});
-
-test('bulk seed selection preserves aliases, custom records and retained overrides', () => {
-  const library = { units: { guard: { display_name: 'Guard' }, archer: { display_name: 'Archer' } }, factions: {}, maps: {} };
-  const source = { map: 'world', manifest: {}, units: { ally: { seed: 'guard', overrides: { attack: 9 } }, custom: { overrides: { display_name: 'Custom' } } }, factions: {} };
-  const options = scenarioSelectionOptions(source, library, 'units');
-  assert.deepEqual(options.map(o => o.id), ['ally', 'archer', 'custom']);
-  assert.equal(options.find(o => o.id === 'ally').seed, 'guard');
-  const next = withScenarioSelection(source, 'units', ['ally', 'archer', 'custom']);
-  assert.deepEqual(next.units.ally, source.units.ally);
-  assert.deepEqual(next.units.custom, source.units.custom);
-  assert.deepEqual(next.units.archer, { seed: 'archer', overrides: {} });
+test('seed selection preserves aliases, custom records and retained overrides', () => {
+  const setup = example();
+  setup.units = { ally: { seed: 'guard', overrides: { attack: 9 } }, custom: { overrides: { display_name: 'Custom' } } };
+  assert.deepEqual(scenarioSelectionOptions(setup, library, 'units').map(o => o.id), ['ally', 'archer', 'custom']);
+  const next = withScenarioSelection(setup, 'units', ['ally', 'archer', 'custom']);
+  assert.deepEqual(next.units.ally, setup.units.ally);
+  assert.deepEqual(next.units.custom, setup.units.custom);
+  assert.deepEqual(next.units.archer, { seed: 'archer' });
   assert.deepEqual(withScenarioSelection(next, 'units', []).units, {});
-  assert.equal(Object.keys(source.units).length, 2);
+  assert.equal(resolveSetup(next, library).units.ally.id, 'ally');
 });
 
-test('bulk faction selection retains overrides and adds inherited seeds', () => {
-  const source = { map: 'world', manifest: {}, units: {}, factions: { good: { seed: 'good', overrides: { color: '#123456' } } } };
-  const next = withScenarioSelection(source, 'factions', ['good', 'evil']);
-  assert.deepEqual(next.factions.good, source.factions.good);
-  assert.deepEqual(next.factions.evil, { seed: 'evil', overrides: {} });
+test('territory choices include unselected map seeds and preserve selected metadata', () => {
+  const setup = example();
+  setup.manifest.map_asset = 'new';
+  setup.territories = { shire: setup.territories.shire };
+  assert.deepEqual(scenarioSelectionOptions(setup, library, 'territories').map(o => o.id), ['bree', 'shire']);
+  const next = withScenarioSelection(setup, 'territories', ['shire', 'bree']);
+  assert.deepEqual(next.territories.bree, { seed: 'bree' });
+  assert.deepEqual(next.territories.shire, setup.territories.shire);
 });
 
-test('territory choices follow the selected map and remove only unchecked overrides', () => {
-  const library = { units: {}, factions: {}, territories: { elsewhere: {} }, maps: { world: { shire: {}, bree: {} }, other: { elsewhere: {} } } };
-  const source = { map: 'world', manifest: {}, units: {}, factions: {}, territory_overrides: { shire: { produces: { power: 7 } }, bree: { ownable: false } } };
-  assert.deepEqual(scenarioSelectionOptions(source, library, 'territories').map(o => o.id), ['bree', 'shire']);
-  const next = withScenarioSelection(source, 'territories', ['shire']);
-  assert.deepEqual(next.territory_ids, ['shire']);
-  assert.deepEqual(next.territory_overrides, { shire: { produces: { power: 7 } } });
-  assert.deepEqual(withScenarioSelection(next, 'territories', []).territory_ids, []);
-  assert.ok(source.territory_overrides.bree);
+test('map changes replace geography and retain only matching placements and metadata', () => {
+  const setup = example();
+  setup.factions.good.overrides = { capital: 'removed' };
+  const bundle = resolveSetup(setup, library);
+  const before = structuredClone(bundle);
+  const next = withScenarioMap(bundle, library, 'new');
+  assert.deepEqual(Object.keys(next.territories), ['shire', 'bree']);
+  assert.deepEqual(next.territories.shire.adjacent, ['bree']);
+  assert.equal(next.territories.shire.display_name, 'Home');
+  assert.deepEqual(next.starting_setup.territory_owners, { shire: 'good' });
+  assert.deepEqual(next.starting_setup.starting_units, { shire: [{ unit_id: 'guard', count: 1 }] });
+  assert.equal(next.factions.good.capital, null);
+  assert.deepEqual(next.camps, { retained: { territory_id: 'shire' } });
+  assert.equal(next.setup.manifest.map_asset, 'new');
+  assert.deepEqual(Object.keys(next.setup.territories), ['shire', 'bree']);
+  assert.equal(next.setup.territories.shire.overrides.adjacent, undefined);
+  assert.deepEqual(bundle, before);
+  assert.throws(() => withScenarioMap(bundle, library, 'missing'), /No territory data/);
+});
+
+test('map graph changes are inherited without changing the compact setup', () => {
+  const setup = example();
+  const before = structuredClone(setup);
+  const updated = structuredClone(library);
+  updated.maps.world.shire.adjacent = ['removed'];
+  assert.deepEqual(resolveSetup(setup, updated).territories.shire.adjacent, ['removed']);
+  assert.deepEqual(setup, before);
 });

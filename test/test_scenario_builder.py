@@ -1,28 +1,27 @@
-"""Lossless authoring migration, compile semantics, CLI, and DB/admin integration."""
+"""Canonical JSON migration, seed resolution, admin saves and map authority."""
 from copy import deepcopy
+import hashlib
 import json
 from pathlib import Path
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-
 from backend.api.auth import get_current_admin
 from backend.api.database import Base, get_db
 from backend.api.main import app
 from backend.api.models import AppSetting, Setup
-from backend.engine.definitions import DATA_DIR, SETUPS_DIR
+from backend.engine.definitions import DATA_DIR, SETUPS_DIR, load_static_definitions, load_setup
 from backend.scenario_builder import (
-    BUNDLE_KEYS, DELETE, compile_scenario, delta, extract_library, extract_source,
-    load_library, merge, parse_source,
+    BUNDLE_KEYS, DELETE, MAP_TERRITORY_FIELDS, canonical_setup, compile_setup, delta,
+    extract_library, load_library, merge, migrate_legacy_setups,
+    parse_setup_json, read_setup_bundle, setup_from_bundle, write_setup,
 )
-from backend.scenario_store import SETTING, compile_all, initialize, load_state, save_source, update_library
-from backend.setup_data import get_admin_setup_bundle, save_setup_bundle
-from backend.setup_validation import validate_setup_payload
-from backend.tools.scenario import main, read_bundle
-
+from backend.legacy_setup_migration import extract_source
+from backend.scenario_store import SETTING, compile_all, initialize, load_state, save_definition, update_library, with_map
+from backend.setup_data import get_admin_setup_bundle
+from backend.tools.scenario import main
 
 def example(setup_id="alpha", attack=5):
     return {
@@ -36,96 +35,6 @@ def example(setup_id="alpha", attack=5):
         "starting_setup": {"turn_order": ["good"], "territory_owners": {"shire": "good"},
                            "starting_units": {"shire": [{"unit_id": "guard", "count": 2}]}},
     }
-
-
-def test_merge_and_delta_preserve_null_empty_lists_missing_and_nested_fields():
-    base = {"cost": {"power": 3, "other": 2}, "specials": ["heal"], "home_territory_ids": ["shire"], "gone": 1}
-    target = {"cost": {"power": 5}, "specials": [], "home_territory_ids": None, "new": False}
-    patch = delta(base, target)
-    assert patch["gone"] == DELETE
-    assert merge(base, patch) == target
-    assert base["specials"] == ["heal"]
-
-
-def test_majority_is_per_field_deterministic_and_lossless():
-    bundles = {"a": example("a", 6), "b": example("b"), "c": example("c")}
-    bundles["a"]["units"]["guard"]["specials"] = None
-    bundles["a"]["units"]["guard"].pop("cost")
-    bundles["a"]["territories"]["shire"]["produces"]["power"] = 4
-    library = extract_library(bundles)
-    assert library == extract_library(dict(reversed(list(bundles.items()))))
-    assert library["units"]["guard"]["attack"] == 5
-    assert library["maps"]["world"]["shire"]["produces"]["power"] == 2
-    for bundle in bundles.values():
-        assert compile_scenario(extract_source(bundle, library), library) == bundle
-
-
-def test_structural_overrides_aliases_and_custom_units():
-    bundle = example()
-    library = extract_library({"alpha": bundle})
-    source = extract_source(bundle, library)
-    source["units"] = {
-        "ally": {"seed": "guard", "overrides": {"faction": "elves", "specials": [], "home_territory_ids": None}},
-        "custom": {"overrides": {"id": "custom", "attack": 7}},
-    }
-    compiled = compile_scenario(source, library)
-    assert compiled["units"]["ally"]["id"] == "ally"
-    assert compiled["units"]["ally"]["faction"] == "elves"
-    assert compiled["units"]["ally"]["home_territory_ids"] is None
-    assert compiled["units"]["custom"] == {"id": "custom", "attack": 7}
-
-
-@pytest.mark.parametrize("asset", [None, "", False, 123, DELETE])
-def test_legacy_missing_and_empty_map_assets_roundtrip(asset):
-    bundle = example()
-    if asset == DELETE:
-        del bundle["manifest"]["map_asset"]
-    else:
-        bundle["manifest"]["map_asset"] = asset
-    library = extract_library({"alpha": bundle})
-    assert compile_scenario(extract_source(bundle, library), library) == bundle
-
-
-def test_one_level_inheritance_lists_replace_and_records_can_be_removed():
-    library = extract_library({"alpha": example()})
-    parent = extract_source(example(), library)
-    child = {"extends": "alpha", "manifest": {"id": "beta"}, "units": {"guard": {"overrides": {"attack": 6}}}, "starting_setup": {"turn_order": []}}
-    result = compile_scenario(child, library, {"alpha": parent}.get)
-    assert result["manifest"]["id"] == "beta"
-    assert result["units"]["guard"]["attack"] == 6
-    assert result["starting_setup"]["turn_order"] == []
-    assert compile_scenario({**child, "units": {"guard": DELETE}}, library, {"alpha": parent}.get)["units"] == {}
-    with pytest.raises(ValueError, match="one level"):
-        compile_scenario({"extends": "beta"}, library, {"beta": child}.get)
-    with pytest.raises(ValueError):
-        compile_scenario({"extends": "missing"}, library, {}.get)
-
-
-@pytest.mark.parametrize("text", ["[]", "version: 1\nversion: 2", "x: &a [1]\ny: *a", "x: !!python/object:foo {}", "1: value", "x: 2020-01-01", "x: .nan", "x: " + "[" * 70 + "0" + "]" * 70])
-def test_rejects_ambiguous_or_unsafe_yaml(text):
-    with pytest.raises(ValueError):
-        parse_source(text)
-
-
-def test_bad_references_and_source_fields_report_errors():
-    library = extract_library({"alpha": example()})
-    source = extract_source(example(), library)
-    for bad in ({**source, "map": "missing"}, {**source, "version": 2}, {**source, "typo": 1},
-                {**source, "units": {"guard": {"seed": "missing"}}}, {**source, "territory_ids": ["missing"]},
-                {**source, "territory_ids": ["shire", "shire"]}):
-        with pytest.raises(ValueError):
-            compile_scenario(bad, library)
-
-
-@pytest.mark.parametrize("folder", sorted(path for path in SETUPS_DIR.iterdir() if (path / "manifest.json").is_file()), ids=lambda p: p.name)
-def test_committed_sources_compile_identically_and_validation_does_not_regress(folder):
-    library = load_library(DATA_DIR)
-    source = parse_source((folder / "setup.yaml").read_text())
-    bundle = compile_scenario(source, library, lambda key: parse_source((SETUPS_DIR / key / "setup.yaml").read_text()))
-    assert bundle == read_bundle(folder), "Compiled JSON is stale; rebuild or extract intentionally"
-    catalog = json.loads((DATA_DIR / "catalog.json").read_text())
-    baseline = json.loads((Path(__file__).parent / "fixtures" / "scenario_validation_baseline.json").read_text())
-    assert sorted(validate_setup_payload(bundle, catalog)) == baseline[folder.name]
 
 
 @pytest.fixture()
@@ -143,78 +52,6 @@ def db(monkeypatch):
     engine.dispose()
 
 
-def test_initialization_uses_live_db_and_never_replaces_setup_values(db):
-    before = {row.id: row.units_json for row in db.query(Setup).all()}
-    initialize(db)
-    state = load_state(db)
-    assert set(state["library"]["units"]) == {"guard"}
-    assert state["library"]["units"]["guard"]["attack"] == 5
-    assert {row.id: row.units_json for row in db.query(Setup).all()} == before
-    assert compile_all(state) == {key: {k: v for k, v in get_admin_setup_bundle(db, key).items() if k != "id"} for key in before}
-    initialize(db)
-    assert load_state(db) == state
-
-
-def test_default_updates_preview_then_rebuild_inheritors_and_preserve_overrides(db):
-    initialize(db)
-    library = deepcopy(load_state(db)["library"])
-    library["units"]["guard"]["attack"] = 7
-    library["factions"]["good"]["display_name"] = "Allies"
-    library["territories"]["shire"]["produces"]["power"] = 4
-    impact = update_library(db, library)
-    assert set(impact["changed_setups"]) == {"alpha", "beta", "gamma"}
-    assert json.loads(db.get(Setup, "alpha").units_json)["guard"]["attack"] == 5
-    update_library(db, library, apply=True)
-    for key, attack in (("alpha", 7), ("beta", 7), ("gamma", 6)):
-        bundle = get_admin_setup_bundle(db, key)
-        assert bundle["units"]["guard"]["attack"] == attack
-        assert bundle["factions"]["good"]["display_name"] == "Allies"
-        assert bundle["territories"]["shire"]["produces"]["power"] == 4
-
-
-def test_invalid_library_is_atomic_and_unused_bad_seeds_are_rejected(db):
-    initialize(db)
-    before = db.get(AppSetting, SETTING).value_json
-    library = deepcopy(load_state(db)["library"])
-    library["units"]["guard"]["faction"] = "missing"
-    with pytest.raises(ValueError, match="known faction"):
-        update_library(db, library, apply=True)
-    assert db.get(AppSetting, SETTING).value_json == before
-    assert json.loads(db.get(Setup, "alpha").units_json)["guard"]["faction"] == "good"
-    library = deepcopy(load_state(db)["library"])
-    library["units"]["unused"] = {"id": "unused", "attack": "bad"}
-    with pytest.raises(ValueError, match="Invalid defaults"):
-        update_library(db, library, apply=True)
-
-
-def test_legacy_form_edits_sync_source_and_explicit_equal_overrides_stay_pinned(db):
-    initialize(db)
-    state = load_state(db)
-    source = state["sources"]["alpha"]
-    source["units"]["guard"]["overrides"]["attack"] = 5
-    bundle = compile_scenario(source, state["library"])
-    bundle["units"]["guard"]["cost"]["power"] = 8
-    save_setup_bundle(db, "alpha", bundle, source)
-    stored = load_state(db)
-    assert stored["sources"]["alpha"]["units"]["guard"]["overrides"] == {"attack": 5, "cost": {"power": 8}}
-    library = deepcopy(stored["library"])
-    library["units"]["guard"]["attack"] = 9
-    update_library(db, library, apply=True)
-    assert json.loads(db.get(Setup, "alpha").units_json)["guard"]["attack"] == 5
-
-
-def test_parent_source_save_rebuilds_children(db):
-    initialize(db)
-    state = load_state(db)
-    child = {"version": 1, "extends": "alpha", "manifest": {"id": "beta"}}
-    save_source(db, "beta", child)
-    state = load_state(db)
-    parent = state["sources"]["alpha"]
-    parent["units"]["guard"]["overrides"]["attack"] = 10
-    save_source(db, "alpha", parent)
-    assert json.loads(db.get(Setup, "beta").units_json)["guard"]["attack"] == 10
-
-
 @pytest.fixture()
 def client(db):
     def override_db():
@@ -225,216 +62,301 @@ def client(db):
     app.dependency_overrides.clear()
 
 
-def test_admin_dry_run_source_import_and_save(client, db):
-    response = client.get("/admin/setups/alpha/source")
-    assert response.status_code == 200
-    source = response.json()["source"]
-    original = db.get(Setup, "alpha").units_json
-    source["units"]["guard"]["overrides"]["attack"] = 8
-    check = client.post("/admin/setups/validate", json={"source": json.dumps(source)})
-    assert check.json()["valid"] is True
-    assert db.get(Setup, "alpha").units_json == original
-    assert client.put("/admin/setups/alpha/source", json={"source": source}).status_code == 200
-    assert json.loads(db.get(Setup, "alpha").units_json)["guard"]["attack"] == 8
-    imported = client.post("/admin/setups", json={"id": "imported", "source": json.dumps(source)})
-    assert imported.status_code == 200, imported.text
-    stored = client.get("/admin/setups/imported/source").json()["source"]
-    assert stored["manifest"]["id"] == "imported"
-    assert stored["manifest"]["is_active"] is False
-    assert client.post("/admin/setups/validate", json={"source": "units: ["}).json()["valid"] is False
-    assert client.post("/admin/setups/validate", json=example()).json()["valid"] is True
-    exported = client.get("/admin/scenarios/export").json()
-    assert "imported" in exported["sources"]
+def test_recursive_overrides_replacement_null_and_deletion():
+    base = {"cost": {"power": 3, "other": 2}, "specials": ["heal"], "home": ["shire"], "gone": 1}
+    target = {"cost": {"power": 5}, "specials": [], "home": None, "new": False}
+    assert merge(base, delta(base, target)) == target
+    assert base["specials"] == ["heal"]
 
 
-def test_new_endpoints_require_admin(db):
-    app.dependency_overrides[get_db] = lambda: db
-    try:
-        client = TestClient(app)
-        for method, path in (("GET", "/admin/scenario-library"), ("PUT", "/admin/scenario-library"),
-                             ("POST", "/admin/scenario-library/preview"), ("POST", "/admin/setups/validate"),
-                             ("GET", "/admin/setups/alpha/source"), ("PUT", "/admin/setups/alpha/source"),
-                             ("GET", "/admin/scenarios/export")):
-            assert client.request(method, path, json={} if method != "GET" else None).status_code in (401, 403)
-    finally:
-        app.dependency_overrides.clear()
+@pytest.mark.parametrize("text", ['manifest: {}', '{"a":1,"a":2}', '{"x": NaN}', '[]', '{'])
+def test_json_parser_rejects_yaml_ambiguous_and_invalid_json(text):
+    with pytest.raises(ValueError):
+        parse_setup_json(text)
 
 
-def test_cli_validation_errors_no_write_and_explain(tmp_path, capsys):
-    library = extract_library({"alpha": example()})
-    from backend.scenario_builder import write_library
-    write_library(tmp_path, library)
-    (tmp_path / "catalog.json").write_text((DATA_DIR / "catalog.json").read_text())
-    source = tmp_path / "setup.yaml"
-    source.write_text(json.dumps(extract_source(example(), library)))
-    args = ["--data-root", str(tmp_path)]
-    assert main([*args, "build", str(source), "--check"]) == 0
-    assert main([*args, "explain", "guard", str(source)]) == 0
-    assert json.loads(capsys.readouterr().out)["resolved"]["attack"] == 5
-    assert main([*args, "diff", str(source), str(source)]) == 0
-    assert capsys.readouterr().out == ""
-    output = tmp_path / "bundle.json"
-    assert main([*args, "build", str(source), "--output", str(output)]) == 0
-    assert main([*args, "validate", str(output)]) == 0
-    assert json.loads(output.read_text()) == example()
-    output.unlink()
-    bad = parse_source(source.read_text())
-    bad["units"]["guard"]["overrides"]["faction"] = "missing"
-    source.write_text(json.dumps(bad))
-    assert main([*args, "build", str(source), "--output", str(output)]) == 1
-    assert not output.exists()
-    assert "known faction" in capsys.readouterr().err
+@pytest.mark.parametrize("folder", sorted(SETUPS_DIR.glob('*/setup.json')), ids=lambda p: p.parent.name)
+def test_checked_in_setups_have_one_json_and_preserve_non_geometry_data(folder):
+    setup = parse_setup_json(folder.read_text())
+    assert set(setup) == set(BUNDLE_KEYS)
+    assert sorted(p.name for p in folder.parent.glob('*.json')) == ['setup.json']
+    assert not list(folder.parent.glob('*.yaml'))
+    for section in ('units', 'factions', 'territories'):
+        assert all(not (entry.keys() - {'seed', 'overrides'}) for entry in setup[section].values())
+    bundle = read_setup_bundle(folder.parent)
+    clean = {**bundle, 'territories': {tid: {k: v for k, v in record.items() if k not in MAP_TERRITORY_FIELDS} for tid, record in bundle['territories'].items()}}
+    baseline = json.loads((Path(__file__).parent / 'fixtures/canonical_setup_baseline.json').read_text())
+    assert hashlib.sha256(json.dumps(clean, sort_keys=True).encode()).hexdigest() == baseline[folder.parent.name]
+    assert load_setup(folder.parent.name)['starting_setup'] == bundle['starting_setup']
+    assert len(load_static_definitions(setup_id=folder.parent.name)[0]) == len(bundle['units'])
 
 
-def test_export_unpacks_to_a_lossless_offline_collection(client, tmp_path):
-    snapshot = client.get("/admin/scenarios/export").json()
-    path = tmp_path / "snapshot.json"
-    path.write_text(json.dumps(snapshot))
-    root = tmp_path / "offline"
-    assert main(["unpack", str(path), "--output-root", str(root)]) == 0
-    for key, source in snapshot["sources"].items():
-        assert read_bundle(root / "setups" / key) == compile_scenario(source, snapshot["library"], snapshot["sources"].get)
-        assert main(["--data-root", str(root), "build", str(root / "setups" / key / "setup.yaml"), "--check"]) == 0
+def test_extraction_and_compilation_are_lossless_for_seed_aliases_and_custom_records():
+    bundle = example()
+    library = extract_library({'alpha': bundle})
+    setup = setup_from_bundle(bundle, library)
+    setup['units']['ally'] = {'seed': 'guard', 'overrides': {'attack': 8, 'cost': {'power': 6}}}
+    setup['units']['custom'] = {'overrides': {'id': 'custom', 'attack': 1}}
+    resolved = compile_setup(setup, library)
+    assert resolved['units']['ally']['id'] == 'ally'
+    assert resolved['units']['ally']['cost'] == {'power': 6}
+    assert resolved['units']['custom'] == {'id': 'custom', 'attack': 1}
+    assert compile_setup(setup_from_bundle(resolved, library, setup), library) == resolved
 
 
-def test_empty_map_draft_and_deleted_setup_id_can_be_reused(client):
-    assert client.post("/admin/setups", json={"id": "fresh"}).status_code == 200
-    assert client.get("/admin/setups/fresh/source").status_code == 200
-    assert client.delete("/admin/setups/fresh").status_code == 200
-    assert client.post("/admin/setups", json={"id": "fresh", "bundle": example("fresh", 9)}).status_code == 200
-    source = client.get("/admin/setups/fresh/source").json()["source"]
-    assert compile_scenario(source, client.get("/admin/scenario-library").json())["units"]["guard"]["attack"] == 9
+def test_explicit_equal_overrides_stay_pinned():
+    bundle = example()
+    library = extract_library({'alpha': bundle})
+    setup = setup_from_bundle(bundle, library)
+    setup['units']['guard']['overrides'] = {'attack': 5}
+    edited = deepcopy(bundle)
+    edited['units']['guard']['cost']['power'] = 8
+    setup = setup_from_bundle(edited, library, setup)
+    assert setup['units']['guard']['overrides'] == {'attack': 5, 'cost': {'power': 8}}
+    library['units']['guard']['attack'] = 9
+    assert compile_setup(setup, library)['units']['guard']['attack'] == 5
 
 
-def test_library_http_preview_and_save(client):
-    library = client.get("/admin/scenario-library").json()
-    library["units"]["guard"]["attack"] = 8
-    preview = client.post("/admin/scenario-library/preview", json=library)
-    assert preview.status_code == 200, preview.text
-    assert set(preview.json()["changed_setups"]) == {"alpha", "beta"}
-    assert client.get("/admin/setups/alpha").json()["units"]["guard"]["attack"] == 5
-    saved = client.put("/admin/scenario-library", json=library)
-    assert saved.status_code == 200, saved.text
-    assert client.get("/admin/setups/alpha").json()["units"]["guard"]["attack"] == 8
+def test_new_definitions_reject_extends_and_have_no_geometry_overrides():
+    library = extract_library({'alpha': example()})
+    setup = setup_from_bundle(example(), library)
+    with pytest.raises(ValueError, match='Unknown setup fields'):
+        canonical_setup({**setup, 'extends': 'parent'})
+    setup['territories']['shire']['overrides'] = {'adjacent': ['missing'], 'produces': {'power': 8}}
+    compact = canonical_setup(setup)
+    assert compact['territories']['shire']['overrides'] == {'produces': {'power': 8}}
+    assert compile_setup(compact, library)['territories']['shire']['adjacent'] == []
 
 
-def test_form_save_updates_inheriting_children_and_prevents_parent_deletion(client):
-    assert client.put("/admin/setups/beta/source", json={"source": {"extends": "alpha", "manifest": {"id": "beta"}}}).status_code == 200
-    bundle = client.get("/admin/setups/alpha").json()
-    bundle["units"]["guard"]["attack"] = 11
-    assert client.put("/admin/setups/alpha", json=bundle).status_code == 200
-    assert client.get("/admin/setups/beta").json()["units"]["guard"]["attack"] == 11
-    assert client.delete("/admin/setups/alpha").status_code == 409
-    assert client.get("/admin/setups/alpha").status_code == 200
-
-
-def test_map_authority_is_reflected_in_sources_and_checked_in_dry_run(client, db):
-    initialize(db)
-    from backend.map_overrides import save_map_overrides
-    save_map_overrides(db, "world", {"territories": {}, "terrain": {"shire": "forest"}})
-    response = client.get("/admin/setups/alpha/source").json()
-    assert response["library"]["maps"]["world"]["shire"]["terrain_type"] == "forest"
-    source = response["source"]
-    source.setdefault("territory_overrides", {})["shire"] = {"terrain_type": "plains"}
-    assert client.post("/admin/setups/validate", json={"source": source}).json()["valid"] is False
-    assert client.put("/admin/setups/alpha/source", json={"source": source}).status_code == 400
-
-
-def test_territory_seeds_update_matching_maps_by_id_and_keep_scenario_overrides(db):
-    initialize(db)
-    source = load_state(db)["sources"]["beta"]
-    source.setdefault("territory_overrides", {})["shire"] = {"produces": {"power": 9}}
-    save_source(db, "beta", source)
-    library = deepcopy(load_state(db)["library"])
-    library["maps"]["another_map"] = deepcopy(library["maps"]["world"])
-    library["territories"]["shire"]["produces"]["power"] = 7
-    impact = update_library(db, library)
-    assert set(impact["changed_setups"]) == {"alpha", "gamma"}
-    assert json.loads(db.get(Setup, "alpha").territories_json)["shire"]["produces"]["power"] == 2
-    update_library(db, library, apply=True)
-    state = load_state(db)
-    for records in state["library"]["maps"].values():
-        assert records["shire"]["produces"]["power"] == 7
-    assert get_admin_setup_bundle(db, "alpha")["territories"]["shire"]["produces"]["power"] == 7
-    assert get_admin_setup_bundle(db, "beta")["territories"]["shire"]["produces"]["power"] == 9
-    bad = deepcopy(state["library"])
-    del bad["territories"]["shire"]
-    with pytest.raises(ValueError, match="still used by maps"):
-        update_library(db, bad, apply=True)
-
-
-def test_legacy_map_metadata_becomes_lossless_scenario_overrides(db):
-    beta = db.get(Setup, "beta")
-    manifest = json.loads(beta.manifest_json)
-    manifest["map_asset"] = "other"
-    beta.manifest_json = json.dumps(manifest)
-    territories = json.loads(beta.territories_json)
-    territories["shire"]["produces"]["power"] = 5
-    beta.territories_json = json.dumps(territories)
+def test_live_legacy_migration_flattens_extends_and_preserves_overrides(db):
+    bundles = {'alpha': example(), 'beta': example('beta')}
+    library = extract_library(bundles)
+    parent = extract_source(bundles['alpha'], library)
+    parent['units']['guard']['overrides']['attack'] = 5
+    state = {'library': library, 'sources': {'alpha': parent, 'beta': {'version': 1, 'extends': 'alpha', 'manifest': {'id': 'beta'}, 'units': {'guard': {'overrides': {'defense': 4}}}}}}
+    db.add(AppSetting(key=SETTING, value_json=json.dumps(state)))
     db.commit()
-    bundles = {key: {k: v for k, v in get_admin_setup_bundle(db, key).items() if k != "id"} for key in ("alpha", "beta", "gamma")}
-    legacy = extract_library(bundles)
-    del legacy["territories"]
-    legacy["maps"]["other"] = deepcopy(bundles["beta"]["territories"])
-    sources = {key: extract_source(bundle, legacy) for key, bundle in bundles.items()}
-    sources["beta"] = {"extends": "alpha", "map": "other", "manifest": bundles["beta"]["manifest"]}
-    db.add(AppSetting(key=SETTING, value_json=json.dumps({"library": legacy, "sources": sources})))
-    db.commit()
-    original_rows = {row.id: row.territories_json for row in db.query(Setup).all()}
+    initialize(db)
+    stored = json.loads(db.get(AppSetting, SETTING).value_json)
+    assert 'sources' not in stored
+    assert stored['setups']['alpha']['units']['guard']['overrides']['attack'] == 5
+    assert stored['setups']['beta']['units']['guard']['overrides']['defense'] == 4
+    assert 'extends' not in stored['setups']['beta']
+    assert stored['setups']['alpha']['units']['guard']['overrides']['attack'] == 5
+    initialize(db)
+    assert json.loads(db.get(AppSetting, SETTING).value_json) == stored
+
+
+def test_startup_uses_live_database_not_repository_seeds(db):
     initialize(db)
     state = load_state(db)
-    assert compile_all(state) == bundles
-    assert {row.id: row.territories_json for row in db.query(Setup).all()} == original_rows
-    assert state["sources"]["beta"]["extends"] == "alpha"
-    assert state["sources"]["beta"]["territory_overrides"]["shire"]["produces"]["power"] == 5
+    assert state['library']['units']['guard']['attack'] == 5
+    assert compile_all(state)['gamma']['units']['guard']['attack'] == 6
+    assert set(state['setups']) == {'alpha', 'beta', 'gamma'}
 
 
-def test_new_map_region_uses_existing_territory_seed_automatically(db):
-    from backend.map_assets import save_map_asset
-    initialize(db)
-    library = deepcopy(load_state(db)["library"])
-    library["territories"]["future"] = {"id": "future", "display_name": "Seed name", "produces": {"power": 4}, "ownable": True}
-    update_library(db, library, apply=True)
-    drawing = {"width": 100, "height": 100,
-        "joints": {"a": {"x": 0, "y": 0}, "b": {"x": 100, "y": 0}, "c": {"x": 100, "y": 100}, "d": {"x": 0, "y": 100}},
-        "borders": {"ab": {"a": "a", "b": "b"}, "bc": {"a": "b", "b": "c"}, "cd": {"a": "c", "b": "d"}, "da": {"a": "d", "b": "a"}},
-        "labels": {"future": {"display_name": "Drawing name", "x": 50, "y": 50}}}
-    save_map_asset(db, "future_map", {"doc": drawing})
-    record = load_state(db)["library"]["maps"]["future_map"]["future"]
-    assert record["display_name"] == "Seed name"
-    assert record["produces"] == {"power": 4}
-    assert record["terrain_type"] == "plains"
-
-
-def test_rebuild_compares_resolved_sources_to_saved_scenario_definitions(db):
+def test_seed_updates_warn_save_and_leave_invalid_generated_snapshots_unchanged(db):
     initialize(db)
     state = load_state(db)
-    state["sources"]["alpha"]["units"]["guard"]["overrides"]["attack"] = 8
-    # A drawing/source can be newer than the saved gameplay definition.
+    state['setups']['alpha']['factions']['good']['overrides'] = {'capital': 'missing'}
     db.get(AppSetting, SETTING).value_json = json.dumps(state)
     db.commit()
-    assert update_library(db, deepcopy(state["library"]))["changed_setups"] == ["alpha"]
-    assert get_admin_setup_bundle(db, "alpha")["units"]["guard"]["attack"] == 5
-    update_library(db, deepcopy(state["library"]), apply=True)
-    assert get_admin_setup_bundle(db, "alpha")["units"]["guard"]["attack"] == 8
+    library = deepcopy(load_state(db)['library'])
+    library['units']['guard']['attack'] = 8
+    preview = update_library(db, deepcopy(library))
+    result = update_library(db, library, apply=True)
+    assert result == preview
+    assert result['skipped_setups'] == ['alpha']
+    assert result['warnings']['alpha']
+    assert json.loads(db.get(Setup, 'alpha').units_json)['guard']['attack'] == 5
+    assert json.loads(db.get(Setup, 'beta').units_json)['guard']['attack'] == 8
+    setup = deepcopy(load_state(db)['setups']['alpha'])
+    setup['factions']['good'].pop('overrides')
+    result = save_definition(db, 'alpha', setup)
+    assert result['bundle']['units']['guard']['attack'] == 8
 
 
-def test_cli_unpack_preserves_legacy_map_metadata(tmp_path):
-    bundles = {"alpha": example("alpha"), "beta": example("beta")}
-    bundles["beta"]["manifest"]["map_asset"] = "other"
-    bundles["beta"]["territories"]["shire"]["produces"]["power"] = 5
-    library = extract_library(bundles)
-    del library["territories"]
-    library["maps"]["other"] = deepcopy(bundles["beta"]["territories"])
-    state = {"library": library, "sources": {key: extract_source(bundle, library) for key, bundle in bundles.items()},
-             "catalog": json.loads((DATA_DIR / "catalog.json").read_text())}
-    path = tmp_path / "legacy-export.json"
-    path.write_text(json.dumps(state))
-    root = tmp_path / "offline"
-    assert main(["unpack", str(path), "--output-root", str(root)]) == 0
-    current_library = load_library(root)
-    assert "shire" in current_library["territories"]
-    for key, bundle in bundles.items():
-        source = parse_source((root / "setups" / key / "setup.yaml").read_text())
-        assert compile_scenario(source, current_library) == bundle
-        assert read_bundle(root / "setups" / key) == bundle
+def test_seed_validation_messages_are_nonblocking(db):
+    initialize(db)
+    library = deepcopy(load_state(db)['library'])
+    library['units']['guard']['faction'] = 'missing'
+    result = update_library(db, library, apply=True)
+    assert result['warnings']['seeds']
+    assert load_state(db)['library']['units']['guard']['faction'] == 'missing'
+    assert json.loads(db.get(Setup, 'alpha').units_json)['guard']['faction'] == 'good'
+    # Editing geography must not accidentally apply invalid seed changes to games.
+    from backend.map_overrides import save_map_overrides
+    save_map_overrides(db, 'world', {'graph': {'adjacent': {'shire': []}}})
+    assert json.loads(db.get(Setup, 'alpha').units_json)['guard']['faction'] == 'good'
+
+
+def test_structurally_invalid_seed_update_is_atomic(db):
+    initialize(db)
+    before = db.get(AppSetting, SETTING).value_json
+    library = deepcopy(load_state(db)['library'])
+    library['units'] = []
+    with pytest.raises(ValueError):
+        update_library(db, library, apply=True)
+    assert db.get(AppSetting, SETTING).value_json == before
+
+
+def add_new_map(db):
+    initialize(db)
+    state = load_state(db)
+    state['library']['maps']['new_world'] = {'bree': {**example()['territories']['shire'], 'id': 'bree', 'display_name': 'Bree'}}
+    db.get(AppSetting, SETTING).value_json = json.dumps(state)
+    db.commit()
+    return state
+
+
+def test_map_change_updates_selection_and_prunes_starting_positions_before_validation(client, db):
+    state = add_new_map(db)
+    setup = deepcopy(state['setups']['alpha'])
+    setup['manifest']['map_asset'] = 'new_world'
+    response = client.put('/admin/setups/alpha', json=setup)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert set(result['setup']['territories']) == {'bree'}
+    assert result['bundle']['starting_setup']['territory_owners'] == {}
+    assert result['bundle']['starting_setup']['starting_units'] == {}
+    assert result['bundle']['factions']['good']['capital'] is None
+    assert 'shire' not in result['setup']['territories']
+    assert client.get('/admin/setups/alpha').json()['setup'] == result['setup']
+
+
+def test_map_change_keeps_matching_overrides_ownership_and_units(db):
+    state = add_new_map(db)
+    state['library']['maps']['new_world']['shire'] = deepcopy(state['library']['maps']['world']['shire'])
+    state['library']['maps']['new_world']['shire']['adjacent'] = ['bree']
+    state['library']['maps']['new_world']['bree']['adjacent'] = ['shire']
+    setup = deepcopy(state['setups']['alpha'])
+    setup['territories']['shire']['overrides'] = {'display_name': 'Home'}
+    setup['camps'] = {'keep': {'id': 'keep', 'territory_id': 'shire'}, 'gone': {'id': 'gone', 'territory_id': 'removed'}}
+    result = with_map(setup, state['library'], 'new_world')
+    assert result['territories']['shire']['overrides'] == {'display_name': 'Home'}
+    assert result['starting_setup'] == setup['starting_setup']
+    assert result['camps'] == {'keep': setup['camps']['keep']}
+    assert compile_setup(result, state['library'])['territories']['shire']['adjacent'] == ['bree']
+    assert result['territories']['bree'] == {'seed': 'bree'}
+
+
+def test_api_canonical_get_save_export_and_no_source_editor_endpoint(client, db):
+    response = client.get('/admin/setups/alpha')
+    assert response.status_code == 200
+    setup = response.json()['setup']
+    setup['units']['guard']['overrides'] = {'attack': 8}
+    assert client.put('/admin/setups/alpha', json=setup).status_code == 200
+    exported = client.get('/admin/scenarios/export').json()
+    assert 'sources' not in exported
+    assert exported['setups']['alpha']['units']['guard']['overrides']['attack'] == 8
+    assert client.get('/admin/setups/alpha/source').status_code == 404
+    assert client.post('/admin/setups/validate', json=setup).json()['valid']
+    assert client.post('/admin/setups', json={'id': 'imported', 'setup': json.dumps(setup)}).status_code == 200
+    assert client.get('/admin/setups/imported').json()['setup']['manifest']['is_active'] is False
+
+
+def test_graph_edits_change_generated_snapshots_without_duplicating_graph_in_setup_json(db):
+    from backend.map_overrides import save_map_overrides
+    state = add_new_map(db)
+    state['library']['maps']['world']['bree'] = deepcopy(state['library']['maps']['new_world']['bree'])
+    for setup in state['setups'].values():
+        setup['territories']['bree'] = {'seed': 'bree'}
+    db.get(AppSetting, SETTING).value_json = json.dumps(state)
+    db.commit()
+    save_map_overrides(db, 'world', {'graph': {'adjacent': {'shire': ['bree'], 'bree': ['shire']}}})
+    for key in ('alpha', 'beta', 'gamma'):
+        assert json.loads(db.get(Setup, key).territories_json)['shire']['adjacent'] == ['bree']
+    setup = load_state(db)['setups']['alpha']
+    assert setup['territories']['shire'] == {'seed': 'shire'}
+
+
+def test_cli_json_export_round_trip(tmp_path, client, db):
+    snapshot = client.get('/admin/scenarios/export').json()
+    source = tmp_path / 'snapshot.json'
+    source.write_text(json.dumps(snapshot))
+    root = tmp_path / 'export'
+    assert main(['unpack', str(source), '--output-root', str(root)]) == 0
+    for key, setup in snapshot['setups'].items():
+        folder = root / 'setups' / key
+        assert [path.name for path in folder.iterdir()] == ['setup.json']
+        assert read_setup_bundle(folder) == compile_setup(setup, snapshot['library'])
+        assert main(['--data-root', str(root), 'build', str(folder / 'setup.json'), '--check']) == 0
+
+
+def test_files_mode_saves_the_canonical_json_and_reads_it_immediately(tmp_path, monkeypatch):
+    from backend.scenario_builder import write_library
+    from backend.engine import definitions
+    from backend import setup_data
+    library = extract_library({'alpha': example()})
+    write_library(tmp_path, library)
+    (tmp_path / 'catalog.json').write_text((DATA_DIR / 'catalog.json').read_text())
+    write_setup(tmp_path / 'setups/alpha', setup_from_bundle(example(), library))
+    monkeypatch.setenv('SETUP_SOURCE', 'files')
+    monkeypatch.setattr(definitions, 'DATA_DIR', tmp_path)
+    monkeypatch.setattr(definitions, 'SETUPS_DIR', tmp_path / 'setups')
+    monkeypatch.setattr(setup_data, 'SETUPS_DIR', tmp_path / 'setups')
+    engine = create_engine('sqlite://', poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    with sessionmaker(bind=engine)() as session:
+        setup = load_state(session)['setups']['alpha']
+        setup['units']['guard']['overrides'] = {'attack': 9}
+        save_definition(session, 'alpha', setup)
+    assert read_setup_bundle(tmp_path / 'setups/alpha')['units']['guard']['attack'] == 9
+    assert sorted(p.name for p in (tmp_path / 'setups/alpha').iterdir()) == ['setup.json']
+
+
+def test_empty_database_seeds_exact_canonical_definitions_and_shared_defaults(db, monkeypatch):
+    from backend.setup_data import seed_setups_if_empty
+    for row in db.query(Setup).all():
+        db.delete(row)
+    db.commit()
+    assert seed_setups_if_empty(db) == 6
+    state = load_state(db)
+    for path in SETUPS_DIR.glob('*/setup.json'):
+        assert state['setups'][path.parent.name] == canonical_setup(json.loads(path.read_text()))
+
+
+@pytest.mark.parametrize('setup_id', ['motw_1.0', 'wotr_1.1', 'wotr_exp_1.1'])
+def test_csv_import_updates_only_the_canonical_setup(tmp_path, monkeypatch, setup_id):
+    import importlib.util
+    from backend.scenario_builder import write_library
+    spec = importlib.util.spec_from_file_location('csv_import', SETUPS_DIR / setup_id / 'csv_to_json.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    library = extract_library({'alpha': example()})
+    write_library(tmp_path, library)
+    folder = tmp_path / 'setups/alpha'
+    write_setup(folder, setup_from_bundle(example(), library))
+    monkeypatch.setattr(module, 'SETUP_DIR', folder)
+    monkeypatch.setattr(module, '_require_units_csv', lambda: tmp_path / 'units.csv')
+    units = deepcopy(example()['units']['guard'])
+    units['attack'] = 9
+    monkeypatch.setattr(module, 'load_units_csv', lambda _: [units])
+    monkeypatch.setattr(module, '_first_existing_csv', lambda *_: None)
+    module.main()
+    assert read_setup_bundle(folder)['units']['guard']['attack'] == 9
+    assert sorted(path.name for path in folder.iterdir()) == ['setup.json']
+
+
+def test_canonical_files_do_not_introduce_new_validation_errors():
+    from backend.setup_validation import validate_setup_payload
+    baseline = json.loads((Path(__file__).parent / 'fixtures/scenario_validation_baseline.json').read_text())
+    catalog = json.loads((DATA_DIR / 'catalog.json').read_text())
+    for path in SETUPS_DIR.glob('*/setup.json'):
+        errors = validate_setup_payload(read_setup_bundle(path.parent), catalog)
+        assert not (set(errors) - set(baseline[path.parent.name]))
+
+
+def test_copy_keeps_seed_aliases_and_explicit_equal_overrides(client, db):
+    setup = client.get('/admin/setups/alpha').json()['setup']
+    setup['units']['guard']['overrides'] = {'attack': 5}
+    setup['units']['ally'] = {'seed': 'guard', 'overrides': {'attack': 7}}
+    assert client.put('/admin/setups/alpha', json=setup).status_code == 200
+    copied = client.post('/admin/setups', json={'id': 'copy', 'duplicate_from': 'alpha'})
+    assert copied.status_code == 200, copied.text
+    result = client.get('/admin/setups/copy').json()['setup']
+    assert result['units']['guard']['overrides']['attack'] == 5
+    assert result['units']['ally']['seed'] == 'guard'
+    assert result['manifest']['is_active'] is False
+    assert client.delete('/admin/setups/copy').status_code == 200
+    assert client.get('/admin/setups/copy').status_code == 404

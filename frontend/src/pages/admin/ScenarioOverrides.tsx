@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { EntityRecords, ScenarioLibrary, ScenarioSource } from '../../services/api';
+import type { EntityRecords, ScenarioLibrary, SetupDefinition } from '../../services/api';
 import { deleted, object, resolve, scenarioSelectionOptions, withScenarioSelection, type SelectionOption, type Dict } from './scenarioOverridesModel';
 
 function ValueInput({ value, onChange, label }: { value: unknown; onChange: (v: unknown) => void; label: string }) {
@@ -96,8 +96,8 @@ function SeedSelectionDialog({ title, options, selected, onClose, onApply }: {
 
 /** Defaults remain visible. Checked fields alone are stored as scenario overrides. */
 export function ScenarioOverrides({ section, source, library, onChange }: {
-  section: 'units' | 'factions' | 'territories'; source: ScenarioSource; library: ScenarioLibrary;
-  onChange: (records: EntityRecords, source: ScenarioSource) => void;
+  section: 'units' | 'factions' | 'territories'; source: SetupDefinition; library: ScenarioLibrary;
+  onChange: (records: EntityRecords, source: SetupDefinition) => void;
 }) {
   const [selected, setSelected] = useState('');
   const [newId, setNewId] = useState('');
@@ -105,29 +105,24 @@ export function ScenarioOverrides({ section, source, library, onChange }: {
   const [updatingList, setUpdatingList] = useState(false);
   const singular = { units: 'Unit', territories: 'Territory', factions: 'Faction' }[section];
   const territory = section === 'territories';
-  const defaults = territory ? library.maps[source.map] ?? {} : library[section];
-  const ids = territory ? source.territory_ids ?? Object.keys(defaults) : Object.keys(source[section]);
+  const defaults = territory ? library.maps[String(source.manifest.map_asset || source.manifest.id)] ?? {} : library[section];
+  const ids = Object.keys(source[section]);
   const id = ids.includes(selected) ? selected : ids[0] ?? '';
-  const entry = territory ? undefined : source[section][id];
-  const seed = territory ? id : entry?.seed;
+  const entry = source[section][id];
+  const seed = entry?.seed;
   const base = defaults[seed ?? ''] ?? {};
-  const overrides = territory ? source.territory_overrides?.[id] ?? {} : entry?.overrides ?? {};
+  const overrides = entry?.overrides ?? {};
 
-  const emit = (next: ScenarioSource) => {
+  const emit = (next: SetupDefinition) => {
     const records: EntityRecords = {};
-    if (territory) {
-      for (const tid of next.territory_ids ?? Object.keys(defaults)) records[tid] = resolve(defaults[tid] ?? {}, next.territory_overrides?.[tid] ?? {});
-    } else {
-      for (const [key, item] of Object.entries(next[section])) {
-        records[key] = resolve(defaults[item.seed ?? ''] ?? {}, item.overrides ?? {});
-        if ('id' in records[key] && !Object.hasOwn(item.overrides ?? {}, 'id')) records[key].id = key;
-      }
+    for (const [key, item] of Object.entries(next[section])) {
+      records[key] = resolve(defaults[item.seed ?? key] ?? {}, item.overrides ?? {});
+      if ('id' in records[key] && !Object.hasOwn(item.overrides ?? {}, 'id')) records[key].id = key;
     }
     onChange(records, next);
   };
-  const changeOverrides = (next: Dict) => emit(territory
-    ? { ...source, territory_overrides: { ...source.territory_overrides, [id]: next } }
-    : { ...source, [section]: { ...source[section], [id]: { ...entry, overrides: next } } });
+  const changeOverrides = (next: Dict) => emit({ ...source,
+    [section]: { ...source[section], [id]: { ...entry, overrides: next } } });
   const options = scenarioSelectionOptions(source, library, section);
   const visibleIds = [...ids].sort().filter((key) => {
     const option = options.find((option) => option.id === key);

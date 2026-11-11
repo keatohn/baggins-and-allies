@@ -1,6 +1,6 @@
-"""Declarative authoring compiled to the existing seven-document setup format.
+"""Resolve one canonical setup JSON against shared seeds and map geometry.
 
-This module is pure: neither compilation nor extraction reads or writes the DB.
+Database snapshots are generated consumers, never a second editable document.
 """
 from __future__ import annotations
 
@@ -8,13 +8,10 @@ from collections import Counter
 from copy import deepcopy
 import json
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-import yaml
 
 BUNDLE_KEYS = ("manifest", "units", "territories", "factions", "camps", "ports", "starting_setup")
-SOURCE_KEYS = {"version", "extends", "map", "manifest", "units", "factions", "territory_ids",
-               "territory_overrides", "camps", "ports", "starting_setup"}
 DELETE = {"$delete": True}
 MAP_TERRITORY_FIELDS = {"terrain_type", "adjacent", "aerial_adjacent", "ford_adjacent"}
 
@@ -103,150 +100,23 @@ def extract_library(bundles: dict[str, dict]) -> dict:
     return library
 
 
-def extract_source(bundle: dict, library: dict) -> dict:
-    map_id = scenario_map_id(bundle["manifest"], bundle["manifest"]["id"])
-    source = {"version": 1, "map": map_id, "manifest": deepcopy(bundle["manifest"])}
-    if "map_asset" not in source["manifest"]:
-        source["manifest"]["map_asset"] = deepcopy(DELETE)
-    for section in ("units", "factions"):
-        seeds = library[section]
-        source[section] = {
-            key: {**({"seed": key} if key in seeds else {}), "overrides": delta(seeds.get(key, {}), record)}
-            for key, record in bundle[section].items()
-        }
-    territories = library["maps"].get(map_id, {})
-    source["territory_ids"] = list(bundle["territories"])
-    source["territory_overrides"] = {
-        key: change for key, record in bundle["territories"].items()
-        if (change := delta(territories.get(key, {}), record))
-    }
-    for section in ("camps", "ports", "starting_setup"):
-        source[section] = deepcopy(bundle[section])
-    return source
-
-
-def resolve_source(source: dict, lookup: Callable[[str], dict] | None = None) -> dict:
-    _object(source, "scenario")
-    unknown = source.keys() - SOURCE_KEYS
-    if unknown:
-        raise ValueError(f"Unknown scenario fields: {', '.join(sorted(unknown))}")
-    if type(source.get("version", 1)) is not int or source.get("version", 1) != 1:
-        raise ValueError("Unsupported scenario version (expected 1)")
-    if "extends" not in source:
-        return deepcopy(source)
-    parent_id = source["extends"]
-    if not isinstance(parent_id, str) or not lookup:
-        raise ValueError("extends needs a parent scenario id and a scenario lookup")
-    parent = lookup(parent_id)
-    if not isinstance(parent, dict) or parent.get("extends"):
-        raise ValueError("extends supports exactly one level; parent must exist and have no extends")
-    resolve_source(parent)
-    return merge(parent, {key: value for key, value in source.items() if key != "extends"})
-
-
-def compile_scenario(source: dict, library: dict, lookup: Callable[[str], dict] | None = None) -> dict:
-    source = resolve_source(source, lookup)
-    map_id = source.get("map")
-    if not isinstance(map_id, str) or map_id not in library.get("maps", {}):
-        raise ValueError(f"Unknown map: {map_id!r}")
-    out = {key: deepcopy(_object(source.get(key, {}), key)) for key in ("manifest", "camps", "ports", "starting_setup")}
-    # Preserve legacy missing/null/empty map_asset, which resolves to the setup id.
-    asset = out["manifest"].get("map_asset")
-    if asset == DELETE:
-        out["manifest"].pop("map_asset")
-    elif "map_asset" not in out["manifest"] or (isinstance(asset, str) and asset):
-        out["manifest"]["map_asset"] = map_id
-    for section in ("units", "factions"):
-        out[section] = {}
-        for key, entry in _object(source.get(section, {}), section).items():
-            _object(entry, f"{section}.{key}")
-            if entry.keys() - {"seed", "overrides"}:
-                raise ValueError(f"{section}.{key}: use seed and overrides")
-            seed = entry.get("seed")
-            if seed is not None and (not isinstance(seed, str) or seed not in library[section]):
-                raise ValueError(f"Unknown {section} seed: {seed!r}")
-            record = merge(library[section].get(seed, {}), _object(entry.get("overrides", {}), f"{section}.{key}.overrides"))
-            # Seed aliases are useful for multiple factions' variants of a unit.
-            if seed != key and "id" in record and "id" not in entry.get("overrides", {}):
-                record["id"] = key
-            out[section][key] = record
-    defaults = library["maps"][map_id]
-    ids = source.get("territory_ids", list(defaults))
-    if not isinstance(ids, list) or any(not isinstance(tid, str) for tid in ids) or len(set(ids)) != len(ids):
-        raise ValueError("territory_ids must be a list of unique territory ids")
-    overrides = _object(source.get("territory_overrides", {}), "territory_overrides")
-    if overrides.keys() - set(ids):
-        raise ValueError("territory_overrides contains territories outside territory_ids")
-    out["territories"] = {}
-    for tid in ids:
-        if tid not in defaults:
-            raise ValueError(f"Unknown map territory: {tid}")
-        out["territories"][tid] = merge(defaults[tid], _object(overrides.get(tid, {}), f"territory_overrides.{tid}"))
-    return {key: out[key] for key in BUNDLE_KEYS}
-
-
-def overlay_overrides(base: dict, change: dict) -> dict:
-    """Update override expressions, retaining deletion markers as expressions."""
-    out = deepcopy(base)
-    for key, value in change.items():
-        if isinstance(value, dict) and value != DELETE and isinstance(out.get(key), dict) and out[key] != DELETE:
-            out[key] = overlay_overrides(out[key], value)
-        else:
-            out[key] = deepcopy(value)
-    return out
-
-
-def upgrade_territory_sources(state: dict) -> None:
-    """Preserve legacy bundles and extends while lifting map metadata into seeds."""
-    library, sources = state["library"], state["sources"]
-    before = {key: compile_scenario(source, library, sources.get) for key, source in sources.items()}
-    prepare_territory_seeds(library)
-    for key in sorted(sources, key=lambda key: bool(sources[key].get("extends"))):
-        source = sources[key]
-        after = compile_scenario(source, library, sources.get)
-        changes = delta(after["territories"], before[key]["territories"])
-        if changes:
-            source["territory_overrides"] = overlay_overrides(source.get("territory_overrides", {}), changes)
-
-
-class _NoAliasLoader(yaml.SafeLoader):
-    def __init__(self, stream):
-        super().__init__(stream)
-        self._depth = 0
-
-    def compose_node(self, parent, index):
-        if self.check_event(yaml.AliasEvent):
-            raise ValueError("YAML aliases are not supported")
-        self._depth += 1
-        try:
-            if self._depth > 64:
-                raise ValueError("Scenario nesting exceeds 64 levels")
-            return super().compose_node(parent, index)
-        finally:
-            self._depth -= 1
-
-    def construct_mapping(self, node, deep=False):
-        keys = set()
-        for key_node, _ in node.value:
-            key = self.construct_object(key_node, deep=deep)
-            if not isinstance(key, str):
-                raise ValueError("Scenario object keys must be strings")
-            if key in keys:
-                raise ValueError(f"Duplicate scenario key: {key}")
-            keys.add(key)
-        return super().construct_mapping(node, deep=deep)
-
-
-def parse_source(text: str) -> dict:
+def parse_setup_json(text: str) -> dict:
+    """JSON only. Legacy YAML is deliberately no longer an authoring format."""
     if len(text.encode("utf-8")) > 2_000_000:
-        raise ValueError("Scenario source exceeds 2 MB")
+        raise ValueError("Setup JSON exceeds 2 MB")
+    def pairs(items):
+        out = {}
+        for key, value in items:
+            if key in out:
+                raise ValueError(f"Duplicate setup key: {key}")
+            out[key] = value
+        return out
+    def constant(value):
+        raise ValueError(f"Invalid JSON constant: {value}")
     try:
-        value = yaml.load(text, Loader=_NoAliasLoader)
-        # Reject YAML-only values such as dates, non-string keys and non-finite numbers.
-        json.dumps(value, allow_nan=False)
-        return _object(value, "scenario")
-    except (yaml.YAMLError, TypeError, RecursionError) as exc:
-        raise ValueError(f"Invalid scenario YAML/JSON: {exc}") from exc
+        return _object(json.loads(text, object_pairs_hook=pairs, parse_constant=constant), "setup")
+    except (json.JSONDecodeError, RecursionError) as exc:
+        raise ValueError(f"Invalid setup JSON: {exc}") from exc
 
 
 def load_library(root: Path) -> dict:
@@ -265,3 +135,116 @@ def write_library(root: Path, library: dict) -> None:
         folder = root / "maps" / map_id
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "territories.json").write_text(json.dumps(records, indent=2, ensure_ascii=False) + "\n")
+
+
+def canonical_setup(setup: dict) -> dict:
+    """Validate and compact the single editable setup document."""
+    _object(setup, "setup")
+    unknown = setup.keys() - set(BUNDLE_KEYS)
+    if unknown:
+        raise ValueError("Unknown setup fields: " + ", ".join(sorted(unknown)))
+    out = {section: deepcopy(_object(setup.get(section, {}), section)) for section in BUNDLE_KEYS}
+    for field in ("territory_owners", "starting_units"):
+        if field in out["starting_setup"]:
+            _object(out["starting_setup"][field], f"starting_setup.{field}")
+    for section in ("camps", "ports"):
+        for key, record in out[section].items():
+            _object(record, f"{section}.{key}")
+    for section in ("units", "factions", "territories"):
+        for key, entry in out[section].items():
+            _object(entry, f"{section}.{key}")
+            if entry.get("seed") is not None and not isinstance(entry["seed"], str):
+                raise ValueError(f"{section}.{key}.seed must be a string")
+            if entry.keys() - {"seed", "overrides"}:
+                raise ValueError(f"{section}.{key}: use seed and optional overrides")
+            patch = _object(entry.get("overrides", {}), f"{section}.{key}.overrides")
+            if section == "territories":
+                patch = {field: value for field, value in patch.items() if field not in MAP_TERRITORY_FIELDS}
+            out[section][key] = {**({"seed": entry["seed"]} if entry.get("seed") is not None else {}), **({"overrides": patch} if patch else {})}
+    return out
+
+
+def compile_setup(setup: dict, library: dict) -> dict:
+    setup = canonical_setup(setup)
+    map_id = scenario_map_id(setup["manifest"], setup["manifest"].get("id", ""))
+    if map_id not in library["maps"]:
+        raise ValueError(f"Unknown map: {map_id}")
+    out = {section: deepcopy(setup[section]) for section in ("manifest", "camps", "ports", "starting_setup")}
+    for section in ("units", "factions", "territories"):
+        out[section] = {}
+        for key, entry in setup[section].items():
+            seed = entry.get("seed")
+            if section == "territories":
+                if key not in library["maps"][map_id] or seed not in (None, key):
+                    raise ValueError(f"Unknown map territory: {key}")
+                base = library["maps"][map_id][key]
+            else:
+                if seed is not None and seed not in library[section]:
+                    raise ValueError(f"Unknown {section} seed: {seed}")
+                base = library[section].get(seed, {})
+            record = merge(base, entry.get("overrides", {}))
+            if "id" in record and "id" not in entry.get("overrides", {}):
+                record["id"] = key
+            out[section][key] = record
+    return {section: out[section] for section in BUNDLE_KEYS}
+
+
+def setup_from_bundle(bundle: dict, library: dict, previous: dict | None = None) -> dict:
+    """One-way import of legacy resolved data, preserving pinned override choices."""
+    out = {section: deepcopy(bundle[section]) for section in ("manifest", "camps", "ports", "starting_setup")}
+    map_id = scenario_map_id(bundle["manifest"], bundle["manifest"].get("id", ""))
+    for section in ("units", "factions", "territories"):
+        out[section] = {}
+        for key, record in bundle[section].items():
+            entry = (previous or {}).get(section, {}).get(key)
+            seed = entry.get("seed") if entry is not None else (key if section == "territories" or key in library[section] else None)
+            base = library["maps"].get(map_id, {}).get(key, {}) if section == "territories" else deepcopy(library[section].get(seed, {}))
+            if section != "territories" and "id" in base:
+                base["id"] = key
+            patch = delta(base, record)
+            if entry:
+                # Explicit equal overrides remain deliberate choices.
+                old_patch = entry.get("overrides", {})
+                def retain(default, old, value):
+                    result = delta(default, value)
+                    for field, item in old.items():
+                        if field in value and merge({field: default.get(field)}, {field: item}).get(field) == value[field]:
+                            result[field] = deepcopy(item)
+                        elif isinstance(item, dict) and item != DELETE and isinstance(value.get(field), dict):
+                            nested = retain(default.get(field, {}), item, value[field])
+                            if nested:
+                                result[field] = nested
+                    return result
+                patch = retain(base, old_patch, record)
+            out[section][key] = {**({"seed": seed} if seed is not None else {}), **({"overrides": patch} if patch else {})}
+    return canonical_setup(out)
+
+
+def migrate_legacy_setups(state: dict) -> dict:
+    """Flatten the old source/extends representation once, without importing files."""
+    if "setups" in state:
+        return {"library": state["library"], "setups": {key: canonical_setup(value) for key, value in state["setups"].items()}}
+    from backend.legacy_setup_migration import compile_scenario, resolve_source, upgrade_territory_sources
+    library, sources = state["library"], state.get("sources", {})
+    upgrade_territory_sources(state)
+    setups = {}
+    for key, source in sources.items():
+        resolved = resolve_source(source, sources.get)
+        bundle = compile_scenario(resolved, library)
+        previous = {section: resolved.get(section, {}) for section in ("units", "factions")}
+        previous["territories"] = {tid: {"seed": tid, "overrides": resolved.get("territory_overrides", {}).get(tid, {})} for tid in bundle["territories"]}
+        setups[key] = setup_from_bundle(bundle, library, previous)
+    return {"library": library, "setups": setups}
+
+
+def read_setup_bundle(folder: Path) -> dict:
+    """Resolve canonical files; legacy folders remain supported for imports only."""
+    path = folder / "setup.json"
+    if path.is_file():
+        return compile_setup(parse_setup_json(path.read_text()), load_library(folder.parent.parent))
+    return {key: json.loads((folder / f"{key}.json").read_text()) if (folder / f"{key}.json").is_file() else {} for key in BUNDLE_KEYS}
+
+
+def write_setup(folder: Path, setup: dict) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "setup.json").write_text(json.dumps(canonical_setup(setup), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

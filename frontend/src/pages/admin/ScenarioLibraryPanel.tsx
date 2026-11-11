@@ -90,6 +90,11 @@ export function ScenarioLibraryPanel({ onClose, onSaved }: { onClose: () => void
         </fieldset>}
         {impact && <div className="scenario-library__review" role="status">
           <p className="admin-form__micro">{saved ? 'Saved. ' : ''}{impact.changed_setups.length ? `Affected scenarios: ${impact.changed_setups.join(', ')}` : 'No scenario definition changes.'}</p>
+          {!!impact.skipped_setups?.length && <p className="admin-form__micro">Seeds can be saved. Scenarios with validation problems keep their saved definitions: {impact.skipped_setups.join(', ')}.</p>}
+          {!!Object.keys(impact.warnings ?? {}).length && <div>
+            <p className="admin-form__micro">Validation warnings (do not block saving seeds):</p>
+            {Object.entries(impact.warnings ?? {}).map(([scope, messages]) => <div key={scope}><strong>{scope}</strong><ul>{messages.map((message) => <li key={message}>{message}</li>)}</ul></div>)}
+          </div>}
           <details><summary>Changes</summary><pre>{JSON.stringify(impact.changes, null, 2)}</pre></details>
         </div>}
         <div className="admin-modal__actions">
@@ -97,7 +102,7 @@ export function ScenarioLibraryPanel({ onClose, onSaved }: { onClose: () => void
           <button type="button" className="admin-page__btn admin-page__btn--primary" disabled={busy || !impact || saved} onClick={save}>Save and Rebuild</button>
           <button type="button" className="admin-page__btn" disabled={busy || !library} onClick={exportState}>Export</button>
         </div>
-        <p className="admin-form__micro">All tabs share pending changes. Review shows affected scenarios without saving. Save and Rebuild validates and saves seed changes and affected scenario definitions together. Scenario overrides, visibility, and games in progress are preserved. Export downloads the saved authoring data.</p>
+        <p className="admin-form__micro">All tabs share pending changes. Review shows affected scenarios without saving. Save and Rebuild saves seeds even when validation warnings exist, and rebuilds valid scenarios. Scenarios with validation problems keep their saved definitions until repaired. Scenario overrides, visibility, and games in progress are preserved. Export downloads the saved authoring data.</p>
       </div>
     </div>
   );

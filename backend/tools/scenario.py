@@ -1,136 +1,107 @@
-"""Run with ``python -m backend.tools.scenario --help``. No database access."""
+"""Inspect, validate and export canonical setup JSON. No database access."""
 from __future__ import annotations
-
 import argparse
 import difflib
 import json
 from pathlib import Path
 import sys
-
-import yaml
-
 from backend.engine.definitions import DATA_DIR
 from backend.scenario_builder import (
-    BUNDLE_KEYS, compile_scenario, extract_library, extract_source,
-    load_library, parse_source, resolve_source, upgrade_territory_sources, write_library,
+    BUNDLE_KEYS, canonical_setup, compile_setup, extract_library, load_library,
+    migrate_legacy_setups, parse_setup_json, read_setup_bundle, setup_from_bundle, write_library, write_setup,
 )
 from backend.setup_validation import validate_setup_payload
 
 
 def read_bundle(path: Path) -> dict:
-    if path.is_dir():
-        return {key: json.loads((path / f"{key}.json").read_text()) for key in BUNDLE_KEYS}
-    return json.loads(path.read_text())
+    return read_setup_bundle(path) if path.is_dir() else json.loads(path.read_text())
+
+
+def update_setup_sections(folder: Path, sections: dict) -> None:
+    """CSV compatibility: import changed records into the one canonical file."""
+    library = load_library(folder.parent.parent)
+    previous = canonical_setup(parse_setup_json((folder / "setup.json").read_text()))
+    bundle = read_setup_bundle(folder)
+    bundle.update(sections)
+    map_id = bundle["manifest"].get("map_asset") or bundle["manifest"]["id"]
+    if bundle["territories"].keys() - library["maps"].get(map_id, {}).keys():
+        raise ValueError("CSV includes territories outside the selected map; edit the map first")
+    write_setup(folder, setup_from_bundle(bundle, library, previous))
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Compile declarative scenarios without changing the database")
-    parser.add_argument("--data-root", type=Path, default=DATA_DIR, help="Library, maps and setups directory")
+    parser = argparse.ArgumentParser(description="Manage canonical setup JSON")
+    parser.add_argument("--data-root", type=Path, default=DATA_DIR)
     commands = parser.add_subparsers(dest="command", required=True)
-    extract = commands.add_parser("extract", help="Extract majority defaults and lossless sources from JSON folders")
-    extract.add_argument("--setups", type=Path, default=DATA_DIR / "setups")
-    extract.add_argument("--output-root", type=Path, required=True, help="Destination data root (use a scratch directory for DB exports)")
-    unpack = commands.add_parser("unpack", help="Write a live admin export to an offline data root")
+    for name in ("build", "validate"):
+        command = commands.add_parser(name, help="Resolve seed references and validate setup.json")
+        command.add_argument("source", type=Path)
+        if name == "build":
+            command.add_argument("--check", action="store_true")
+            command.add_argument("--output", type=Path, help="Optional resolved runtime snapshot")
+    unpack = commands.add_parser("unpack", help="Write an admin JSON export as canonical setup files")
     unpack.add_argument("snapshot", type=Path)
     unpack.add_argument("--output-root", type=Path, required=True)
-    build = commands.add_parser("build", help="Compile and validate a setup.yaml")
-    build.add_argument("source", type=Path)
-    build.add_argument("--check", action="store_true", help="Dry run; emit errors only")
-    build.add_argument("--output", type=Path, help="Write a seven-key master JSON bundle")
-    build.add_argument("--write-setup", type=Path, help="Write compiled JSON documents to this folder")
-    validate = commands.add_parser("validate", help="Validate master JSON, compiled setup directory, or setup.yaml")
-    validate.add_argument("path", type=Path)
-    explain = commands.add_parser("explain", help="Show seed, explicit overrides, and resolved unit")
+    extract = commands.add_parser("extract", help="Import legacy resolved folders into canonical setup JSON")
+    extract.add_argument("--setups", type=Path, default=DATA_DIR / "setups")
+    extract.add_argument("--output-root", type=Path, required=True)
+    explain = commands.add_parser("explain")
     explain.add_argument("unit")
     explain.add_argument("source", type=Path)
-    diff = commands.add_parser("diff", help="Diff compiled bundles (JSON, folder, or YAML)")
+    diff = commands.add_parser("diff")
     diff.add_argument("before", type=Path)
     diff.add_argument("after", type=Path)
     args = parser.parse_args(argv)
-
-    def lookup(setup_id):
-        from backend.setup_ids import validate_setup_id
-        if error := validate_setup_id(setup_id):
-            raise ValueError(error)
-        return parse_source((args.data_root / "setups" / setup_id / "setup.yaml").read_text())
-
-    def compile_path(path):
-        if path.suffix.lower() in (".yaml", ".yml"):
-            return compile_scenario(parse_source(path.read_text()), load_library(args.data_root), lookup)
-        return read_bundle(path)
-
-    def printed(bundle):
-        return json.dumps(bundle, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
-
+    printed = lambda value: json.dumps(value, indent=2, ensure_ascii=False) + "\n"
     try:
-        if args.command == "unpack":
+        if args.command in ("unpack", "extract"):
+            if args.command == "unpack":
+                snapshot = json.loads(args.snapshot.read_text())
+                state = migrate_legacy_setups(snapshot)
+                catalog = snapshot.get("catalog")
+            else:
+                bundles = {folder.name: read_setup_bundle(folder) for folder in sorted(args.setups.iterdir())
+                           if (folder / "setup.json").is_file() or (folder / "manifest.json").is_file()}
+                if not bundles:
+                    raise ValueError("No setup folders found")
+                library = extract_library(bundles)
+                state = {"library": library, "setups": {key: setup_from_bundle(bundle, library) for key, bundle in bundles.items()}}
+                catalog = json.loads((args.data_root / "catalog.json").read_text())
             from backend.setup_ids import validate_setup_id
-            state = json.loads(args.snapshot.read_text())
-            upgrade_territory_sources(state)
-            library, sources = state["library"], state["sources"]
-            bundles = {key: compile_scenario(source, library, sources.get) for key, source in sources.items()}
-            for key in sources:
+            for key in state["setups"]:
                 if error := validate_setup_id(key):
                     raise ValueError(error)
-            write_library(args.output_root, library)
-            (args.output_root / "catalog.json").write_text(printed(state["catalog"]))
-            for key, source in sources.items():
-                folder = args.output_root / "setups" / key
-                folder.mkdir(parents=True, exist_ok=True)
-                (folder / "setup.yaml").write_text(yaml.safe_dump(source, sort_keys=False, allow_unicode=True))
-                for name in BUNDLE_KEYS:
-                    (folder / f"{name}.json").write_text(printed(bundles[key][name]))
-            print(f"Unpacked {len(sources)} live scenarios. Run validate to inspect historical errors.")
+            write_library(args.output_root, state["library"])
+            if catalog is not None:
+                (args.output_root / "catalog.json").write_text(printed(catalog))
+            for key, setup in state["setups"].items():
+                write_setup(args.output_root / "setups" / key, setup)
+            print(f"Wrote {len(state['setups'])} canonical setup JSON files.")
             return 0
-        if args.command == "extract":
-            bundles = {p.name: read_bundle(p) for p in sorted(args.setups.iterdir()) if (p / "manifest.json").is_file()}
-            if not bundles:
-                raise ValueError("No setup folders found")
-            library = extract_library(bundles)
-            sources = {key: extract_source(bundle, library) for key, bundle in bundles.items()}
-            for key in bundles:
-                if compile_scenario(sources[key], library) != bundles[key]:
-                    raise ValueError(f"Lossless extraction failed for {key}")
-            write_library(args.output_root, library)
-            for key, source in sources.items():
-                folder = args.output_root / "setups" / key
-                folder.mkdir(parents=True, exist_ok=True)
-                (folder / "setup.yaml").write_text(yaml.safe_dump(source, sort_keys=False, allow_unicode=True))
-            print(f"Extracted {len(sources)} scenarios; all compile identically to their input bundles.")
+        library = load_library(args.data_root)
+        def resolve(path):
+            return read_setup_bundle(path) if path.is_dir() else compile_setup(parse_setup_json(path.read_text()), library)
+        if args.command == "diff":
+            print("".join(difflib.unified_diff(printed(resolve(args.before)).splitlines(True),
+                printed(resolve(args.after)).splitlines(True), fromfile=str(args.before), tofile=str(args.after))), end="")
             return 0
         if args.command == "explain":
-            library = load_library(args.data_root)
-            source = resolve_source(parse_source(args.source.read_text()), lookup)
-            entry = source.get("units", {}).get(args.unit)
-            if entry is None:
-                raise ValueError(f"Unknown unit: {args.unit}")
-            print(printed({"seed": entry.get("seed"), "default": library["units"].get(entry.get("seed"), {}),
-                           "overrides": entry.get("overrides", {}),
-                           "resolved": compile_scenario(source, library)["units"][args.unit]}), end="")
+            setup = canonical_setup(parse_setup_json(args.source.read_text()))
+            entry = setup["units"][args.unit]
+            print(printed({"seed": entry.get("seed"), "overrides": entry.get("overrides", {}),
+                           "resolved": compile_setup(setup, library)["units"][args.unit]}), end="")
             return 0
-        if args.command == "diff":
-            print("".join(difflib.unified_diff(printed(compile_path(args.before)).splitlines(True),
-                                              printed(compile_path(args.after)).splitlines(True),
-                                              fromfile=str(args.before), tofile=str(args.after))), end="")
-            return 0
-        path = args.source if args.command == "build" else args.path
-        bundle = compile_path(path)
-        catalog = json.loads((args.data_root / "catalog.json").read_text())
-        errors = validate_setup_payload(bundle, catalog)
+        bundle = resolve(args.source)
+        errors = validate_setup_payload(bundle, json.loads((args.data_root / "catalog.json").read_text()))
         if errors:
-            for error in errors:
-                print(error, file=sys.stderr)
+            print("\n".join(errors), file=sys.stderr)
             return 1
         if args.command == "build":
-            if args.check and (args.output or args.write_setup):
-                raise ValueError("--check cannot be combined with write options")
+            if args.check and args.output:
+                raise ValueError("--check cannot be combined with --output")
             if args.output:
                 args.output.write_text(printed(bundle))
-            if args.write_setup:
-                args.write_setup.mkdir(parents=True, exist_ok=True)
-                for key in BUNDLE_KEYS:
-                    (args.write_setup / f"{key}.json").write_text(printed(bundle[key]))
-            if not args.check and not args.output and not args.write_setup:
+            elif not args.check:
                 print(printed(bundle), end="")
         return 0
     except (OSError, ValueError, KeyError, TypeError) as exc:

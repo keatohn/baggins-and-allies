@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""
-Generate units.json, territories.json, and update starting_setup.json from the two CSVs.
-Uses exact column order; types in parentheses are not part of field names.
+"""Import CSV records into this folder's canonical setup.json.
 
-wotr_exp_1.1: prefers exp_units.csv + exp_terr.csv; falls back to legacy "Baggins & Allies - …" names.
+Units/factions are stored as seed references and optional overrides. Territory
+metadata and starting positions can be imported; geometry remains map-owned.
 """
 import csv
 import json
@@ -192,43 +191,22 @@ def load_territories_csv(path: Path) -> tuple[list[dict], dict, dict]:
 
 
 def main():
+    sys.path.insert(0, str(SETUP_DIR.parents[3]))
+    from backend.tools.scenario import update_setup_sections, read_bundle
     units_path = _require_units_csv()
-    print(f"Using units CSV: {units_path.name}")
-
-    # Units
     units_rows = load_units_csv(units_path)
-    units_by_id = {u["id"]: u for u in units_rows}
-    with open(SETUP_DIR / "units.json", "w", encoding="utf-8") as f:
-        json.dump(units_by_id, f, indent=2)
-    print(f"Wrote units.json with {len(units_by_id)} units")
-
-    # Territories (optional: skip if CSV missing)
+    if not units_rows:
+        raise ValueError("No unit rows after header")
+    updates = {"units": {unit["id"]: unit for unit in units_rows}}
     terr_csv = _first_existing_csv(*TERR_CSV_NAMES)
     if terr_csv is not None:
-        print(f"Using territories CSV: {terr_csv.name}")
-        terr_rows, owners, units_by_terr = load_territories_csv(terr_csv)
-        territories_by_id = {}
-        for t in terr_rows:
-            tid = t["id"]
-            if tid not in territories_by_id:  # first occurrence only to avoid sea_zone12 overwriting sea_zone_12
-                territories_by_id[tid] = t
-        with open(SETUP_DIR / "territories.json", "w", encoding="utf-8") as f:
-            json.dump(territories_by_id, f, indent=2)
-        print(f"Wrote territories.json with {len(territories_by_id)} territories")
-
-        # Starting setup: keep turn_order and structure, replace territory_owners and starting_units
-        setup_path = SETUP_DIR / "starting_setup.json"
-        with open(setup_path, "r", encoding="utf-8") as f:
-            setup = json.load(f)
-        setup["territory_owners"] = owners
-        setup["starting_units"] = {
-            tid: units for tid, units in units_by_terr.items()
-        }
-        with open(setup_path, "w", encoding="utf-8") as f:
-            json.dump(setup, f, indent=2)
-        print(f"Updated starting_setup.json: {len(owners)} territory owners, {len(units_by_terr)} territories with starting units")
-    else:
-        print("Skipped territories and starting_setup (territories CSV not found)")
+        terr_rows, owners, stacks = load_territories_csv(terr_csv)
+        updates["starting_setup"] = {**read_bundle(SETUP_DIR)["starting_setup"], "territory_owners": owners, "starting_units": stacks}
+        updates["territories"] = {}
+        for territory in terr_rows:
+            updates["territories"].setdefault(territory["id"], territory)
+    update_setup_sections(SETUP_DIR, updates)
+    print("Updated setup.json seed selections, overrides and starting positions")
 
 
 if __name__ == "__main__":

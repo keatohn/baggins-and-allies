@@ -267,6 +267,9 @@ def save_map_asset(db: Session | None, map_base: str, payload: Any) -> dict[str,
         write_overrides(db, base, overrides)
         _mirror_graph_db(db, base, overrides["graph"])
         _write_row(db, base, name, doc, svg)
+        db.flush()
+        from backend.scenario_store import sync_map
+        sync_map(db, base)
         updated = _row(db, base).updated_at
     return {"ok": True, "map_base": base, "display_name": name, "updated_at": updated.isoformat() + "Z", "doc": doc}
 

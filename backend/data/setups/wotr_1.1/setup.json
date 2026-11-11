@@ -1,0 +1,1181 @@
+{
+  "manifest": {
+    "id": "wotr_1.1",
+    "display_name": "War of the Ring",
+    "is_active": true,
+    "map_asset": "wotr_map_1.2",
+    "context": {
+      "year": "TA 3019",
+      "map": "Middle-earth",
+      "faction_count": 5,
+      "factions": [
+        "Free Peoples",
+        "Isengard",
+        "Rohan",
+        "Mordor",
+        "Gondor"
+      ]
+    },
+    "victory_criteria": {
+      "strongholds": {
+        "good": 10,
+        "evil": 8
+      }
+    },
+    "camp_cost": 10,
+    "stronghold_repair_cost": 2,
+    "prefire_penalty": false,
+    "lobby_music": [
+      "fellowship.m4a"
+    ],
+    "menu_order": 1
+  },
+  "units": {
+    "hobbit": {
+      "seed": "hobbit",
+      "overrides": {
+        "faction": "freepeoples"
+      }
+    },
+    "laketown_archer": {
+      "seed": "laketown_archer",
+      "overrides": {
+        "faction": "freepeoples"
+      }
+    },
+    "dwarf_warrior": {
+      "seed": "dwarf_warrior",
+      "overrides": {
+        "faction": "freepeoples"
+      }
+    },
+    "galadhrim_archer": {
+      "seed": "galadhrim_archer",
+      "overrides": {
+        "faction": "freepeoples"
+      }
+    },
+    "rivendell_warrior": {
+      "seed": "rivendell_warrior",
+      "overrides": {
+        "faction": "freepeoples"
+      }
+    },
+    "mirkwood_elf": {
+      "seed": "mirkwood_elf",
+      "overrides": {
+        "faction": "freepeoples"
+      }
+    },
+    "rivendell_knight": {
+      "seed": "rivendell_knight",
+      "overrides": {
+        "faction": "freepeoples"
+      }
+    },
+    "lindon_ship": {
+      "seed": "lindon_ship",
+      "overrides": {
+        "faction": "freepeoples"
+      }
+    },
+    "ent": {
+      "seed": "ent",
+      "overrides": {
+        "faction": "freepeoples"
+      }
+    },
+    "eagle": {
+      "seed": "eagle",
+      "overrides": {
+        "faction": "freepeoples"
+      }
+    },
+    "gondor_archer": {
+      "seed": "gondor_archer"
+    },
+    "gondor_soldier": {
+      "seed": "gondor_soldier"
+    },
+    "citadel_guard": {
+      "seed": "citadel_guard"
+    },
+    "ithilien_ranger": {
+      "seed": "ithilien_ranger",
+      "overrides": {
+        "specials": [
+          "archer",
+          "home",
+          "forest",
+          "stealth"
+        ]
+      }
+    },
+    "gondor_knight": {
+      "seed": "gondor_knight",
+      "overrides": {
+        "home_territory_ids": {
+          "$delete": true
+        }
+      }
+    },
+    "captain_of_gondor": {
+      "seed": "captain_of_gondor"
+    },
+    "gondor_ship": {
+      "seed": "gondor_ship"
+    },
+    "trebuchet": {
+      "seed": "trebuchet"
+    },
+    "siege_ladder": {
+      "seed": "siege_ladder"
+    },
+    "dunland_wildman": {
+      "seed": "dunland_wildman"
+    },
+    "uruk_crossbowman": {
+      "seed": "uruk_crossbowman"
+    },
+    "urukhai_warrior": {
+      "seed": "urukhai_warrior"
+    },
+    "uruk_pikeman": {
+      "seed": "uruk_pikeman"
+    },
+    "berserker": {
+      "seed": "berserker"
+    },
+    "isengard_warg_rider": {
+      "seed": "isengard_warg_rider"
+    },
+    "battering_ram": {
+      "seed": "battering_ram"
+    },
+    "bomb": {
+      "seed": "bomb"
+    },
+    "orc_warrior": {
+      "seed": "orc_warrior"
+    },
+    "haradrim_archer": {
+      "seed": "haradrim_archer",
+      "overrides": {
+        "faction": "mordor",
+        "specials": [
+          "archer",
+          "home"
+        ]
+      }
+    },
+    "corsair_of_umbar": {
+      "seed": "corsair_of_umbar",
+      "overrides": {
+        "faction": "mordor"
+      }
+    },
+    "black_uruk": {
+      "seed": "black_uruk",
+      "overrides": {
+        "home_territory_ids": {
+          "$delete": true
+        }
+      }
+    },
+    "easterling_pikeman": {
+      "seed": "easterling_pikeman",
+      "overrides": {
+        "faction": "mordor",
+        "specials": [
+          "anti_cavalry",
+          "home"
+        ]
+      }
+    },
+    "mordor_warg_rider": {
+      "seed": "mordor_warg_rider"
+    },
+    "black_ship": {
+      "seed": "black_ship",
+      "overrides": {
+        "faction": "mordor"
+      }
+    },
+    "grond": {
+      "seed": "grond"
+    },
+    "armored_troll": {
+      "seed": "armored_troll"
+    },
+    "catapult": {
+      "seed": "catapult"
+    },
+    "nazgul": {
+      "seed": "nazgul"
+    },
+    "war_mumakil": {
+      "seed": "war_mumakil",
+      "overrides": {
+        "faction": "mordor",
+        "cost": {
+          "power": 20
+        },
+        "specials": [
+          "ford_crosser",
+          "home",
+          "ram"
+        ]
+      }
+    },
+    "rohan_peasant": {
+      "seed": "rohan_peasant"
+    },
+    "rohirrim_archer": {
+      "seed": "rohirrim_archer"
+    },
+    "rohirrim_soldier": {
+      "seed": "rohirrim_soldier"
+    },
+    "royal_guard": {
+      "seed": "royal_guard"
+    },
+    "rohirrim_archer_rider": {
+      "seed": "rohirrim_archer_rider"
+    },
+    "rider_of_rohan": {
+      "seed": "rider_of_rohan"
+    },
+    "marshal_of_the_riddermark": {
+      "seed": "marshal_of_the_riddermark"
+    },
+    "goblin": {
+      "seed": "goblin"
+    },
+    "spider": {
+      "seed": "spider"
+    },
+    "barrowwight": {
+      "seed": "barrowwight"
+    },
+    "cave_troll": {
+      "seed": "cave_troll"
+    },
+    "dragon": {
+      "seed": "dragon"
+    }
+  },
+  "territories": {
+    "forlindon": {
+      "seed": "forlindon"
+    },
+    "harlindon": {
+      "seed": "harlindon"
+    },
+    "the_shire": {
+      "seed": "the_shire"
+    },
+    "grey_havens": {
+      "seed": "grey_havens",
+      "overrides": {
+        "stronghold_base_health": {
+          "$delete": true
+        }
+      }
+    },
+    "tower_hills": {
+      "seed": "tower_hills"
+    },
+    "lune_valley": {
+      "seed": "lune_valley"
+    },
+    "bree_fornost": {
+      "seed": "bree_fornost"
+    },
+    "south_downs": {
+      "seed": "south_downs"
+    },
+    "north_downs": {
+      "seed": "north_downs"
+    },
+    "evendim_hills": {
+      "seed": "evendim_hills"
+    },
+    "angmar": {
+      "seed": "angmar"
+    },
+    "carn_dum": {
+      "seed": "carn_dum"
+    },
+    "weather_hills": {
+      "seed": "weather_hills"
+    },
+    "rivendell": {
+      "seed": "rivendell"
+    },
+    "lothlorien": {
+      "seed": "lothlorien"
+    },
+    "gladden_fields": {
+      "seed": "gladden_fields"
+    },
+    "anduin_valley": {
+      "seed": "anduin_valley"
+    },
+    "carrock": {
+      "seed": "carrock"
+    },
+    "moria": {
+      "seed": "moria",
+      "overrides": {
+        "is_stronghold": true
+      }
+    },
+    "north_eregion": {
+      "seed": "north_eregion"
+    },
+    "south_eregion": {
+      "seed": "south_eregion"
+    },
+    "fangorn": {
+      "seed": "fangorn"
+    },
+    "dol_guldur": {
+      "seed": "dol_guldur",
+      "overrides": {
+        "produces": {
+          "power": 5
+        }
+      }
+    },
+    "south_mirkwood": {
+      "seed": "south_mirkwood"
+    },
+    "north_mirkwood": {
+      "seed": "north_mirkwood"
+    },
+    "thranduils_halls": {
+      "seed": "thranduils_halls"
+    },
+    "rhudaur": {
+      "seed": "rhudaur"
+    },
+    "gundabad": {
+      "seed": "gundabad",
+      "overrides": {
+        "produces": {
+          "power": 3
+        }
+      }
+    },
+    "forodwaith": {
+      "seed": "forodwaith",
+      "overrides": {
+        "produces": {
+          "power": {
+            "$delete": true
+          }
+        }
+      }
+    },
+    "minhiriath": {
+      "seed": "minhiriath"
+    },
+    "erebor": {
+      "seed": "erebor"
+    },
+    "dale": {
+      "seed": "dale"
+    },
+    "esgaroth": {
+      "seed": "esgaroth"
+    },
+    "celduin_valley": {
+      "seed": "celduin_valley"
+    },
+    "withered_heath": {
+      "seed": "withered_heath"
+    },
+    "iron_hills": {
+      "seed": "iron_hills"
+    },
+    "north_rhun": {
+      "seed": "north_rhun"
+    },
+    "west_rhun": {
+      "seed": "west_rhun",
+      "overrides": {
+        "stronghold_base_health": {
+          "$delete": true
+        },
+        "produces": {
+          "power": 2
+        }
+      }
+    },
+    "rhun_hills": {
+      "seed": "rhun_hills",
+      "overrides": {
+        "produces": {
+          "power": 2
+        }
+      }
+    },
+    "dorwinion": {
+      "seed": "dorwinion",
+      "overrides": {
+        "stronghold_base_health": {
+          "$delete": true
+        }
+      }
+    },
+    "minas_tirith": {
+      "seed": "minas_tirith"
+    },
+    "pelennor": {
+      "seed": "pelennor"
+    },
+    "anorien": {
+      "seed": "anorien"
+    },
+    "west_osgiliath": {
+      "seed": "west_osgiliath"
+    },
+    "east_osgiliath": {
+      "seed": "east_osgiliath",
+      "overrides": {
+        "image": {
+          "$delete": true
+        }
+      }
+    },
+    "south_ithilien": {
+      "seed": "south_ithilien"
+    },
+    "north_ithilien": {
+      "seed": "north_ithilien"
+    },
+    "lossarnach": {
+      "seed": "lossarnach"
+    },
+    "lebennin": {
+      "seed": "lebennin"
+    },
+    "pelargir": {
+      "seed": "pelargir"
+    },
+    "belfalas": {
+      "seed": "belfalas"
+    },
+    "anfalas": {
+      "seed": "anfalas"
+    },
+    "andrast": {
+      "seed": "andrast"
+    },
+    "erech_lamedon": {
+      "seed": "erech_lamedon"
+    },
+    "druwaith_iaur": {
+      "seed": "druwaith_iaur"
+    },
+    "minas_morgul": {
+      "seed": "minas_morgul"
+    },
+    "the_black_gate": {
+      "seed": "the_black_gate"
+    },
+    "barad_dur": {
+      "seed": "barad_dur",
+      "overrides": {
+        "image": {
+          "$delete": true
+        }
+      }
+    },
+    "mount_doom": {
+      "seed": "mount_doom"
+    },
+    "gorgoroth": {
+      "seed": "gorgoroth"
+    },
+    "nurn": {
+      "seed": "nurn"
+    },
+    "udun": {
+      "seed": "udun"
+    },
+    "cirith_ungol": {
+      "seed": "cirith_ungol"
+    },
+    "isengard": {
+      "seed": "isengard"
+    },
+    "south_dunland": {
+      "seed": "south_dunland",
+      "overrides": {
+        "produces": {
+          "power": 4
+        }
+      }
+    },
+    "north_dunland": {
+      "seed": "north_dunland"
+    },
+    "gap_of_rohan": {
+      "seed": "gap_of_rohan"
+    },
+    "westfold": {
+      "seed": "westfold"
+    },
+    "westemnet": {
+      "seed": "westemnet"
+    },
+    "edoras": {
+      "seed": "edoras"
+    },
+    "helms_deep": {
+      "seed": "helms_deep"
+    },
+    "dunharrow": {
+      "seed": "dunharrow"
+    },
+    "eastfold": {
+      "seed": "eastfold"
+    },
+    "eastemnet": {
+      "seed": "eastemnet"
+    },
+    "entwash": {
+      "seed": "entwash"
+    },
+    "the_wold": {
+      "seed": "the_wold"
+    },
+    "dead_marshes": {
+      "seed": "dead_marshes"
+    },
+    "emyn_muil": {
+      "seed": "emyn_muil",
+      "overrides": {
+        "produces": {
+          "power": {
+            "$delete": true
+          }
+        }
+      }
+    },
+    "dagorlad": {
+      "seed": "dagorlad",
+      "overrides": {
+        "produces": {
+          "power": {
+            "$delete": true
+          }
+        }
+      }
+    },
+    "enedwaith": {
+      "seed": "enedwaith"
+    },
+    "fords_of_isen": {
+      "seed": "fords_of_isen"
+    },
+    "west_march": {
+      "seed": "west_march"
+    },
+    "east_brown_lands": {
+      "seed": "east_brown_lands"
+    },
+    "west_brown_lands": {
+      "seed": "west_brown_lands"
+    },
+    "harondor": {
+      "seed": "harondor"
+    },
+    "khand": {
+      "seed": "khand",
+      "overrides": {
+        "produces": {
+          "power": 1
+        }
+      }
+    },
+    "near_harad": {
+      "seed": "near_harad"
+    },
+    "far_harad": {
+      "seed": "far_harad"
+    },
+    "haradwaith": {
+      "seed": "haradwaith",
+      "overrides": {
+        "stronghold_base_health": {
+          "$delete": true
+        },
+        "is_stronghold": false,
+        "produces": {
+          "power": 3
+        }
+      }
+    },
+    "umbar": {
+      "seed": "umbar",
+      "overrides": {
+        "stronghold_base_health": {
+          "$delete": true
+        },
+        "produces": {
+          "power": 3
+        }
+      }
+    },
+    "sea_zone_1": {
+      "seed": "sea_zone_1"
+    },
+    "sea_zone_2": {
+      "seed": "sea_zone_2"
+    },
+    "sea_zone_3": {
+      "seed": "sea_zone_3"
+    },
+    "sea_zone_4": {
+      "seed": "sea_zone_4"
+    },
+    "sea_zone_5": {
+      "seed": "sea_zone_5"
+    },
+    "sea_zone_6": {
+      "seed": "sea_zone_6"
+    },
+    "sea_zone_7": {
+      "seed": "sea_zone_7"
+    },
+    "sea_zone_8": {
+      "seed": "sea_zone_8"
+    },
+    "sea_zone_9": {
+      "seed": "sea_zone_9"
+    },
+    "sea_zone_10": {
+      "seed": "sea_zone_10"
+    },
+    "sea_zone_11": {
+      "seed": "sea_zone_11"
+    },
+    "sea_zone_12": {
+      "seed": "sea_zone_12"
+    }
+  },
+  "factions": {
+    "mordor": {
+      "seed": "mordor"
+    },
+    "isengard": {
+      "seed": "isengard"
+    },
+    "gondor": {
+      "seed": "gondor"
+    },
+    "rohan": {
+      "seed": "rohan"
+    },
+    "freepeoples": {
+      "seed": "freepeoples"
+    },
+    "neutral": {
+      "seed": "neutral"
+    }
+  },
+  "camps": {
+    "rivendell_camp": {
+      "id": "rivendell_camp",
+      "territory_id": "rivendell"
+    },
+    "lothlorien_camp": {
+      "id": "lothlorien_camp",
+      "territory_id": "lothlorien"
+    },
+    "dol_guldur_camp": {
+      "id": "dol_guldur_camp",
+      "territory_id": "dol_guldur"
+    },
+    "erebor_camp": {
+      "id": "erebor_camp",
+      "territory_id": "erebor"
+    },
+    "minas_tirith_camp": {
+      "id": "minas_tirith_camp",
+      "territory_id": "minas_tirith"
+    },
+    "west_osgiliath_camp": {
+      "id": "west_osgiliath_camp",
+      "territory_id": "west_osgiliath"
+    },
+    "minas_morgul_camp": {
+      "id": "minas_morgul_camp",
+      "territory_id": "minas_morgul"
+    },
+    "barad_dur_camp": {
+      "id": "barad_dur_camp",
+      "territory_id": "barad_dur"
+    },
+    "isengard_camp": {
+      "id": "isengard_camp",
+      "territory_id": "isengard"
+    },
+    "edoras_camp": {
+      "id": "edoras_camp",
+      "territory_id": "edoras"
+    },
+    "dunharrow_camp": {
+      "id": "dunharrow_camp",
+      "territory_id": "dunharrow"
+    }
+  },
+  "ports": {
+    "grey_havens_port": {
+      "id": "grey_havens_port",
+      "territory_id": "grey_havens"
+    },
+    "pelargir_port": {
+      "id": "pelargir_port",
+      "territory_id": "pelargir"
+    },
+    "umbar_port": {
+      "id": "umbar_port",
+      "territory_id": "umbar"
+    }
+  },
+  "starting_setup": {
+    "turn_order": [
+      "freepeoples",
+      "isengard",
+      "rohan",
+      "mordor",
+      "gondor"
+    ],
+    "territory_owners": {
+      "forlindon": "freepeoples",
+      "harlindon": "freepeoples",
+      "the_shire": "freepeoples",
+      "grey_havens": "freepeoples",
+      "rivendell": "freepeoples",
+      "lothlorien": "freepeoples",
+      "fangorn": "freepeoples",
+      "dol_guldur": "mordor",
+      "thranduils_halls": "freepeoples",
+      "gundabad": "mordor",
+      "erebor": "freepeoples",
+      "dale": "freepeoples",
+      "esgaroth": "freepeoples",
+      "iron_hills": "freepeoples",
+      "north_rhun": "mordor",
+      "west_rhun": "mordor",
+      "rhun_hills": "mordor",
+      "dorwinion": "mordor",
+      "minas_tirith": "gondor",
+      "pelennor": "gondor",
+      "anorien": "gondor",
+      "west_osgiliath": "gondor",
+      "east_osgiliath": "gondor",
+      "south_ithilien": "gondor",
+      "north_ithilien": "gondor",
+      "lossarnach": "gondor",
+      "lebennin": "gondor",
+      "pelargir": "gondor",
+      "belfalas": "gondor",
+      "anfalas": "gondor",
+      "andrast": "gondor",
+      "erech_lamedon": "gondor",
+      "minas_morgul": "mordor",
+      "the_black_gate": "mordor",
+      "barad_dur": "mordor",
+      "mount_doom": "mordor",
+      "gorgoroth": "mordor",
+      "nurn": "mordor",
+      "udun": "mordor",
+      "cirith_ungol": "mordor",
+      "isengard": "isengard",
+      "south_dunland": "isengard",
+      "gap_of_rohan": "rohan",
+      "westfold": "rohan",
+      "westemnet": "rohan",
+      "edoras": "rohan",
+      "helms_deep": "rohan",
+      "dunharrow": "rohan",
+      "eastfold": "rohan",
+      "eastemnet": "rohan",
+      "entwash": "rohan",
+      "the_wold": "rohan",
+      "fords_of_isen": "rohan",
+      "west_march": "rohan",
+      "khand": "mordor",
+      "near_harad": "mordor",
+      "far_harad": "mordor",
+      "haradwaith": "mordor",
+      "umbar": "mordor"
+    },
+    "starting_units": {
+      "grey_havens": [
+        {
+          "unit_id": "rivendell_warrior",
+          "count": 1
+        }
+      ],
+      "south_downs": [
+        {
+          "unit_id": "barrowwight",
+          "count": 1
+        }
+      ],
+      "rivendell": [
+        {
+          "unit_id": "rivendell_warrior",
+          "count": 2
+        }
+      ],
+      "lothlorien": [
+        {
+          "unit_id": "galadhrim_archer",
+          "count": 2
+        }
+      ],
+      "carrock": [
+        {
+          "unit_id": "goblin",
+          "count": 2
+        }
+      ],
+      "moria": [
+        {
+          "unit_id": "goblin",
+          "count": 10
+        },
+        {
+          "unit_id": "cave_troll",
+          "count": 1
+        }
+      ],
+      "fangorn": [
+        {
+          "unit_id": "ent",
+          "count": 2
+        }
+      ],
+      "dol_guldur": [
+        {
+          "unit_id": "mordor_warg_rider",
+          "count": 3
+        },
+        {
+          "unit_id": "black_uruk",
+          "count": 2
+        }
+      ],
+      "south_mirkwood": [
+        {
+          "unit_id": "spider",
+          "count": 1
+        }
+      ],
+      "north_mirkwood": [
+        {
+          "unit_id": "spider",
+          "count": 1
+        }
+      ],
+      "thranduils_halls": [
+        {
+          "unit_id": "mirkwood_elf",
+          "count": 1
+        }
+      ],
+      "gundabad": [
+        {
+          "unit_id": "mordor_warg_rider",
+          "count": 1
+        },
+        {
+          "unit_id": "black_uruk",
+          "count": 1
+        }
+      ],
+      "erebor": [
+        {
+          "unit_id": "dwarf_warrior",
+          "count": 1
+        }
+      ],
+      "esgaroth": [
+        {
+          "unit_id": "laketown_archer",
+          "count": 1
+        }
+      ],
+      "withered_heath": [
+        {
+          "unit_id": "dragon",
+          "count": 1
+        }
+      ],
+      "iron_hills": [
+        {
+          "unit_id": "dwarf_warrior",
+          "count": 1
+        }
+      ],
+      "north_rhun": [
+        {
+          "unit_id": "easterling_pikeman",
+          "count": 1
+        }
+      ],
+      "west_rhun": [
+        {
+          "unit_id": "easterling_pikeman",
+          "count": 3
+        }
+      ],
+      "rhun_hills": [
+        {
+          "unit_id": "easterling_pikeman",
+          "count": 2
+        }
+      ],
+      "dorwinion": [
+        {
+          "unit_id": "easterling_pikeman",
+          "count": 1
+        }
+      ],
+      "minas_tirith": [
+        {
+          "unit_id": "trebuchet",
+          "count": 1
+        },
+        {
+          "unit_id": "citadel_guard",
+          "count": 1
+        },
+        {
+          "unit_id": "gondor_archer",
+          "count": 2
+        },
+        {
+          "unit_id": "gondor_soldier",
+          "count": 1
+        },
+        {
+          "unit_id": "gondor_knight",
+          "count": 1
+        }
+      ],
+      "west_osgiliath": [
+        {
+          "unit_id": "gondor_soldier",
+          "count": 1
+        }
+      ],
+      "east_osgiliath": [
+        {
+          "unit_id": "gondor_archer",
+          "count": 1
+        },
+        {
+          "unit_id": "gondor_soldier",
+          "count": 2
+        }
+      ],
+      "south_ithilien": [
+        {
+          "unit_id": "ithilien_ranger",
+          "count": 2
+        }
+      ],
+      "north_ithilien": [
+        {
+          "unit_id": "ithilien_ranger",
+          "count": 3
+        }
+      ],
+      "lebennin": [
+        {
+          "unit_id": "gondor_soldier",
+          "count": 1
+        }
+      ],
+      "pelargir": [
+        {
+          "unit_id": "gondor_soldier",
+          "count": 1
+        }
+      ],
+      "belfalas": [
+        {
+          "unit_id": "gondor_soldier",
+          "count": 1
+        }
+      ],
+      "minas_morgul": [
+        {
+          "unit_id": "nazgul",
+          "count": 1
+        },
+        {
+          "unit_id": "orc_warrior",
+          "count": 5
+        }
+      ],
+      "the_black_gate": [
+        {
+          "unit_id": "armored_troll",
+          "count": 1
+        },
+        {
+          "unit_id": "black_uruk",
+          "count": 2
+        }
+      ],
+      "barad_dur": [
+        {
+          "unit_id": "black_uruk",
+          "count": 3
+        }
+      ],
+      "cirith_ungol": [
+        {
+          "unit_id": "orc_warrior",
+          "count": 1
+        },
+        {
+          "unit_id": "black_uruk",
+          "count": 1
+        }
+      ],
+      "gorgoroth": [
+        {
+          "unit_id": "orc_warrior",
+          "count": 2
+        }
+      ],
+      "udun": [
+        {
+          "unit_id": "orc_warrior",
+          "count": 2
+        }
+      ],
+      "isengard": [
+        {
+          "unit_id": "uruk_crossbowman",
+          "count": 2
+        },
+        {
+          "unit_id": "uruk_pikeman",
+          "count": 3
+        },
+        {
+          "unit_id": "urukhai_warrior",
+          "count": 6
+        },
+        {
+          "unit_id": "berserker",
+          "count": 1
+        },
+        {
+          "unit_id": "isengard_warg_rider",
+          "count": 3
+        },
+        {
+          "unit_id": "bomb",
+          "count": 1
+        },
+        {
+          "unit_id": "siege_ladder",
+          "count": 1
+        }
+      ],
+      "south_dunland": [
+        {
+          "unit_id": "dunland_wildman",
+          "count": 3
+        }
+      ],
+      "westfold": [
+        {
+          "unit_id": "rohan_peasant",
+          "count": 2
+        }
+      ],
+      "westemnet": [
+        {
+          "unit_id": "rohan_peasant",
+          "count": 1
+        }
+      ],
+      "edoras": [
+        {
+          "unit_id": "royal_guard",
+          "count": 1
+        },
+        {
+          "unit_id": "rohirrim_soldier",
+          "count": 2
+        }
+      ],
+      "helms_deep": [
+        {
+          "unit_id": "rohirrim_archer",
+          "count": 2
+        },
+        {
+          "unit_id": "rohirrim_soldier",
+          "count": 1
+        }
+      ],
+      "dunharrow": [
+        {
+          "unit_id": "rohirrim_soldier",
+          "count": 1
+        }
+      ],
+      "eastfold": [
+        {
+          "unit_id": "rohan_peasant",
+          "count": 1
+        }
+      ],
+      "eastemnet": [
+        {
+          "unit_id": "rider_of_rohan",
+          "count": 3
+        },
+        {
+          "unit_id": "rohirrim_archer_rider",
+          "count": 1
+        }
+      ],
+      "fords_of_isen": [
+        {
+          "unit_id": "rider_of_rohan",
+          "count": 2
+        }
+      ],
+      "haradwaith": [
+        {
+          "unit_id": "haradrim_archer",
+          "count": 2
+        }
+      ],
+      "far_harad": [
+        {
+          "unit_id": "war_mumakil",
+          "count": 1
+        },
+        {
+          "unit_id": "haradrim_archer",
+          "count": 2
+        }
+      ]
+    }
+  }
+}

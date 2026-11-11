@@ -30,7 +30,7 @@ from backend.setup_validation import validate_setup_payload
 
 
 def _setup_folders() -> list[Path]:
-    return [d for d in sorted(Path(SETUPS_DIR).iterdir()) if (d / "manifest.json").is_file()]
+    return [d for d in sorted(Path(SETUPS_DIR).iterdir()) if (d / "setup.json").is_file()]
 
 
 @pytest.mark.parametrize("folder", _setup_folders(), ids=lambda d: d.name)

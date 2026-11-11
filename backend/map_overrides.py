@@ -506,7 +506,7 @@ def _readable_db(db: Session | None) -> Session | None:
         return None
     from backend.api.models import MapOverride, Setup
 
-    inspector = inspect(db.get_bind())
+    inspector = inspect(db.connection())
     if not inspector.has_table(MapOverride.__tablename__):
         return None
     if not inspector.has_table(Setup.__tablename__):
@@ -563,6 +563,9 @@ def save_map_overrides(db: Session | None, map_base: str, raw: Any) -> dict[str,
     _write_row(db, map_base, data)
     _mirror_terrain_db(db, map_base, terrain)
     _mirror_graph_db(db, map_base, graph)
+    db.flush()
+    from backend.scenario_store import sync_map
+    sync_map(db, map_base)
     db.commit()
     return data
 
@@ -683,8 +686,13 @@ def _iter_setup_maps(db: Session | None) -> Iterator[tuple[str, set[str]]]:
     for d in sorted(SETUPS_DIR.iterdir()):
         if not d.is_dir():
             continue
-        manifest = _read_json(d / "manifest.json")
-        territories = _read_json(d / "territories.json")
+        if (d / "setup.json").is_file():
+            from backend.scenario_builder import read_setup_bundle
+            bundle = read_setup_bundle(d)
+            manifest, territories = bundle["manifest"], bundle["territories"]
+        else:
+            manifest = _read_json(d / "manifest.json")
+            territories = _read_json(d / "territories.json")
         yield _entry_from(d.name, manifest if isinstance(manifest, dict) else None, territories)
 
 
@@ -722,8 +730,13 @@ def _iter_setup_terrain(db: Session | None) -> Iterator[tuple[str, dict[str, str
     for d in sorted(SETUPS_DIR.iterdir()):
         if not d.is_dir():
             continue
-        manifest = _read_json(d / "manifest.json")
-        territories = _read_json(d / "territories.json")
+        if (d / "setup.json").is_file():
+            from backend.scenario_builder import read_setup_bundle
+            bundle = read_setup_bundle(d)
+            manifest, territories = bundle["manifest"], bundle["territories"]
+        else:
+            manifest = _read_json(d / "manifest.json")
+            territories = _read_json(d / "territories.json")
         map_base, _tids = _entry_from(d.name, manifest if isinstance(manifest, dict) else None, territories)
         yield map_base, _terrain_from_setup_territories(territories)
 
@@ -778,13 +791,19 @@ def _mirror_terrain_db(db: Session, map_base: str, terrain: dict[str, str]) -> N
 
 def _mirror_terrain_files(map_base: str, terrain: dict[str, str]) -> None:
     """Files-source only. Production reads the database and never takes this path."""
+    _mirror_authoring_map_files(map_base, terrain=terrain)
     if not terrain or not SETUPS_DIR.is_dir():
         return
     for d in sorted(SETUPS_DIR.iterdir()):
-        if not d.is_dir():
+        if not d.is_dir() or (d / "setup.json").is_file():
             continue
-        manifest = _read_json(d / "manifest.json")
-        territories = _read_json(d / "territories.json")
+        if (d / "setup.json").is_file():
+            from backend.scenario_builder import read_setup_bundle
+            bundle = read_setup_bundle(d)
+            manifest, territories = bundle["manifest"], bundle["territories"]
+        else:
+            manifest = _read_json(d / "manifest.json")
+            territories = _read_json(d / "territories.json")
         base, _tids = _entry_from(d.name, manifest if isinstance(manifest, dict) else None, territories)
         if base != map_base or not isinstance(territories, dict):
             continue
@@ -794,7 +813,7 @@ def _mirror_terrain_files(map_base: str, terrain: dict[str, str]) -> None:
             if isinstance(record, dict) and record.get("terrain_type") != name:
                 record["terrain_type"] = name
                 touched = True
-        if touched:
+        if touched and not (d / "setup.json").is_file():
             with open(d / "territories.json", "w", encoding="utf-8") as f:
                 json.dump(territories, f, indent=2, ensure_ascii=False)
                 f.write("\n")
@@ -838,8 +857,13 @@ def _iter_setup_graph(db: Session | None) -> Iterator[tuple[str, dict[str, dict[
     for d in sorted(SETUPS_DIR.iterdir()):
         if not d.is_dir():
             continue
-        manifest = _read_json(d / "manifest.json")
-        territories = _read_json(d / "territories.json")
+        if (d / "setup.json").is_file():
+            from backend.scenario_builder import read_setup_bundle
+            bundle = read_setup_bundle(d)
+            manifest, territories = bundle["manifest"], bundle["territories"]
+        else:
+            manifest = _read_json(d / "manifest.json")
+            territories = _read_json(d / "territories.json")
         map_base, _tids = _entry_from(d.name, manifest if isinstance(manifest, dict) else None, territories)
         yield map_base, _graph_from_setup_territories(territories)
 
@@ -911,22 +935,47 @@ def _mirror_graph_db(db: Session, map_base: str, graph: dict[str, Any]) -> None:
 
 def _mirror_graph_files(map_base: str, graph: dict[str, Any]) -> None:
     """Files-source only. Production reads the database and never takes this path."""
+    _mirror_authoring_map_files(map_base, graph=graph)
     if not any(isinstance(graph.get(field), dict) and graph[field] for field in GRAPH_FIELDS):
         return
     if not SETUPS_DIR.is_dir():
         return
     for d in sorted(SETUPS_DIR.iterdir()):
-        if not d.is_dir():
+        if not d.is_dir() or (d / "setup.json").is_file():
             continue
-        manifest = _read_json(d / "manifest.json")
-        territories = _read_json(d / "territories.json")
+        if (d / "setup.json").is_file():
+            from backend.scenario_builder import read_setup_bundle
+            bundle = read_setup_bundle(d)
+            manifest, territories = bundle["manifest"], bundle["territories"]
+        else:
+            manifest = _read_json(d / "manifest.json")
+            territories = _read_json(d / "territories.json")
         base, _tids = _entry_from(d.name, manifest if isinstance(manifest, dict) else None, territories)
         if base != map_base or not isinstance(territories, dict):
             continue
-        if _apply_graph_lists(territories, graph):
+        if _apply_graph_lists(territories, graph) and not (d / "setup.json").is_file():
             with open(d / "territories.json", "w", encoding="utf-8") as f:
                 json.dump(territories, f, indent=2, ensure_ascii=False)
                 f.write("\n")
+
+
+def _mirror_authoring_map_files(map_base: str, *, terrain=None, graph=None) -> None:
+    """Keep declarative map defaults current and discard stale geometry overrides."""
+    if not terrain and not graph:
+        return
+    path = MAPS_DIR / map_base / "territories.json"
+    records = _read_json(path)
+    if isinstance(records, dict):
+        if graph:
+            _apply_graph_lists(records, graph)
+        for tid, name in (terrain or {}).items():
+            if isinstance(records.get(tid), dict):
+                records[tid]["terrain_type"] = name
+        path.write_text(json.dumps(records, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    if not SETUPS_DIR.is_dir():
+        return
+    # Geometry is inherited; canonical setup JSON never duplicates adjacency.
+    # No setup-file rewrite is necessary for graph/terrain edits.
 
 
 def list_map_bases(db: Session | None) -> list[str]:

@@ -41,7 +41,7 @@ test('Setup sidebars support bulk seed selection, cancellation and retained over
   await writeFile(fixture,`<html><meta name="viewport" content="width=device-width, initial-scale=1"><body><div class="admin-page" id="root"></div><script type="module">
  import React from 'react';import {createRoot} from 'react-dom/client';import {ScenarioOverrides} from '/src/pages/admin/ScenarioOverrides.tsx';import '/src/index.css';import '/src/pages/Admin.css';
  const library={units:{archer:{id:'archer',display_name:'Archer',attack:2},guard:{id:'guard',display_name:'Guard',attack:4,cost:{power:3},specials:[]}},factions:{evil:{id:'evil',display_name:'Enemy'},good:{id:'good',display_name:'Allies',color:'#31572c',alliance:'good'}},territories:{shire:{id:'shire',display_name:'The Shire'}},maps:{world:{bree:{id:'bree',display_name:'Bree',produces:{power:1}},shire:{id:'shire',display_name:'The Shire',produces:{power:2},ownable:true,terrain_type:'plains',adjacent:[]}}}};
- function App(){const [section,setSection]=React.useState('units');const [source,setSource]=React.useState({map:'world',units:{archer:{id:'archer',display_name:'Archer',attack:2},guard:{seed:'guard',overrides:{attack:5}}},factions:{good:{seed:'good',overrides:{color:'#123456'}}},territory_ids:['shire'],territory_overrides:{shire:{display_name:'Shire'}}});window.source=source;return React.createElement(React.Fragment,null,React.createElement('div',{className:'admin-page__tabs'},...['units','territories','factions'].map(key=>React.createElement('button',{className:'admin-page__tab',onClick:()=>setSection(key)},key))),React.createElement('div',{className:'admin-page__panel'},React.createElement(ScenarioOverrides,{key:section,section,source,library,onChange:(_,next)=>setSource(next)})));}
+ function App(){const [section,setSection]=React.useState('units');const [source,setSource]=React.useState({manifest:{id:'alpha',map_asset:'world'},camps:{},ports:{},starting_setup:{},units:{archer:{seed:'archer'},guard:{seed:'guard',overrides:{attack:5}}},factions:{good:{seed:'good',overrides:{color:'#123456'}}},territories:{shire:{seed:'shire',overrides:{display_name:'Shire'}}}});window.source=source;return React.createElement(React.Fragment,null,React.createElement('div',{className:'admin-page__tabs'},...['units','territories','factions'].map(key=>React.createElement('button',{className:'admin-page__tab',onClick:()=>setSection(key)},key))),React.createElement('div',{className:'admin-page__panel'},React.createElement(ScenarioOverrides,{key:section,section,source,library,onChange:(_,next)=>setSource(next)})));}
  createRoot(document.getElementById('root')).render(React.createElement(App));</script></body></html>`);
 
   await page.call('Emulation.setDeviceMetricsOverride',{width:1280,height:1000,deviceScaleFactor:1,mobile:false});
@@ -65,7 +65,7 @@ test('Setup sidebars support bulk seed selection, cancellation and retained over
    await click(initial);
    if(section==='units') assert.equal(await evaluate('window.source.units.guard.overrides.attack'),5);
    if(section==='factions') assert.equal(await evaluate('window.source.factions.good.overrides.color'),'#123456');
-   if(section==='territories') assert.equal(await evaluate('window.source.territory_overrides.shire.display_name'),'Shire');
+   if(section==='territories') assert.equal(await evaluate('window.source.territories.shire.overrides.display_name'),'Shire');
    await click(`Update ${singular} List`);
    await click('Clear shown');
    await click('Update List');

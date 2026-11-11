@@ -1,0 +1,654 @@
+{
+  "manifest": {
+    "id": "woteas_1.0",
+    "display_name": "War of the Elves and Sauron",
+    "is_active": true,
+    "map_asset": "woteas_map_1.0",
+    "context": {
+      "year": "SA 1697",
+      "map": "Eriador and Rhovanion",
+      "faction_count": 4,
+      "factions": [
+        "Númenor",
+        "Sauron",
+        "Noldor",
+        "Khazad-dûm"
+      ]
+    },
+    "victory_criteria": {
+      "strongholds": {
+        "good": 6,
+        "evil": 4
+      }
+    },
+    "camp_cost": 10,
+    "stronghold_repair_cost": 2,
+    "prefire_penalty": false,
+    "special_rules": [
+      {
+        "type": "rings_of_power",
+        "name": "Rings of Power",
+        "is_optional": true,
+        "rings": [
+          {
+            "id": "narya",
+            "name": "Narya",
+            "territory_id": "mithlond",
+            "power": 3
+          },
+          {
+            "id": "nenya",
+            "name": "Nenya",
+            "territory_id": "ost_in_edhil",
+            "power": 3
+          },
+          {
+            "id": "vilya",
+            "name": "Vilya",
+            "territory_id": "ost_in_edhil",
+            "power": 3
+          },
+          {
+            "id": "durins_ring",
+            "name": "Durin's Ring",
+            "territory_id": "khazad_dum",
+            "power": 2
+          },
+          {
+            "id": "the_six",
+            "name": "The Six",
+            "territory_id": "ost_in_edhil",
+            "power": 4
+          },
+          {
+            "id": "the_nine",
+            "name": "The Nine",
+            "territory_id": "ost_in_edhil",
+            "power": 4
+          },
+          {
+            "id": "the_one",
+            "name": "The One",
+            "territory_id": "east_eriador",
+            "power": 4,
+            "bearer_hero_id": "sauron",
+            "returns_to": "orodruin",
+            "attack_boost": 1,
+            "defense_boost": 1
+          }
+        ]
+      }
+    ],
+    "lobby_music": [
+      "fellowship.m4a"
+    ],
+    "menu_order": 5
+  },
+  "units": {
+    "khazad_warrior": {
+      "seed": "khazad_warrior"
+    },
+    "durin": {
+      "seed": "durin"
+    },
+    "khazad_ballista": {
+      "seed": "khazad_ballista"
+    },
+    "khazad_guard": {
+      "seed": "khazad_guard"
+    },
+    "khazad_archer": {
+      "seed": "khazad_archer"
+    },
+    "orc_warrior": {
+      "seed": "orc_warrior",
+      "overrides": {
+        "faction": "sauron"
+      }
+    },
+    "orc_archer": {
+      "seed": "orc_archer",
+      "overrides": {
+        "faction": "sauron"
+      }
+    },
+    "warg_rider": {
+      "seed": "warg_rider",
+      "overrides": {
+        "faction": "sauron"
+      }
+    },
+    "armored_troll": {
+      "seed": "armored_troll",
+      "overrides": {
+        "faction": "sauron"
+      }
+    },
+    "sauron": {
+      "seed": "sauron",
+      "overrides": {
+        "faction": "sauron"
+      }
+    },
+    "battering_ram": {
+      "seed": "battering_ram",
+      "overrides": {
+        "faction": "sauron"
+      }
+    },
+    "catapult": {
+      "seed": "catapult",
+      "overrides": {
+        "faction": "sauron"
+      }
+    },
+    "noldor_warrior": {
+      "seed": "noldor_warrior"
+    },
+    "noldor_archer": {
+      "seed": "noldor_archer"
+    },
+    "noldor_knight": {
+      "seed": "noldor_knight"
+    },
+    "lindon_ship": {
+      "seed": "lindon_ship",
+      "overrides": {
+        "faction": "noldor"
+      }
+    },
+    "lindon_spearman": {
+      "seed": "lindon_spearman"
+    },
+    "gil_galad": {
+      "seed": "gil_galad"
+    },
+    "elrond": {
+      "seed": "elrond"
+    },
+    "numenor_archer": {
+      "seed": "numenor_archer"
+    },
+    "numenor_soldier": {
+      "seed": "numenor_soldier"
+    },
+    "numenor_knight": {
+      "seed": "numenor_knight"
+    },
+    "numenor_ship": {
+      "seed": "numenor_ship"
+    },
+    "elendil": {
+      "seed": "elendil"
+    },
+    "isildur": {
+      "seed": "isildur"
+    },
+    "numenor_captain": {
+      "seed": "numenor_captain"
+    },
+    "numenor_spearman": {
+      "seed": "numenor_spearman"
+    },
+    "dragon": {
+      "seed": "dragon"
+    },
+    "goblin": {
+      "seed": "goblin"
+    },
+    "spider": {
+      "seed": "spider"
+    },
+    "cave_troll": {
+      "seed": "cave_troll"
+    },
+    "ent": {
+      "seed": "ent",
+      "overrides": {
+        "faction": "neutral",
+        "purchasable": false,
+        "cost": {
+          "power": 0
+        }
+      }
+    }
+  },
+  "territories": {
+    "udun": {
+      "seed": "udun",
+      "overrides": {
+        "display_name": "Udûn"
+      }
+    },
+    "dagorlad": {
+      "seed": "dagorlad"
+    },
+    "emyn_muil": {
+      "seed": "emyn_muil"
+    },
+    "glanduin_valley": {
+      "seed": "glanduin_valley",
+      "overrides": {
+        "display_name": "glanduin_valley"
+      }
+    },
+    "south_greenwood": {
+      "seed": "south_greenwood"
+    },
+    "harlindon": {
+      "seed": "harlindon",
+      "overrides": {
+        "produces": {
+          "power": 3
+        }
+      }
+    },
+    "celduin_valley": {
+      "seed": "celduin_valley"
+    },
+    "tower_hills": {
+      "seed": "tower_hills"
+    },
+    "khazad_dum": {
+      "seed": "khazad_dum"
+    },
+    "mithlond": {
+      "seed": "mithlond"
+    },
+    "ettenmoors": {
+      "seed": "ettenmoors"
+    },
+    "evendim_hills": {
+      "seed": "evendim_hills"
+    },
+    "iron_hills": {
+      "seed": "iron_hills"
+    },
+    "lune_valley": {
+      "seed": "lune_valley"
+    },
+    "forlindon": {
+      "seed": "forlindon",
+      "overrides": {
+        "produces": {
+          "power": 3
+        }
+      }
+    },
+    "morannon": {
+      "seed": "morannon",
+      "overrides": {
+        "produces": {
+          "power": 5
+        }
+      }
+    },
+    "west_calenardhon": {
+      "seed": "west_calenardhon"
+    },
+    "fangorn": {
+      "seed": "fangorn"
+    },
+    "field_of_celebrant": {
+      "seed": "field_of_celebrant"
+    },
+    "east_rhovanion": {
+      "seed": "east_rhovanion"
+    },
+    "west_rhovanion": {
+      "seed": "west_rhovanion"
+    },
+    "anduin_valley": {
+      "seed": "anduin_valley",
+      "overrides": {
+        "produces": {
+          "power": 1
+        }
+      }
+    },
+    "lond_daer": {
+      "seed": "lond_daer",
+      "overrides": {
+        "produces": {
+          "power": 4
+        }
+      }
+    },
+    "eryn_vorn": {
+      "seed": "eryn_vorn"
+    },
+    "east_eriador": {
+      "seed": "east_eriador"
+    },
+    "forodwaith": {
+      "seed": "forodwaith"
+    },
+    "west_eriador": {
+      "seed": "west_eriador"
+    },
+    "north_eriador": {
+      "seed": "north_eriador"
+    },
+    "weather_hills": {
+      "seed": "weather_hills"
+    },
+    "sea_zone_2": {
+      "seed": "sea_zone_2"
+    },
+    "sea_zone_3": {
+      "seed": "sea_zone_3"
+    },
+    "west_rhun": {
+      "seed": "west_rhun",
+      "overrides": {
+        "stronghold_base_health": {
+          "$delete": true
+        }
+      }
+    },
+    "rhun_hills": {
+      "seed": "rhun_hills",
+      "overrides": {
+        "produces": {
+          "power": 1
+        }
+      }
+    },
+    "north_eregion": {
+      "seed": "north_eregion",
+      "overrides": {
+        "produces": {
+          "power": 2
+        }
+      }
+    },
+    "sea_zone_7": {
+      "seed": "sea_zone_7"
+    },
+    "sea_zone_8": {
+      "seed": "sea_zone_8"
+    },
+    "druwaith": {
+      "seed": "druwaith",
+      "overrides": {
+        "display_name": "Drúwaith"
+      }
+    },
+    "west_enedwaith": {
+      "seed": "west_enedwaith",
+      "overrides": {
+        "produces": {
+          "power": 2
+        }
+      }
+    },
+    "east_enedwaith": {
+      "seed": "east_enedwaith"
+    },
+    "orodruin": {
+      "seed": "orodruin"
+    },
+    "gorgoroth": {
+      "seed": "gorgoroth"
+    },
+    "hithlaeglir": {
+      "seed": "hithlaeglir"
+    },
+    "gundabad": {
+      "seed": "gundabad"
+    },
+    "numenor": {
+      "seed": "numenor"
+    },
+    "imladris": {
+      "seed": "imladris",
+      "overrides": {
+        "image": {
+          "$delete": true
+        },
+        "stronghold_base_health": {
+          "$delete": true
+        }
+      }
+    },
+    "ost_in_edhil": {
+      "seed": "ost_in_edhil"
+    },
+    "barad_dur": {
+      "seed": "barad_dur",
+      "overrides": {
+        "display_name": "Barad-dûr"
+      }
+    },
+    "sea_zone_4": {
+      "seed": "sea_zone_4"
+    },
+    "sea_zone_6": {
+      "seed": "sea_zone_6"
+    },
+    "tol_fuin": {
+      "seed": "tol_fuin"
+    },
+    "sea_zone_1": {
+      "seed": "sea_zone_1"
+    },
+    "tharbad": {
+      "seed": "tharbad"
+    },
+    "falls_of_rauros": {
+      "seed": "falls_of_rauros"
+    },
+    "anduin_central": {
+      "seed": "anduin_central"
+    },
+    "anduin_south": {
+      "seed": "anduin_south"
+    },
+    "anduin_north": {
+      "seed": "anduin_north"
+    },
+    "gwathlo_south": {
+      "seed": "gwathlo_south"
+    },
+    "gwathlo_central": {
+      "seed": "gwathlo_central"
+    },
+    "gwathlo_north": {
+      "seed": "gwathlo_north"
+    },
+    "south_eregion": {
+      "seed": "south_eregion",
+      "overrides": {
+        "produces": {
+          "power": 3
+        }
+      }
+    },
+    "minhiriath": {
+      "seed": "minhiriath",
+      "overrides": {
+        "produces": {
+          "power": 2
+        }
+      }
+    },
+    "nindalf": {
+      "seed": "nindalf"
+    },
+    "ninglor": {
+      "seed": "ninglor"
+    },
+    "lorinand": {
+      "seed": "lorinand",
+      "overrides": {
+        "image": {
+          "$delete": true
+        },
+        "stronghold_base_health": {
+          "$delete": true
+        },
+        "display_name": "Lórinand"
+      }
+    },
+    "ithilien": {
+      "seed": "ithilien"
+    },
+    "amon_lanc": {
+      "seed": "amon_lanc",
+      "overrides": {
+        "image": {
+          "$delete": true
+        },
+        "stronghold_base_health": {
+          "$delete": true
+        }
+      }
+    },
+    "nurn": {
+      "seed": "nurn",
+      "overrides": {
+        "produces": {
+          "power": 2
+        }
+      }
+    },
+    "lithlad": {
+      "seed": "lithlad"
+    },
+    "north_greenwood": {
+      "seed": "north_greenwood"
+    },
+    "withered_heath": {
+      "seed": "withered_heath"
+    },
+    "north_rhun": {
+      "seed": "north_rhun"
+    },
+    "south_calenardhon": {
+      "seed": "south_calenardhon"
+    },
+    "east_calenardhon": {
+      "seed": "east_calenardhon"
+    },
+    "ered_nimrais": {
+      "seed": "ered_nimrais"
+    },
+    "old_forest": {
+      "seed": "old_forest"
+    },
+    "sea_zone_13": {
+      "seed": "sea_zone_13"
+    },
+    "sea_zone_9": {
+      "seed": "sea_zone_9"
+    },
+    "sea_zone_12": {
+      "seed": "sea_zone_12"
+    },
+    "sea_zone_11": {
+      "seed": "sea_zone_11"
+    },
+    "sea_zone_10": {
+      "seed": "sea_zone_10"
+    },
+    "sea_zone_5": {
+      "seed": "sea_zone_5"
+    }
+  },
+  "factions": {
+    "sauron": {
+      "seed": "sauron"
+    },
+    "noldor": {
+      "seed": "noldor"
+    },
+    "khazad_dum": {
+      "seed": "khazad_dum"
+    },
+    "numenor": {
+      "seed": "numenor"
+    },
+    "neutral": {
+      "seed": "neutral"
+    }
+  },
+  "camps": {
+    "numenor_camp": {
+      "id": "numenor_camp",
+      "territory_id": "numenor"
+    },
+    "barad_dur_camp": {
+      "id": "barad_dur_camp",
+      "territory_id": "barad_dur"
+    },
+    "morannon_camp": {
+      "id": "morannon_camp",
+      "territory_id": "morannon"
+    },
+    "ost_in_edhil_camp": {
+      "id": "ost_in_edhil_camp",
+      "territory_id": "ost_in_edhil"
+    },
+    "mithlond_camp": {
+      "id": "mithlond_camp",
+      "territory_id": "mithlond"
+    },
+    "amon_lanc_camp": {
+      "id": "amon_lanc_camp",
+      "territory_id": "amon_lanc"
+    },
+    "khazad_dum_camp": {
+      "id": "khazad_dum_camp",
+      "territory_id": "khazad_dum"
+    },
+    "imladris_camp": {
+      "id": "imladris_camp",
+      "territory_id": "imladris"
+    }
+  },
+  "ports": {
+    "numenor_port": {
+      "id": "numenor_port",
+      "territory_id": "numenor"
+    },
+    "mithlond_port": {
+      "id": "mithlond_port",
+      "territory_id": "mithlond"
+    },
+    "lond_daer_port": {
+      "id": "lond_daer_port",
+      "territory_id": "lond_daer"
+    }
+  },
+  "starting_setup": {
+    "turn_order": [
+      "sauron",
+      "noldor",
+      "khazad_dum",
+      "numenor"
+    ],
+    "territory_owners": {
+      "numenor": "numenor",
+      "lond_daer": "numenor",
+      "barad_dur": "sauron",
+      "gorgoroth": "sauron",
+      "orodruin": "sauron",
+      "nurn": "sauron",
+      "lithlad": "sauron",
+      "udun": "sauron",
+      "morannon": "sauron",
+      "dagorlad": "sauron",
+      "ost_in_edhil": "noldor",
+      "mithlond": "noldor",
+      "forlindon": "noldor",
+      "harlindon": "noldor",
+      "lune_valley": "noldor",
+      "north_eregion": "noldor",
+      "south_eregion": "noldor",
+      "khazad_dum": "khazad_dum",
+      "iron_hills": "khazad_dum",
+      "imladris": "noldor"
+    },
+    "starting_units": {}
+  }
+}

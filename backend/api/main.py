@@ -2755,7 +2755,6 @@ class AdminSetupPayload(BaseModel):
     camps: dict[str, Any]
     ports: dict[str, Any]
     starting_setup: dict[str, Any]
-    authoring_source: dict[str, Any] | None = None
 
 
 class AdminCreateSetupBody(BaseModel):
@@ -2763,7 +2762,7 @@ class AdminCreateSetupBody(BaseModel):
 
     id: str = Field(..., min_length=1, max_length=127)
     duplicate_from: str | None = None
-    source: str | dict[str, Any] | None = None
+    setup: str | dict[str, Any] | None = None
     bundle: dict[str, Any] | None = Field(
         default=None,
         description=(
@@ -3501,45 +3500,14 @@ def admin_export_scenarios(_admin: Player = Depends(get_current_admin), db: Sess
 
 @app.post("/admin/setups/validate")
 def admin_validate_setup(body: dict[str, Any], _admin: Player = Depends(get_current_admin), db: Session = Depends(get_db)):
-    """Dry-run either a seven-key bundle or {source: YAML string/object}. Never writes."""
-    from backend.scenario_builder import compile_scenario, parse_source
-    from backend.scenario_store import load_state, map_authority_errors
+    from backend.scenario_builder import compile_setup
+    from backend.scenario_store import load_state
     try:
-        if "source" in body:
-            state = load_state(db)
-            source = parse_source(body["source"]) if isinstance(body["source"], str) else body["source"]
-            bundle = compile_scenario(source, state["library"], state["sources"].get)
-        else:
-            bundle = body
+        bundle = compile_setup(body, load_state(db)["library"])
         errors = validate_setup_payload(bundle, load_catalog(db))
-        if "source" in body:
-            errors.extend(map_authority_errors(db, bundle))
         return {"valid": not errors, "errors": errors, "bundle": bundle}
     except (ValueError, KeyError, TypeError) as exc:
         return {"valid": False, "errors": [str(exc)], "bundle": None}
-
-
-@app.get("/admin/setups/{setup_id}/source")
-def admin_get_scenario_source(setup_id: str, _admin: Player = Depends(get_current_admin), db: Session = Depends(get_db)):
-    from backend.scenario_builder import resolve_source
-    from backend.scenario_store import load_state
-    state = load_state(db)
-    if setup_id not in state["sources"]:
-        raise HTTPException(status_code=404, detail="Setup not found")
-    return {"source": state["sources"][setup_id], "resolved_source": resolve_source(state["sources"][setup_id], state["sources"].get), "library": state["library"]}
-
-
-@app.put("/admin/setups/{setup_id}/source")
-def admin_save_scenario_source(setup_id: str, body: dict[str, Any], _admin: Player = Depends(get_current_admin), db: Session = Depends(get_db)):
-    from backend.scenario_builder import parse_source
-    from backend.scenario_store import save_source
-    try:
-        source = body.get("source")
-        source = parse_source(source) if isinstance(source, str) else source
-        return {"ok": True, "bundle": save_source(db, setup_id, source)}
-    except (ValueError, KeyError, TypeError) as exc:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/admin/setups")
@@ -3549,21 +3517,18 @@ def admin_create_setup(
     db: Session = Depends(get_db),
 ):
     """Create a new setup: empty draft, duplicate of an existing id, or import a master JSON bundle. Setup id must be unique."""
-    if body.source is not None:
+    if body.setup is not None:
         if body.bundle is not None or body.bundle_json is not None or body.duplicate_from:
-            raise HTTPException(status_code=400, detail="Use source alone, without bundle or duplicate_from")
-        from backend.scenario_builder import compile_scenario, parse_source, resolve_source
-        from backend.scenario_store import load_state, map_authority_errors, stage_state
+            raise HTTPException(status_code=400, detail="Use setup JSON alone, without bundle or duplicate_from")
+        from backend.scenario_builder import canonical_setup, compile_setup, parse_setup_json
+        from backend.scenario_store import load_state, stage_state
         try:
             state = load_state(db)
-            source = parse_source(body.source) if isinstance(body.source, str) else body.source
-            source = resolve_source(source, state["sources"].get)
-            source["manifest"] = {**source.get("manifest", {}), "id": body.id.strip(), "is_active": False}
-            bundle = compile_scenario(source, state["library"])
-            if errors := map_authority_errors(db, bundle):
-                raise ValueError("; ".join(errors))
+            setup = canonical_setup(parse_setup_json(body.setup) if isinstance(body.setup, str) else body.setup)
+            setup["manifest"] = {**setup["manifest"], "id": body.id.strip(), "is_active": False}
+            bundle = compile_setup(setup, state["library"])
             out = create_setup_from_bundle(db, body.id.strip(), bundle, commit=False)
-            state["sources"][body.id.strip()] = source
+            state["setups"][body.id.strip()] = setup
             stage_state(db, state)
             db.commit()
             return {"ok": True, **out}
@@ -3599,6 +3564,22 @@ def admin_create_setup(
             out = create_setup(db, body.id.strip(), body.duplicate_from)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    from backend.scenario_store import load_state, stage_state
+    from backend.scenario_builder import scenario_map_id, setup_from_bundle
+    state = load_state(db)
+    new_id = body.id.strip()
+    if body.duplicate_from and body.duplicate_from in state["setups"]:
+        bundle = get_admin_setup_bundle(db, new_id)
+        state["setups"][new_id] = setup_from_bundle(bundle, state["library"], state["setups"][body.duplicate_from])
+    if new_id not in state["setups"]:
+        bundle = get_admin_setup_bundle(db, new_id)
+        map_id = scenario_map_id(bundle["manifest"], new_id)
+        state["library"]["maps"].setdefault(map_id, {}).update({tid: value for tid, value in bundle["territories"].items()
+            if tid not in state["library"]["maps"].get(map_id, {})})
+        previous = state["setups"].get(body.duplicate_from) if body.duplicate_from else None
+        state["setups"][new_id] = setup_from_bundle(bundle, state["library"], previous)
+    stage_state(db, state)
+    db.commit()
     return {"ok": True, **out}
 
 
@@ -3608,10 +3589,13 @@ def admin_get_setup(
     _admin: Player = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    bundle = get_admin_setup_bundle(db, setup_id)
-    if not bundle:
+    from backend.scenario_store import load_state
+    from backend.scenario_builder import compile_setup
+    state = load_state(db)
+    setup = state["setups"].get(setup_id)
+    if setup is None:
         raise HTTPException(status_code=404, detail="Setup not found")
-    return bundle
+    return {"id": setup_id, **compile_setup(setup, state["library"]), "setup": setup, "library": state["library"]}
 
 
 @app.put("/admin/setups/{setup_id}")
@@ -3621,26 +3605,21 @@ def admin_put_setup(
     _admin: Player = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    payload = body.model_dump(exclude={"authoring_source"})
-    manifest = dict(payload["manifest"])
-    manifest["id"] = setup_id
-    payload["manifest"] = manifest
-    errs = validate_setup_payload(payload, load_catalog(db))
-    if errs:
-        raise HTTPException(status_code=400, detail={"validation_errors": errs})
+    from backend.scenario_store import load_state, save_definition
+    from backend.scenario_builder import setup_from_bundle
+    payload = body.model_dump()
+    # Old resolved bundle imports remain supported; normal saves use compact JSON.
+    compact = all(isinstance(entry, dict) and not (entry.keys() - {"seed", "overrides"})
+                  for section in ("units", "factions", "territories") for entry in payload[section].values())
     try:
-        save_setup_bundle(db, setup_id, payload, body.authoring_source)
-    except ValueError as e:
+        if not compact:
+            state = load_state(db)
+            payload = setup_from_bundle(payload, state["library"], state["setups"].get(setup_id))
+        result = save_definition(db, setup_id, payload)
+        return {"ok": True, "id": setup_id, **result}
+    except (ValueError, KeyError, TypeError) as e:
         db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-    map_asset = manifest.get("map_asset") if isinstance(manifest.get("map_asset"), str) else ""
-    try:
-        from backend.map_overrides import publish_setup_terrain
-
-        publish_setup_terrain(db, map_asset or setup_id, payload.get("territories"))
-    except MapOverridesError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return {"ok": True, "id": setup_id}
 
 
 @app.delete("/admin/setups/{setup_id}")
