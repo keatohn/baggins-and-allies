@@ -13,7 +13,7 @@ from typing import Any
 
 BUNDLE_KEYS = ("manifest", "units", "territories", "factions", "camps", "ports", "starting_setup")
 DELETE = {"$delete": True}
-MAP_TERRITORY_FIELDS = {"terrain_type", "adjacent", "aerial_adjacent", "ford_adjacent"}
+MAP_TERRITORY_FIELDS = {"adjacent", "aerial_adjacent", "ford_adjacent"}
 
 
 def prepare_territory_seeds(library: dict) -> None:
@@ -28,6 +28,11 @@ def prepare_territory_seeds(library: dict) -> None:
     for tid, records in grouped.items():
         if tid not in seeds:
             seeds[tid] = {**_majority(records), "id": tid}
+        if "terrain_type" not in seeds[tid]:
+            terrains = [record for record in records if record.get("terrain_type")]
+            seeds[tid]["terrain_type"] = _majority(terrains).get("terrain_type", "plains")
+    for seed in seeds.values():
+        seed.setdefault("terrain_type", "plains")
     for map_records in library["maps"].values():
         for tid, record in map_records.items():
             _object(seeds[tid], f"territories.{tid}")
@@ -119,10 +124,11 @@ def parse_setup_json(text: str) -> dict:
         raise ValueError(f"Invalid setup JSON: {exc}") from exc
 
 
-def load_library(root: Path) -> dict:
+def load_library(root: Path, *, prepare: bool = True) -> dict:
     library = json.loads((root / "scenario_library.json").read_text())
     library["maps"] = {p.parent.name: json.loads(p.read_text()) for p in sorted((root / "maps").glob("*/territories.json"))}
-    prepare_territory_seeds(library)
+    if prepare:
+        prepare_territory_seeds(library)
     return library
 
 
@@ -134,7 +140,7 @@ def write_library(root: Path, library: dict) -> None:
         validate_map_base(map_id)
         folder = root / "maps" / map_id
         folder.mkdir(parents=True, exist_ok=True)
-        (folder / "territories.json").write_text(json.dumps(records, indent=2, ensure_ascii=False) + "\n")
+        (folder / "territories.json").write_text(json.dumps({tid: {field: value for field, value in record.items() if field in MAP_TERRITORY_FIELDS} for tid, record in records.items()}, indent=2, ensure_ascii=False) + "\n")
 
 
 def canonical_setup(setup: dict) -> dict:
@@ -241,10 +247,28 @@ def read_setup_bundle(folder: Path) -> dict:
     """Resolve canonical files; legacy folders remain supported for imports only."""
     path = folder / "setup.json"
     if path.is_file():
-        return compile_setup(parse_setup_json(path.read_text()), load_library(folder.parent.parent))
+        setup = parse_setup_json(path.read_text())
+        state = {"library": load_library(folder.parent.parent, prepare=False), "setups": {folder.name: setup}}
+        migrate_seed_terrain(state)
+        return compile_setup(state["setups"][folder.name], state["library"])
     return {key: json.loads((folder / f"{key}.json").read_text()) if (folder / f"{key}.json").is_file() else {} for key in BUNDLE_KEYS}
 
 
 def write_setup(folder: Path, setup: dict) -> None:
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "setup.json").write_text(json.dumps(canonical_setup(setup), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def migrate_seed_terrain(state: dict) -> None:
+    """Lift legacy per-map terrain into shared seeds, preserving scenario differences."""
+    library = state["library"]
+    missing = {tid for tid, seed in library.get("territories", {}).items() if "terrain_type" not in seed}
+    original = {map_id: {tid: record.get("terrain_type") for tid, record in records.items()}
+                for map_id, records in library["maps"].items()}
+    prepare_territory_seeds(library)
+    for key, setup in state.get("setups", {}).items():
+        map_id = scenario_map_id(setup["manifest"], key)
+        for tid, entry in setup["territories"].items():
+            terrain = original.get(map_id, {}).get(tid)
+            if tid in missing and terrain and terrain != library["territories"][tid]["terrain_type"]:
+                entry.setdefault("overrides", {}).setdefault("terrain_type", terrain)

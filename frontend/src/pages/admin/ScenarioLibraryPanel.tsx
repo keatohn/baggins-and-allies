@@ -15,6 +15,7 @@ export function ScenarioLibraryPanel({ onClose, onSaved }: { onClose: () => void
   const [busy, setBusy] = useState(false);
   const [impact, setImpact] = useState<ScenarioImpact | null>(null);
   const [saved, setSaved] = useState(false);
+  const [terrainTypes, setTerrainTypes] = useState<string[]>([]);
   const [archetypes, setArchetypes] = useState<string[]>([]);
   const closeRef = useRef<HTMLButtonElement>(null);
   const dirty = !!library && JSON.stringify(library) !== original;
@@ -26,7 +27,7 @@ export function ScenarioLibraryPanel({ onClose, onSaved }: { onClose: () => void
     api.adminGetScenarioLibrary().then((value) => {
       if (active) { setLibrary(value); setOriginal(JSON.stringify(value)); }
     }).catch((e: Error) => { if (active) setError(e.message); });
-    api.getCatalog().then((value) => { if (active) setArchetypes(value.archetypes); }).catch(() => {});
+    api.getCatalog().then((value) => { if (active) { setArchetypes(value.archetypes); setTerrainTypes(value.terrain_types); } }).catch(() => {});
     return () => { active = false; previousFocus?.focus(); };
   }, []);
 
@@ -50,7 +51,7 @@ export function ScenarioLibraryPanel({ onClose, onSaved }: { onClose: () => void
       const result = await api.adminSaveScenarioLibrary(library);
       const current = await api.adminGetScenarioLibrary();
       setLibrary(current); setOriginal(JSON.stringify(current));
-      setImpact(result); setSaved(true); onSaved?.();
+      setImpact(result); setSaved(true); window.dispatchEvent(new Event('admin-territory-seeds-changed')); onSaved?.();
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
   };
@@ -79,14 +80,14 @@ export function ScenarioLibraryPanel({ onClose, onSaved }: { onClose: () => void
             className={`admin-page__tab${tab === key ? ' admin-page__tab--active' : ''}`} onClick={() => setTab(key)}>{LABELS[key]}</button>)}
         </div>
         <p className="admin-form__micro">{tab === 'territories'
-          ? 'Territory IDs automatically match regions in every map. Terrain and connections stay in Maps; scenario overrides take precedence.'
+          ? 'Territory IDs automatically match regions in every map. Names, terrain and properties come from these shared seeds. Connections stay in Maps; explicit scenario overrides take precedence.'
           : 'Shared defaults for scenarios. Explicit scenario overrides take precedence.'}</p>
         {error && <p role="alert" className="admin-page__error">{error}</p>}
         {!library && !error && <p className="admin-form__micro">Loading seeds…</p>}
         {library && <fieldset disabled={busy} className="scenario-library__body" role="tabpanel" aria-label={`${LABELS[tab]} seeds`}>
           {tab === 'units' ? <UnitsPanel units={library.units} factionIds={Object.keys(library.factions)} archetypes={archetypes} setupId="" setups={[]} onChange={(units) => change({ ...library, units })} />
             : tab === 'factions' ? <FactionsPanel factions={library.factions} onChange={(factions) => change({ ...library, factions })} />
-            : <TerritoriesPanel seedMode territories={library.territories} terrainTypes={[]} onChange={(territories) => change({ ...library, territories })} />}
+            : <TerritoriesPanel seedMode territories={library.territories} terrainTypes={terrainTypes} onChange={(territories) => change({ ...library, territories })} />}
         </fieldset>}
         {impact && <div className="scenario-library__review" role="status">
           <p className="admin-form__micro">{saved ? 'Saved. ' : ''}{impact.changed_setups.length ? `Affected scenarios: ${impact.changed_setups.join(', ')}` : 'No scenario definition changes.'}</p>

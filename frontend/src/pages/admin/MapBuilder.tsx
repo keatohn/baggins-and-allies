@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { api } from '../../services/api';
+import { api, type EntityRecords } from '../../services/api';
+import { TerritorySeedFields } from './SetupEditorPanels';
 import { createWheelNavIntentResolver, wheelZoomScaleMultiplier } from '../../utils/wheelNavIntent';
-import { jointsInBox, moveJoints, deleteJoints, labelAtPoint, splitBorderAtPoint } from './mapBuilderSelection';
+import { jointsInBox, moveJoints, deleteJoints, labelAtPoint, splitBorderAtPoint, selectionBounds, copyGraphFragment, pasteGraphFragment, resizeJoints, type GraphFragment, type ResizeHandle } from './mapBuilderSelection';
 import { fetchMapSvgText } from './territoryGraph';
 
 /**
@@ -17,7 +18,7 @@ import { fetchMapSvgText } from './territoryGraph';
 type Pt = { x: number; y: number };
 type Joint = { x: number; y: number };
 type Border = { a: string; b: string };
-type TerritoryLabel = { display_name: string; x: number; y: number };
+type TerritoryLabel = { x: number; y: number };
 
 type BuilderDoc = {
   width: number;
@@ -29,7 +30,7 @@ type BuilderDoc = {
 
 type Tool = 'select' | 'pen' | 'pencil' | 'label';
 type Selection = { kind: 'joint' | 'border' | 'label'; id: string } | { kind: 'joints'; ids: string[]; labelIds?: string[] } | null;
-const selectedJointIds = (selection: Selection): string[] => selection?.kind === 'joints' ? selection.ids : selection?.kind === 'joint' ? [selection.id] : [];
+const selectedJointIds = (selection: Selection, drawing?: BuilderDoc): string[] => selection?.kind === 'joints' ? selection.ids : selection?.kind === 'joint' ? [selection.id] : selection?.kind === 'border' && drawing?.borders[selection.id] ? [...new Set([drawing.borders[selection.id].a, drawing.borders[selection.id].b])] : [];
 
 const LEGACY_STORAGE_KEY = 'admin_map_builder_doc_v1';
 const DRAFTS_KEY = 'admin_map_builder_drafts_v1';
@@ -49,10 +50,10 @@ const DEFAULT_W = 3500;
 const DEFAULT_H = 2600;
 
 const TOOL_HINTS: Record<Tool, string> = {
-  select: 'Double-click an edge to add a node, or inside a region to select its nodes · Drag or arrow keys move selected nodes (Shift+arrow = 10 px) · Shift-click or Shift-drag adds nodes · Delete joins neighbors of intermediate nodes; select an edge or label dot to remove it · Space + drag or middle-drag pans',
+  select: 'Ctrl/Cmd+C / V copies and pastes selected nodes and internal edges · Drag side handles to stretch; corners resize proportionally · Double-click an edge to add a node, or inside a region to select its nodes · Drag or arrow keys move selected nodes (Shift+arrow = 10 px) · Shift-click or Shift-drag adds nodes · Delete joins neighbors of intermediate nodes; select an edge or label dot to remove it · Space + drag or middle-drag pans',
   pen: 'Click to place points (endpoints snap onto joints or split borders they land on) · drag to pan · Enter or click the first point finishes · Esc cancels',
   pencil: 'Drag to draw a freehand border · ends snap and join the shared graph',
-  label: 'Click inside a closed region to name it · click an existing label to edit · drag to pan',
+  label: 'Click a closed region to assign or create a territory seed · click an assignment to edit its shared seed · drag to pan',
 };
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -133,6 +134,7 @@ function loadStore(): DraftStore {
         )
       ) {
         if (!s.drafts.some((d) => d.id === s.currentId)) s.currentId = s.drafts[0].id;
+        for (const draft of s.drafts) draft.doc.labels = Object.fromEntries(Object.entries(draft.doc.labels).map(([id, label]) => [id, { x: label.x, y: label.y }]));
         return s;
       }
     }
@@ -403,6 +405,8 @@ export function MapBuilder() {
   const [future, setFuture] = useState<BuilderDoc[]>([]);
   const [tool, setTool] = useState<Tool>('select');
   const [selection, setSelection] = useState<Selection>(null);
+  const [clipboard, setClipboard] = useState<GraphFragment | null>(null);
+  const pasteCountRef = useRef(0);
   const [selectionBox, setSelectionBox] = useState<{ start: Pt; end: Pt } | null>(null);
   const [view, setView] = useState({ x: 0, y: 0, scale: 1 });
   const [sizeDraft, setSizeDraft] = useState({ w: String(doc.width), h: String(doc.height) });
@@ -414,15 +418,28 @@ export function MapBuilder() {
   const [confirmBox, setConfirmBox] = useState<{ title: string; message: string; onConfirm: () => void } | null>(
     null,
   );
+  const [territorySeeds, setTerritorySeeds] = useState<EntityRecords>({});
+  const [terrainTypes, setTerrainTypes] = useState<string[]>([]);
+  const [seedLoading, setSeedLoading] = useState(true);
+  const [seedError, setSeedError] = useState<string | null>(null);
+  const [labelBusy, setLabelBusy] = useState(false);
   const [labelDialog, setLabelDialog] = useState<{
-    x: number;
-    y: number;
-    tid: string;
-    name: string;
-    tidTouched: boolean;
-    existing: string | null;
-    error: string | null;
+    x: number; y: number; tid: string; existing: string | null; mode: 'existing' | 'create';
+    draft: Record<string, unknown>; edit: boolean; tidTouched: boolean; error: string | null;
   } | null>(null);
+  useEffect(() => {
+    let active = true;
+    const load = () => {
+      setSeedLoading(true);
+      Promise.all([api.adminGetScenarioLibrary(), api.getCatalog()]).then(([library, catalog]) => {
+        if (!active) return;
+        setTerritorySeeds(library.territories ?? {}); setTerrainTypes(catalog.terrain_types ?? []); setSeedError(null);
+      }).catch((error: Error) => { if (active) setSeedError(error.message); })
+        .finally(() => { if (active) setSeedLoading(false); });
+    };
+    load(); window.addEventListener('admin-territory-seeds-changed', load);
+    return () => { active = false; window.removeEventListener('admin-territory-seeds-changed', load); };
+  }, []);
   const [converting, setConverting] = useState(false);
   const [savedMaps, setSavedMaps] = useState<SavedMap[]>([]);
   const [knownMaps, setKnownMaps] = useState<string[]>([]);
@@ -453,6 +470,7 @@ export function MapBuilder() {
   const pencilRef = useRef<{ snapshot: BuilderDoc | null } | null>(null);
   const panRef = useRef<{ x: number; y: number; vx: number; vy: number; id: number } | null>(null);
   const jointDragRef = useRef<{ ids: string[]; labelIds?: string[]; start: Pt; snapshot: BuilderDoc; moved: boolean } | null>(null);
+  const resizeDragRef = useRef<{ ids: string[]; labelIds: string[]; handle: ResizeHandle; start: Pt; snapshot: BuilderDoc; moved: boolean; id: number } | null>(null);
   const nudgingRef = useRef(false);
   const boxRef = useRef<{ start: Pt; end: Pt; previous: string[]; borderId: string | null; moved: boolean; id: number } | null>(null);
   const spaceRef = useRef(false);
@@ -563,7 +581,7 @@ export function MapBuilder() {
     const intentOf = createWheelNavIntentResolver();
     const handler = (e: WheelEvent) => {
       e.preventDefault();
-      if (boxRef.current || jointDragRef.current) return;
+      if (boxRef.current || jointDragRef.current || resizeDragRef.current) return;
       const rect = el.getBoundingClientRect();
       const v = viewRef.current;
       if (intentOf(e) === 'pan') {
@@ -753,6 +771,7 @@ export function MapBuilder() {
   );
 
   const labelClick = useCallback((w: Pt) => {
+    if (seedLoading) { setStatus('Loading territory seeds…'); return; }
     const d = docRef.current;
     const rings = interiorRings(d);
     const idx = findRingIndex(rings, d.joints, w.x, w.y);
@@ -773,15 +792,16 @@ export function MapBuilder() {
         x: lab.x,
         y: lab.y,
         tid: existing,
-        name: lab.display_name,
+        draft: structuredClone(territorySeeds[existing] ?? { id: existing, display_name: existing, terrain_type: 'plains', produces: { power: 0 }, ownable: true }),
+        mode: territorySeeds[existing] ? 'existing' : 'create', edit: false,
         tidTouched: true,
         existing,
         error: null,
       });
     } else {
-      setLabelDialog({ x: w.x, y: w.y, tid: '', name: '', tidTouched: false, existing: null, error: null });
+      setLabelDialog({ x: w.x, y: w.y, tid: '', draft: { display_name: '', terrain_type: terrainTypes.includes('plains') ? 'plains' : terrainTypes[0] ?? '', produces: { power: 0 }, ownable: true, is_stronghold: false }, mode: 'existing', edit: false, tidTouched: false, existing: null, error: null });
     }
-  }, []);
+  }, [territorySeeds, terrainTypes, seedLoading]);
 
   const selectRegionLabel = useCallback((w: Pt | null) => {
     if (!w) return;
@@ -795,13 +815,13 @@ export function MapBuilder() {
     for (const [tid, lab] of Object.entries(d.labels)) {
       if (findRingIndex(rings, d.joints, lab.x, lab.y) === idx) {
         setSelection({ kind: 'label', id: tid });
-        setStatus(lab.display_name);
+        setStatus(`${String(territorySeeds[tid]?.display_name ?? tid)} (${tid})`);
         return;
       }
     }
     setSelection(null);
-    setStatus('This region has no name yet — use Label to name it.');
-  }, []);
+    setStatus('This region has no territory seed yet — use Label to assign one.');
+  }, [territorySeeds]);
 
   const deleteSelection = useCallback(() => {
     const sel = selection;
@@ -821,6 +841,38 @@ export function MapBuilder() {
     setStatus(sel.kind === 'label' ? 'Label removed' : 'Deleted');
   }, [mutate, pushHistory, selection]);
 
+  const copySelection = useCallback(() => {
+    const fragment = copyGraphFragment(docRef.current, selectedJointIds(selection, docRef.current), selection?.kind === 'joints' ? selection.labelIds : undefined);
+    if (!fragment) return;
+    setClipboard(fragment);
+    pasteCountRef.current = 0;
+    setStatus(`Copied ${Object.keys(fragment.joints).length} nodes and ${Object.keys(fragment.borders).length} edges · Paste here or in another open draft`);
+  }, [selection]);
+
+  const pasteSelection = useCallback(() => {
+    if (!clipboard) return;
+    const snapshot = docRef.current;
+    const next = cloneDoc(snapshot);
+    const offset = 20 * (pasteCountRef.current + 1);
+    const pasted = pasteGraphFragment(next, clipboard, offset, offset);
+    if (!pasted) { setStatus('The copied selection is too large for this map. Enlarge the map before pasting.'); return; }
+    pasteCountRef.current++;
+    pushHistory(snapshot);
+    docRef.current = next;
+    setDoc(next);
+    setSelection({ kind: 'joints', ...pasted });
+    const unassigned = Object.keys(clipboard.labels).length - pasted.labelIds.length;
+    setStatus(`Pasted ${pasted.ids.length} nodes · Drag to reposition or use the resize handles${unassigned ? ' · Duplicate territory assignments were left unnamed; use Label to assign seeds' : ''}`);
+  }, [clipboard, pushHistory]);
+
+  const cancelResize = useCallback(() => {
+    const drag = resizeDragRef.current;
+    if (!drag) return;
+    resizeDragRef.current = null;
+    docRef.current = drag.snapshot;
+    setDoc(drag.snapshot);
+  }, []);
+
   const selectRegionNodes = useCallback((point: Pt) => {
     const drawing = docRef.current;
     const rings = interiorRings(drawing);
@@ -836,6 +888,7 @@ export function MapBuilder() {
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     // A missed release/cancel from the previous gesture must never hijack this one.
+    cancelResize();
     panRef.current = null;
     boxRef.current = null;
     jointDragRef.current = null;
@@ -870,9 +923,18 @@ export function MapBuilder() {
     }
 
     if (t === 'select') {
+      const handle = (e.target as Element).closest('[data-resize-handle]')?.getAttribute('data-resize-handle') as ResizeHandle | null;
+      if (handle) {
+        e.preventDefault();
+        const ids = selectedJointIds(selection, docRef.current);
+        resizeDragRef.current = { ids, labelIds: selection?.kind === 'joints' ? selection.labelIds ?? [] : [],
+          handle, start: w, snapshot: docRef.current, moved: false, id: e.pointerId };
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+        return;
+      }
       const jid = hitJoint(w);
       if (jid) {
-        const previous = selectedJointIds(selection);
+        const previous = selectedJointIds(selection, docRef.current);
         if (e.shiftKey) {
           const ids = previous.includes(jid) ? previous.filter((id) => id !== jid) : [...previous, jid];
           setSelection(ids.length ? { kind: 'joints', ids } : null);
@@ -895,11 +957,11 @@ export function MapBuilder() {
       const labelId = labelAtPoint(docRef.current.labels, w, HIT_PX / viewRef.current.scale);
       if (labelId) {
         setSelection({ kind: 'label', id: labelId });
-        setStatus(docRef.current.labels[labelId].display_name);
+        setStatus(`${String(territorySeeds[labelId]?.display_name ?? labelId)} (${labelId})`);
         downRef.current = null;
         return;
       }
-      boxRef.current = { start: w, end: w, previous: e.shiftKey ? selectedJointIds(selection) : [], borderId: hitBorder(w), moved: false, id: e.pointerId };
+      boxRef.current = { start: w, end: w, previous: e.shiftKey ? selectedJointIds(selection, docRef.current) : [], borderId: hitBorder(w), moved: false, id: e.pointerId };
       setStatus(null);
       try {
         e.currentTarget.setPointerCapture(e.pointerId);
@@ -919,6 +981,16 @@ export function MapBuilder() {
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const resize = resizeDragRef.current;
+    if (resize && e.pointerId === resize.id) {
+      const point = screenToWorld(e.clientX, e.clientY);
+      if (!point) return;
+      const next = cloneDoc(resize.snapshot);
+      resize.moved = resizeJoints(next, resize.snapshot, resize.ids, resize.handle, point.x - resize.start.x, point.y - resize.start.y, resize.labelIds);
+      docRef.current = next;
+      setDoc(next);
+      return;
+    }
     // pen / label: a drag past the click threshold becomes a pan instead of a silent no-op.
     const downForPan = downRef.current;
     if (
@@ -993,6 +1065,15 @@ export function MapBuilder() {
   };
 
   const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const resize = resizeDragRef.current;
+    if (resize && e.pointerId === resize.id) {
+      onPointerMove(e);
+      resizeDragRef.current = null;
+      downRef.current = null;
+      if (resize.moved) pushHistory(resize.snapshot);
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+      return;
+    }
     const box = boxRef.current;
     if (box && e.pointerId === box.id) {
       // Include the release position, even if the browser coalesced the last move.
@@ -1000,7 +1081,10 @@ export function MapBuilder() {
       boxRef.current = null;
       setSelectionBox(null);
       downRef.current = null;
-      if (!box.moved && !e.shiftKey) {
+      if (!box.moved && e.shiftKey && box.borderId) {
+        const edge = docRef.current.borders[box.borderId];
+        if (edge) setSelection({ kind: 'joints', ids: [...new Set([...box.previous, edge.a, edge.b])] });
+      } else if (!box.moved && !e.shiftKey) {
         if (box.borderId) setSelection({ kind: 'border', id: box.borderId });
         else selectRegionLabel(screenToWorld(e.clientX, e.clientY));
       }
@@ -1072,6 +1156,7 @@ export function MapBuilder() {
   };
 
   const onPointerCancel = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (resizeDragRef.current?.id === e.pointerId) cancelResize();
     if (boxRef.current?.id === e.pointerId) {
       const ids = boxRef.current.previous;
       setSelection(ids.length ? { kind: 'joints', ids } : null);
@@ -1109,7 +1194,7 @@ export function MapBuilder() {
         return;
       }
       if (labelDialog || jsonModal || svgModal || confirmBox || saveBox || noteBox) {
-        if (e.key === 'Escape') {
+        if (e.key === 'Escape' && !labelBusy) {
           setLabelDialog(null);
           setJsonModal(null);
           setSvgModal(null);
@@ -1119,15 +1204,24 @@ export function MapBuilder() {
         }
         return;
       }
+      if (resizeDragRef.current) {
+        e.preventDefault();
+        if (e.key === 'Escape') { cancelResize(); downRef.current = null; }
+        return;
+      }
       if (e.code === 'Space') {
         e.preventDefault();
         spaceRef.current = true;
         return;
       }
       const key = e.key.toLowerCase();
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && toolRef.current === 'select') {
+        if (key === 'c' && selectedJointIds(selection, docRef.current).length) { e.preventDefault(); copySelection(); return; }
+        if (key === 'v' && clipboard) { e.preventDefault(); if (!e.repeat) pasteSelection(); return; }
+      }
       const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
       if (direction && toolRef.current === 'select' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const ids = selectedJointIds(selection);
+        const ids = selectedJointIds(selection, docRef.current);
         if (!ids.length) return;
         e.preventDefault();
         const snapshot = docRef.current;
@@ -1183,7 +1277,7 @@ export function MapBuilder() {
       }
     };
     const releaseSpace = (e: KeyboardEvent) => { if (e.code === 'Space') spaceRef.current = false; if (e.key.startsWith('Arrow')) nudgingRef.current = false; };
-    const blur = () => { spaceRef.current = false; nudgingRef.current = false; };
+    const blur = () => { spaceRef.current = false; nudgingRef.current = false; cancelResize(); };
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', releaseSpace);
     window.addEventListener('blur', blur);
@@ -1192,7 +1286,7 @@ export function MapBuilder() {
       window.removeEventListener('keyup', releaseSpace);
       window.removeEventListener('blur', blur);
     };
-  }, [cancelStroke, confirmBox, deleteSelection, finishPen, jsonModal, labelDialog, noteBox, pushHistory, redo, saveBox, selection, svgModal, undo]);
+  }, [cancelResize, cancelStroke, clipboard, confirmBox, copySelection, deleteSelection, finishPen, jsonModal, labelDialog, labelBusy, noteBox, pasteSelection, pushHistory, redo, saveBox, selection, svgModal, undo]);
 
   // --- header actions ---------------------------------------------------------
 
@@ -1265,7 +1359,7 @@ export function MapBuilder() {
         height: raw.height,
         joints: {},
         borders: (raw.borders ?? {}) as Record<string, Border>,
-        labels: (raw.labels ?? {}) as Record<string, TerritoryLabel>,
+        labels: Object.fromEntries(Object.entries(raw.labels ?? {}).map(([id, point]) => [id, { x: point.x, y: point.y }])),
       };
       for (const [jid, j] of Object.entries(raw.joints as Record<string, Joint>)) {
         if (typeof j?.x !== 'number' || typeof j?.y !== 'number' || !Number.isFinite(j.x) || !Number.isFinite(j.y)) {
@@ -1303,31 +1397,30 @@ export function MapBuilder() {
     }
   };
 
-  const saveLabel = () => {
-    if (!labelDialog) return;
-    const name = labelDialog.name.trim();
+  const saveLabel = async () => {
+    if (!labelDialog || labelBusy || seedLoading) return;
     const tid = labelDialog.tid.trim();
-    if (!name) {
-      setLabelDialog({ ...labelDialog, error: 'Display name is required' });
-      return;
-    }
-    if (!TID_RE.test(tid)) {
-      setLabelDialog({ ...labelDialog, error: 'Id must be 1–64 chars: letters, digits, _ . -' });
-      return;
-    }
-    if (tid !== labelDialog.existing && tid in docRef.current.labels) {
-      setLabelDialog({ ...labelDialog, error: `Id “${tid}” is already used` });
-      return;
-    }
-    const snapshot = docRef.current;
-    mutate((d) => {
-      if (labelDialog.existing && labelDialog.existing !== tid) delete d.labels[labelDialog.existing];
-      d.labels[tid] = { display_name: name, x: labelDialog.x, y: labelDialog.y };
-    });
-    pushHistory(snapshot);
-    setSelection({ kind: 'label', id: tid });
-    setLabelDialog(null);
-    setStatus(labelDialog.existing ? `Label updated: ${tid}` : `Region labelled: ${tid}`);
+    if (!TID_RE.test(tid)) { setLabelDialog({ ...labelDialog, error: 'Select a territory seed or enter a valid new ID.' }); return; }
+    if (tid !== labelDialog.existing && tid in docRef.current.labels) { setLabelDialog({ ...labelDialog, error: `Territory ${tid} is already assigned on this map.` }); return; }
+    if (labelDialog.mode === 'existing' && !territorySeeds[tid]) { setLabelDialog({ ...labelDialog, error: 'Select an existing territory seed.' }); return; }
+    if (labelDialog.existing && tid !== labelDialog.existing && !window.confirm(`Assign this region to ${tid}? Saving the map will replace ${labelDialog.existing} in affected setups and remove its old ownership and starting units. The new territory starts unowned and empty.`)) return;
+    setLabelBusy(true);
+    try {
+      if (labelDialog.mode === 'create' || labelDialog.edit) {
+        const record = { ...labelDialog.draft, id: tid };
+        const result = labelDialog.mode === 'create' ? await api.adminCreateTerritorySeed(record) : await api.adminUpdateTerritorySeed(tid, record);
+        setTerritorySeeds(current => ({ ...current, [tid]: result.seed }));
+        window.dispatchEvent(new Event('admin-territory-seeds-changed'));
+      }
+      const snapshot = docRef.current;
+      mutate(d => {
+        if (labelDialog.existing && labelDialog.existing !== tid) delete d.labels[labelDialog.existing];
+        d.labels[tid] = { x: labelDialog.x, y: labelDialog.y };
+      });
+      pushHistory(snapshot); setSelection({ kind: 'label', id: tid }); setLabelDialog(null);
+      setStatus(`Territory assigned: ${tid} · Name, terrain and properties come from its shared seed`);
+    } catch (error) { setLabelDialog(current => current ? { ...current, error: error instanceof Error ? error.message : String(error) } : current); }
+    finally { setLabelBusy(false); }
   };
 
   const setToolAndCancel = (t: Tool) => {
@@ -1372,6 +1465,7 @@ export function MapBuilder() {
   };
 
   const loadDoc = (next: BuilderDoc, name: string, mapBase: string | null, message: string) => {
+    next = { ...next, labels: Object.fromEntries(Object.entries(next.labels).map(([id, point]) => [id, { x: point.x, y: point.y }])) };
     const snapshot = docRef.current;
     docRef.current = next;
     setDoc(next);
@@ -1675,6 +1769,21 @@ export function MapBuilder() {
   // --- render -----------------------------------------------------------------
 
   const k = 1 / view.scale;
+  const selectedIds = selectedJointIds(selection, doc);
+  const selectedLabels = selection?.kind === 'joints' ? selection.labelIds ?? [] : [];
+  const bounds = tool === 'select' && selectedIds.length > 1 ? selectionBounds(doc, selectedIds, selectedLabels) : null;
+  const gripBox = bounds ? { left: bounds.minX - 14 * k, top: bounds.minY - 14 * k, right: bounds.maxX + 14 * k, bottom: bounds.maxY + 14 * k } : null;
+  const handles: { id: ResizeHandle; x: number; y: number; cursor: string; label: string }[] = gripBox && bounds ? [
+    { id: 'nw', x: gripBox.left, y: gripBox.top, cursor: 'nwse-resize', label: 'Resize proportionally from top left' },
+    { id: 'n', x: (gripBox.left + gripBox.right) / 2, y: gripBox.top, cursor: 'ns-resize', label: 'Resize vertically from top' },
+    { id: 'ne', x: gripBox.right, y: gripBox.top, cursor: 'nesw-resize', label: 'Resize proportionally from top right' },
+    { id: 'e', x: gripBox.right, y: (gripBox.top + gripBox.bottom) / 2, cursor: 'ew-resize', label: 'Resize horizontally from right' },
+    { id: 'se', x: gripBox.right, y: gripBox.bottom, cursor: 'nwse-resize', label: 'Resize proportionally from bottom right' },
+    { id: 's', x: (gripBox.left + gripBox.right) / 2, y: gripBox.bottom, cursor: 'ns-resize', label: 'Resize vertically from bottom' },
+    { id: 'sw', x: gripBox.left, y: gripBox.bottom, cursor: 'nesw-resize', label: 'Resize proportionally from bottom left' },
+    { id: 'w', x: gripBox.left, y: (gripBox.top + gripBox.bottom) / 2, cursor: 'ew-resize', label: 'Resize horizontally from left' },
+  ].filter(handle => (bounds.maxX > bounds.minX || !['e', 'w'].includes(handle.id)) && (bounds.maxY > bounds.minY || !['n', 's'].includes(handle.id))) as { id: ResizeHandle; x: number; y: number; cursor: string; label: string }[] : [];
+
   const borderList = Object.entries(doc.borders);
   const jointList = Object.entries(doc.joints);
   const penJoints = penRef.current.joints;
@@ -1879,6 +1988,8 @@ export function MapBuilder() {
           </div>
 
           <div className="mapbuilder__actions">
+            <button type="button" className="admin-page__btn" disabled={tool !== 'select' || !selectedIds.length} onClick={copySelection} title="Copy selected nodes and internal edges (Ctrl/Cmd+C)">Copy selection</button>
+            <button type="button" className="admin-page__btn" disabled={tool !== 'select' || !clipboard} onClick={pasteSelection} title="Paste copied geometry with fresh IDs (Ctrl/Cmd+V)">Paste selection</button>
             <button type="button" className="admin-page__btn" onClick={undo} disabled={!past.length} title="Ctrl+Z">
               Undo
             </button>
@@ -2000,7 +2111,7 @@ export function MapBuilder() {
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerCancel}
           onDoubleClick={(e) => {
-            if (toolRef.current !== 'select' || e.button !== 0 || spaceRef.current) return;
+            if (toolRef.current !== 'select' || e.button !== 0 || spaceRef.current || (e.target as Element).closest('[data-resize-handle]')) return;
             const point = screenToWorld(e.clientX, e.clientY);
             if (!point) return;
             const borderId = hitBorder(point);
@@ -2039,11 +2150,12 @@ export function MapBuilder() {
                 const A = doc.joints[b.a];
                 const B = doc.joints[b.b];
                 if (!A || !B) return null;
-                const selectedBorder = selection?.kind === 'border' && selection.id === bid;
+                const selectedBorder = (selection?.kind === 'border' && selection.id === bid) || (selectedIds.includes(b.a) && selectedIds.includes(b.b));
                 const inPen = penJoints.includes(b.a) && penJoints.includes(b.b);
                 return (
                   <line
                     key={bid}
+                    data-border-id={bid}
                     x1={A.x}
                     y1={A.y}
                     x2={B.x}
@@ -2097,7 +2209,7 @@ export function MapBuilder() {
                         fontSize={11 * k}
                         strokeWidth={1.1 * k}
                       >
-                        {lab.display_name}
+                        {String(territorySeeds[tid]?.display_name ?? tid)} ({tid})
                       </text>
                     ) : null}
                   </g>
@@ -2106,11 +2218,12 @@ export function MapBuilder() {
 
               {/* Joints */}
               {jointList.map(([jid, j]) => {
-                const sel = selectedJointIds(selection).includes(jid);
+                const sel = selectedIds.includes(jid);
                 const inPen = penJoints.includes(jid);
                 return (
                   <circle
                     key={jid}
+                    data-joint-id={jid}
                     cx={j.x}
                     cy={j.y}
                     r={(sel || inPen ? JOINT_R_PX + 2 : JOINT_R_PX) * k}
@@ -2120,6 +2233,26 @@ export function MapBuilder() {
                   />
                 );
               })}
+              {gripBox && handles.length > 0 && <g className="mapbuilder__selection-frame">
+                <rect x={gripBox.left} y={gripBox.top} width={gripBox.right - gripBox.left} height={gripBox.bottom - gripBox.top}
+                  fill="none" stroke="#4173aa" strokeWidth={k} strokeDasharray={`${5 * k} ${3 * k}`} pointerEvents="none" />
+                {handles.map(handle => <rect key={handle.id} data-resize-handle={handle.id}
+                  role="button" tabIndex={0} aria-label={`${handle.label}; drag or use arrow keys`} x={handle.x - 6 * k} y={handle.y - 6 * k} width={12 * k} height={12 * k}
+                  rx={2 * k} fill="var(--parchment-light, #fffdf4)" stroke="#4173aa" strokeWidth={1.5 * k} style={{ cursor: handle.cursor }}
+                  onKeyDown={(e) => {
+                    const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+                    if (!direction || e.ctrlKey || e.metaKey || e.altKey) return;
+                    e.preventDefault(); e.stopPropagation();
+                    const snapshot = docRef.current;
+                    const next = cloneDoc(snapshot);
+                    const step = e.shiftKey ? 10 : 1;
+                    if (!resizeJoints(next, snapshot, selectedIds, handle.id, direction[0] * step, direction[1] * step, selectedLabels)) return;
+                    if (!e.repeat) pushHistory(snapshot);
+                    docRef.current = next; setDoc(next);
+                  }}>
+                  <title>{handle.label} · Arrow keys resize; Shift = 10 px</title>
+                </rect>)}
+              </g>}
               {selectionBox && <rect
                 x={Math.min(selectionBox.start.x, selectionBox.end.x)}
                 y={Math.min(selectionBox.start.y, selectionBox.end.y)}
@@ -2175,65 +2308,41 @@ export function MapBuilder() {
       ) : null}
 
       {labelDialog ? (
-        <div className="admin-modal-overlay" role="presentation" onClick={() => setLabelDialog(null)}>
-          <div
-            className="admin-modal admin-modal--small"
-            role="dialog"
-            aria-modal="true"
-            aria-label={labelDialog.existing ? 'Edit territory label' : 'Label region'}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="admin-modal__title">
-              {labelDialog.existing ? 'Edit territory' : 'Label region'}
-            </h3>
-            <label className="mapbuilder__field admin-form__label">
-              Display name
-              <input
-                className="admin-form__input"
-                value={labelDialog.name}
-                autoFocus
-                onChange={(e) => {
-                  const name = e.target.value;
-                  setLabelDialog((d) =>
-                    d
-                      ? {
-                          ...d,
-                          name,
-                          tid: d.tidTouched ? d.tid : normalizeTid(name),
-                          error: null,
-                        }
-                      : d,
-                  );
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') saveLabel();
-                }}
-              />
-            </label>
-            <label className="mapbuilder__field admin-form__label">
-              Territory id
-              <input
-                className="admin-form__input"
-                value={labelDialog.tid}
-                onChange={(e) =>
-                  setLabelDialog((d) => (d ? { ...d, tid: e.target.value, tidTouched: true, error: null } : d))
-                }
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') saveLabel();
-                }}
-              />
-            </label>
-            <p className="admin-form__micro">
-              The id is derived from the name (lowercase, spaces → _ , apostrophes stripped) until you edit it.
-            </p>
-            {labelDialog.error ? <p className="admin-page__error">{labelDialog.error}</p> : null}
+        <div className="admin-modal-overlay" role="presentation" onClick={() => { if (!labelBusy) setLabelDialog(null); }}>
+          <div className="admin-modal admin-modal--territory-seed" role="dialog" aria-modal="true" aria-label="Assign territory" onClick={e => e.stopPropagation()}>
+            <h3 className="admin-modal__title">Assign territory</h3>
+            {seedError && <p className="admin-page__error" role="alert">Could not load territory seeds: {seedError} <button type="button" className="admin-page__btn" onClick={() => window.dispatchEvent(new Event('admin-territory-seeds-changed'))}>Retry</button></p>}
+            <fieldset disabled={labelBusy || seedLoading} className="mapbuilder__seed-fields">
+              <label className="mapbuilder__field admin-form__label">Territory seed
+                <select autoFocus className="admin-form__input" aria-label="Territory seed" value={labelDialog.mode === 'create' ? '__create__' : labelDialog.tid} onChange={e => {
+                  const tid = e.target.value;
+                  if (tid === '__create__') setLabelDialog({ ...labelDialog, mode: 'create', tid: '', edit: false, tidTouched: false, error: null,
+                    draft: { display_name: '', terrain_type: terrainTypes.includes('plains') ? 'plains' : terrainTypes[0] ?? '', produces: { power: 0 }, ownable: true, is_stronghold: false } });
+                  else setLabelDialog({ ...labelDialog, mode: 'existing', tid, edit: false, draft: structuredClone(territorySeeds[tid] ?? {}), error: null });
+                }}>
+                  <option value="">{seedLoading ? 'Loading seeds…' : 'Select a territory…'}</option>
+                  {Object.entries(territorySeeds).sort(([a, left], [b, right]) => String(left.display_name ?? a).localeCompare(String(right.display_name ?? b))).map(([tid, seed]) => <option key={tid} value={tid} disabled={tid !== labelDialog.existing && tid in doc.labels}>{String(seed.display_name ?? tid)} ({tid}){tid !== labelDialog.existing && tid in doc.labels ? ' — already assigned' : ''}</option>)}
+                  <option value="__create__">Create new territory…</option>
+                </select>
+              </label>
+              {labelDialog.mode === 'create' && <label className="mapbuilder__field admin-form__label">New territory ID
+                <input className="admin-form__input" aria-label="New territory ID" value={labelDialog.tid} onChange={e => setLabelDialog({ ...labelDialog, tid: e.target.value, tidTouched: true, error: null })} />
+              </label>}
+              {labelDialog.mode === 'existing' && labelDialog.tid && !labelDialog.edit && <>
+                <p className="admin-form__micro">ID: <strong>{labelDialog.tid}</strong> · Terrain: {String(territorySeeds[labelDialog.tid]?.terrain_type ?? 'unset')}. Name and properties are inherited from this seed.</p>
+                <button type="button" className="admin-page__btn" onClick={() => setLabelDialog({ ...labelDialog, edit: true })}>Edit shared seed</button>
+              </>}
+              {(labelDialog.mode === 'create' || labelDialog.edit) && <>
+                <p className="admin-form__micro">{labelDialog.edit ? 'These changes affect every map using this territory seed.' : 'Creates a shared seed now. Its map assignment stays in this draft until you save the map.'}</p>
+                <TerritorySeedFields id={labelDialog.tid} showId={false} t={labelDialog.draft} terrainTypes={terrainTypes} patch={patch => setLabelDialog(current => current ? {
+                  ...current, draft: { ...current.draft, ...patch }, tid: current.mode === 'create' && !current.tidTouched && typeof patch.display_name === 'string' ? normalizeTid(patch.display_name) : current.tid, error: null,
+                } : current)} />
+              </>}
+            </fieldset>
+            {labelDialog.error && <p className="admin-page__error" role="alert">{labelDialog.error}</p>}
             <div className="admin-modal__actions">
-              <button type="button" className="admin-page__btn admin-page__btn--primary" onClick={saveLabel}>
-                Save
-              </button>
-              <button type="button" className="admin-page__btn" onClick={() => setLabelDialog(null)}>
-                Cancel
-              </button>
+              <button type="button" className="admin-page__btn admin-page__btn--primary" disabled={labelBusy || seedLoading || !!seedError || !labelDialog.tid} onClick={() => void saveLabel()}>{labelBusy ? 'Saving…' : labelDialog.mode === 'create' ? 'Create and assign' : labelDialog.edit ? 'Save seed and assign' : 'Assign territory'}</button>
+              <button type="button" className="admin-page__btn" disabled={labelBusy} onClick={() => setLabelDialog(null)}>Cancel</button>
             </div>
           </div>
         </div>

@@ -40,6 +40,10 @@ def _display_name(raw: Any, fallback: str) -> str:
     return name
 
 
+def _canonical_doc(doc: dict[str, Any]) -> dict[str, Any]:
+    return {**doc, "labels": {tid: {"x": label["x"], "y": label["y"]} for tid, label in doc.get("labels", {}).items()}}
+
+
 def _doc_from_payload(payload: Any) -> tuple[str, dict[str, Any]]:
     if not isinstance(payload, dict):
         raise MapBuilderError("payload must be a JSON object")
@@ -55,7 +59,7 @@ def _doc_from_payload(payload: Any) -> tuple[str, dict[str, Any]]:
         "height": doc["height"],
         "joints": doc["joints"],
         "borders": doc["borders"],
-        "labels": doc["labels"],
+        "labels": {tid: {"x": label["x"], "y": label["y"]} for tid, label in doc["labels"].items()},
     }
     return name, stored
 
@@ -94,7 +98,7 @@ def _read_files(map_base: str) -> tuple[str, dict[str, Any], str, datetime] | No
 def _write_files(map_base: str, name: str, doc: dict[str, Any], svg: str) -> None:
     directory = MAPS_DIR / map_base
     directory.mkdir(parents=True, exist_ok=True)
-    payload = {"display_name": name, **doc}
+    payload = {"display_name": name, **_canonical_doc(doc)}
     (directory / "builder.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     (directory / "map.svg").write_text(svg, encoding="utf-8")
 
@@ -150,7 +154,7 @@ def load_map_asset(db: Session | None, map_base: str) -> dict[str, Any]:
         if loaded is None:
             raise MapBuilderError(f"no saved map {base!r}")
         name, doc, _svg, updated = loaded
-        return {"map_base": base, "display_name": name, "updated_at": updated.isoformat() + "Z", "doc": doc}
+        return {"map_base": base, "display_name": name, "updated_at": updated.isoformat() + "Z", "doc": _canonical_doc(doc)}
 
     row = _row(db, base)
     if row is None:
@@ -165,7 +169,7 @@ def load_map_asset(db: Session | None, map_base: str) -> dict[str, Any]:
         "map_base": base,
         "display_name": row.display_name,
         "updated_at": row.updated_at.isoformat() + "Z" if row.updated_at else None,
-        "doc": doc,
+        "doc": _canonical_doc(doc),
     }
 
 
@@ -192,6 +196,16 @@ def load_map_svg(db: Session | None, map_base: str) -> str | None:
 def save_map_asset(db: Session | None, map_base: str, payload: Any) -> dict[str, Any]:
     base = _check_base(map_base)
     name, doc = _doc_from_payload(payload)
+    if is_files_setup_source() or db is None:
+        from backend.scenario_builder import load_library
+        from backend.engine.definitions import DATA_DIR
+        seeds = load_library(DATA_DIR)["territories"]
+    else:
+        from backend.scenario_store import load_state
+        seeds = load_state(db)["library"]["territories"]
+    unknown = set(doc["labels"]) - seeds.keys()
+    if unknown:
+        raise MapBuilderError("Assign existing territory seeds or create them before saving: " + ", ".join(sorted(unknown)))
     converted = convert_map_builder(doc)
     svg = converted["svg"]
     previous = None
@@ -209,6 +223,7 @@ def save_map_asset(db: Session | None, map_base: str, payload: Any) -> dict[str,
             raise MapBuilderError(f"could not read saved map overrides: {exc}") from exc
     else:
         overrides = load_map_overrides(db, base)
+    overrides.pop("terrain", None)  # terrain is inherited from territory seeds
     graph = overrides.get("graph")
     if graph is None:
         overrides["graph"] = converted["graph"]
@@ -225,6 +240,10 @@ def save_map_asset(db: Session | None, map_base: str, payload: Any) -> dict[str,
                 if other not in graph.get("aerial_adjacent", {}).get(tid, []) and other not in graph.get("ford_adjacent", {}).get(tid, []):
                     neighbors.add(other)
             land[tid] = sorted(neighbors)
+    assigned_ids = {territory["id"] for territory in converted["territories"]}
+    for table in (overrides.get("graph") or {}).values():
+        for tid, neighbors in list(table.items()):
+            table[tid] = [neighbor for neighbor in neighbors if neighbor in assigned_ids] if tid in assigned_ids else []
     try:
         overrides = validate_map_overrides(overrides)
     except MapOverridesError as exc:
@@ -233,12 +252,16 @@ def save_map_asset(db: Session | None, map_base: str, payload: Any) -> dict[str,
     terrain_types = load_catalog(db)["terrain_types"]
     default_terrain = "plains" if "plains" in terrain_types else next((t for t in terrain_types if t != "sea"), "sea")
     def add_territories(records, seeds=None):
+        assigned = {territory["id"] for territory in converted["territories"]}
+        for tid in list(records):
+            if tid not in assigned:
+                del records[tid]
         for territory in converted["territories"]:
             tid = territory["id"]
             records.setdefault(tid, {"id": tid, "display_name": territory["label"],
                 "produces": {"power": 0}, "ownable": True, "is_stronghold": False,
                 **(seeds or {}).get(tid, {}),
-                "terrain_type": overrides.get("terrain", {}).get(tid, default_terrain),
+                "terrain_type": (seeds or {}).get(tid, {}).get("terrain_type", default_terrain),
                 **{field: overrides["graph"].get(field, {}).get(tid, []) for field in ("adjacent", "aerial_adjacent", "ford_adjacent")}})
     if is_files_setup_source() or db is None:
         defaults_path = MAPS_DIR / base / "territories.json"
@@ -251,18 +274,34 @@ def save_map_asset(db: Session | None, map_base: str, payload: Any) -> dict[str,
         from backend.scenario_builder import load_library
         from backend.engine.definitions import DATA_DIR
         seeds = load_library(DATA_DIR).get("territories", {})
+        previous_ids = set(defaults)
         add_territories(defaults, seeds)
         _write_files(base, name, doc, svg)
         (MAPS_DIR / base / "overrides.json").write_text(json.dumps(overrides, indent=2) + "\n")
-        defaults_path.write_text(json.dumps(defaults, indent=2) + "\n")
+        from backend.scenario_builder import MAP_TERRITORY_FIELDS
+        defaults_path.write_text(json.dumps({tid: {key: value for key, value in record.items() if key in MAP_TERRITORY_FIELDS} for tid, record in defaults.items()}, indent=2) + "\n")
         _mirror_graph_files(base, overrides["graph"])
+        from backend.scenario_builder import canonical_setup, write_setup, prepare_territory_seeds
+        from backend.scenario_store import sync_map_membership
+        library = load_library(DATA_DIR)
+        library["maps"][base] = defaults
+        prepare_territory_seeds(library)
+        state = {"library": library, "setups": {path.parent.name: canonical_setup(json.loads(path.read_text())) for path in (DATA_DIR / "setups").glob("*/setup.json")}}
+        sync_map_membership(state, base, previous_ids)
+        for key, setup in state["setups"].items():
+            if setup["manifest"].get("map_asset") == base:
+                write_setup(DATA_DIR / "setups" / key, setup)
         updated = datetime.utcnow()
     else:
         from backend.scenario_store import load_state, stage_state
         from backend.scenario_builder import prepare_territory_seeds
         state = load_state(db)
-        add_territories(state["library"]["maps"].setdefault(base, {}), state["library"]["territories"])
+        records = state["library"]["maps"].setdefault(base, {})
+        previous_ids = set(records)
+        add_territories(records, state["library"]["territories"])
         prepare_territory_seeds(state["library"])
+        from backend.scenario_store import sync_map_membership
+        sync_map_membership(state, base, previous_ids)
         stage_state(db, state)
         write_overrides(db, base, overrides)
         _mirror_graph_db(db, base, overrides["graph"])
@@ -271,7 +310,7 @@ def save_map_asset(db: Session | None, map_base: str, payload: Any) -> dict[str,
         from backend.scenario_store import sync_map
         sync_map(db, base)
         updated = _row(db, base).updated_at
-    return {"ok": True, "map_base": base, "display_name": name, "updated_at": updated.isoformat() + "Z", "doc": doc}
+    return {"ok": True, "map_base": base, "display_name": name, "updated_at": updated.isoformat() + "Z", "doc": _canonical_doc(doc)}
 
 
 def copy_map_asset(db: Session | None, map_base: str, new_base: str, display_name: str | None) -> dict[str, Any]:
@@ -342,7 +381,7 @@ def _write_row(db: Session, map_base: str, name: str, doc: dict[str, Any], svg: 
     from backend.api.models import MapAsset
 
     row = _row(db, map_base)
-    payload = json.dumps(doc, ensure_ascii=False)
+    payload = json.dumps(_canonical_doc(doc), ensure_ascii=False)
     now = datetime.utcnow()
     if row is None:
         db.add(

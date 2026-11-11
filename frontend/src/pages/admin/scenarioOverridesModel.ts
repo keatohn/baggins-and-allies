@@ -2,7 +2,7 @@ import type { AdminSetupBundle, ScenarioLibrary, SetupDefinition } from '../../s
 export type Dict = Record<string, unknown>;
 export const object = (value: unknown): Dict => value && typeof value === 'object' && !Array.isArray(value) ? value as Dict : {};
 export const deleted = (value: unknown) => JSON.stringify(value) === '{"$delete":true}';
-const geometry = new Set(['terrain_type', 'adjacent', 'aerial_adjacent', 'ford_adjacent']);
+const geometry = new Set(['adjacent', 'aerial_adjacent', 'ford_adjacent']);
 const mapId = (setup: SetupDefinition) => String(setup.manifest.map_asset || setup.manifest.id);
 export function resolve(base: Dict, overrides: Dict): Dict {
   const out = structuredClone(base);

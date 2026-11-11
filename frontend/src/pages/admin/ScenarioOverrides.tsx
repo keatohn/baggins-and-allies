@@ -129,7 +129,7 @@ export function ScenarioOverrides({ section, source, library, onChange }: {
     return `${key} ${option?.name ?? ''}`.toLowerCase().includes(filter.trim().toLowerCase());
   });
   return <div className="scenario-overrides">
-    <p className="admin-form__micro">Select an entry to modify its overrides. Unchecked fields inherit their shared default. Map terrain and connections are edited in Maps.</p>
+    <p className="admin-form__micro">Select an entry to modify its overrides. Unchecked fields inherit their shared default. Terrain inherits from territory seeds; connections are edited in Maps.</p>
     <div className="admin-entity">
       <div className="admin-entity__sidebar">
         <button type="button" className="admin-page__btn" onClick={() => setUpdatingList(true)}>Update {singular} List</button>
@@ -156,9 +156,9 @@ export function ScenarioOverrides({ section, source, library, onChange }: {
         {id ? <>
           <h3 className="admin-form__subtitle">{id}</h3>
           <p className="admin-form__micro">{seed ? `Seed: ${seed}` : 'Custom record'}</p>
-          <Fields key={`${section}:${id}:${seed}`} defaults={territory ? Object.fromEntries(Object.entries(base).filter(([key]) => !['terrain_type', 'adjacent', 'aerial_adjacent', 'ford_adjacent'].includes(key))) : base}
-            overrides={territory ? Object.fromEntries(Object.entries(overrides).filter(([key]) => !['terrain_type', 'adjacent', 'aerial_adjacent', 'ford_adjacent'].includes(key))) : overrides}
-            onChange={(next) => changeOverrides(territory ? { ...Object.fromEntries(Object.entries(overrides).filter(([key]) => ['terrain_type', 'adjacent', 'aerial_adjacent', 'ford_adjacent'].includes(key))), ...next } : next)} />
+          <Fields key={`${section}:${id}:${seed}`} defaults={territory ? Object.fromEntries(Object.entries(base).filter(([key]) => !['adjacent', 'aerial_adjacent', 'ford_adjacent'].includes(key))) : base}
+            overrides={territory ? Object.fromEntries(Object.entries(overrides).filter(([key]) => !['adjacent', 'aerial_adjacent', 'ford_adjacent'].includes(key))) : overrides}
+            onChange={(next) => changeOverrides(territory ? { ...Object.fromEntries(Object.entries(overrides).filter(([key]) => ['adjacent', 'aerial_adjacent', 'ford_adjacent'].includes(key))), ...next } : next)} />
         </> : <p className="admin-form__micro">Use Update {singular} List to choose seeds for this setup.</p>}
       </div>
     </div>

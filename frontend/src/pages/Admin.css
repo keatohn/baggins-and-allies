@@ -4135,6 +4135,7 @@ body:has(.combat-sim-modal-overlay) {
 
 .mapbuilder__svg {
   display: block;
+  overflow: visible;
   background: rgba(255, 253, 244, 0.55);
   outline: 1px dashed var(--ink-faded);
 }
@@ -4451,3 +4452,12 @@ body:has(.admin-modal--map-editor) .menu-scroll-overlay:not(.menu-scroll-overlay
 .scenario-selection__option input { flex-shrink: 0; }
 .scenario-selection__option small { display: block; color: var(--ink-faded); }
 .scenario-custom-record { display: grid; gap: 0.5rem; padding-top: 0.5rem; }
+
+.mapbuilder__selection-frame [data-resize-handle]:hover,
+.mapbuilder__selection-frame [data-resize-handle]:focus-visible {
+  fill: var(--gold, #dfc16d);
+  outline: none;
+}
+
+.admin-modal--territory-seed { width: min(44rem, 94vw); max-height: 88dvh; overflow-y: auto; }
+.mapbuilder__seed-fields { border: 0; padding: 0; margin: 0; min-width: 0; }

@@ -370,6 +370,12 @@ def db_session():
     Base.metadata.create_all(bind=engine)
     maker = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     session = maker()
+    from backend.scenario_store import load_state, stage_state
+    state = load_state(session)
+    for tid, name in [('west', 'West'), ('east', 'East'), ('the_shire', 'The Shire')]:
+        state['library']['territories'][tid] = {'id': tid, 'display_name': name, 'terrain_type': 'plains', 'produces': {'power': 0}, 'ownable': True}
+    stage_state(session, state)
+    session.commit()
     yield session
     session.close()
     engine.dispose()
@@ -569,7 +575,7 @@ def test_import_route_and_saved_map_library(make_client, players, monkeypatch):
 
     fetched = client.get("/admin/maps/builder/custom_map_2.0")
     assert fetched.status_code == 200
-    assert fetched.json()["doc"]["labels"]["west"]["display_name"] == "West"
+    assert set(fetched.json()["doc"]["labels"]["west"]) == {"x", "y"}
 
     svg = client.get("/maps/custom_map_2.0/svg")
     assert svg.status_code == 200
@@ -614,7 +620,7 @@ def test_save_map_asset_files_source(tmp_path, monkeypatch):
     assert (tmp_path / "files_map_1.0" / "builder.json").is_file()
     import json
     defaults = json.loads((tmp_path / "files_map_1.0" / "territories.json").read_text())
-    assert defaults["the_shire"]["display_name"] == "The Shire"
+    assert "display_name" not in defaults["the_shire"]
     svg = (tmp_path / "files_map_1.0" / "map.svg").read_text(encoding="utf-8")
     assert 'id="the_shire"' in svg
     assert map_assets.load_map_svg(None, "files_map_1.0") == svg

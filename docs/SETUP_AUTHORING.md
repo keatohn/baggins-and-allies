@@ -31,9 +31,9 @@ Custom units/factions omit `seed` and supply their fields in `overrides`.
 Territory IDs must belong to the selected map; their seed IDs match their region IDs.
 
 Shared unit, faction and territory metadata lives in `backend/data/scenario_library.json`.
-Map membership, terrain and adjacency live in `backend/data/maps/<map>/territories.json` and
+Map membership and adjacency live in `backend/data/maps/<map>/territories.json` and
 the map editor's overrides. Territory metadata comes from matching shared seeds.
-Setups do not duplicate terrain or adjacency overrides: those fields always come from the map.
+Terrain inherits from the territory seed and may be explicitly overridden by a setup. Adjacency always comes from the map.
 The engine consumes resolved data; resolution is a one-way operation, not another editing workflow.
 
 ## Admin editing
@@ -52,9 +52,9 @@ removed capitals are cleared. New territories have no owner and no starting unit
 The change remains pending until Save; canceling the confirmation leaves the setup untouched.
 The backend performs the same normalization before validating a map change.
 
-Saving a map graph or terrain edit updates every setup using that map. Adjacency is inherited,
+Saving a map graph edit updates every setup using that map. Editing seed terrain affects every map and inheriting setup; explicit setup terrain overrides remain intact. Adjacency is inherited,
 so graph changes do not require rewriting adjacency lists in setup JSON. Files mode updates
-shared map files; DB mode updates shared map data and generated gameplay snapshots in one transaction.
+shared map files; DB mode updates shared map data and generated gameplay snapshots in one transaction. Landscape shows seed terrain as read-only; edit it in Seeds → Territories or the Builder assignment popup.
 Existing games retain their own snapshots.
 
 Use **Seeds → Review / Save and Rebuild** to edit shared defaults. Validation messages are
@@ -110,3 +110,43 @@ The CLI reports historical validation errors and exits nonzero; exporting does n
 - `/admin/setups/{id}/source` is removed.
 
 Frontend calls use `/api` in development; backend routes have no `/api` prefix.
+
+## Map builder selections
+
+In **Maps → Builder → Select**, drag a box to select nodes and the edges between them.
+Shift-click nodes/edges or Shift-drag to extend a selection. Use **Copy selection** /
+**Paste selection**, or Ctrl/Cmd+C and Ctrl/Cmd+V. The builder clipboard also works
+between drafts while the builder stays open. Pasted geometry has independent node
+and edge IDs and starts slightly offset; drag it to its destination. Selecting a
+region's nodes also carries its labels. Across maps their seed IDs are retained. Within the same map duplicate assignments are left unnamed, so choose another seed or create one for the copied region.
+
+Drag the selection rectangle's side handles to scale horizontally or vertically;
+corner handles preserve aspect ratio and anchor the opposite corner. Shapes remain
+within the map bounds. Handles can also be focused and resized with arrow keys
+(Shift = 10 px). Escape or an interrupted pointer cancels a resize. Each paste or
+resize gesture is one undo/redo step. Shared nodes still reshape connected neighbors.
+
+## Territory identity and terrain
+
+A map region is assigned to a shared territory seed ID; the Builder document stores only
+`labels: {"seed_id": {"x": ..., "y": ...}}`. Its name, terrain, image, production and stronghold
+properties come from that seed. There is no independent map territory name or second ID.
+The ID is shown beside the inherited name when a territory is selected.
+
+Use **Builder → Label → Assign territory** to pick an existing seed from the dropdown or
+choose **Create new territory**. The popup includes the same metadata fields as Seeds →
+Territories. **Create and assign** creates the seed immediately and assigns its ID in the
+current draft; save the map to publish the assignment. A seed can only be assigned once per
+map. Unassigned regions can remain while drawing. Imported unknown IDs must be assigned to
+existing seeds or created before saving the map. **Edit shared seed** updates its properties
+everywhere; IDs remain immutable.
+
+Changing a region's seed identity requires confirmation. On map save, affected setup
+territory lists replace retired IDs with newly assigned ones, preserving matching records,
+removing old ownership/units/camps/ports and clearing removed capitals. New IDs start unowned
+and empty. Existing games retain snapshots. Graph edges referencing retired IDs are removed.
+
+The terrain migration chooses a deterministic shared default for legacy IDs and preserves
+different existing map terrain as explicit setup overrides. Checked-in scenario terrain is
+verified against a baseline from the pre-migration files. Old map-level terrain API payloads
+remain compatible by updating shared seeds; new UI edits use the seed endpoints.

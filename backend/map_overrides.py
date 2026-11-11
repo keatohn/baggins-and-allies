@@ -532,6 +532,37 @@ def load_map_overrides(db: Session | None, map_base: str) -> dict[str, Any]:
         filled_graph = agreed_graph_for_map(db, map_base)
         if filled_graph:
             data["graph"] = filled_graph
+    # The terrain section is a compatibility projection of territory seeds.
+    # Legacy stored map values only supply a fallback during migration.
+    from backend.scenario_builder import scenario_map_id
+    from backend.api.models import AppSetting
+    from backend.scenario_store import SETTING
+    state = None
+    if db is not None and not is_files_setup_source():
+        row = db.query(AppSetting).filter(AppSetting.key == SETTING).first()
+        if row:
+            state = json.loads(row.value_json)
+    else:
+        seed_path = MAPS_DIR.parent / "scenario_library.json"
+        if seed_path.is_file():
+            state = {"library": json.loads(seed_path.read_text())}
+    if state:
+        library = state["library"]
+        ids = set(data.get("terrain", {})) | set(library.get("maps", {}).get(map_base, {}))
+        path = MAPS_DIR / map_base / "territories.json"
+        records = _read_json(path)
+        if isinstance(records, dict):
+            ids.update(records)
+        for setup in state.get("setups", {}).values():
+            if scenario_map_id(setup["manifest"], setup["manifest"].get("id", "")) == map_base:
+                ids.update(setup["territories"])
+        terrain = dict(data.get("terrain", {}))
+        for tid in ids:
+            seed = library.get("territories", {}).get(tid, {})
+            if seed.get("terrain_type"):
+                terrain[tid] = seed["terrain_type"]
+        if terrain:
+            data["terrain"] = terrain
     return data
 
 
@@ -555,6 +586,8 @@ def save_map_overrides(db: Session | None, map_base: str, raw: Any) -> dict[str,
     terrain = data.get("terrain") or {}
     _require_known_terrain(db, terrain)
     graph = data.get("graph") or {}
+    if terrain:
+        _save_legacy_terrain_as_seeds(db, terrain)
     if is_files_setup_source() or db is None:
         _write_file(map_base, data)
         _mirror_terrain_files(map_base, terrain)
@@ -968,9 +1001,6 @@ def _mirror_authoring_map_files(map_base: str, *, terrain=None, graph=None) -> N
     if isinstance(records, dict):
         if graph:
             _apply_graph_lists(records, graph)
-        for tid, name in (terrain or {}).items():
-            if isinstance(records.get(tid), dict):
-                records[tid]["terrain_type"] = name
         path.write_text(json.dumps(records, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     if not SETUPS_DIR.is_dir():
         return
@@ -1062,3 +1092,33 @@ def seed_map_terrain_if_missing(db: Session) -> int:
     if added:
         db.commit()
     return added
+
+
+def _save_legacy_terrain_as_seeds(db: Session | None, terrain: dict[str, str]) -> None:
+    """Compatibility for old clients: terrain edits update shared territory seeds."""
+    from backend.scenario_store import load_state, stage_state, stage_bundle, _bundles
+    from backend.scenario_builder import prepare_territory_seeds
+    if db is None or is_files_setup_source():
+        from backend.scenario_builder import load_library, write_library
+        root = MAPS_DIR.parent
+        if not (root / "scenario_library.json").is_file():
+            raise MapOverridesError("Create territory seeds before editing terrain")
+        library = load_library(root)
+        state = {"library": library, "setups": {}}
+    else:
+        state = load_state(db)
+        library = state["library"]
+    for tid, value in terrain.items():
+        seed = library["territories"].setdefault(tid, {"id": tid, "display_name": tid, "produces": {"power": 0}, "ownable": value != "sea"})
+        seed["terrain_type"] = value
+    prepare_territory_seeds(library)
+    if db is None or is_files_setup_source():
+        write_library(root, library)
+        return
+    for key, bundle in _bundles(db).items():
+        for tid, record in bundle["territories"].items():
+            entry = state["setups"].get(key, {}).get("territories", {}).get(tid, {})
+            if tid in terrain and "terrain_type" not in entry.get("overrides", {}):
+                record["terrain_type"] = terrain[tid]
+        stage_bundle(db, key, bundle)
+    stage_state(db, state)

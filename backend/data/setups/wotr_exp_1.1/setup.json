@@ -344,7 +344,10 @@
       "seed": "north_eregion"
     },
     "south_eregion": {
-      "seed": "south_eregion"
+      "seed": "south_eregion",
+      "overrides": {
+        "terrain_type": "mountains"
+      }
     },
     "fangorn": {
       "seed": "fangorn"
@@ -384,7 +387,8 @@
           "power": {
             "$delete": true
           }
-        }
+        },
+        "terrain_type": "wasteland"
       }
     },
     "minhiriath": {

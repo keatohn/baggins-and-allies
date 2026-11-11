@@ -2445,7 +2445,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "mountains"
     },
     "anfalas": {
       "display_name": "Anfalas",
@@ -2454,7 +2455,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "grassland"
     },
     "anorien": {
       "display_name": "Anorien",
@@ -2463,7 +2465,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "grassland"
     },
     "barad_dur": {
       "display_name": "Barad-Dûr",
@@ -2474,7 +2477,8 @@
       "produces": {
         "power": 12
       },
-      "stronghold_base_health": 2
+      "stronghold_base_health": 2,
+      "terrain_type": "fortress"
     },
     "belfalas": {
       "display_name": "Belfalas",
@@ -2483,7 +2487,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "grassland"
     },
     "cair_andros": {
       "display_name": "Cair Andros",
@@ -2492,7 +2497,8 @@
       "ownable": true,
       "produces": {
         "power": 3
-      }
+      },
+      "terrain_type": "fortress"
     },
     "cirith_ungol": {
       "display_name": "Cirith Ungol",
@@ -2501,7 +2507,8 @@
       "ownable": true,
       "produces": {
         "power": 2
-      }
+      },
+      "terrain_type": "fortress"
     },
     "dagorlad": {
       "display_name": "Dagorlad",
@@ -2510,14 +2517,16 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "wasteland"
     },
     "dead_marshes": {
       "display_name": "Dead Marshes",
       "id": "dead_marshes",
       "is_stronghold": false,
       "ownable": true,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "marsh"
     },
     "dol_amroth": {
       "display_name": "Dol Amroth",
@@ -2527,7 +2536,8 @@
       "produces": {
         "power": 4
       },
-      "stronghold_base_health": 2
+      "stronghold_base_health": 2,
+      "terrain_type": "city"
     },
     "druwaith_iaur": {
       "display_name": "Drúwaith Iaur",
@@ -2536,7 +2546,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "forest"
     },
     "dunharrow": {
       "display_name": "Dunharrow",
@@ -2545,7 +2556,8 @@
       "ownable": true,
       "produces": {
         "power": 3
-      }
+      },
+      "terrain_type": "mountains"
     },
     "east_brown_lands": {
       "display_name": "East Brown Lands",
@@ -2554,7 +2566,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "wasteland"
     },
     "east_osgiliath": {
       "display_name": "East Osgiliath",
@@ -2565,7 +2578,8 @@
       "produces": {
         "power": 3
       },
-      "stronghold_base_health": 1
+      "stronghold_base_health": 1,
+      "terrain_type": "city"
     },
     "eastemnet": {
       "display_name": "Eastemnet",
@@ -2574,7 +2588,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "plains"
     },
     "eastfold": {
       "display_name": "Eastfold",
@@ -2583,7 +2598,8 @@
       "ownable": true,
       "produces": {
         "power": 2
-      }
+      },
+      "terrain_type": "plains"
     },
     "edoras": {
       "display_name": "Edoras",
@@ -2593,7 +2609,8 @@
       "produces": {
         "power": 5
       },
-      "stronghold_base_health": 1
+      "stronghold_base_health": 1,
+      "terrain_type": "city"
     },
     "emyn_muil": {
       "display_name": "Emyn Muil",
@@ -2602,7 +2619,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "wasteland"
     },
     "enedwaith": {
       "display_name": "Enedwaith",
@@ -2611,7 +2629,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "hills"
     },
     "entwash": {
       "display_name": "Entwash",
@@ -2620,7 +2639,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "marsh"
     },
     "erech_lamedon": {
       "display_name": "Erech-Lamedon",
@@ -2629,7 +2649,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "mountains"
     },
     "fangorn": {
       "display_name": "Fangorn",
@@ -2638,7 +2659,8 @@
       "ownable": true,
       "produces": {
         "power": 3
-      }
+      },
+      "terrain_type": "forest"
     },
     "far_harad": {
       "display_name": "Far Harad",
@@ -2647,7 +2669,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "desert"
     },
     "fenmarch": {
       "display_name": "Fenmarch",
@@ -2656,7 +2679,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "marsh"
     },
     "field_of_celebrant": {
       "display_name": "Field of Celebrant",
@@ -2665,7 +2689,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "grassland"
     },
     "fords_of_isen": {
       "display_name": "Fords of Isen",
@@ -2674,7 +2699,8 @@
       "ownable": true,
       "produces": {
         "power": 2
-      }
+      },
+      "terrain_type": "valley"
     },
     "gap_of_rohan": {
       "display_name": "Gap of Rohan",
@@ -2683,7 +2709,8 @@
       "ownable": true,
       "produces": {
         "power": 2
-      }
+      },
+      "terrain_type": "plains"
     },
     "gorgoroth": {
       "display_name": "Gorgoroth",
@@ -2692,7 +2719,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "wasteland"
     },
     "haradwaith": {
       "display_name": "Haradwaith",
@@ -2702,7 +2730,8 @@
       "produces": {
         "power": 5
       },
-      "stronghold_base_health": 1
+      "stronghold_base_health": 1,
+      "terrain_type": "desert"
     },
     "harondor": {
       "display_name": "Harondor",
@@ -2711,7 +2740,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "desert"
     },
     "helms_deep": {
       "display_name": "Helm's Deep",
@@ -2721,7 +2751,8 @@
       "produces": {
         "power": 3
       },
-      "stronghold_base_health": 3
+      "stronghold_base_health": 3,
+      "terrain_type": "fortress"
     },
     "isengard": {
       "display_name": "Isengard",
@@ -2731,7 +2762,8 @@
       "produces": {
         "power": 12
       },
-      "stronghold_base_health": 3
+      "stronghold_base_health": 3,
+      "terrain_type": "fortress"
     },
     "khand": {
       "display_name": "Khand",
@@ -2740,7 +2772,8 @@
       "ownable": true,
       "produces": {
         "power": 2
-      }
+      },
+      "terrain_type": "desert"
     },
     "lebennin": {
       "display_name": "Lebennin",
@@ -2749,7 +2782,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "grassland"
     },
     "lossarnach": {
       "display_name": "Lossarnach",
@@ -2758,7 +2792,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "grassland"
     },
     "minas_morgul": {
       "display_name": "Minas Morgul",
@@ -2768,7 +2803,8 @@
       "produces": {
         "power": 7
       },
-      "stronghold_base_health": 2
+      "stronghold_base_health": 2,
+      "terrain_type": "fortress"
     },
     "minas_tirith": {
       "display_name": "Minas Tirith",
@@ -2778,7 +2814,8 @@
       "produces": {
         "power": 10
       },
-      "stronghold_base_health": 4
+      "stronghold_base_health": 4,
+      "terrain_type": "city"
     },
     "minhiriath": {
       "display_name": "Minhiriath",
@@ -2787,7 +2824,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "wasteland"
     },
     "mount_doom": {
       "display_name": "Mount Doom",
@@ -2796,7 +2834,8 @@
       "ownable": true,
       "produces": {
         "power": 2
-      }
+      },
+      "terrain_type": "volcano"
     },
     "near_harad": {
       "display_name": "Near Harad",
@@ -2805,7 +2844,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "desert"
     },
     "north_dunland": {
       "display_name": "North Dunland",
@@ -2814,7 +2854,8 @@
       "ownable": true,
       "produces": {
         "power": 2
-      }
+      },
+      "terrain_type": "hills"
     },
     "north_ithilien": {
       "display_name": "North Ithilien",
@@ -2823,7 +2864,8 @@
       "ownable": true,
       "produces": {
         "power": 2
-      }
+      },
+      "terrain_type": "forest"
     },
     "nurn": {
       "display_name": "Nurn",
@@ -2832,7 +2874,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "wasteland"
     },
     "pelargir": {
       "display_name": "Pelargir",
@@ -2841,7 +2884,8 @@
       "ownable": true,
       "produces": {
         "power": 3
-      }
+      },
+      "terrain_type": "city"
     },
     "pelennor": {
       "display_name": "Pelennor",
@@ -2850,7 +2894,8 @@
       "ownable": true,
       "produces": {
         "power": 2
-      }
+      },
+      "terrain_type": "grassland"
     },
     "rhun_hills": {
       "display_name": "Rhûn Hills",
@@ -2859,91 +2904,104 @@
       "ownable": true,
       "produces": {
         "power": 3
-      }
+      },
+      "terrain_type": "hills"
     },
     "sea_zone_1": {
       "display_name": "Sea Zone 1",
       "id": "sea_zone_1",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "sea_zone_10": {
       "display_name": "Sea Zone 10",
       "id": "sea_zone_10",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "sea_zone_11": {
       "display_name": "Sea Zone 11",
       "id": "sea_zone_11",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "sea_zone_12": {
       "display_name": "Sea Zone 12",
       "id": "sea_zone_12",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "sea_zone_2": {
       "display_name": "Sea Zone 2",
       "id": "sea_zone_2",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "sea_zone_3": {
       "display_name": "Sea Zone 3",
       "id": "sea_zone_3",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "sea_zone_4": {
       "display_name": "Sea Zone 4",
       "id": "sea_zone_4",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "sea_zone_5": {
       "display_name": "Sea Zone 5",
       "id": "sea_zone_5",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "sea_zone_6": {
       "display_name": "Sea Zone 6",
       "id": "sea_zone_6",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "sea_zone_7": {
       "display_name": "Sea Zone 7",
       "id": "sea_zone_7",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "sea_zone_8": {
       "display_name": "Sea Zone 8",
       "id": "sea_zone_8",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "sea_zone_9": {
       "display_name": "Sea Zone 9",
       "id": "sea_zone_9",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "south_dunland": {
       "display_name": "South Dunland",
@@ -2952,7 +3010,8 @@
       "ownable": true,
       "produces": {
         "power": 2
-      }
+      },
+      "terrain_type": "hills"
     },
     "south_ithilien": {
       "display_name": "South Ithilien",
@@ -2961,7 +3020,8 @@
       "ownable": true,
       "produces": {
         "power": 2
-      }
+      },
+      "terrain_type": "forest"
     },
     "the_black_gate": {
       "display_name": "The Black Gate",
@@ -2971,7 +3031,8 @@
       "produces": {
         "power": 4
       },
-      "stronghold_base_health": 3
+      "stronghold_base_health": 3,
+      "terrain_type": "fortress"
     },
     "the_wold": {
       "display_name": "The Wold",
@@ -2980,7 +3041,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "plains"
     },
     "udun": {
       "display_name": "Udun",
@@ -2989,7 +3051,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "wasteland"
     },
     "umbar": {
       "display_name": "Umbar",
@@ -2999,7 +3062,8 @@
       "produces": {
         "power": 4
       },
-      "stronghold_base_health": 1
+      "stronghold_base_health": 1,
+      "terrain_type": "city"
     },
     "west_brown_lands": {
       "display_name": "West Brown Lands",
@@ -3008,7 +3072,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "wasteland"
     },
     "west_march": {
       "display_name": "West-march",
@@ -3017,7 +3082,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "marsh"
     },
     "west_osgiliath": {
       "display_name": "West Osgiliath",
@@ -3026,7 +3092,8 @@
       "ownable": true,
       "produces": {
         "power": 3
-      }
+      },
+      "terrain_type": "city"
     },
     "westemnet": {
       "display_name": "Westemnet",
@@ -3035,7 +3102,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "plains"
     },
     "westfold": {
       "display_name": "Westfold",
@@ -3044,7 +3112,8 @@
       "ownable": true,
       "produces": {
         "power": 2
-      }
+      },
+      "terrain_type": "plains"
     },
     "amon_lanc": {
       "display_name": "Amon Lanc",
@@ -3055,28 +3124,32 @@
       "produces": {
         "power": 3
       },
-      "stronghold_base_health": 1
+      "stronghold_base_health": 1,
+      "terrain_type": "forest"
     },
     "anduin_central": {
       "display_name": "Anduin Central",
       "id": "anduin_central",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "river"
     },
     "anduin_north": {
       "display_name": "Anduin North",
       "id": "anduin_north",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "river"
     },
     "anduin_south": {
       "display_name": "Anduin South",
       "id": "anduin_south",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "river"
     },
     "anduin_valley": {
       "display_name": "Anduin Valley",
@@ -3085,7 +3158,8 @@
       "ownable": true,
       "produces": {
         "power": 2
-      }
+      },
+      "terrain_type": "valley"
     },
     "celduin_valley": {
       "display_name": "Celduin Valley",
@@ -3094,7 +3168,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "valley"
     },
     "druwaith": {
       "display_name": "Druwaith",
@@ -3103,7 +3178,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "mountains"
     },
     "east_calenardhon": {
       "display_name": "East Calenardhon",
@@ -3112,7 +3188,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "plains"
     },
     "east_enedwaith": {
       "display_name": "East Enedwaith",
@@ -3121,7 +3198,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "hills"
     },
     "east_eriador": {
       "display_name": "East Eriador",
@@ -3130,7 +3208,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "hills"
     },
     "east_rhovanion": {
       "display_name": "East Rhovanion",
@@ -3139,7 +3218,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "grassland"
     },
     "ered_nimrais": {
       "display_name": "Ered Nimrais",
@@ -3148,7 +3228,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "mountains"
     },
     "eryn_vorn": {
       "display_name": "Eryn Vorn",
@@ -3157,7 +3238,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "forest"
     },
     "ettenmoors": {
       "display_name": "Ettenmoors",
@@ -3166,7 +3248,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "hills"
     },
     "evendim_hills": {
       "display_name": "Evendim Hills",
@@ -3175,7 +3258,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "hills"
     },
     "falls_of_rauros": {
       "display_name": "Falls of Rauros",
@@ -3184,7 +3268,8 @@
       "ownable": false,
       "produces": {
         "power": 0
-      }
+      },
+      "terrain_type": "river"
     },
     "forlindon": {
       "display_name": "Forlindon",
@@ -3193,7 +3278,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "forest"
     },
     "forodwaith": {
       "display_name": "Forodwaith",
@@ -3202,7 +3288,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "ice"
     },
     "glanduin_valley": {
       "display_name": "Glanduin Valley",
@@ -3211,7 +3298,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "valley"
     },
     "gundabad": {
       "display_name": "Gundabad",
@@ -3220,28 +3308,32 @@
       "ownable": true,
       "produces": {
         "power": 2
-      }
+      },
+      "terrain_type": "fortress"
     },
     "gwathlo_central": {
       "display_name": "Gwathló Central",
       "id": "gwathlo_central",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "river"
     },
     "gwathlo_north": {
       "display_name": "Gwathló North",
       "id": "gwathlo_north",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "river"
     },
     "gwathlo_south": {
       "display_name": "Gwathló South",
       "id": "gwathlo_south",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "river"
     },
     "harlindon": {
       "display_name": "Harlindon",
@@ -3250,7 +3342,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "forest"
     },
     "hithlaeglir": {
       "display_name": "Hithlaeglir",
@@ -3259,7 +3352,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "mountains"
     },
     "imladris": {
       "display_name": "Imladris",
@@ -3270,7 +3364,8 @@
       "produces": {
         "power": 4
       },
-      "stronghold_base_health": 1
+      "stronghold_base_health": 1,
+      "terrain_type": "forest"
     },
     "iron_hills": {
       "display_name": "Iron Hills",
@@ -3279,7 +3374,8 @@
       "ownable": true,
       "produces": {
         "power": 2
-      }
+      },
+      "terrain_type": "mountains"
     },
     "ithilien": {
       "display_name": "Ithilien",
@@ -3288,7 +3384,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "forest"
     },
     "khazad_dum": {
       "display_name": "Khazad-dûm",
@@ -3299,7 +3396,8 @@
       "produces": {
         "power": 8
       },
-      "stronghold_base_health": 3
+      "stronghold_base_health": 3,
+      "terrain_type": "mountains"
     },
     "lithlad": {
       "display_name": "Lithlad",
@@ -3308,7 +3406,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "desert"
     },
     "lond_daer": {
       "display_name": "Lond Daer",
@@ -3317,7 +3416,8 @@
       "ownable": true,
       "produces": {
         "power": 3
-      }
+      },
+      "terrain_type": "city"
     },
     "lorinand": {
       "display_name": "Lorinand",
@@ -3328,7 +3428,8 @@
       "produces": {
         "power": 4
       },
-      "stronghold_base_health": 2
+      "stronghold_base_health": 2,
+      "terrain_type": "forest"
     },
     "lune_valley": {
       "display_name": "Lune Valley",
@@ -3337,7 +3438,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "valley"
     },
     "mithlond": {
       "display_name": "Mithlond",
@@ -3348,7 +3450,8 @@
       "produces": {
         "power": 10
       },
-      "stronghold_base_health": 1
+      "stronghold_base_health": 1,
+      "terrain_type": "city"
     },
     "morannon": {
       "display_name": "Morannon",
@@ -3359,7 +3462,8 @@
       "produces": {
         "power": 4
       },
-      "stronghold_base_health": 3
+      "stronghold_base_health": 3,
+      "terrain_type": "fortress"
     },
     "nindalf": {
       "display_name": "Nindalf",
@@ -3368,7 +3472,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "marsh"
     },
     "ninglor": {
       "display_name": "Ninglor",
@@ -3377,7 +3482,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "marsh"
     },
     "north_eregion": {
       "display_name": "North Eregion",
@@ -3386,7 +3492,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "mountains"
     },
     "north_eriador": {
       "display_name": "North Eriador",
@@ -3395,7 +3502,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "plains"
     },
     "north_greenwood": {
       "display_name": "North Greenwood",
@@ -3404,7 +3512,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "forest"
     },
     "north_rhun": {
       "display_name": "North Rhûn",
@@ -3413,7 +3522,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "desert"
     },
     "numenor": {
       "display_name": "Númenor",
@@ -3422,7 +3532,8 @@
       "ownable": true,
       "produces": {
         "power": 20
-      }
+      },
+      "terrain_type": "plains"
     },
     "old_forest": {
       "display_name": "Old Forest",
@@ -3431,7 +3542,8 @@
       "ownable": true,
       "produces": {
         "power": 3
-      }
+      },
+      "terrain_type": "forest"
     },
     "orodruin": {
       "display_name": "Orodruin",
@@ -3442,7 +3554,8 @@
       "produces": {
         "power": 10
       },
-      "stronghold_base_health": 1
+      "stronghold_base_health": 1,
+      "terrain_type": "volcano"
     },
     "ost_in_edhil": {
       "display_name": "Ost-In-Edhil",
@@ -3453,14 +3566,16 @@
       "produces": {
         "power": 10
       },
-      "stronghold_base_health": 2
+      "stronghold_base_health": 2,
+      "terrain_type": "plains"
     },
     "sea_zone_13": {
       "display_name": "Sea Zone 13",
       "id": "sea_zone_13",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "south_calenardhon": {
       "display_name": "South Calenardhon",
@@ -3469,7 +3584,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "plains"
     },
     "south_eregion": {
       "display_name": "South Eregion",
@@ -3478,7 +3594,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "forest"
     },
     "south_greenwood": {
       "display_name": "South Greenwood",
@@ -3487,7 +3604,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "forest"
     },
     "tharbad": {
       "display_name": "Tharbad",
@@ -3496,7 +3614,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "marsh"
     },
     "tol_fuin": {
       "display_name": "Tol Fuin",
@@ -3505,7 +3624,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "island"
     },
     "tower_hills": {
       "display_name": "Tower Hills",
@@ -3514,7 +3634,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "hills"
     },
     "weather_hills": {
       "display_name": "Weather Hills",
@@ -3523,7 +3644,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "hills"
     },
     "west_calenardhon": {
       "display_name": "West Calenardhon",
@@ -3532,7 +3654,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "plains"
     },
     "west_enedwaith": {
       "display_name": "West Enedwaith",
@@ -3541,7 +3664,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "forest"
     },
     "west_eriador": {
       "display_name": "West Eriador",
@@ -3550,7 +3674,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "hills"
     },
     "west_rhovanion": {
       "display_name": "West Rhovanion",
@@ -3559,7 +3684,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "grassland"
     },
     "west_rhun": {
       "display_name": "West Rhûn",
@@ -3569,7 +3695,8 @@
       "produces": {
         "power": 1
       },
-      "stronghold_base_health": 1
+      "stronghold_base_health": 1,
+      "terrain_type": "desert"
     },
     "withered_heath": {
       "display_name": "Withered Heath",
@@ -3578,7 +3705,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "mountains"
     },
     "amon_sul": {
       "display_name": "Weather Hills",
@@ -3587,7 +3715,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "hills"
     },
     "annuminas": {
       "display_name": "Annuminas",
@@ -3598,7 +3727,8 @@
       "produces": {
         "power": 8
       },
-      "stronghold_base_health": 1
+      "stronghold_base_health": 1,
+      "terrain_type": "city"
     },
     "east_harnen": {
       "display_name": "East Harnen",
@@ -3607,7 +3737,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "grassland"
     },
     "ered_luin": {
       "display_name": "Ered Luin",
@@ -3616,7 +3747,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "mountains"
     },
     "fornost": {
       "display_name": "North Eriador",
@@ -3625,7 +3757,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "plains"
     },
     "minas_anor": {
       "display_name": "Minas Anor",
@@ -3636,7 +3769,8 @@
       "produces": {
         "power": 3
       },
-      "stronghold_base_health": 1
+      "stronghold_base_health": 1,
+      "terrain_type": "fortress"
     },
     "minas_ithil": {
       "display_name": "Minas Ithil",
@@ -3647,7 +3781,8 @@
       "produces": {
         "power": 3
       },
-      "stronghold_base_health": 1
+      "stronghold_base_health": 1,
+      "terrain_type": "fortress"
     },
     "morgai": {
       "display_name": "Morgai",
@@ -3656,7 +3791,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "mountains"
     },
     "orthanc": {
       "display_name": "Orthanc",
@@ -3665,63 +3801,72 @@
       "ownable": true,
       "produces": {
         "power": 3
-      }
+      },
+      "terrain_type": "fortress"
     },
     "sea_zone_14": {
       "display_name": "Sea Zone 14",
       "id": "sea_zone_14",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "sea_zone_15": {
       "display_name": "Sea Zone 15",
       "id": "sea_zone_15",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "sea_zone_16": {
       "display_name": "Sea Zone 16",
       "id": "sea_zone_16",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "sea_zone_17": {
       "display_name": "Sea Zone 17",
       "id": "sea_zone_17",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "sea_zone_18": {
       "display_name": "Sea Zone 18",
       "id": "sea_zone_18",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "sea_zone_19": {
       "display_name": "Sea Zone 19",
       "id": "sea_zone_19",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "sea_zone_20": {
       "display_name": "Sea Zone 20",
       "id": "sea_zone_20",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "sea_zone_21": {
       "display_name": "Sea Zone 21",
       "id": "sea_zone_21",
       "is_stronghold": false,
       "ownable": false,
-      "produces": {}
+      "produces": {},
+      "terrain_type": "sea"
     },
     "tolfalas": {
       "display_name": "Tolfalas",
@@ -3730,7 +3875,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "island"
     },
     "west_harnen": {
       "display_name": "West Harnen",
@@ -3739,7 +3885,8 @@
       "ownable": true,
       "produces": {
         "power": 2
-      }
+      },
+      "terrain_type": "grassland"
     },
     "angmar": {
       "display_name": "Angmar",
@@ -3748,7 +3895,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "mountains"
     },
     "bree_fornost": {
       "display_name": "Bree-Fornost",
@@ -3757,7 +3905,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "city"
     },
     "carn_dum": {
       "display_name": "Carn Dum",
@@ -3766,7 +3915,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "mountains"
     },
     "carrock": {
       "display_name": "Carrock",
@@ -3775,7 +3925,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "mountains"
     },
     "dale": {
       "display_name": "Dale",
@@ -3784,7 +3935,8 @@
       "ownable": true,
       "produces": {
         "power": 2
-      }
+      },
+      "terrain_type": "city"
     },
     "dol_guldur": {
       "display_name": "Dol Guldur",
@@ -3794,7 +3946,8 @@
       "produces": {
         "power": 4
       },
-      "stronghold_base_health": 2
+      "stronghold_base_health": 2,
+      "terrain_type": "fortress"
     },
     "dorwinion": {
       "display_name": "Dorwinion",
@@ -3804,7 +3957,8 @@
       "produces": {
         "power": 2
       },
-      "stronghold_base_health": 1
+      "stronghold_base_health": 1,
+      "terrain_type": "grassland"
     },
     "erebor": {
       "display_name": "Erebor",
@@ -3814,7 +3968,8 @@
       "produces": {
         "power": 4
       },
-      "stronghold_base_health": 2
+      "stronghold_base_health": 2,
+      "terrain_type": "mountains"
     },
     "esgaroth": {
       "display_name": "Esgaroth",
@@ -3823,7 +3978,8 @@
       "ownable": true,
       "produces": {
         "power": 2
-      }
+      },
+      "terrain_type": "lake"
     },
     "gladden_fields": {
       "display_name": "Gladden Fields",
@@ -3832,7 +3988,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "valley"
     },
     "grey_havens": {
       "display_name": "Grey Havens",
@@ -3842,7 +3999,8 @@
       "produces": {
         "power": 4
       },
-      "stronghold_base_health": 1
+      "stronghold_base_health": 1,
+      "terrain_type": "city"
     },
     "lothlorien": {
       "display_name": "Lothlórien",
@@ -3852,7 +4010,8 @@
       "produces": {
         "power": 6
       },
-      "stronghold_base_health": 1
+      "stronghold_base_health": 1,
+      "terrain_type": "forest"
     },
     "moria": {
       "display_name": "Moria",
@@ -3862,7 +4021,8 @@
       "produces": {
         "power": 5
       },
-      "stronghold_base_health": 1
+      "stronghold_base_health": 1,
+      "terrain_type": "mountains"
     },
     "north_downs": {
       "display_name": "North Downs",
@@ -3871,7 +4031,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "hills"
     },
     "north_mirkwood": {
       "display_name": "North Mirkwood",
@@ -3880,7 +4041,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "forest"
     },
     "rhudaur": {
       "display_name": "Rhudaur",
@@ -3889,7 +4051,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "hills"
     },
     "rivendell": {
       "display_name": "Rivendell",
@@ -3899,7 +4062,8 @@
       "produces": {
         "power": 8
       },
-      "stronghold_base_health": 2
+      "stronghold_base_health": 2,
+      "terrain_type": "forest"
     },
     "south_downs": {
       "display_name": "South Downs",
@@ -3908,7 +4072,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "hills"
     },
     "south_mirkwood": {
       "display_name": "South Mirkwood",
@@ -3917,7 +4082,8 @@
       "ownable": true,
       "produces": {
         "power": 1
-      }
+      },
+      "terrain_type": "forest"
     },
     "the_shire": {
       "display_name": "The Shire",
@@ -3926,7 +4092,8 @@
       "ownable": true,
       "produces": {
         "power": 2
-      }
+      },
+      "terrain_type": "hills"
     },
     "thranduils_halls": {
       "display_name": "Thranduil's Halls",
@@ -3935,7 +4102,8 @@
       "ownable": true,
       "produces": {
         "power": 3
-      }
+      },
+      "terrain_type": "forest"
     }
   }
 }

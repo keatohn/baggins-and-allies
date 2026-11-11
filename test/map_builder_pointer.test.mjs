@@ -239,7 +239,7 @@ test('Seeds uses matching admin styles and a top-right Close on every tab', { sk
       assert.ok(styles.actionFamilies.every((family) => family === styles.family));
       assert.ok(styles.family.includes('IM Fell English'), styles.family);
     }
-    assert.equal(await evaluate("[...document.querySelectorAll('.admin-form__label')].some(l=>l.textContent==='Terrain type')"), false);
+    assert.equal(await evaluate("[...document.querySelectorAll('.admin-form__label')].some(l=>l.textContent==='Terrain type')"), true);
     await evaluate(`(()=>{const row=[...document.querySelectorAll('.admin-form__row')].find(r=>r.querySelector('label')?.textContent==='Power production');
       const input=row.querySelector('input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'4');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
     await delay(70);
@@ -337,5 +337,221 @@ test('Landscape border mode fills and paints only the clicked shared border', { 
     await manager.call('Target.closeTarget', { targetId });
     manager.close();
     await unlink(landscapeFixture).catch(() => {});
+  }
+});
+
+test('Builder copies selected geometry and resizes with one-step undo, cancellation and zoom-aware grips', { skip: !browser, timeout: 25000 }, async () => {
+  const metadata = await (await fetch(`${browser}/json/version`)).json();
+  const manager = await connect(metadata.webSocketDebuggerUrl);
+  const { targetId } = await manager.call('Target.createTarget', { url: 'about:blank' });
+  const path = new URL('../frontend/__builder_transform_test.html', import.meta.url);
+  let page;
+  try {
+    const tabs = await (await fetch(`${browser}/json`)).json();
+    page = await connect(tabs.find(tab => tab.id === targetId).webSocketDebuggerUrl);
+    const evaluate = async expression => {
+      const result = await page.call('Runtime.evaluate', { expression, returnByValue: true });
+      assert.ok(!result.exceptionDetails, JSON.stringify(result.exceptionDetails));
+      return result.result.value;
+    };
+    const doc = { width: 1000, height: 800,
+      joints: { a: { x: 100, y: 100 }, b: { x: 300, y: 100 }, c: { x: 300, y: 300 }, d: { x: 100, y: 300 } },
+      borders: { ab: { a: 'a', b: 'b' }, bc: { a: 'b', b: 'c' }, cd: { a: 'c', b: 'd' }, da: { a: 'd', b: 'a' } },
+      labels: { region: { x: 175, y: 175, display_name: 'Region' } } };
+    const store = JSON.stringify({ currentId: 'test', drafts: [{ id: 'test', name: 'Transform regression', updated: 1, doc }] });
+    await writeFile(path, `<html><body><div class="admin-page" id="root"></div><script type="module">
+      import React from 'react';import {createRoot} from 'react-dom/client';import {MapBuilder} from '/src/pages/admin/MapBuilder.tsx';import '/src/index.css';import '/src/pages/Admin.css';
+      window.fetch=async()=>new Response(JSON.stringify({maps:[]}),{headers:{'Content-Type':'application/json'}});
+      localStorage.setItem('admin_map_builder_drafts_v1',${JSON.stringify(store)});
+      createRoot(document.getElementById('root')).render(React.createElement(MapBuilder));
+      </script><style>.mapbuilder{height:95vh!important}.mapbuilder__main{height:90vh!important}.mapbuilder__viewport{height:65vh!important;flex:none!important;min-height:400px!important}</style></body></html>`);
+    await page.call('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1100, deviceScaleFactor: 1, mobile: false });
+    await page.call('Page.navigate', { url: `${vite}/__builder_transform_test.html` });
+    for (let i = 0; i < 70; i++) { if (await evaluate("!!document.querySelector('.mapbuilder__joint')")) break; await delay(100); }
+    await delay(1000);
+    const button = name => `[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(name)})`;
+    const key = async (key, modifiers = {}) => { await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown',{key:${JSON.stringify(key)},bubbles:true,cancelable:true,...${JSON.stringify(modifiers)}}))`); await delay(70); };
+    const point = (x, y) => evaluate(`(()=>{const r=document.querySelector('.mapbuilder__svg').getBoundingClientRect();return {x:r.left+${x}*r.width/1000,y:r.top+${y}*r.height/800}})()`);
+    const click = async (position, count = 1, modifiers = 0) => {
+      await page.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...position, button: 'left', buttons: 1, clickCount: count, modifiers });
+      await page.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...position, button: 'left', buttons: 0, clickCount: count, modifiers });
+      await delay(70);
+    };
+    const select = async () => { const p = await point(250, 250); await click(p); await click(p, 2); };
+    const nodes = () => evaluate("Object.fromEntries([...document.querySelectorAll('[data-joint-id]')].map(n=>[n.dataset.jointId,{x:+n.getAttribute('cx'),y:+n.getAttribute('cy')}]))");
+    const grip = id => evaluate(`(()=>{const r=document.querySelector('[data-resize-handle="${id}"]').getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`);
+    const dragGrip = async (id, dx, dy, cancel) => {
+      const from = await grip(id), zero = await point(0, 0), unit = await point(1, 1);
+      const to = { x: from.x + dx * (unit.x - zero.x), y: from.y + dy * (unit.y - zero.y) };
+      await page.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...from, button: 'left', buttons: 1, clickCount: 1 });
+      await page.call('Input.dispatchMouseEvent', { type: 'mouseMoved', ...to, button: 'left', buttons: 1 });
+      await delay(70);
+      if (cancel === 'escape') await key('Escape');
+      if (cancel === 'pointer') await evaluate("document.querySelector('.mapbuilder__viewport').dispatchEvent(new PointerEvent('pointercancel',{bubbles:true,pointerId:1}))");
+      await page.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...to, button: 'left', buttons: 0, clickCount: 1 });
+      await delay(70);
+    };
+    const undo = () => key('z', { ctrlKey: true });
+    const closeTo = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1, `${actual} should be close to ${expected}`);
+    assert.equal(await evaluate(`${button('Copy selection')}.disabled`), true);
+    assert.equal(await evaluate(`${button('Paste selection')}.disabled`), true);
+    // A selected edge copies just itself and its two endpoints. Shift-clicking
+    // additional edges includes their endpoints in the same bulk selection.
+    await click(await point(200, 100));
+    await key('c', { ctrlKey: true }); await key('v', { ctrlKey: true });
+    assert.equal(Object.keys(await nodes()).length, 6);
+    assert.equal(await evaluate("document.querySelectorAll('[data-border-id]').length"), 5);
+    await undo(); assert.deepEqual(await nodes(), doc.joints);
+    await click(await point(200, 100), 1, 8);
+    await click(await point(200, 300), 1, 8);
+    assert.equal(await evaluate("document.querySelectorAll('.mapbuilder__joint--selected').length"), 4);
+    await select();
+    assert.equal(await evaluate("document.querySelectorAll('[data-resize-handle]').length"), 8);
+    assert.equal(await evaluate("document.querySelectorAll('.mapbuilder__border--selected').length"), 4);
+    await key('c', { ctrlKey: true });
+    await key('v', { metaKey: true });
+    let pasted = await nodes();
+    assert.equal(Object.keys(pasted).length, 8);
+    const copiedIds = Object.keys(pasted).filter(id => !(id in doc.joints));
+    closeTo(Math.min(...copiedIds.map(id => pasted[id].x)), 120);
+    assert.equal(await evaluate("document.querySelectorAll('[data-border-id]').length"), 8);
+    assert.equal(await evaluate("document.querySelectorAll('[data-label-id]').length"), 1);
+    assert.equal(await evaluate("document.querySelectorAll('.mapbuilder__joint--selected').length"), 4);
+    await undo(); assert.deepEqual(await nodes(), doc.joints);
+    await key('z', { ctrlKey: true, shiftKey: true }); assert.equal(Object.keys(await nodes()).length, 8);
+    await undo();
+    await select();
+    await evaluate(`${button('Copy selection')}.click()`); await delay(70);
+    await evaluate(`${button('Paste selection')}.click()`); await delay(70);
+    await key('v', { ctrlKey: true });
+    assert.equal(Object.keys(await nodes()).length, 12);
+    await undo(); assert.equal(Object.keys(await nodes()).length, 8);
+    await undo(); assert.deepEqual(await nodes(), doc.joints);
+    // Typing in a focused field retains ordinary copy/paste behavior.
+    const ignored = await evaluate(`(()=>{const t=document.createElement('textarea');document.body.append(t);t.focus();const e=new KeyboardEvent('keydown',{key:'v',ctrlKey:true,bubbles:true,cancelable:true});t.dispatchEvent(e);t.remove();return !e.defaultPrevented})()`);
+    assert.ok(ignored); assert.equal(Object.keys(await nodes()).length, 4);
+    await select();
+    await dragGrip('e', 100, 0);
+    let resized = await nodes(); closeTo(resized.b.x, 400); closeTo(resized.c.y, 300); closeTo(resized.a.x, 100);
+    await undo(); assert.deepEqual(await nodes(), doc.joints);
+    await select();
+    await dragGrip('se', 100, 100);
+    resized = await nodes(); closeTo(resized.b.x, 400); closeTo(resized.c.y, 400); closeTo(resized.a.x, 100);
+    const labelX = await evaluate("+document.querySelector('[data-label-id=region] circle').getAttribute('cx')");
+    closeTo(labelX, 212.5);
+    await undo(); assert.deepEqual(await nodes(), doc.joints);
+    await select();
+    await dragGrip('nw', -50, -50);
+    resized = await nodes(); closeTo(resized.a.x, 50); closeTo(resized.a.y, 50); closeTo(resized.c.x, 300);
+    await undo(); assert.deepEqual(await nodes(), doc.joints);
+    await select();
+    await dragGrip('se', 100, 100, 'escape'); assert.deepEqual(await nodes(), doc.joints);
+    await dragGrip('e', 100, 0, 'pointer'); assert.deepEqual(await nodes(), doc.joints);
+    await dragGrip('e', 0, 0);
+    assert.equal(await evaluate(`${button('Undo')}.disabled`), true, 'cancelled and zero-distance resizes do not create history entries');
+    // A keyboard user can focus a grip and resize without moving the group.
+    await evaluate("document.querySelector('[data-resize-handle=e]').focus()");
+    await page.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowRight', code: 'ArrowRight', modifiers: 8 });
+    await page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowRight', code: 'ArrowRight' });
+    await delay(70);
+    resized = await nodes(); closeTo(resized.b.x, 310); closeTo(resized.a.x, 100);
+    await undo(); assert.deepEqual(await nodes(), doc.joints);
+    await select();
+    const gripWidth = await evaluate("document.querySelector('[data-resize-handle=e]').getBoundingClientRect().width");
+    const beforeZoom = await evaluate("document.querySelector('.mapbuilder__world').style.transform");
+    const center = await point(200, 200);
+    await evaluate(`document.querySelector('.mapbuilder__viewport').dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,ctrlKey:true,deltaY:-40,clientX:${center.x},clientY:${center.y}}))`);
+    await delay(200);
+    assert.notEqual(await evaluate("document.querySelector('.mapbuilder__world').style.transform"), beforeZoom);
+    closeTo(await evaluate("document.querySelector('[data-resize-handle=e]').getBoundingClientRect().width"), gripWidth);
+    await dragGrip('e', 100, 0);
+    resized = await nodes(); closeTo(resized.b.x, 400); closeTo(resized.a.x, 100);
+    await evaluate('window.scrollTo(0,0)');
+    const screenshot = await page.call('Page.captureScreenshot', { format: 'png' });
+    await writeFile('/private/tmp/baggins-builder-selection.png', Buffer.from(screenshot.data, 'base64'));
+  } finally {
+    page?.close(); await manager.call('Target.closeTarget', { targetId }); manager.close();
+    await unlink(path).catch(() => {});
+  }
+});
+
+test('Builder assigns existing seeds, creates seeds inline and edits shared terrain without local names', { skip: !browser, timeout: 25000 }, async () => {
+  const metadata = await (await fetch(`${browser}/json/version`)).json();
+  const manager = await connect(metadata.webSocketDebuggerUrl);
+  const { targetId } = await manager.call('Target.createTarget', { url: 'about:blank' });
+  const path = new URL('../frontend/__builder_seed_test.html', import.meta.url);
+  let page;
+  try {
+    const tabs = await (await fetch(`${browser}/json`)).json();
+    page = await connect(tabs.find(tab => tab.id === targetId).webSocketDebuggerUrl);
+    const evaluate = async expression => {
+      const result = await page.call('Runtime.evaluate', { expression, returnByValue: true });
+      assert.ok(!result.exceptionDetails, JSON.stringify(result.exceptionDetails)); return result.result.value;
+    };
+    const doc = { width: 1000, height: 800,
+      joints: { a: { x: 0, y: 0 }, b: { x: 500, y: 0 }, c: { x: 1000, y: 0 }, d: { x: 1000, y: 800 }, e: { x: 500, y: 800 }, f: { x: 0, y: 800 } },
+      borders: { ab: { a: 'a', b: 'b' }, bc: { a: 'b', b: 'c' }, cd: { a: 'c', b: 'd' }, de: { a: 'd', b: 'e' }, ef: { a: 'e', b: 'f' }, fa: { a: 'f', b: 'a' }, be: { a: 'b', b: 'e' } }, labels: {} };
+    const store = JSON.stringify({ currentId: 'test', drafts: [{ id: 'test', name: 'Seed assignments', updated: 1, doc }] });
+    await writeFile(path, `<html><body><div class="admin-page" id="root"></div><script type="module">
+      import React from 'react';import {createRoot} from 'react-dom/client';import {MapBuilder} from '/src/pages/admin/MapBuilder.tsx';import '/src/index.css';import '/src/pages/Admin.css';
+      window.library={units:{},factions:{},territories:{shire:{id:'shire',display_name:'Shared Shire',terrain_type:'plains',produces:{power:2},ownable:true}},maps:{}};
+      window.fetch=async(input,init={})=>{const url=String(input);let data={maps:[]};
+        if(url.includes('/territory-seeds')){const record=JSON.parse(init.body);window.library.territories[record.id]=record;if(init.method==='POST')window.lastCreatedSeed=record;else window.lastUpdatedSeed=record;data={seed:record,warnings:{}};}
+        else if(url.includes('/scenario-library'))data=window.library;
+        else if(url.includes('/catalog'))data={terrain_types:['plains','forest','hills','mountains'],archetypes:['infantry']};
+        return new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});};
+      localStorage.setItem('admin_map_builder_drafts_v1',${JSON.stringify(store)});
+      createRoot(document.getElementById('root')).render(React.createElement(MapBuilder));
+      </script><style>.mapbuilder{height:95vh!important}.mapbuilder__main{height:90vh!important}.mapbuilder__viewport{height:65vh!important;flex:none!important;min-height:400px!important}</style></body></html>`);
+    await page.call('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1100, deviceScaleFactor: 1, mobile: false });
+    await page.call('Page.navigate', { url: `${vite}/__builder_seed_test.html` });
+    for (let i = 0; i < 70; i++) { if (await evaluate("!!document.querySelector('.mapbuilder__joint')")) break; await delay(100); }
+    await delay(700);
+    const button = name => `[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(name)})`;
+    const clickButton = async name => { await evaluate(`${button(name)}.click()`); await delay(80); };
+    const clickRegion = async (x, y) => {
+      const p = await evaluate(`(()=>{const r=document.querySelector('.mapbuilder__svg').getBoundingClientRect();return {x:r.left+${x}*r.width/1000,y:r.top+${y}*r.height/800}})()`);
+      await page.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...p, button: 'left', buttons: 1, clickCount: 1 });
+      await page.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...p, button: 'left', buttons: 0, clickCount: 1 });
+      await delay(80);
+    };
+    const control = (label, tag) => `([...document.querySelector('[aria-label="Assign territory"]').querySelectorAll('.admin-form__row')].find(row=>row.querySelector('.admin-form__label')?.textContent.trim()===${JSON.stringify(label)}).querySelector(${JSON.stringify(tag)}))`;
+    const change = async (expression, value, event = 'change') => {
+      await evaluate(`(()=>{const el=${expression};Object.getOwnPropertyDescriptor(${event === 'input' ? 'HTMLInputElement' : 'HTMLSelectElement'}.prototype,'value').set.call(el,${JSON.stringify(value)});el.dispatchEvent(new Event(${JSON.stringify(event)},{bubbles:true}))})()`);
+      await delay(80);
+    };
+    const picker = `document.querySelector('select[aria-label="Territory seed"]')`;
+    await clickButton('Label'); await clickRegion(250, 400);
+    await change(picker, 'shire'); await clickButton('Assign territory');
+    assert.match(await evaluate("document.querySelector('[data-label-id=shire] text').textContent"), /Shared Shire.*shire/);
+    await delay(450);
+    let labels = await evaluate("JSON.parse(localStorage.getItem('admin_map_builder_drafts_v1')).drafts[0].doc.labels");
+    assert.deepEqual(Object.keys(labels.shire).sort(), ['x', 'y']);
+    await clickRegion(250, 400); await clickButton('Edit shared seed');
+    await change(control('Display name', 'input'), 'Lush Shire', 'input');
+    await change(control('Terrain type', 'select'), 'forest');
+    await clickButton('Save seed and assign');
+    assert.equal(await evaluate('window.lastUpdatedSeed.id'), 'shire');
+    assert.equal(await evaluate('window.lastUpdatedSeed.terrain_type'), 'forest');
+    assert.match(await evaluate("document.querySelector('[data-label-id=shire] text').textContent"), /Lush Shire.*shire/);
+    await clickRegion(750, 400);
+    assert.equal(await evaluate(`${picker}.querySelector('option[value="shire"]').disabled`), true);
+    await change(picker, '__create__');
+    await change(control('Display name', 'input'), 'Mountain Pass', 'input');
+    assert.equal(await evaluate("document.querySelector('input[aria-label=\"New territory ID\"]').value"), 'mountain_pass');
+    await change(control('Terrain type', 'select'), 'mountains');
+    await change(control('Power production', 'input'), '6', 'input');
+    const screenshot = await page.call('Page.captureScreenshot', { format: 'png' });
+    await writeFile('/private/tmp/baggins-territory-seed-popup.png', Buffer.from(screenshot.data, 'base64'));
+    await clickButton('Create and assign');
+    const created = await evaluate('window.lastCreatedSeed');
+    assert.equal(created.id, 'mountain_pass'); assert.equal(created.terrain_type, 'mountains'); assert.deepEqual(created.produces, { power: 6 });
+    assert.match(await evaluate("document.querySelector('[data-label-id=mountain_pass] text').textContent"), /Mountain Pass.*mountain_pass/);
+    await delay(450);
+    labels = await evaluate("JSON.parse(localStorage.getItem('admin_map_builder_drafts_v1')).drafts[0].doc.labels");
+    assert.deepEqual(Object.keys(labels).sort(), ['mountain_pass', 'shire']);
+    assert.ok(Object.values(labels).every(label => Object.keys(label).sort().join(',') === 'x,y'));
+  } finally {
+    page?.close(); await manager.call('Target.closeTarget', { targetId }); manager.close(); await unlink(path).catch(() => {});
   }
 });

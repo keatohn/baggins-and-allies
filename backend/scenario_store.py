@@ -14,7 +14,7 @@ from backend.api.models import AppSetting, Setup
 from backend.scenario_builder import (
     BUNDLE_KEYS, MAP_TERRITORY_FIELDS, canonical_setup, compile_setup, delta,
     extract_library, load_library, migrate_legacy_setups, prepare_territory_seeds,
-    read_setup_bundle, scenario_map_id, setup_from_bundle, write_library, write_setup,
+    read_setup_bundle, scenario_map_id, setup_from_bundle, write_library, write_setup, migrate_seed_terrain,
 )
 from backend.setup_validation import validate_setup_payload
 
@@ -23,7 +23,7 @@ SETTING = "scenario_authoring_v1"
 def _include_map_seed_choices(db: Session, state: dict) -> None:
     """Offer matching SVG regions without expanding existing scenario selections."""
     from backend.map_assets import load_map_svg
-    from backend.map_overrides import apply_map_graph, apply_map_terrain
+    from backend.map_overrides import apply_map_graph
     library = state["library"]
     label_key = "{http://www.inkscape.org/namespaces/inkscape}label"
     for map_id, records in library["maps"].items():
@@ -54,9 +54,8 @@ def _include_map_seed_choices(db: Session, state: dict) -> None:
         terrain_types = load_catalog(db)["terrain_types"]
         default_terrain = "plains" if "plains" in terrain_types else next((t for t in terrain_types if t != "sea"), "sea")
         for tid in sorted(additions):
-            records[tid] = {**deepcopy(library["territories"][tid]), "terrain_type": default_terrain,
+            records[tid] = {"terrain_type": default_terrain, **deepcopy(library["territories"][tid]),
                             "adjacent": [], "aerial_adjacent": [], "ford_adjacent": []}
-        apply_map_terrain(records, map_id, db)
         apply_map_graph(records, map_id, db)
 
 
@@ -69,12 +68,58 @@ def _bundles(db: Session) -> dict[str, dict]:
             for row in db.query(Setup).order_by(Setup.id).all()}
 
 
+def _migrate_saved_map_seeds(db: Session, state: dict) -> None:
+    """Preserve legacy saved drawings that have never been used by a setup."""
+    from backend.api.models import MapAsset
+    from backend.map_builder import MapBuilderError, convert_map_builder
+    from backend.map_overrides import load_map_overrides
+    from backend.setup_data import is_files_setup_source
+    from backend.engine.definitions import DATA_DIR
+    library = state["library"]
+    drawings = {}
+    for path in (DATA_DIR / "maps").glob("*/builder.json"):
+        try:
+            drawings[path.parent.name] = json.loads(path.read_text())
+        except (ValueError, OSError):
+            continue
+    if not is_files_setup_source():
+        for asset in db.query(MapAsset).all():
+            try:
+                doc = json.loads(asset.builder_json)
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(doc, dict) or not isinstance(doc.get("labels", {}), dict):
+                continue
+            fallback = drawings.get(asset.map_base, {}).get("labels", {})
+            for tid, label in doc.get("labels", {}).items():
+                if isinstance(label, dict) and "display_name" not in label and fallback.get(tid, {}).get("display_name"):
+                    label["display_name"] = fallback[tid]["display_name"]
+            drawings[asset.map_base] = doc
+    for map_id, doc in drawings.items():
+        if not isinstance(doc, dict) or not isinstance(doc.get("labels", {}), dict):
+            continue
+        if map_id in library["maps"] and all(tid in library["territories"] for tid in doc.get("labels", {})):
+            continue
+        try:
+            converted = convert_map_builder(doc)
+        except MapBuilderError:
+            # An invalid saved drawing can still be opened/repaired independently.
+            continue
+        legacy_terrain = load_map_overrides(db, map_id).get("terrain", {})
+        records = library["maps"].setdefault(map_id, {})
+        for territory in converted["territories"]:
+            tid = territory["id"]
+            records.setdefault(tid, {"id": tid, "display_name": territory["label"], "terrain_type": legacy_terrain.get(tid, "plains"),
+                "produces": {"power": 0}, "ownable": legacy_terrain.get(tid) != "sea",
+                **{field: converted["graph"].get(field, {}).get(tid, []) for field in MAP_TERRITORY_FIELDS}})
+
+
 def load_state(db: Session) -> dict:
     from backend.setup_data import is_files_setup_source
     from backend.engine.definitions import DATA_DIR, SETUPS_DIR
     from backend.map_overrides import apply_map_graph, apply_map_terrain
     if is_files_setup_source():
-        state = {"library": load_library(DATA_DIR), "setups": {
+        state = {"library": load_library(DATA_DIR, prepare=False), "setups": {
             folder.name: canonical_setup(json.loads((folder / "setup.json").read_text()))
             for folder in sorted(SETUPS_DIR.iterdir()) if (folder / "setup.json").is_file()}}
     else:
@@ -89,9 +134,17 @@ def load_state(db: Session) -> dict:
                 tid: value for tid, value in bundle["territories"].items() if tid not in state["library"]["maps"].get(map_id, {})})
             state["setups"][key] = setup_from_bundle(bundle, state["library"])
         state["setups"] = {key: value for key, value in state["setups"].items() if key in bundles}
-    prepare_territory_seeds(state["library"])
+    _migrate_saved_map_seeds(db, state)
+    # Preserve the last effective map terrain once when migrating old seeds.
+    missing = {tid for tid, seed in state["library"].get("territories", {}).items() if "terrain_type" not in seed}
     for map_id, records in state["library"]["maps"].items():
-        apply_map_terrain(records, map_id, db)
+        legacy = {tid: deepcopy(record) for tid, record in records.items() if tid in missing}
+        if legacy:
+            apply_map_terrain(legacy, map_id, db)
+            for tid, record in legacy.items():
+                records[tid]["terrain_type"] = record.get("terrain_type", "plains")
+    migrate_seed_terrain(state)
+    for map_id, records in state["library"]["maps"].items():
         apply_map_graph(records, map_id, db)
     _include_map_seed_choices(db, state)
     return state
@@ -194,6 +247,17 @@ def sync_map(db: Session, map_id: str) -> None:
             snapshot = snapshots.get(key)
             if snapshot is None:
                 continue
+            selected = setup["territories"].keys()
+            removed = snapshot["territories"].keys() - selected
+            resolved = compile_setup(setup, state["library"])
+            snapshot["territories"] = {tid: snapshot["territories"].get(tid, deepcopy(resolved["territories"][tid])) for tid in selected}
+            for field in ("territory_owners", "starting_units"):
+                snapshot["starting_setup"][field] = {tid: value for tid, value in snapshot["starting_setup"].get(field, {}).items() if tid not in removed}
+            for section in ("camps", "ports"):
+                snapshot[section] = {cid: value for cid, value in snapshot[section].items() if value.get("territory_id") not in removed}
+            for faction in snapshot["factions"].values():
+                if isinstance(faction.get("capital"), str) and faction["capital"] in removed:
+                    faction["capital"] = None
             for tid, record in snapshot["territories"].items():
                 geography = state["library"]["maps"][map_id].get(tid, {})
                 for field in MAP_TERRITORY_FIELDS:
@@ -225,13 +289,13 @@ def update_library(db: Session, library: dict, *, apply: bool = False) -> dict:
                 raise ValueError("Map territory defaults must be records keyed by territory id")
             old = state["library"]["maps"].get(map_id, {}).get(tid)
             if old and any(old.get(field) != record.get(field) for field in MAP_TERRITORY_FIELDS):
-                raise ValueError("Edit map terrain and connections in Maps")
+                raise ValueError("Edit connections in Maps; terrain is edited on territory seeds")
     prepare_territory_seeds(library)
     before = _bundles(db)
     state["library"] = library
     after = compile_all(state)
     catalog = load_catalog(db)
-    territories = {tid: record for records in library["maps"].values() for tid, record in records.items()}
+    territories = library["territories"]
     seed_errors = validate_setup_payload({"manifest": {"id": "seed_catalog"}, "units": library["units"], "factions": library["factions"],
         "territories": territories, "camps": {}, "ports": {}, "starting_setup": {}}, catalog)
     warnings = {"seeds": seed_errors} if seed_errors else {}
@@ -252,3 +316,40 @@ def update_library(db: Session, library: dict, *, apply: bool = False) -> dict:
         db.commit()
     return {"changed_setups": changed, "skipped_setups": skipped, "warnings": warnings,
             "changes": {key: delta(before.get(key, {}), after[key]) for key in changed}}
+
+
+def save_territory_seed(db: Session, tid: str, record: dict, *, create: bool = False) -> dict:
+    from backend.catalog import load_catalog
+    from backend.map_builder import _TID_RE
+    if not isinstance(tid, str) or not _TID_RE.fullmatch(tid):
+        raise ValueError("Territory ID must be 1–64 characters: letters, digits, _ . -")
+    if not isinstance(record, dict) or record.get("id") != tid:
+        raise ValueError("Territory seed ID must match its key")
+    if not isinstance(record.get("display_name"), str) or not record["display_name"].strip():
+        raise ValueError("Display name is required")
+    if record.get("terrain_type") not in load_catalog(db)["terrain_types"]:
+        raise ValueError("Select a known terrain type")
+    state = load_state(db)
+    seeds = state["library"]["territories"]
+    if create and tid in seeds:
+        raise ValueError(f"Territory seed {tid} already exists; select it instead")
+    if not create and tid not in seeds:
+        raise ValueError(f"Territory seed {tid} not found")
+    seeds[tid] = deepcopy(record)
+    result = update_library(db, state["library"], apply=True)
+    return {"seed": seeds[tid], **result}
+
+
+def sync_map_membership(state: dict, map_id: str, previous_ids: set[str]) -> None:
+    """Region reassignment adds new seeds and removes retired IDs from setups."""
+    current = state["library"]["maps"][map_id].keys()
+    if current == previous_ids:
+        return
+    added = current - previous_ids
+    for key, setup in list(state["setups"].items()):
+        if scenario_map_id(setup["manifest"], key) != map_id:
+            continue
+        selected = (setup["territories"].keys() & current) | added
+        normalized = with_map(setup, state["library"], map_id)
+        normalized["territories"] = {tid: entry for tid, entry in normalized["territories"].items() if tid in selected}
+        state["setups"][key] = normalized

@@ -1979,9 +1979,18 @@ export function TerritoriesPanel({
         title="territory"
         data={territories}
         onChange={onChange}
-        renderEditor={(id, t, patch) => (
+        renderEditor={(id, t, patch) => <TerritorySeedFields id={id} t={t} patch={patch} terrainTypes={terrainTypes} seedMode={seedMode} />}
+      />
+  );
+}
+
+export function TerritorySeedFields({ id, t, patch, terrainTypes, seedMode = true, showId = true }: {
+  id: string; t: Record<string, unknown>; patch: (next: Record<string, unknown>) => void;
+  terrainTypes: string[]; seedMode?: boolean; showId?: boolean;
+}) {
+  return (
           <div className="admin-form">
-            {fieldRow('Territory id', <input type="text" className="admin-form__input admin-form__input--readonly" readOnly disabled value={id} />)}
+            {showId && fieldRow('Territory id', <input type="text" className="admin-form__input admin-form__input--readonly" readOnly disabled value={id} />)}
           {fieldRow(
             'Display name',
             <input type="text" className="admin-form__input" value={String(t.display_name ?? '')} onChange={(e) => patch({ display_name: e.target.value })} />,
@@ -1990,7 +1999,7 @@ export function TerritoriesPanel({
             'Image',
             <TerritoryImageField value={t.image} onApply={(image) => patch({ image })} />,
           )}
-          {!seedMode && fieldRow(
+          {fieldRow(
             'Terrain type',
             <CatalogSelect
               value={t.terrain_type}
@@ -2054,8 +2063,6 @@ export function TerritoriesPanel({
             <input type="checkbox" checked={t.ownable !== false} onChange={(e) => patch({ ownable: e.target.checked })} />,
           )}
           </div>
-        )}
-      />
   );
 }
 

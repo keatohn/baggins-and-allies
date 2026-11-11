@@ -115,3 +115,115 @@ export function deleteJoints(drawing: Drawing, ids: string[]): void {
     connected.add(edgeKey(a, b));
   }
 }
+
+export type SelectionBounds = { minX: number; minY: number; maxX: number; maxY: number };
+export type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+export type GraphFragment = {
+  joints: Drawing['joints'];
+  borders: Drawing['borders'];
+  labels: Record<string, Point & { display_name?: string }>;
+};
+
+export function selectionBounds(drawing: Drawing, ids: string[], labelIds: string[] = []): SelectionBounds | null {
+  const points = [...ids.map(id => drawing.joints[id]), ...labelIds.map(id => drawing.labels?.[id])].filter((point): point is Point => !!point);
+  if (!points.length) return null;
+  return points.reduce((box, point) => ({ minX: Math.min(box.minX, point.x), minY: Math.min(box.minY, point.y),
+    maxX: Math.max(box.maxX, point.x), maxY: Math.max(box.maxY, point.y) }),
+  { minX: points[0].x, minY: points[0].y, maxX: points[0].x, maxY: points[0].y });
+}
+
+/** Copy only internal edges; external neighbors never become part of a paste. */
+export function copyGraphFragment(drawing: Drawing, ids: string[], labelIds: string[] = []): GraphFragment | null {
+  const selected = new Set(ids.filter(id => drawing.joints[id]));
+  if (!selected.size) return null;
+  return structuredClone({
+    joints: Object.fromEntries([...selected].map(id => [id, drawing.joints[id]])),
+    borders: Object.fromEntries(Object.entries(drawing.borders).filter(([, edge]) => selected.has(edge.a) && selected.has(edge.b) && edge.a !== edge.b)),
+    labels: Object.fromEntries(labelIds.filter(id => drawing.labels?.[id]).map(id => [id, drawing.labels![id]])),
+  });
+}
+
+/** Clone a fragment with fresh IDs and one clamped translation for the whole group. */
+export function pasteGraphFragment(drawing: Drawing, fragment: GraphFragment, dx: number, dy: number): { ids: string[]; labelIds: string[] } | null {
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return null;
+  const bounds = selectionBounds({ ...fragment, width: drawing.width, height: drawing.height }, Object.keys(fragment.joints), Object.keys(fragment.labels));
+  if (!bounds || bounds.maxX - bounds.minX > drawing.width || bounds.maxY - bounds.minY > drawing.height) return null;
+  const offsetX = Math.max(-bounds.minX, Math.min(dx, drawing.width - bounds.maxX));
+  const offsetY = Math.max(-bounds.minY, Math.min(dy, drawing.height - bounds.maxY));
+  const counters = new Map<string, number>();
+  const fresh = (records: object, prefix: string) => {
+    let n = counters.get(prefix) ?? 1;
+    while (`${prefix}${n}` in records) n++;
+    counters.set(prefix, n + 1);
+    return `${prefix}${n}`;
+  };
+  const remap = new Map<string, string>();
+  for (const [id, point] of Object.entries(fragment.joints)) {
+    const nextId = fresh(drawing.joints, 'j');
+    drawing.joints[nextId] = { x: point.x + offsetX, y: point.y + offsetY };
+    remap.set(id, nextId);
+  }
+  for (const edge of Object.values(fragment.borders)) {
+    const a = remap.get(edge.a), b = remap.get(edge.b);
+    if (a && b && a !== b) drawing.borders[fresh(drawing.borders, 'b')] = { a, b };
+  }
+  const labelIds = [];
+  if (Object.keys(fragment.labels).length) drawing.labels ??= {};
+  for (const [id, label] of Object.entries(fragment.labels)) {
+    // Region IDs reference shared seeds. Reuse that reference across maps;
+    // within the same map leave the duplicate unassigned rather than inventing a seed.
+    if (id in drawing.labels!) continue;
+    drawing.labels![id] = { ...label, x: label.x + offsetX, y: label.y + offsetY };
+    labelIds.push(id);
+  }
+  return { ids: [...remap.values()], labelIds };
+}
+
+/** Resize from the original snapshot, anchored opposite the dragged handle.
+ * Side handles scale one axis; corners preserve the aspect ratio. Clamp the
+ * scale, rather than individual points, to preserve shape at the map bounds.
+ */
+export function resizeJoints(drawing: Drawing, original: Drawing, ids: string[], handle: ResizeHandle, dx: number, dy: number, labelIds: string[] = []): boolean {
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return false;
+  const box = selectionBounds(original, ids, labelIds);
+  if (!box) return false;
+  const width = box.maxX - box.minX, height = box.maxY - box.minY;
+  const horizontal = handle.includes('w') ? -1 : handle.includes('e') ? 1 : 0;
+  const vertical = handle.includes('n') ? -1 : handle.includes('s') ? 1 : 0;
+  const anchorX = horizontal === -1 ? box.maxX : box.minX;
+  const anchorY = vertical === -1 ? box.maxY : box.minY;
+  const limit = (min: number, max: number, anchor: number, extent: number) => Math.min(
+    min < anchor ? anchor / (anchor - min) : Infinity,
+    max > anchor ? (extent - anchor) / (max - anchor) : Infinity,
+  );
+  const maxX = limit(box.minX, box.maxX, anchorX, original.width);
+  const maxY = limit(box.minY, box.maxY, anchorY, original.height);
+  const clampScale = (scale: number, span: number, max: number) => Math.max(Math.min(1, 1 / Math.max(span, 1)), Math.min(scale, max));
+  let sx = 1, sy = 1;
+  if (horizontal && vertical) {
+    const vx = horizontal * width, vy = vertical * height;
+    const length2 = vx * vx + vy * vy;
+    if (!length2) return false;
+    const scale = 1 + (dx * vx + dy * vy) / length2;
+    sx = sy = clampScale(scale, Math.max(width, height), Math.min(maxX, maxY));
+  } else if (horizontal && width) {
+    sx = clampScale(1 + horizontal * dx / width, width, maxX);
+  } else if (vertical && height) {
+    sy = clampScale(1 + vertical * dy / height, height, maxY);
+  }
+  let changed = false;
+  const transform = (point: Point) => ({ x: anchorX + (point.x - anchorX) * sx, y: anchorY + (point.y - anchorY) * sy });
+  for (const id of ids) {
+    const point = original.joints[id];
+    if (!point || !drawing.joints[id]) continue;
+    const next = transform(point);
+    drawing.joints[id] = next;
+    changed ||= Math.abs(next.x - point.x) > 1e-9 || Math.abs(next.y - point.y) > 1e-9;
+  }
+  for (const id of labelIds) {
+    const label = original.labels?.[id];
+    if (!label || !drawing.labels?.[id]) continue;
+    drawing.labels[id] = { ...label, ...transform(label) };
+  }
+  return changed;
+}

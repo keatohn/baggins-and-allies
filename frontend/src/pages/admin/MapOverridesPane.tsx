@@ -36,7 +36,6 @@ import {
   resolveTerritoryKey,
   sameTerritoryId,
   territoriesWithEdgeEdits,
-  toMapBase,
   type TerritoryEdgeEdit,
   type TerritoryEdgeField,
   type TerritoryPathData,
@@ -306,7 +305,6 @@ function fmt(pt: MapOverridePoint): string {
  */
 export function MapOverridesPane({
   territories = {},
-  setupId = '',
   onClose,
 }: {
   territories?: Dict;
@@ -341,7 +339,6 @@ export function MapOverridesPane({
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [editorTab, setEditorTab] = useState<'icon' | 'landscape' | 'builder' | 'graph'>('icon');
   const [edgeField, setEdgeField] = useState<TerritoryEdgeField>('adjacent');
-  const [terrainTypes, setTerrainTypes] = useState<string[]>([]);
   const [manifest, setManifest] = useState<LandscapeManifest>({});
   const [placing, setPlacing] = useState<{ cat: string; img: string } | null>(null);
   const [borderMode, setBorderMode] = useState(false);
@@ -523,16 +520,7 @@ export function MapOverridesPane({
     restoreHistory(editorTab, nextSnap);
   }, [editorTab, endGesture, restoreHistory]);
   // Map terrain wins over the setup copy so the landscape palette follows what this map stores.
-  const terrainBackedDefs = useMemo(() => {
-    const terrain = current?.terrain;
-    if (!terrain || !Object.keys(terrain).length) return territoryDefs;
-    const out: Dict = { ...territoryDefs };
-    for (const [tid, type] of Object.entries(terrain)) {
-      const key = resolveTid(out, tid) ?? tid;
-      out[key] = { ...(out[key] ?? {}), terrain_type: type };
-    }
-    return out;
-  }, [territoryDefs, current]);
+  const terrainBackedDefs = territoryDefs;
 
   const graphShown = useMemo(
     () => withGraph(terrainBackedDefs, current?.graph),
@@ -582,53 +570,23 @@ export function MapOverridesPane({
     };
   }, []);
 
-  // Terrain comes from a setup that uses this map. The open setup is only a match
-  // when it is the one on screen; otherwise every region fell back to "land".
+  // Map previews use shared territory seeds, not one scenario's overrides.
   useEffect(() => {
     if (!mapBase) return;
-    let cancelled = false;
-    api
-      .adminListSetups()
-      .then(async (res) => {
-        const rows = Array.isArray(res?.setups) ? res.setups : [];
-        const matches = rows.filter((row) => toMapBase(row.map_asset || row.id) === mapBase);
-        const preferred = matches.find((row) => row.id === setupId) ?? matches[0];
-        if (!preferred) {
-          if (!cancelled) setTerritoryDefs(territories);
-          return;
-        }
-        if (preferred.id === setupId && Object.keys(territories).length > 0) {
-          if (!cancelled) setTerritoryDefs(territories);
-          return;
-        }
-        const bundle = await api.adminGetSetup(preferred.id);
-        if (!cancelled) setTerritoryDefs((bundle.territories ?? {}) as Dict);
-      })
-      .catch(() => {
-        if (!cancelled) setTerritoryDefs(territories);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [mapBase, setupId, territories, clearHistory]);
+    let active = true;
+    const load = () => api.adminGetScenarioLibrary().then(library => {
+      if (active) setTerritoryDefs((library.maps?.[mapBase] ?? territories) as Dict);
+    }).catch(() => { if (active) setTerritoryDefs(territories); });
+    void load();
+    window.addEventListener('admin-territory-seeds-changed', load);
+    return () => { active = false; window.removeEventListener('admin-territory-seeds-changed', load); };
+  }, [mapBase, territories]);
 
   useEffect(() => {
     let cancelled = false;
     loadLandscapeManifest().then((m) => {
       if (!cancelled) setManifest(m);
     });
-    api
-      .getCatalog()
-      .then((catalog) => {
-        if (cancelled) return;
-        const types = Array.isArray(catalog?.terrain_types)
-          ? catalog.terrain_types.filter((t): t is string => typeof t === 'string' && t.length > 0)
-          : [];
-        setTerrainTypes(types);
-      })
-      .catch(() => {
-        if (!cancelled) setTerrainTypes([]);
-      });
     return () => {
       cancelled = true;
     };
@@ -1546,16 +1504,6 @@ export function MapOverridesPane({
       setAutoBusy(false);
     }
   }, [artMode, paths, terrainBackedDefs, manifest, updateLandscape]);
-
-  const updateTerrain = useCallback(
-    (tid: string, terrain: string) => {
-      commitDraft('landscape', (base) => {
-        const key = resolveTid(base.terrain, tid) ?? resolveTid(territoryDefs, tid) ?? tid;
-        return nextOverrides(base, { terrain: { ...(base.terrain ?? {}), [key]: terrain } });
-      });
-    },
-    [commitDraft, territoryDefs],
-  );
 
   const terrainTypeFor = useCallback(
     (tid: string): string => {
@@ -2936,22 +2884,9 @@ export function MapOverridesPane({
                         </button>
                       </div>
                     ) : editorTab === 'landscape' ? (
-                      <select
-                        className="admin-page__select mapov-inspector__terrain"
-                        aria-label="Terrain type"
-                        value={selectedTerrainType}
-                        onChange={(e) => updateTerrain(selected, e.target.value)}
-                      >
-                        {selectedTerrainType ? null : <option value="">Select terrain</option>}
-                        {selectedTerrainType && !terrainTypes.includes(selectedTerrainType) ? (
-                          <option value={selectedTerrainType}>{prettifyId(selectedTerrainType)}</option>
-                        ) : null}
-                        {terrainTypes.map((type) => (
-                          <option key={type} value={type}>
-                            {prettifyId(type)}
-                          </option>
-                        ))}
-                      </select>
+                      <span className="admin-form__micro" title="Edit shared terrain in Seeds → Territories">
+                        {prettifyId(selectedTerrainType || 'Unassigned terrain')} · inherited from territory seed
+                      </span>
                     ) : null}
                   </div>
                   {editorTab === 'graph' ? (

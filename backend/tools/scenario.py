@@ -8,7 +8,7 @@ import sys
 from backend.engine.definitions import DATA_DIR
 from backend.scenario_builder import (
     BUNDLE_KEYS, canonical_setup, compile_setup, extract_library, load_library,
-    migrate_legacy_setups, parse_setup_json, read_setup_bundle, setup_from_bundle, write_library, write_setup,
+    migrate_legacy_setups, migrate_seed_terrain, parse_setup_json, read_setup_bundle, setup_from_bundle, write_library, write_setup,
 )
 from backend.setup_validation import validate_setup_payload
 
@@ -58,6 +58,7 @@ def main(argv=None) -> int:
             if args.command == "unpack":
                 snapshot = json.loads(args.snapshot.read_text())
                 state = migrate_legacy_setups(snapshot)
+                migrate_seed_terrain(state)
                 catalog = snapshot.get("catalog")
             else:
                 bundles = {folder.name: read_setup_bundle(folder) for folder in sorted(args.setups.iterdir())

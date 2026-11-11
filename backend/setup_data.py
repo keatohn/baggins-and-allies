@@ -135,11 +135,12 @@ def seed_setups_if_empty(db: Session) -> int:
         # not a second majority-derived authoring representation.
         from backend.api.models import AppSetting
         from backend.scenario_store import SETTING
-        from backend.scenario_builder import canonical_setup, load_library
+        from backend.scenario_builder import canonical_setup, load_library, migrate_seed_terrain
         canonical_files = sorted(SETUPS_DIR.glob("*/setup.json"))
         if canonical_files and not db.query(AppSetting).filter(AppSetting.key == SETTING).first():
-            state = {"library": load_library(SETUPS_DIR.parent), "setups": {
+            state = {"library": load_library(SETUPS_DIR.parent, prepare=False), "setups": {
                 path.parent.name: canonical_setup(json.loads(path.read_text())) for path in canonical_files}}
+            migrate_seed_terrain(state)
             db.add(AppSetting(key=SETTING, value_json=json.dumps(state, ensure_ascii=False)))
         db.commit()
     return n
@@ -287,10 +288,9 @@ def get_admin_setup_bundle(db: Session, setup_id: str) -> dict[str, Any] | None:
         return None
     p = _row_to_parsed(row)
     map_base = p["manifest"].get("map_asset") if isinstance(p["manifest"], dict) else None
-    from backend.map_overrides import apply_map_graph, apply_map_terrain
+    from backend.map_overrides import apply_map_graph
 
     resolved_map = map_base if isinstance(map_base, str) and map_base else row.id
-    apply_map_terrain(p["territories"], resolved_map, db)
     apply_map_graph(p["territories"], resolved_map, db)
     return {
         "id": row.id,
@@ -601,10 +601,9 @@ def try_load_static_definitions(setup_id: str, db: Session | None):
         defs = load_static_definitions_from_files(setup_id=setup_id)
     setup = try_load_setup(setup_id, db)
     map_base = (setup or {}).get("map_asset") or setup_id
-    from backend.map_overrides import apply_map_graph, apply_map_terrain
+    from backend.map_overrides import apply_map_graph
 
     resolved_map = map_base if isinstance(map_base, str) else setup_id
-    apply_map_terrain(defs[1], resolved_map, db)
     apply_map_graph(defs[1], resolved_map, db)
     return defs
 

@@ -3492,6 +3492,26 @@ def admin_save_scenario_library(body: dict[str, Any], _admin: Player = Depends(g
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.post("/admin/territory-seeds")
+def admin_create_territory_seed(body: dict[str, Any], _admin: Player = Depends(get_current_admin), db: Session = Depends(get_db)):
+    from backend.scenario_store import save_territory_seed
+    try:
+        return save_territory_seed(db, body.get("id"), body, create=True)
+    except (ValueError, KeyError, TypeError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/admin/territory-seeds/{territory_id}")
+def admin_update_territory_seed(territory_id: str, body: dict[str, Any], _admin: Player = Depends(get_current_admin), db: Session = Depends(get_db)):
+    from backend.scenario_store import save_territory_seed
+    try:
+        return save_territory_seed(db, territory_id, body)
+    except (ValueError, KeyError, TypeError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/admin/scenarios/export")
 def admin_export_scenarios(_admin: Player = Depends(get_current_admin), db: Session = Depends(get_db)):
     from backend.scenario_store import load_state

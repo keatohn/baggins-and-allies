@@ -1567,7 +1567,7 @@ export const api = {
       `/admin/maps/${encodeURIComponent(mapBase)}/overrides`,
       {
         method: 'PUT',
-        body: JSON.stringify(overrides),
+        body: JSON.stringify({ ...overrides, terrain: undefined }),
       },
     ),
   /** Admin: turn a closed-path territory SVG into the builder's shared-border graph. */
@@ -1579,7 +1579,7 @@ export const api = {
         height: number;
         joints: Record<string, { x: number; y: number }>;
         borders: Record<string, { a: string; b: string }>;
-        labels: Record<string, { display_name: string; x: number; y: number }>;
+        labels: Record<string, { x: number; y: number }>;
       };
       warnings: string[];
       stats: {
@@ -1616,7 +1616,7 @@ export const api = {
         height: number;
         joints: Record<string, { x: number; y: number }>;
         borders: Record<string, { a: string; b: string }>;
-        labels: Record<string, { display_name: string; x: number; y: number }>;
+        labels: Record<string, { x: number; y: number }>;
       };
     }>(`/admin/maps/builder/${encodeURIComponent(mapBase)}`),
   adminSaveMapBuilder: (
@@ -1705,6 +1705,8 @@ export const api = {
       body: JSON.stringify(body),
     }),
   adminGetSetup: (setupId: string) => fetchJson<AdminSetupBundle>(`/admin/setups/${encodeURIComponent(setupId)}`),
+  adminCreateTerritorySeed: (record: Record<string, unknown>) => fetchJson<{ seed: Record<string, unknown>; warnings?: Record<string, string[]> }>('/admin/territory-seeds', { method: 'POST', body: JSON.stringify(record) }),
+  adminUpdateTerritorySeed: (id: string, record: Record<string, unknown>) => fetchJson<{ seed: Record<string, unknown>; warnings?: Record<string, string[]> }>(`/admin/territory-seeds/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(record) }),
   adminGetScenarioLibrary: () => fetchJson<ScenarioLibrary>('/admin/scenario-library'),
   adminPreviewScenarioLibrary: (library: ScenarioLibrary) => fetchJson<ScenarioImpact>('/admin/scenario-library/preview', { method: 'POST', body: JSON.stringify(library) }),
   adminSaveScenarioLibrary: (library: ScenarioLibrary) => fetchJson<ScenarioImpact>('/admin/scenario-library', { method: 'PUT', body: JSON.stringify(library) }),

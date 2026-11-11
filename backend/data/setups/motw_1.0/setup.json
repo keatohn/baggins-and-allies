@@ -210,7 +210,10 @@
       "seed": "minhiriath"
     },
     "field_of_celebrant": {
-      "seed": "field_of_celebrant"
+      "seed": "field_of_celebrant",
+      "overrides": {
+        "terrain_type": "plains"
+      }
     },
     "fangorn": {
       "seed": "fangorn"

@@ -221,7 +221,10 @@
       }
     },
     "dagorlad": {
-      "seed": "dagorlad"
+      "seed": "dagorlad",
+      "overrides": {
+        "terrain_type": "plains"
+      }
     },
     "emyn_muil": {
       "seed": "emyn_muil"
@@ -247,7 +250,10 @@
       "seed": "celduin_valley"
     },
     "tower_hills": {
-      "seed": "tower_hills"
+      "seed": "tower_hills",
+      "overrides": {
+        "terrain_type": "mountains"
+      }
     },
     "khazad_dum": {
       "seed": "khazad_dum"
@@ -256,7 +262,10 @@
       "seed": "mithlond"
     },
     "ettenmoors": {
-      "seed": "ettenmoors"
+      "seed": "ettenmoors",
+      "overrides": {
+        "terrain_type": "mountains"
+      }
     },
     "evendim_hills": {
       "seed": "evendim_hills"
@@ -293,10 +302,16 @@
       "seed": "field_of_celebrant"
     },
     "east_rhovanion": {
-      "seed": "east_rhovanion"
+      "seed": "east_rhovanion",
+      "overrides": {
+        "terrain_type": "hills"
+      }
     },
     "west_rhovanion": {
-      "seed": "west_rhovanion"
+      "seed": "west_rhovanion",
+      "overrides": {
+        "terrain_type": "hills"
+      }
     },
     "anduin_valley": {
       "seed": "anduin_valley",
@@ -324,7 +339,10 @@
       "seed": "forodwaith"
     },
     "west_eriador": {
-      "seed": "west_eriador"
+      "seed": "west_eriador",
+      "overrides": {
+        "terrain_type": "plains"
+      }
     },
     "north_eriador": {
       "seed": "north_eriador"
@@ -343,7 +361,8 @@
       "overrides": {
         "stronghold_base_health": {
           "$delete": true
-        }
+        },
+        "terrain_type": "plains"
       }
     },
     "rhun_hills": {
@@ -351,7 +370,8 @@
       "overrides": {
         "produces": {
           "power": 1
-        }
+        },
+        "terrain_type": "mountains"
       }
     },
     "north_eregion": {
@@ -395,7 +415,10 @@
       "seed": "hithlaeglir"
     },
     "gundabad": {
-      "seed": "gundabad"
+      "seed": "gundabad",
+      "overrides": {
+        "terrain_type": "mountains"
+      }
     },
     "numenor": {
       "seed": "numenor"
@@ -408,7 +431,8 @@
         },
         "stronghold_base_health": {
           "$delete": true
-        }
+        },
+        "terrain_type": "valley"
       }
     },
     "ost_in_edhil": {
@@ -427,13 +451,19 @@
       "seed": "sea_zone_6"
     },
     "tol_fuin": {
-      "seed": "tol_fuin"
+      "seed": "tol_fuin",
+      "overrides": {
+        "terrain_type": "plains"
+      }
     },
     "sea_zone_1": {
       "seed": "sea_zone_1"
     },
     "tharbad": {
-      "seed": "tharbad"
+      "seed": "tharbad",
+      "overrides": {
+        "terrain_type": "plains"
+      }
     },
     "falls_of_rauros": {
       "seed": "falls_of_rauros"
@@ -469,7 +499,8 @@
       "overrides": {
         "produces": {
           "power": 2
-        }
+        },
+        "terrain_type": "forest"
       }
     },
     "nindalf": {
@@ -522,7 +553,10 @@
       "seed": "withered_heath"
     },
     "north_rhun": {
-      "seed": "north_rhun"
+      "seed": "north_rhun",
+      "overrides": {
+        "terrain_type": "plains"
+      }
     },
     "south_calenardhon": {
       "seed": "south_calenardhon"
