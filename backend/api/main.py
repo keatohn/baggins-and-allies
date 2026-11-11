@@ -258,7 +258,8 @@ from backend.engine.movement import (
     water_transport_relation,
 )
 from backend.engine.queries import _is_water_boat, get_valid_offload_sea_zones, participates_in_sea_hex_naval_combat
-from backend.engine.combat_sim import apply_sim_ring_boosts, run_simulation, SimOptions
+from backend.engine.combat_sim import ring_instance_boosts, run_simulation, SimOptions
+from backend.engine.rings import merge_ring_stat_mods
 from backend.engine.combat_specials import (
     compute_battle_specials_and_modifiers,
     stacks_to_synthetic_units,
@@ -604,7 +605,7 @@ class SimulateCombatOptionsRequest(BaseModel):
     is_sea_raid: bool | None = None  # land combat: Sea Raider special +attack; not naval combat
     retreat_when_attacker_units_le: int | None = None  # retreat when attacker count <= this after a round
     stronghold_initial_hp: int | None = None  # when set, defender stronghold starts at this HP for the sim
-    ring_boosts: list[dict[str, Any]] | None = None  # sim-only: {unit_id, attack, defense, dice, hp}
+    ring_boosts: list[dict[str, Any]] | None = None  # sim-only: {unit_id, attack, defense, dice, hp, side?}
 
 
 class SimulateCombatRequest(BaseModel):
@@ -4493,8 +4494,6 @@ def simulate_combat(request: SimulateCombatRequest, db: Session = Depends(get_db
         prefire_penalty=prefire_penalty_on,
         ring_boosts=list(o.ring_boosts) if o and o.ring_boosts else None,
     )
-    if opts.ring_boosts:
-        ud = apply_sim_ring_boosts(ud, opts.ring_boosts)
     is_sea_raid = bool(opts.is_sea_raid)
     # Build battle context from combat_specials engine (single source of truth) so frontend shows backend-derived specials/shelves
     battle_context: BattleContext | None = None
@@ -4523,6 +4522,16 @@ def simulate_combat(request: SimulateCombatRequest, db: Session = Depends(get_db
                 archer_prefire_applicable=archer_ok,
                 stealth_prefire_applicable=attacker_all_stealth,
             )
+            if opts.ring_boosts:
+                # Shelves show ring-boosted stats for the bearer's side only (the
+                # battle itself applies the same per-instance, side-scoped boosts).
+                ring_att, ring_def = ring_instance_boosts(opts.ring_boosts, att_units, def_units)
+                spec_result.stat_modifiers_attacker = merge_ring_stat_mods(
+                    spec_result.stat_modifiers_attacker, ring_att, attacking=True,
+                )
+                spec_result.stat_modifiers_defender = merge_ring_stat_mods(
+                    spec_result.stat_modifiers_defender, ring_def, attacking=False,
+                )
             battle_context = _build_battle_context(att_units, def_units, spec_result, ud, territory_def)
     except Exception:
         battle_context = None

@@ -26,7 +26,7 @@ standard rounds.
 import math
 import random
 from collections import defaultdict
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Any, Literal, Optional
 
 CasualtyCostVarianceCategory = Literal["Predictable", "Moderate", "Unpredictable"]
@@ -82,11 +82,17 @@ from backend.engine.combat_specials import (
 )
 from backend.engine.definitions import TerritoryDefinition, UnitDefinition
 from backend.engine.movement import _is_sea_zone, _is_water_zone
+from backend.engine.rings import (
+    hp_shield_from_boosts,
+    merge_ring_dice,
+    merge_ring_stat_mods,
+)
 from backend.engine.state import Unit
 from backend.engine.utils import (
     archer_prefire_eligible,
     can_conquer_territory_as_attacker,
     generate_combat_rolls_for_units,
+    generate_dice_rolls_for_units,
     has_unit_special,
 )
 
@@ -116,7 +122,9 @@ class SimOptions:
     fuse_bomb: bool = True
     # True (default): -1 to stealth and archer prefire target stats; False: 0 (setup manifest prefire_penalty).
     prefire_penalty: bool = True
-    # Optional sim-only boosts: {"unit_id", "attack", "defense", "dice", "hp"}.
+    # Optional sim-only boosts: {"unit_id", "attack", "defense", "dice", "hp", "side"?}.
+    # Applied per bearer instance on the given side (rings.combat_boosts parity) — never
+    # baked into shared unit defs, so the enemy copy of the same unit_id is not boosted.
     ring_boosts: list[dict[str, Any]] | None = None
 
 
@@ -148,20 +156,33 @@ def sim_prefire_penalty(state: Any) -> bool:
     return bool(getattr(state, "prefire_penalty", True))
 
 
-def apply_sim_ring_boosts(
-    unit_defs: dict[str, UnitDefinition],
+def ring_instance_boosts(
     ring_boosts: list[dict[str, Any]] | None,
-) -> dict[str, UnitDefinition]:
-    """Copy unit defs and add sim-only ring boosts. The caller's catalog stays unchanged."""
+    attacker_units: list[Unit],
+    defender_units: list[Unit],
+) -> tuple[dict[str, tuple[int, int, int, int]], dict[str, tuple[int, int, int, int]]]:
+    """Map sim ring-boost rows to per-instance boosts, scoped to the bearer's side.
+
+    Row shape: {unit_id, attack, defense, dice, hp, side?} — the same tuple parts as
+    live `rings.combat_boosts`: (attack, defense, extra dice, extra hp) per instance.
+
+    `side` ("attacker" | "defender", case-insensitive) restricts the boost to that
+    side's instances of unit_id — live combat only boosts the ring's bearer instance,
+    never the enemy copy of the same unit type. Any other/omitted side keeps the
+    legacy behavior: every matching instance on either side (only ambiguous when the
+    same unit_id is stacked on both sides).
+
+    Returns (attacker_boosts, defender_boosts): instance_id -> (atk, def, dice, hp).
+    """
+    att: dict[str, tuple[int, int, int, int]] = {}
+    dfn: dict[str, tuple[int, int, int, int]] = {}
     if not ring_boosts:
-        return unit_defs
-    out = dict(unit_defs)
+        return att, dfn
     for row in ring_boosts:
         if not isinstance(row, dict):
             continue
         uid = str(row.get("unit_id") or "").strip()
-        ud = out.get(uid)
-        if ud is None:
+        if not uid:
             continue
 
         def _n(key: str, source: dict[str, Any] = row) -> int:
@@ -170,14 +191,37 @@ def apply_sim_ring_boosts(
             except (TypeError, ValueError):
                 return 0
 
-        out[uid] = replace(
-            ud,
-            attack=int(ud.attack) + _n("attack"),
-            defense=int(ud.defense) + _n("defense"),
-            dice=max(0, int(ud.dice) + _n("dice")),
-            health=max(1, int(ud.health) + _n("hp")),
-        )
-    return out
+        parts = (_n("attack"), _n("defense"), _n("dice"), _n("hp"))
+        if parts == (0, 0, 0, 0):
+            continue
+        side = str(row.get("side") or "").strip().lower()
+        if side in ("attacker", "attack", "att"):
+            targets: list[tuple[list[Unit], dict[str, tuple[int, int, int, int]]]] = [
+                (attacker_units, att),
+            ]
+        elif side in ("defender", "defense", "def"):
+            targets = [(defender_units, dfn)]
+        else:
+            targets = [(attacker_units, att), (defender_units, dfn)]
+        for units, out in targets:
+            for u in units:
+                if u.unit_id != uid:
+                    continue
+                prev = out.get(u.instance_id, (0, 0, 0, 0))
+                out[u.instance_id] = tuple(prev[i] + parts[i] for i in range(4))
+    return att, dfn
+
+
+def _ring_mods(
+    mods: dict[str, int],
+    boosts: dict[str, tuple[int, int, int, int]],
+    *,
+    attacking: bool,
+) -> dict[str, int]:
+    """Merge ring stat boosts into specials mods (same slot rule as the reducer)."""
+    if not boosts:
+        return mods
+    return merge_ring_stat_mods(mods, boosts, attacking=attacking)
 
 
 @dataclass
@@ -251,6 +295,14 @@ def run_one_battle(
         attacker_stacks, defender_stacks, unit_defs,
     )
 
+    # Ring boosts: per-instance, side-scoped (live rings.combat_boosts parity). The HP
+    # part is a hit-absorbing shield (hp_shield), not extra max health — computed once
+    # and depleted in place across phases, same as combat.ring_hp_shield in the reducer.
+    ring_att_boosts, ring_def_boosts = ring_instance_boosts(
+        opts.ring_boosts, attacker_units, defender_units,
+    )
+    ring_hp_shield = hp_shield_from_boosts({**ring_att_boosts, **ring_def_boosts})
+
     instance_to_att_uid = {u.instance_id: u.unit_id for u in attacker_units}
     instance_to_def_uid = {u.instance_id: u.unit_id for u in defender_units}
 
@@ -281,6 +333,9 @@ def run_one_battle(
             attacker_units, unit_defs,
             use_paired_fused_siegework_rules=True,
         )
+        stealth_eff_dice = merge_ring_dice(
+            stealth_eff_dice, attacker_units, unit_defs, ring_att_boosts,
+        )
         dice = generate_combat_rolls_for_units(
             attacker_units, defender_units, unit_defs,
             attacker_effective_dice_override=stealth_eff_dice,
@@ -295,7 +350,9 @@ def run_one_battle(
             is_sea_raid=opts.is_sea_raid,
             stealth_prefire_applicable=True,
         )
-        attacker_mods = spec_stealth.stat_modifiers_attacker
+        attacker_mods = _ring_mods(
+            spec_stealth.stat_modifiers_attacker, ring_att_boosts, attacking=True,
+        )
         prefire_result = resolve_stealth_prefire(
             attacker_units,
             defender_units,
@@ -303,6 +360,7 @@ def run_one_battle(
             dice.get("attacker", []),
             stat_modifiers_attacker_extra=attacker_mods,
             prefire_penalty_delta=pdelta,
+            hp_shield=ring_hp_shield,
             attacker_effective_dice_override=stealth_eff_dice,
             effective_stat_override=stealth_attack_ov or None,
             exclude_archetypes={"siegework"},
@@ -371,18 +429,44 @@ def run_one_battle(
                 is_sea_raid=opts.is_sea_raid,
                 ram_applicable=True,
             )
-            attacker_mods = spec_sw.stat_modifiers_attacker
-            defender_mods = spec_sw.stat_modifiers_defender
+            attacker_mods = _ring_mods(
+                spec_sw.stat_modifiers_attacker, ring_att_boosts, attacking=True,
+            )
+            defender_mods = _ring_mods(
+                spec_sw.stat_modifiers_defender, ring_def_boosts, attacking=False,
+            )
             att_rolling = get_siegework_attacker_rolling_units(
                 attacker_units, unit_defs, defender_territory_is_stronghold,
                 defender_stronghold_hp=stronghold_hp,
                 fuse_bomb=fuse_sim,
             )
             def_sw = get_siegework_defender_rolling_units(defender_units, unit_defs)
-            siege_att_rolls = (
-                [rng.randint(1, DICE_SIDES) for _ in range(siegework_att_dice)] if siegework_att_dice > 0 else []
+            # Ring-only dice override: the siegeworks round rolls base dice for paired
+            # bombs (unlike att_effective_dice, which zeroes them) — same as the reducer.
+            ring_att_siege_dice = merge_ring_dice(
+                None, attacker_units, unit_defs, ring_att_boosts,
             )
-            siege_def_rolls = [rng.randint(1, DICE_SIDES) for _ in range(siegework_def_dice)] if def_sw else []
+            ring_def_siege_dice = merge_ring_dice(
+                None, defender_units, unit_defs, ring_def_boosts,
+            )
+            # Roll counts = base siegework dice + ring bonus dice on the rolling units
+            # (live expands the roll list the same way before resolution).
+            att_siege_extra = sum(
+                ring_att_boosts.get(u.instance_id, (0, 0, 0, 0))[2] for u in att_rolling
+            )
+            def_siege_extra = sum(
+                ring_def_boosts.get(u.instance_id, (0, 0, 0, 0))[2] for u in def_sw
+            )
+            siege_att_total = siegework_att_dice + att_siege_extra
+            siege_def_total = siegework_def_dice + def_siege_extra
+            siege_att_rolls = (
+                [rng.randint(1, DICE_SIDES) for _ in range(siege_att_total)]
+                if siege_att_total > 0 else []
+            )
+            siege_def_rolls = (
+                [rng.randint(1, DICE_SIDES) for _ in range(siege_def_total)]
+                if def_sw else []
+            )
             siege_dice_rolls = {"attacker": siege_att_rolls, "defender": siege_def_rolls}
             siege_result, stronghold_hp, ladder_count = resolve_siegeworks_round(
                 attacker_units,
@@ -396,6 +480,9 @@ def run_one_battle(
                 defender_stronghold_hp=stronghold_hp,
                 defender_territory_is_stronghold=defender_territory_is_stronghold,
                 fuse_bomb=fuse_sim,
+                hp_shield=ring_hp_shield,
+                attacker_effective_dice_override=ring_att_siege_dice,
+                defender_effective_dice_override=ring_def_siege_dice,
             )
             att_siegework_hits = siege_result.attacker_hits
             def_siegework_hits = siege_result.defender_hits
@@ -484,8 +571,13 @@ def run_one_battle(
         # --- Archer prefire: after siegework so surviving archers reflect casualties (e.g. bomb overflow). ---
         defender_archer_units = [u for u in defender_units if archer_prefire_eligible(unit_defs.get(u.unit_id))]
         if attacker_units and defender_archer_units:
+            ring_def_dice = merge_ring_dice(
+                None, defender_units, unit_defs, ring_def_boosts,
+            )
             dice = generate_combat_rolls_for_units(
-                attacker_units, defender_units, unit_defs, rng=rng,
+                attacker_units, defender_units, unit_defs,
+                defender_effective_dice_override=ring_def_dice,
+                rng=rng,
             )
             spec_archer = compute_battle_specials_and_modifiers(
                 attacker_units,
@@ -495,7 +587,9 @@ def run_one_battle(
                 is_sea_raid=opts.is_sea_raid,
                 archer_prefire_applicable=True,
             )
-            defender_mods = spec_archer.stat_modifiers_defender
+            defender_mods = _ring_mods(
+                spec_archer.stat_modifiers_defender, ring_def_boosts, attacking=False,
+            )
             # resolve_archer_prefire applies the stronghold/fortress penalty exemption
             # (archer special) to this delta internally — same contract as the reducer.
             prefire_result = resolve_archer_prefire(
@@ -506,6 +600,8 @@ def run_one_battle(
                 stat_modifiers_defender_extra=defender_mods,
                 territory_def=territory_def,
                 prefire_penalty_delta=pdelta,
+                hp_shield=ring_hp_shield,
+                defender_effective_dice_override=ring_def_dice,
                 casualty_order_attacker=casualty_order_attacker,
             )
             def_prefire_applicable = True
@@ -595,13 +691,23 @@ def run_one_battle(
             unit_defs,
             is_sea_raid=opts.is_sea_raid,
         )
-        attacker_mods = spec_round.stat_modifiers_attacker
-        defender_mods = spec_round.stat_modifiers_defender
+        attacker_mods = _ring_mods(
+            spec_round.stat_modifiers_attacker, ring_att_boosts, attacking=True,
+        )
+        defender_mods = _ring_mods(
+            spec_round.stat_modifiers_defender, ring_def_boosts, attacking=False,
+        )
 
         use_pair_fusion = (not siegeworks_occurred) or fuse_sim
         att_effective_dice, att_self_destruct, att_attack_override = get_attacker_effective_dice_and_bombikazi_self_destruct(
             attacker_units, unit_defs,
             use_paired_fused_siegework_rules=use_pair_fusion,
+        )
+        att_effective_dice = merge_ring_dice(
+            att_effective_dice, attacker_units, unit_defs, ring_att_boosts,
+        )
+        ring_def_dice = merge_ring_dice(
+            None, defender_units, unit_defs, ring_def_boosts,
         )
         # Ladder climbers are re-derived every round (same as live combat): members die
         # between rounds, so a stale set would misroute wall-bypass hits.
@@ -613,6 +719,7 @@ def run_one_battle(
         dice_rolls = generate_combat_rolls_for_units(
             attacker_units, defender_units, unit_defs,
             attacker_effective_dice_override=att_effective_dice,
+            defender_effective_dice_override=ring_def_dice,
             exclude_archetypes={"siegework"},
             rng=rng,
         )
@@ -653,6 +760,8 @@ def run_one_battle(
             defender_stronghold_hp=stronghold_hp,
             exclude_archetypes_from_rolling=["siegework"],
             attacker_ladder_instance_ids=ladder_set,
+            defender_effective_dice_override=ring_def_dice,
+            hp_shield=ring_hp_shield,
         )
 
         for iid in round_result.attacker_casualties:

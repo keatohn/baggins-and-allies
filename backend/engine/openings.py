@@ -28,7 +28,7 @@ from backend.ai.mcts.combat_move import apply_bundled_moves, decide_combat_move_
 from backend.ai.mcts.dice import sample_dice_for_continue, sample_dice_for_initiate
 from backend.ai.mcts import tree_cache
 from backend.engine.actions import end_phase
-from backend.engine.combat_sim import SimOptions, apply_sim_ring_boosts, run_simulation
+from backend.engine.combat_sim import SimOptions, run_simulation
 from backend.engine.definitions import (
     CampDefinition,
     FactionDefinition,
@@ -112,7 +112,7 @@ def _stacks(units) -> list[dict[str, Any]]:
     return [{"unit_id": uid, "count": counts[uid]} for uid in sorted(counts)]
 
 
-def _boost_rows(boosts: dict, units) -> list[dict[str, Any]]:
+def _boost_rows(boosts: dict, units, *, side: str) -> list[dict[str, Any]]:
     by_id = {unit.instance_id: unit for unit in units}
     rows: dict[str, dict[str, Any]] = {}
     for instance_id, parts in boosts.items():
@@ -122,7 +122,7 @@ def _boost_rows(boosts: dict, units) -> list[dict[str, Any]]:
         attack, defense, dice, hp = parts
         row = rows.setdefault(
             unit.unit_id,
-            {"unit_id": unit.unit_id, "attack": 0, "defense": 0, "dice": 0, "hp": 0},
+            {"unit_id": unit.unit_id, "attack": 0, "defense": 0, "dice": 0, "hp": 0, "side": side},
         )
         row["attack"] += int(attack or 0)
         row["defense"] += int(defense or 0)
@@ -605,12 +605,13 @@ def _sim_chance(
     boosts = _boost_rows(
         combat_boosts(state, attackers, unit_defs, origin, {unit.instance_id for unit in attackers}),
         attackers,
-    ) + _boost_rows(combat_boosts(state, defenders, unit_defs, dest), defenders)
+        side="attacker",
+    ) + _boost_rows(combat_boosts(state, defenders, unit_defs, dest), defenders, side="defender")
     result = run_simulation(
         _stacks(attackers),
         _stacks(defenders),
         dest,
-        apply_sim_ring_boosts(unit_defs, boosts),
+        unit_defs,
         territory_defs,
         n_trials=n_trials,
         options=SimOptions(
@@ -620,6 +621,7 @@ def _sim_chance(
             is_sea_raid=sea_raid,
             stronghold_initial_hp=stronghold_hp,
             prefire_penalty=bool(getattr(state, "prefire_penalty", True)),
+            ring_boosts=boosts,
         ),
         seed=seed,
     )
