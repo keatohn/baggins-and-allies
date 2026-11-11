@@ -4503,7 +4503,14 @@ def _handle_retreat(
     if not retreat_territory:
         raise ValueError(f"Invalid retreat territory: {retreat_to}")
 
-    if not _territory_is_friendly_for_retreat(retreat_territory, combat.attacker_faction, faction_defs, unit_defs):
+    retreat_def = territory_defs.get(retreat_to)
+    if retreat_def is not None and _is_water_zone(retreat_def):
+        raise ValueError(
+            f"Cannot retreat to {retreat_to} - must be allied land territory (never water)")
+
+    if not _territory_is_friendly_for_retreat(
+        retreat_territory, combat.attacker_faction, faction_defs, territory_defs, retreat_to
+    ):
         raise ValueError(
             f"Cannot retreat to {retreat_to} - must be allied territory")
 

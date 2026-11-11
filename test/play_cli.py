@@ -335,7 +335,7 @@ def prompt_continue_combat(state, unit_defs, territory_defs, faction_defs):
     print(f"Attackers remaining: {attacker_count}")
     print(f"Defenders remaining: {defender_count}")
 
-    retreat_opts = get_retreat_options(state, territory_defs, faction_defs)
+    retreat_opts = get_retreat_options(state, territory_defs, faction_defs, unit_defs)
 
     print("\nOptions:")
     print("  1. Continue fighting")

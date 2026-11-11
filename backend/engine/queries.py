@@ -1784,8 +1784,17 @@ def _validate_retreat(
     if not dest_territory:
         return ValidationResult(False, f"Territory {destination} does not exist")
 
+    dest_def = territory_defs.get(destination)
+    if dest_def is not None and _is_water_zone(dest_def):
+        return ValidationResult(
+            False,
+            f"Cannot retreat to {destination}: must be allied land territory (never water)"
+        )
+
     attacker_faction = action.faction
-    if not _territory_is_friendly_for_retreat(dest_territory, attacker_faction, faction_defs, unit_defs):
+    if not _territory_is_friendly_for_retreat(
+        dest_territory, attacker_faction, faction_defs, territory_defs, destination
+    ):
         return ValidationResult(
             False,
             f"Cannot retreat to {destination}: must be allied territory"
@@ -3178,12 +3187,18 @@ def _territory_is_friendly_for_retreat(
     territory: TerritoryState,
     attacker_faction: str,
     faction_defs: dict[str, FactionDefinition],
-    unit_defs: dict[str, UnitDefinition],
+    territory_defs: dict[str, TerritoryDefinition],
+    territory_id: str,
 ) -> bool:
     """
-    True if a territory is valid for retreat: allied-owned only (same alliance).
-    Neutral (unowned) territory is not valid for retreat.
+    True if a territory is valid for retreat: allied-owned land only (same alliance).
+    Neutral (unowned) territory is not valid. Water zones (sea/river/lake) are never
+    valid — including ownable lakes such as Esgaroth — because retreat must land units
+    on ground they can normally occupy (pathfinding already blocks water entry).
     """
+    tdef = territory_defs.get(territory_id)
+    if tdef is not None and _is_water_zone(tdef):
+        return False
     owner = territory.owner
     if owner is None:
         return False
@@ -3274,7 +3289,8 @@ def get_retreat_options(
 ) -> list[str]:
     """
     Get valid retreat destinations for the current active combat.
-    Returns list of adjacent territory IDs that are allied (same alliance).
+    Returns list of adjacent land territory IDs that are allied (same alliance).
+    Water zones (sea/river/lake) are never included, even when ownable and allied-owned.
     Only ground-adjacent if any retreating unit is land; aerial_adjacent allowed only if all are aerial.
     Empty when the sea-raid retreat veto applies (the roster still contains a sea-raiding unit).
     """
@@ -3295,7 +3311,9 @@ def get_retreat_options(
         adj_territory = state.territories.get(adj_id)
         if not adj_territory:
             continue
-        if _territory_is_friendly_for_retreat(adj_territory, attacker_faction, faction_defs, unit_defs):
+        if _territory_is_friendly_for_retreat(
+            adj_territory, attacker_faction, faction_defs, territory_defs, adj_id
+        ):
             result.append(adj_id)
 
     return result
