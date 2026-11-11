@@ -48,3 +48,36 @@ export function sourceForRecords(bundle: AdminSetupBundle, library: ScenarioLibr
   return source;
 }
 
+
+export type ScenarioSection = 'units' | 'factions' | 'territories';
+export type SelectionOption = { id: string; seed?: string; name: string };
+
+/** Include existing aliases/custom records without creating duplicate seed entries. */
+export function scenarioSelectionOptions(source: ScenarioSource, library: ScenarioLibrary, section: ScenarioSection): SelectionOption[] {
+  if (section === 'territories') {
+    const defaults = library.maps[source.map] ?? {};
+    return [...new Set([...Object.keys(defaults), ...(source.territory_ids ?? [])])].sort().map((id) => ({
+      id, seed: id, name: String(defaults[id]?.display_name ?? id),
+    }));
+  }
+  const entries = source[section];
+  const options = Object.entries(entries).map(([id, entry]) => ({
+    id, seed: entry.seed, name: String(resolve(library[section][entry.seed ?? ''] ?? {}, entry.overrides ?? {}).display_name ?? id),
+  }));
+  for (const [id, seed] of Object.entries(library[section])) {
+    if (!Object.hasOwn(entries, id) && !options.some((option) => option.seed === id)) {
+      options.push({ id, seed: id, name: String(seed.display_name ?? id) });
+    }
+  }
+  return options.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/** Retained entries keep every override; new entries inherit their seed. */
+export function withScenarioSelection(source: ScenarioSource, section: ScenarioSection, ids: string[]): ScenarioSource {
+  const selected = [...new Set(ids)];
+  if (section === 'territories') return {
+    ...source, territory_ids: selected,
+    territory_overrides: Object.fromEntries(Object.entries(source.territory_overrides ?? {}).filter(([id]) => selected.includes(id))),
+  };
+  return { ...source, [section]: Object.fromEntries(selected.map((id) => [id, source[section][id] ?? { seed: id, overrides: {} }])) };
+}
