@@ -1241,21 +1241,21 @@ function MapAssetField({
     window.addEventListener('admin-maps-changed', load);
     return () => window.removeEventListener('admin-maps-changed', load);
   }, []);
+  const currentMap = String(manifest.map_asset ?? '');
+  const mapOptions = [...new Set([currentMap, ...maps].filter(Boolean))];
   return (
     <>
-      <input
-        type="text"
+      <select
         className="admin-form__input"
-        list="admin-map-assets"
-        placeholder="e.g. wotr_map_1.1"
-        value={String(manifest.map_asset ?? '')}
+        aria-label="Map asset"
+        value={currentMap}
         onChange={(e) => onManifestChange({ ...manifest, map_asset: e.target.value })}
-      />
-      <datalist id="admin-map-assets">
-        {maps.map((id) => (
-          <option key={id} value={id} />
+      >
+        <option value="">Select a map</option>
+        {mapOptions.map((id) => (
+          <option key={id} value={id}>{id}</option>
         ))}
-      </datalist>
+      </select>
       <p className="admin-form__micro">Built-in maps and maps saved from the map builder.</p>
     </>
   );
