@@ -190,3 +190,44 @@ def test_chain_move_carries_ring_and_avoid_forced_to_apply(client, db_session, p
     assert landed["territory_id"] == TARGET_LAND, landed
     assert landed.get("carried_in_by") == HERO_ID, landed
     assert not landed.get("bearer_instance_id"), landed
+
+
+def test_chain_move_boat_only_ids_still_carries_ring(client, db_session, players):
+    """Boat-only payload (the documented drag-the-ship pattern): the hand-built offload
+    pending must store expanded unit ids. apply_carried_ring reads pending_move.unit_instance_ids
+    directly — an unexpanded list drops the hero bearer and leaves carried_in_by unset."""
+    created = client.post("/games/create", json={"name": "M6 boat-only", "setup_id": SETUP_ID})
+    assert created.status_code == 200, created.text
+    game_id = created.json()["game_id"]
+    _arrange_chain(db_session, game_id, players.id)
+
+    res = client.post(
+        f"/games/{game_id}/move",
+        json={
+            "game_id": game_id,
+            "from_territory": ORIGIN_SEA,
+            "to_territory": TARGET_LAND,
+            "unit_instance_ids": [SHIP_ID],
+            "avoid_forced_naval_combat": True,
+            "ring_ids": [RING_ID],
+        },
+    )
+    assert res.status_code == 200, res.text
+
+    pendings = _state_json(db_session, game_id)["pending_moves"]
+    offs = [m for m in pendings if m.get("move_type") == "offload"]
+    assert len(offs) == 1, pendings
+    # Expansion must land on the pending itself, not only inside apply's local list.
+    assert set(offs[0]["unit_instance_ids"]) >= {SHIP_ID, HERO_ID}, offs[0]
+    assert offs[0].get("ring_ids") == [RING_ID], offs[0]
+
+    ended = client.post(f"/games/{game_id}/end-phase", json={"game_id": game_id})
+    assert ended.status_code == 200, ended.text
+
+    raw = _state_json(db_session, game_id)
+    land_units = {u["instance_id"] for u in raw["territories"][TARGET_LAND]["units"]}
+    assert HERO_ID in land_units, land_units
+    landed = next(r for r in raw["rings"] if r["id"] == RING_ID)
+    assert landed["territory_id"] == TARGET_LAND, landed
+    assert landed.get("carried_in_by") == HERO_ID, landed
+    assert not landed.get("bearer_instance_id"), landed
