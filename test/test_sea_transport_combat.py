@@ -979,6 +979,66 @@ def test_validate_end_phase_blocks_when_loaded_boat_must_attack(wotr_defs):
     assert not state.loaded_naval_must_attack_instance_ids
 
 
+def test_load_into_contested_sea_does_not_block_end_phase(wotr_defs):
+    """Loading into a sea that already holds a hostile naval combatant must not set must-attack.
+
+    That naval battle is already pending for the combat phase (get_contested lists it).
+    Blocking end_phase here forced a wrong own-land offload or softlocked the phase when
+    no other attack declaration was available. Empty-sea loads still must attack
+    (covered by test_validate_end_phase_blocks_when_loaded_boat_must_attack).
+    """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    ship_def = unit_defs.get("black_ship")
+    if ship_def is not None:
+        setattr(ship_def, "transport_capacity", 2)
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    sea_11 = state.territories.get("sea_zone_11")
+    harondor = state.territories.get("harondor")
+    assert sea_11 is not None and harondor is not None
+    sea_11.units.clear()
+    harondor.units.clear()
+    ship = _make_unit(state, "harad", "black_ship", unit_defs)
+    enemy_ship = _make_unit(state, "gondor", "gondor_ship", unit_defs)
+    land = _make_unit(state, "harad", "corsair_of_umbar", unit_defs)
+    sea_11.units.extend([ship, enemy_ship])
+    harondor.units.append(land)
+    if harondor.owner == "harad":
+        harondor.owner = "gondor"
+    state.current_faction = "harad"
+    state.phase = "combat_move"
+
+    load_a = move_units(
+        "harad", "harondor", "sea_zone_11", [land.instance_id],
+        move_type="load", load_onto_boat_instance_id=ship.instance_id,
+    )
+    assert validate_action(state, load_a, unit_defs, territory_defs, faction_defs, camp_defs, port_defs).valid
+    state, _ = apply_action(state, load_a, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+
+    sim = get_state_after_pending_moves(state, "combat_move", unit_defs, territory_defs, faction_defs)
+    assert ship.instance_id not in (sim.loaded_naval_must_attack_instance_ids or []), (
+        "hostile co-located sea already has a pending naval battle; load must not set must-attack"
+    )
+
+    ve = validate_action(state, end_phase("harad"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert ve.valid, ve.error
+    state, _ = apply_action(state, end_phase("harad"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert state.phase == "combat"
+    assert not state.loaded_naval_must_attack_instance_ids
+
+    # The co-located battle is what combat phase must resolve.
+    contested = get_contested_territories(state, "harad", faction_defs, unit_defs, territory_defs)
+    contested_ids = [
+        c.get("territory_id") if isinstance(c, dict) else c
+        for c in contested
+    ]
+    assert "sea_zone_11" in contested_ids
+
+
 def test_expand_offload_includes_pending_when_request_lists_embarked_passengers(wotr_defs):
     """Regression: do not skip pending-load splice when IDs already include embarked land units in the sea hex."""
     unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs

@@ -2287,16 +2287,29 @@ def _apply_pending_moves(
         if move_type == "load" and phase == "combat_move" and to_id:
             if not hasattr(state, "loaded_naval_must_attack_instance_ids"):
                 state.loaded_naval_must_attack_instance_ids = []
+            # A sea zone that already holds a hostile naval combatant has a battle pending for
+            # the combat phase — loading there does not create a separate must-attack duty.
+            has_hostile_defender = any(
+                participates_in_sea_hex_naval_combat(u, unit_defs.get(u.unit_id))
+                and water_combat_unit_side(u, faction_id, unit_defs, faction_defs) == "defender"
+                for u in to_territory.units
+            )
             # Boats in to_territory that now have at least one passenger (loaded_onto == boat.instance_id)
+            loaded_boat_ids_this_move: list[str] = []
             for u in to_territory.units:
                 if _purchase_kind(unit_defs.get(u.unit_id)) not in ("naval", "river"):
                     continue
                 boat_id = u.instance_id or ""
                 if any(getattr(p, "loaded_onto", None) == boat_id for p in to_territory.units):
-                    if boat_id not in state.loaded_naval_must_attack_instance_ids:
+                    loaded_boat_ids_this_move.append(boat_id)
+                    if (
+                        not has_hostile_defender
+                        and boat_id not in state.loaded_naval_must_attack_instance_ids
+                    ):
                         state.loaded_naval_must_attack_instance_ids.append(boat_id)
-            if getattr(state, "combat_move_naval_idle_sail_instance_ids", None):
-                loaded_set = set(state.loaded_naval_must_attack_instance_ids or [])
+            # Receiving passengers resolves idle-sail even when must-attack is skipped.
+            if loaded_boat_ids_this_move and getattr(state, "combat_move_naval_idle_sail_instance_ids", None):
+                loaded_set = set(loaded_boat_ids_this_move)
                 state.combat_move_naval_idle_sail_instance_ids = [
                     b
                     for b in state.combat_move_naval_idle_sail_instance_ids
