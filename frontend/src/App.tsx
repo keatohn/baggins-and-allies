@@ -3772,7 +3772,10 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       // skipped siegework entirely. Events are in chronological order — show the first round this action resolved.
       const roundEvent = roundEvents.length === 0 ? undefined : roundEvents[0];
       const endEvent = res.events?.find((e: { type: string }) => e.type === 'combat_ended');
-      if (!roundEvent?.payload) return null;
+      if (!roundEvent?.payload) {
+        addLogEntry('Combat round response contained no round result — check the log and retry', 'error');
+        return null;
+      }
 
       // Backend combat_round_resolved is the full UI contract: dice, hits, casualties, and units at round start.
       const p = roundEvent.payload as {

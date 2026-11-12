@@ -7,6 +7,7 @@ import {
 } from '../audio/gameAudio';
 import { ringCornerClass } from '../ringsDisplay';
 import { computeBadgeHits } from '../utils/combatBadgeHits';
+import { phaseAfterFailedRoll, prospectiveCumulativeCasualties } from '../utils/combatRoundFlow';
 import './CombatDisplay.css';
 
 const CombatRingContext = createContext<Record<string, { id: string; name: string }[]>>({});
@@ -2318,17 +2319,25 @@ function CombatDisplay({
     const mustConquerForRequest = mustConquerPill;
     const fuseBombForRequest = fuseBombPill;
     setCombatPhase('rolling');
+
+    const result = await onStartRound(casualtyOrderForRequest, mustConquerForRequest, fuseBombForRequest);
+    if (!result) {
+      // Failed request: leave the displayed round and casualty lists untouched so the user can
+      // retry. Clearing/folding up-front (the old behavior) wiped the last resolved round and
+      // permanently folded its casualties when the next round never came back.
+      setCombatPhase(phaseAfterFailedRoll(currentRound != null));
+      return;
+    }
+
+    // Success: reset the previous round's reveal state, then commit the prospective casualty
+    // lists (Continue passes folded lists; Start passes none).
     setShowHits(false);
     setShowCasualtyBadges(false);
     setRevealedRows(new Set());
     setCurrentRowKey(null);
     setTerrorFinalRound(null);
-
-    const result = await onStartRound(casualtyOrderForRequest, mustConquerForRequest, fuseBombForRequest);
-    if (!result) {
-      setCombatPhase(roundNumber === 0 ? 'ready' : 'awaiting_decision');
-      return;
-    }
+    if (overridePrevAttacker) setPreviousAttackerCasualties(overridePrevAttacker);
+    if (overridePrevDefender) setPreviousDefenderCasualties(overridePrevDefender);
 
     const newRoundNumber = result.round.roundNumber;
     setRoundNumber(newRoundNumber);
@@ -2392,19 +2401,13 @@ function CombatDisplay({
       undefined,
       { attacker: newElimA, defender: newElimD }
     );
-  }, [onStartRound, casualtyPriorityPill, mustConquerPill, fuseBombPill, animateDiceReveals, previousAttackerCasualties, previousDefenderCasualties, roundNumber, groupedToDefenderRolls, computeEliminatedStacksFromRound]);
+  }, [onStartRound, casualtyPriorityPill, mustConquerPill, fuseBombPill, animateDiceReveals, previousAttackerCasualties, previousDefenderCasualties, currentRound, groupedToDefenderRolls, computeEliminatedStacksFromRound]);
 
-  // Continue = start next round (merge this round's casualties then roll)
+  // Continue = start next round. The fold into previous* casualties happens in handleRoll only
+  // after the request succeeds, so a failed continue keeps the last resolved round on screen.
   const handleContinue = useCallback(() => {
-    const nextPrevA = [...previousAttackerCasualties, ...(currentRound?.attackerCasualties || [])];
-    const nextPrevD = [...previousDefenderCasualties, ...(currentRound?.defenderCasualties || [])];
-    setPreviousAttackerCasualties(nextPrevA);
-    setPreviousDefenderCasualties(nextPrevD);
-    setCurrentRound(null);
-    setShowHits(false);
-    setShowCasualtyBadges(false);
-    setRevealedRows(new Set());
-    setCurrentRowKey(null);
+    const nextPrevA = prospectiveCumulativeCasualties(previousAttackerCasualties, currentRound?.attackerCasualties);
+    const nextPrevD = prospectiveCumulativeCasualties(previousDefenderCasualties, currentRound?.defenderCasualties);
     void handleRoll(nextPrevA, nextPrevD);
   }, [currentRound, previousAttackerCasualties, previousDefenderCasualties, handleRoll]);
 
