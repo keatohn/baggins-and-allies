@@ -1871,6 +1871,8 @@ export const api = {
       is_sea_raid?: boolean;
       retreat_when_attacker_units_le?: number | null;
       stronghold_initial_hp?: number | null;
+      /** None/true: bomb detonates in siegeworks (live default); false: bomb skips the siegeworks round */
+      fuse_bomb?: boolean;
       ring_boosts?: { unit_id: string; attack?: number; defense?: number; dice?: number; hp?: number; side?: 'attacker' | 'defender' }[];
     };
   }) =>
