@@ -252,6 +252,7 @@ from backend.engine.movement import (
     _is_sea_zone,
     _is_river_unit,
     _is_water_zone,
+    expand_sea_offload_instance_ids,
     water_combat_unit_side,
     get_forced_naval_combat_instance_ids,
     resolve_territory_key_in_state,
@@ -6027,15 +6028,29 @@ def do_move(
             val_offload = validate_action(state_simulated, offload_action, ud, td, fd, cd, port_d)
             if not val_offload.valid:
                 raise HTTPException(status_code=400, detail=val_offload.error)
+            # Expand boat-only payloads onto the hand-built pending itself. Apply re-expands
+            # into a local list for movement/charge, but apply_carried_ring reads
+            # pending_move.unit_instance_ids — an unexpanded list drops the hero bearer
+            # (carried_in_by) whenever the client drags only the ship token.
+            expanded_offload_ids = expand_sea_offload_instance_ids(
+                state_simulated,
+                offload_from_sea,
+                to_territory,
+                list(request.unit_instance_ids),
+                ud,
+                td,
+                state.current_faction or "",
+                fd,
+            )
             sea_t = state_simulated.territories.get(offload_from_sea)
             primary_unit_id = ""
-            if sea_t and request.unit_instance_ids:
+            if sea_t and expanded_offload_ids:
                 by_iid = {u.instance_id: u.unit_id for u in sea_t.units}
-                primary_unit_id = str(by_iid.get(request.unit_instance_ids[0]) or "")
+                primary_unit_id = str(by_iid.get(expanded_offload_ids[0]) or "")
             offload_pending = PendingMove(
                 from_territory=offload_from_sea,
                 to_territory=to_territory,
-                unit_instance_ids=request.unit_instance_ids,
+                unit_instance_ids=expanded_offload_ids,
                 phase=state.phase,
                 move_type="offload",
                 primary_unit_id=primary_unit_id,
