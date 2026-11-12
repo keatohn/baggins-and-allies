@@ -605,6 +605,7 @@ class SimulateCombatOptionsRequest(BaseModel):
     is_sea_raid: bool | None = None  # land combat: Sea Raider special +attack; not naval combat
     retreat_when_attacker_units_le: int | None = None  # retreat when attacker count <= this after a round
     stronghold_initial_hp: int | None = None  # when set, defender stronghold starts at this HP for the sim
+    fuse_bomb: bool | None = None  # None/True: bomb detonates in siegeworks (live default); False: bomb skips the siegeworks round
     ring_boosts: list[dict[str, Any]] | None = None  # sim-only: {unit_id, attack, defense, dice, hp, side?}
 
 
@@ -4482,6 +4483,20 @@ def simulate_combat(request: SimulateCombatRequest, db: Session = Depends(get_db
             prefire_penalty_on = True
     n_trials = max(1, min(int(request.n_trials), 100_000))
     o = request.options
+    # L6: casualty orders are one of three known values; anything else is a client
+    # bug, so reject with 422 instead of silently falling back to "best_unit".
+    _VALID_CASUALTY_ORDERS = {
+        "casualty_order_attacker": ("best_unit", "best_attack"),
+        "casualty_order_defender": ("best_unit", "best_defense"),
+    }
+    if o is not None:
+        for _field, _allowed in _VALID_CASUALTY_ORDERS.items():
+            _val = getattr(o, _field, None)
+            if _val is not None and _val not in _allowed:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Invalid {_field}: {_val!r} (expected one of {', '.join(repr(a) for a in _allowed)})",
+                )
     stronghold_hp = getattr(o, "stronghold_initial_hp", None) if o is not None else None
     opts = SimOptions(
         casualty_order_attacker=(o.casualty_order_attacker if o else None) or "best_unit",
@@ -4491,6 +4506,7 @@ def simulate_combat(request: SimulateCombatRequest, db: Session = Depends(get_db
         is_sea_raid=bool(o.is_sea_raid) if o and o.is_sea_raid is not None else False,
         retreat_when_attacker_units_le=o.retreat_when_attacker_units_le if o else None,
         stronghold_initial_hp=stronghold_hp,
+        fuse_bomb=bool(o.fuse_bomb) if o and o.fuse_bomb is not None else True,
         prefire_penalty=prefire_penalty_on,
         ring_boosts=list(o.ring_boosts) if o and o.ring_boosts else None,
     )
