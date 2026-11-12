@@ -2029,6 +2029,64 @@ def test_naval_retreat_disabled_without_adjacent_allied_land(wotr_defs):
     assert ship.instance_id in sea_ids_before and corsair.instance_id in sea_ids_before
 
 
+def test_retreat_never_targets_water_zone(wotr_defs):
+    """
+    Ownable lake Esgaroth is allied to a good attacker and ground-adjacent to North
+    Mirkwood, so it used to appear in get_retreat_options and pass validate/apply —
+    stranding land units on a lake pathfinding can never enter. Water is never a
+    valid retreat destination; the allied land option must still be offered.
+    """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
+    setup = load_starting_setup(setup_id="wotr_exp_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    assert territory_defs["esgaroth"].terrain_type == "lake"
+    assert state.territories["esgaroth"].owner == "erebor"
+    assert "esgaroth" in territory_defs["north_mirkwood"].adjacent
+
+    nm = state.territories["north_mirkwood"]
+    nm.units.clear()
+    nm.owner = "isengard"
+    attacker = _make_unit(state, "gondor", "gondor_soldier", unit_defs)
+    defender = _make_unit(state, "isengard", "urukhai_warrior", unit_defs)
+    nm.units.extend([attacker, defender])
+
+    state.current_faction = "gondor"
+    state.phase = "combat"
+    state.active_combat = ActiveCombat(
+        attacker_faction="gondor",
+        territory_id="north_mirkwood",
+        attacker_instance_ids=[attacker.instance_id],
+        round_number=1,
+        attackers_have_rolled=True,
+        initial_attacker_instance_ids=[attacker.instance_id],
+        initial_defender_instance_ids=[defender.instance_id],
+    )
+
+    opts = get_retreat_options(state, territory_defs, faction_defs, unit_defs)
+    assert "esgaroth" not in opts, f"water must not be a retreat option, got {opts!r}"
+    assert "thranduils_halls" in opts, f"allied land option must remain, got {opts!r}"
+
+    water_action = retreat("gondor", "esgaroth")
+    vr = validate_action(state, water_action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert not vr.valid, vr.error
+    assert "never water" in (vr.error or "")
+
+    nm_units_before = {u.instance_id for u in nm.units}
+    with pytest.raises(ValueError, match="never water"):
+        apply_action(state, water_action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert {u.instance_id for u in nm.units} == nm_units_before
+    assert state.active_combat is not None
+
+    # Land retreat to the same allied neighbour still validates.
+    land_action = retreat("gondor", "thranduils_halls")
+    vr_ok = validate_action(state, land_action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert vr_ok.valid, vr_ok.error
+
+
 def test_contested_sea_zone_counts_aerial_vs_enemy_naval(wotr_defs):
     """Combat phase `combat_territories` must list sea hexes where aerial faces enemy ships (not naval-only filter)."""
     unit_defs, territory_defs, faction_defs, camp_defs, port_defs = wotr_defs
