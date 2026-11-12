@@ -31,6 +31,43 @@ async function connect(url) {
   };
 }
 
+async function verifyMapNavigation(evaluate, viewport, world) {
+  const transform = () => evaluate(`document.querySelector(${JSON.stringify(world)}).style.transform`);
+  const before = await transform();
+  const canceled = await evaluate(`(()=>{
+    const el=document.querySelector(${JSON.stringify(viewport)}), r=el.getBoundingClientRect();
+    window.mapWheelEscaped=false;
+    const outside=()=>{window.mapWheelEscaped=true};
+    document.addEventListener('wheel',outside);
+    const event=new WheelEvent('wheel',{deltaX:7,deltaY:9,clientX:r.left+r.width/2,clientY:r.top+r.height/2,bubbles:true,cancelable:true});
+    el.dispatchEvent(event);document.removeEventListener('wheel',outside);
+    return event.defaultPrevented && !window.mapWheelEscaped;
+  })()`);
+  assert.ok(canceled, 'map scroll is canceled locally and does not reach the page');
+  await delay(100);
+  assert.notEqual(await transform(), before, 'scroll pans the map');
+  const panned = await transform();
+  assert.ok(await evaluate(`(()=>{
+    const el=document.querySelector(${JSON.stringify(viewport)}),r=el.getBoundingClientRect();
+    const event=new WheelEvent('wheel',{deltaY:-4,ctrlKey:true,clientX:r.left+r.width/2,clientY:r.top+r.height/2,bubbles:true,cancelable:true});
+    el.dispatchEvent(event);return event.defaultPrevented;
+  })()`));
+  await delay(100);
+  assert.notEqual(await transform(), panned, 'trackpad pinch zooms the map');
+  const pinched = await transform();
+  assert.ok(await evaluate(`(()=>{
+    const el=document.querySelector(${JSON.stringify(viewport)});
+    return ['gesturestart','gesturechange','gestureend'].every(type=>{
+      const event=new Event(type,{bubbles:true,cancelable:true});
+      Object.defineProperty(event,'scale',{value:type==='gesturechange'?1.05:1});
+      el.dispatchEvent(event);return event.defaultPrevented;
+    });
+  })()`), 'Safari gestures are canceled locally');
+  await delay(100);
+  assert.notEqual(await transform(), pinched, 'Safari pinch zooms the map');
+  assert.equal(await evaluate('window.visualViewport.scale'), 1, 'page zoom is unchanged');
+}
+
 test('Builder selection takes precedence over an interrupted pan; groups move, delete and undo', { skip: !browser, timeout: 20000 }, async () => {
   const metadata = await (await fetch(`${browser}/json/version`)).json();
   const manager = await connect(metadata.webSocketDebuggerUrl);
@@ -71,6 +108,7 @@ test('Builder selection takes precedence over an interrupted pan; groups move, d
       await page.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...to, button, buttons: 0, clickCount: 1 });
       await delay(70);
     };
+    await verifyMapNavigation(evaluate, '.mapbuilder__viewport', '.mapbuilder__world');
     const original = (await state()).transform;
     const click = async (position) => {
       await page.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...position, button: 'left', buttons: 1, clickCount: 1 });
@@ -289,7 +327,7 @@ test('Landscape paints the clicked shared border and Graph has independent selec
         else if(url.includes('.svg'))return new Response(svg,{headers:{'Content-Type':'image/svg+xml'}});
         else if(url.includes('/admin/maps'))data={maps:['wotr_map_1.2']};
         else if(url.includes('/admin/setups'))data={setups:[]};
-        else if(url.includes('/overrides'))data={overrides:{territories:{}}};
+        else if(url.includes('/overrides')){await new Promise(resolve=>setTimeout(resolve,300));data={overrides:{territories:{}}};}
         else if(url.includes('/catalog'))data={terrain_types:['plains','mountains'],archetypes:[],specials:[]};
         else if(url.includes('/landscape/manifest'))data={mountains:['mountain.png'],forest:['forest.png'],landmarks:['city.png']};
         return new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});
@@ -304,8 +342,10 @@ test('Landscape paints the clicked shared border and Graph has independent selec
       await delay(100);
     }
     await delay(500);
+    await verifyMapNavigation(evaluate, '.admin-graph__viewport', '.admin-graph__world');
     await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Landscape').click()");
     await delay(150);
+    await verifyMapNavigation(evaluate, '.admin-graph__viewport', '.admin-graph__world');
     await evaluate("[...document.querySelectorAll('label')].find(l=>l.textContent.includes('Border mode')).querySelector('input').click()");
     await delay(70);
     await evaluate("document.querySelector('.mapov-landscape__thumb').click()");
@@ -401,6 +441,7 @@ test('Landscape paints the clicked shared border and Graph has independent selec
 
     const focus = () => evaluate("document.querySelector('.admin-graph__list-item[aria-selected=true]')?.textContent.trim()");
     await choose('Graph');
+    await verifyMapNavigation(evaluate, '.admin-graph__viewport', '.admin-graph__world');
     assert.equal(await evaluate(`document.querySelector('[aria-label="Graph tool"] button').getAttribute('aria-pressed')`), 'true');
     await click(await point(80, 100)); assert.equal(await focus(), 'a');
     await click(await point(200, 100)); assert.equal(await focus(), 'b');

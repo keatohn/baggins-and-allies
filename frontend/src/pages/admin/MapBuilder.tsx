@@ -1,3 +1,4 @@
+import { listenForMapPinch } from '../../utils/mapGestureZoom';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { api, type EntityRecords } from '../../services/api';
 import { TerritorySeedFields } from './SetupEditorPanels';
@@ -581,6 +582,7 @@ export function MapBuilder() {
     const intentOf = createWheelNavIntentResolver();
     const handler = (e: WheelEvent) => {
       e.preventDefault();
+      e.stopPropagation();
       if (boxRef.current || jointDragRef.current || resizeDragRef.current) return;
       const rect = el.getBoundingClientRect();
       const v = viewRef.current;
@@ -596,7 +598,17 @@ export function MapBuilder() {
       paintView({ x: mx - wx * ns, y: my - wy * ns, scale: ns }, 'soon');
     };
     el.addEventListener('wheel', handler, { passive: false });
-    return () => el.removeEventListener('wheel', handler);
+    const removePinch = listenForMapPinch(el, (factor, clientX, clientY) => {
+      if (boxRef.current || jointDragRef.current || resizeDragRef.current) return;
+      const rect = el.getBoundingClientRect();
+      const v = viewRef.current;
+      const scale = clamp(v.scale * factor, 0.02, 8);
+      const k = scale / v.scale;
+      const mx = clientX - rect.left;
+      const my = clientY - rect.top;
+      paintView({ scale, x: mx - (mx - v.x) * k, y: my - (my - v.y) * k }, 'soon');
+    });
+    return () => { el.removeEventListener('wheel', handler); removePinch(); };
   }, [paintView]);
 
   const mutate = useCallback((fn: (d: BuilderDoc) => void) => {

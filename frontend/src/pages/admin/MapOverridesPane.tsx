@@ -1,3 +1,5 @@
+import { listenForMapPinch } from '../../utils/mapGestureZoom';
+import { wheelZoomScaleMultiplier } from '../../utils/wheelNavIntent';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import GameMap, { DEFAULT_MAP_BASE } from '../../components/GameMap';
 import { TERRITORY_UNIT_PIXEL_NUDGE } from '../../components/mapSpotNudge';
@@ -705,7 +707,7 @@ export function MapOverridesPane({
       }
     }
     setTargetHitAreas(out);
-  }, [loading, paths]);
+  }, [loading, overridesLoading, editorTab, paths]);
 
   // --- calculated spot oracle (hidden GameMap) ----------------------------
 
@@ -771,7 +773,7 @@ export function MapOverridesPane({
     const observer = new ResizeObserver(fit);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [loading, err, viewBox.width, viewBox.height]);
+  }, [loading, overridesLoading, editorTab, err, viewBox.width, viewBox.height]);
 
   const requestClose = () => {
     if (saving) return;
@@ -888,39 +890,39 @@ export function MapOverridesPane({
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
+    const zoom = (factor: number, clientX: number, clientY: number) => {
+      const rect = el.getBoundingClientRect();
+      const mx = clientX - rect.left;
+      const my = clientY - rect.top;
+      setTransform((prev) => {
+        const scale = Math.min(8, Math.max(0.25, prev.scale * factor));
+        const k = scale / prev.scale;
+        return { scale, x: mx - (mx - prev.x) * k, y: my - (my - prev.y) * k };
+      });
+    };
     const handler = (e: WheelEvent) => {
       e.preventDefault();
+      e.stopPropagation();
       // deltaMode: 1 = lines, 2 = pages — normalize to pixels (Firefox wheel, keyboard scroll).
       const mult = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1;
       const dx = e.deltaX * mult;
       const dy = e.deltaY * mult;
-      if (!e.ctrlKey) {
+      if (!e.ctrlKey && !e.metaKey) {
         // Two-finger scroll (and plain mouse wheel) pans.
         setTransform((prev) => ({
           ...prev,
-          x: prev.x + dx,
-          y: prev.y + dy,
+          x: prev.x - dx,
+          y: prev.y - dy,
         }));
         return;
       }
       // Pinch (ctrlKey) and Ctrl+wheel zoom toward cursor.
-      const rect = el.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      const factor = dy < 0 ? 1.08 : 1 / 1.08;
-      setTransform((prev) => {
-        const nextScale = Math.min(8, Math.max(0.25, prev.scale * factor));
-        const k = nextScale / prev.scale;
-        return {
-          scale: nextScale,
-          x: mx - (mx - prev.x) * k,
-          y: my - (my - prev.y) * k,
-        };
-      });
+      zoom(wheelZoomScaleMultiplier(e), e.clientX, e.clientY);
     };
     el.addEventListener('wheel', handler, { passive: false });
-    return () => el.removeEventListener('wheel', handler);
-  }, [loading, err, editorTab]);
+    const removePinch = listenForMapPinch(el, zoom);
+    return () => { el.removeEventListener('wheel', handler); removePinch(); };
+  }, [loading, overridesLoading, err, editorTab]);
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     // Middle-button always pans so the map stays reachable in select/paint modes.
