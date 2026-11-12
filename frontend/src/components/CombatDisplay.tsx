@@ -6,6 +6,7 @@ import {
   stopSiegeworksRoundCommenceSound,
 } from '../audio/gameAudio';
 import { ringCornerClass } from '../ringsDisplay';
+import { computeBadgeHits } from '../utils/combatBadgeHits';
 import './CombatDisplay.css';
 
 const CombatRingContext = createContext<Record<string, { id: string; name: string }[]>>({});
@@ -1317,8 +1318,7 @@ function CombatSide({
   siegeworkRoundActive = false,
   defenderStrongholdHp,
   ladderInstanceIds: ladderInstanceIdSet,
-  attackerRoundCasualties = [],
-  attackerRoundWounded = [],
+  damageByInstanceId,
 }: {
   title: string;
   factionIcon: string;
@@ -1341,8 +1341,8 @@ function CombatSide({
   isLanding: boolean;
   showHits: boolean;
   ladderInstanceIds?: Set<string>;
-  attackerRoundCasualties?: string[];
-  attackerRoundWounded?: string[];
+  /** Per-instance cumulative hit damage this battle; ladder segment badges aggregate from it (same semantics as flat shelves). */
+  damageByInstanceId?: Record<string, number>;
   /** When Terror re-roll: stat -> indices in that row's rolls that were re-rolled (show red X). Defender only. */
   defenderRerolledIndicesByStat?: Record<string, number[]>;
   /** When Terror re-roll: stat -> re-rolled dice to show on shelf next to original. Defender only. */
@@ -1414,8 +1414,6 @@ function CombatSide({
   });
 
   const ladderSetCombat = ladderInstanceIdSet ?? new Set<string>();
-  const casThis = new Set(attackerRoundCasualties);
-  const woundThis = new Set(attackerRoundWounded);
 
   const rowHasDiceForRow = (value: number): boolean => {
     const raw = rolls[value];
@@ -1525,14 +1523,11 @@ function CombatSide({
           }
           let segHits: number[] | undefined;
           if (isAttacker && isAttackerLadderDice(atkDice)) {
+            // Same source and semantics as the flat shelves: cumulative hits on surviving stacks.
             segHits = atkDice.segments.map(seg =>
               rowUnits
                 .filter(u => u.unitType === seg.unitType && ladderSetCombat.has(u.id) === seg.onLadder)
-                .reduce((s, u) => {
-                  if (casThis.has(u.id)) return s + u.health;
-                  if (woundThis.has(u.id)) return s + 1;
-                  return s;
-                }, 0)
+                .reduce((s, u) => s + (damageByInstanceId?.[u.id] ?? 0), 0)
             );
           }
           return (
@@ -2034,80 +2029,43 @@ function CombatDisplay({
     return `${c}60`;
   }, [attacker.factionColor]);
 
-  // Defender instance -> effective defense (for grouping casualties by shelf so hit badges match backend)
-  const defenderEffectiveDefenseByInstance = useMemo(() => {
-    const map: Record<string, number> = {};
-    defenderUnitsThisRound.forEach(u => {
-      map[u.id] = u.effectiveDefense ?? u.defense;
+  // Hit badges: ONE per-instance damage map (see utils/combatBadgeHits) drives every badge —
+  // flat shelves, defender per-shelf badges, and ladder segments — so all shelves show the same
+  // cumulative "hits received" semantics. Round-start payload owns prior damage; live state only
+  // contributes this round's delta for units the payload lists as wounded. Casualties never badge.
+  const {
+    badgeHitsAttacker,
+    badgeHitsDefender,
+    badgeHitsDefenderPerShelf,
+    damageByInstanceAttacker,
+    onlyShowBadgeForHpGreaterThanOne,
+  } = useMemo(() => {
+    const attWounded = currentRound?.attackerWounded;
+    const defWounded = currentRound?.defenderWounded;
+    const attackerBadge = computeBadgeHits({
+      units: attackerUnitsThisRound,
+      liveUnits: attacker.units,
+      cumulativeCasualties: allAttackerCasualties,
+      wounded: Array.isArray(attWounded) ? attWounded : null,
+      postRound: showCasualtyBadges,
     });
-    return map;
-  }, [defenderUnitsThisRound]);
-
-  // Hit badge: at round start = prior damage on living units (HP>1 only); after round = cumulative damage
-  // (max HP − current remaining from live game state, includes pre-rounds and all prior rounds).
-  // Defender hits are per-shelf (by effective defense).
-  const { badgeHitsAttacker, badgeHitsDefender, badgeHitsDefenderPerShelf, onlyShowBadgeForHpGreaterThanOne } = useMemo(() => {
-    const onlyHpGreaterThanOne = !showCasualtyBadges; // round start = true, after round = false
-    const attackerHits: Record<string, number> = {};
-    const defenderHits: Record<string, number> = {};
-    const defenderHitsPerShelf: Record<number, Record<string, number>> = {};
-
-    if (showCasualtyBadges && currentRound) {
-      const liveAttMap = new Map(attacker.units.map(u => [u.id, u]));
-      const liveDefMap = new Map(defender.units.map(u => [u.id, u]));
-      const casualtyAtt = new Set(allAttackerCasualties);
-      const casualtyDef = new Set(allDefenderCasualties);
-
-      attackerUnitsThisRound.forEach(u => {
-        if (casualtyAtt.has(u.id)) return;
-        const live = liveAttMap.get(u.id);
-        const rh = live?.remainingHealth ?? u.remainingHealth;
-        const dmg = Math.max(0, u.health - rh);
-        if (dmg > 0) {
-          attackerHits[u.unitType] = (attackerHits[u.unitType] ?? 0) + dmg;
-        }
-      });
-      defenderUnitsThisRound.forEach(u => {
-        if (casualtyDef.has(u.id)) return;
-        const live = liveDefMap.get(u.id);
-        const rh = live?.remainingHealth ?? u.remainingHealth;
-        const dmg = Math.max(0, u.health - rh);
-        if (dmg > 0) {
-          defenderHits[u.unitType] = (defenderHits[u.unitType] ?? 0) + dmg;
-          const effDef = defenderEffectiveDefenseByInstance[u.id] ?? u.effectiveDefense ?? u.defense;
-          if (!defenderHitsPerShelf[effDef]) defenderHitsPerShelf[effDef] = {};
-          defenderHitsPerShelf[effDef][u.unitType] = (defenderHitsPerShelf[effDef][u.unitType] ?? 0) + dmg;
-        }
-      });
-    } else {
-      // Round start: hits on living units (only count for HP>1 so badge only shows for multi-HP stacks)
-      attackerUnitsThisRound.forEach(u => {
-        if (u.health > 1 && u.remainingHealth < u.health) {
-          const d = u.health - u.remainingHealth;
-          attackerHits[u.unitType] = (attackerHits[u.unitType] ?? 0) + d;
-        }
-      });
-      defenderUnitsThisRound.forEach(u => {
-        if (u.health > 1 && u.remainingHealth < u.health) {
-          const d = u.health - u.remainingHealth;
-          defenderHits[u.unitType] = (defenderHits[u.unitType] ?? 0) + d;
-          const effDef = u.effectiveDefense ?? u.defense;
-          if (!defenderHitsPerShelf[effDef]) defenderHitsPerShelf[effDef] = {};
-          defenderHitsPerShelf[effDef][u.unitType] = (defenderHitsPerShelf[effDef][u.unitType] ?? 0) + d;
-        }
-      });
-    }
-
+    const defenderBadge = computeBadgeHits({
+      units: defenderUnitsThisRound,
+      liveUnits: defender.units,
+      cumulativeCasualties: allDefenderCasualties,
+      wounded: Array.isArray(defWounded) ? defWounded : null,
+      postRound: showCasualtyBadges,
+    });
     return {
-      badgeHitsAttacker: attackerHits,
-      badgeHitsDefender: defenderHits,
-      badgeHitsDefenderPerShelf: defenderHitsPerShelf,
-      onlyShowBadgeForHpGreaterThanOne: onlyHpGreaterThanOne,
+      badgeHitsAttacker: attackerBadge.byUnitType,
+      badgeHitsDefender: defenderBadge.byUnitType,
+      badgeHitsDefenderPerShelf: defenderBadge.byShelf,
+      damageByInstanceAttacker: attackerBadge.byInstanceId,
+      onlyShowBadgeForHpGreaterThanOne: !showCasualtyBadges,
     };
   }, [
     showCasualtyBadges,
     currentRound,
-    defenderEffectiveDefenseByInstance,
     attackerUnitsThisRound,
     defenderUnitsThisRound,
     attacker.units,
@@ -2602,8 +2560,7 @@ function CombatDisplay({
             }
             defenderStrongholdHp={defenderStrongholdHp}
             ladderInstanceIds={ladderInstanceIdSet}
-            attackerRoundCasualties={currentRound?.attackerCasualties ?? []}
-            attackerRoundWounded={currentRound?.attackerWounded ?? []}
+            damageByInstanceId={damageByInstanceAttacker}
           />
 
           <div className="vs-divider">
