@@ -6,11 +6,12 @@
  * cumulative "hits received" by a surviving stack for the whole battle.
  *
  * Sources per displayed unit (round-start payload roster is authoritative):
- *   - prior damage  = max HP − remainingHealth at round start (payload, never live state)
- *   - this round     = live roster delta, counted only when the round payload lists the
- *                      unit as wounded (falls back to 1 for ring HP-shield wounds, which
- *                      cost no health; a payload with no wounded list — legacy combat-log
- *                      entries — falls back to the live delta)
+ *   - cumulative = prior + this round, where
+ *       prior     = max HP − remainingHealth at round start (payload, never live state)
+ *       this round = live roster delta, counted only when the round payload lists the
+ *                    unit as wounded (≥ 1, so ring HP-shield wounds that cost no health
+ *                    still badge; a payload with no wounded list — legacy combat-log
+ *                    entries — falls back to the live delta)
  *   - casualties never badge; they render a red X instead.
  */
 
