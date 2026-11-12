@@ -291,7 +291,7 @@ test('Landscape paints the clicked shared border and Graph has independent selec
         else if(url.includes('/admin/setups'))data={setups:[]};
         else if(url.includes('/overrides'))data={overrides:{territories:{}}};
         else if(url.includes('/catalog'))data={terrain_types:['plains','mountains'],archetypes:[],specials:[]};
-        else if(url.includes('/landscape/manifest'))data={mountains:['mountain.png']};
+        else if(url.includes('/landscape/manifest'))data={mountains:['mountain.png'],forest:['forest.png'],landmarks:['city.png']};
         return new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});
       };
       const territories=Object.fromEntries(['a','b','c'].map(id=>[id,{id,display_name:id,terrain_type:'plains',adjacent:[],produces:{power:0}}]));
@@ -332,8 +332,73 @@ test('Landscape paints the clicked shared border and Graph has independent selec
     await delay(100);
     const pieces = await evaluate("Object.values(window.saved.landscape.territories).flat()");
     assert.ok(pieces.every((p) => Math.abs(p.x - 140) < 0.1 && p.y >= 20 && p.y <= 180), JSON.stringify(pieces));
+    // Free placement lifts terrain-category restrictions as well as boundaries.
+    await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Navigate').click()");
+    await evaluate("[...document.querySelectorAll('label')].find(l=>l.textContent.includes('Free placement')).querySelector('input').click()");
+    await delay(80);
+    assert.ok(await evaluate("!!document.querySelector('.mapov-landscape__thumb[title=\"forest · forest.png\"]')"));
+    assert.ok(await evaluate("!!document.querySelector('.mapov-landscape__thumb[title=\"mountains · mountain.png\"]')"));
+    assert.equal(await evaluate("document.querySelectorAll('.mapov-landscape__thumb[title^=landmarks]').length"), 0);
+    await evaluate("document.querySelector('.mapov-landscape__thumb[title=\"forest · forest.png\"]').click()");
+    await delay(80); await click(await point(80, 100));
+    await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Save').click()");
+    await delay(100);
+    const freeArt = await evaluate("Object.values(window.saved.landscape.territories).flat().filter(p=>p.cat==='forest')");
+    assert.equal(freeArt.length, 1, 'forest art can be selected and placed on a plains territory in free mode');
+    assert.equal(freeArt[0].layer, 'interior');
+    await evaluate("[...document.querySelectorAll('label')].find(l=>l.textContent.includes('Free placement')).querySelector('input').click()");
+    await delay(80);
+    assert.equal(await evaluate("document.querySelectorAll('.mapov-landscape__thumb[title^=forest]').length"), 0);
+    await click(await point(200, 100));
+    await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Save').click()");
+    await delay(80);
+    assert.equal(await evaluate("Object.values(window.saved.landscape.territories).flat().filter(p=>p.cat==='forest').length"), 1, 'turning off free placement clears a now-hidden brush');
+
+
     const toolbarButton = name => `[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(name)})`;
     const choose = async name => { await evaluate(`${toolbarButton(name)}.click()`); await delay(80); };
+    // Numeric scale changes and selection copies retain exact values, with one undo step.
+    await evaluate("document.querySelector('.mapov-placement[aria-label*=forest]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))");
+    await delay(80);
+    await evaluate("(()=>{const input=document.querySelector('input[aria-label^=\"Scale for forest\"]');input.focus();Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'1.375');input.dispatchEvent(new Event('input',{bubbles:true}));})()");
+    await delay(60);
+    await evaluate("document.querySelector('input[aria-label^=\"Scale for forest\"]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))");
+    await delay(80);
+    await choose('Copy selection');
+    await choose('Paste selection');
+    assert.equal(await count(), filled + 2);
+    const setScale = async (value) => {
+      await evaluate(`(()=>{const input=document.querySelector('input[aria-label="Selection scale"]');input.focus();Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(value)});input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+      await delay(60);
+      await evaluate("document.querySelector('input[aria-label=\"Selection scale\"]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))");
+      await delay(60);
+    };
+    assert.equal(await evaluate("document.querySelector('input[aria-label=\"Selection scale\"]').value"), '1.375');
+    await setScale('1.625');
+    await choose('Undo'); assert.equal(await count(), filled + 2);
+    await choose('Undo'); assert.equal(await count(), filled + 1);
+    await choose('Redo'); assert.equal(await count(), filled + 2);
+    await choose('Redo');
+    await evaluate("[...document.querySelectorAll('.mapov-placement[aria-label*=forest]')].at(-1).dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))");
+    await delay(80);
+    // Copy the selected pasted piece using keyboard shortcuts.
+    await evaluate("document.activeElement?.blur();window.dispatchEvent(new KeyboardEvent('keydown',{key:'c',ctrlKey:true,bubbles:true}))");
+    await delay(60);
+    await evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'v',ctrlKey:true,bubbles:true}))");
+    await delay(80);
+    await choose('Save');
+    const copiedForest = await evaluate("Object.values(window.saved.landscape.territories).flat().filter(p=>p.cat==='forest')");
+    assert.deepEqual(copiedForest.map(p=>p.s), [1.375,1.625,1.625]);
+    // Select multiple pieces and verify a bulk paste preserves the whole group.
+    for (let index=0;index<2;index++) {
+      await evaluate(`document.querySelectorAll('.mapov-placement[aria-label*=forest]')[${index}].dispatchEvent(new PointerEvent('pointerdown',{button:0,shiftKey:true,bubbles:true}))`);
+      await delay(50);
+    }
+    await choose('Copy selection'); await choose('Paste selection');
+    assert.equal(await evaluate("document.querySelectorAll('.mapov-placement--multi').length"), 3);
+    await choose('Undo');
+    assert.equal(await count(), filled + 3);
+
     const focus = () => evaluate("document.querySelector('.admin-graph__list-item[aria-selected=true]')?.textContent.trim()");
     await choose('Graph');
     assert.equal(await evaluate(`document.querySelector('[aria-label="Graph tool"] button').getAttribute('aria-pressed')`), 'true');

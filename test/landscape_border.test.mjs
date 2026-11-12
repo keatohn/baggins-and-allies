@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { landscapeCategoriesForTerrain } from '../frontend/src/pages/admin/landscape.ts';
 import { sharedBorderSegments, sharedBorderAtPoint, nearestPointOnBorder, pointsAlongBorder } from '../frontend/src/pages/admin/sharedBorder.ts';
 
 function outline(points) {
@@ -62,4 +63,14 @@ test('shared curved/polyline borders tolerate differing vertex placement', () =>
   const points = pointsAlongBorder(sharedBorderSegments(left, right), 20);
   assert.ok(points.length >= 4);
   assert.ok(points.every((p) => Math.abs(p.x - (100 + Math.min(p.y, 100 - p.y) * 0.4)) < 1));
+});
+
+
+test('free placement exposes all available terrain art without requiring a matching territory', () => {
+  const manifest = { mountains: ['mountain.png'], forest: ['tree.png'], hills: ['hill.png'], anywhere: ['bridge.png'], landmarks: ['city.png'], empty: [] };
+  assert.deepEqual(landscapeCategoriesForTerrain('plains', manifest, { unrestricted: true }), ['anywhere', 'forest', 'hills', 'landmarks', 'mountains']);
+  assert.deepEqual(landscapeCategoriesForTerrain(undefined, manifest, { unrestricted: true }), ['anywhere', 'forest', 'hills', 'landmarks', 'mountains']);
+  assert.deepEqual(landscapeCategoriesForTerrain('forest', manifest), ['forest', 'anywhere', 'landmarks']);
+  assert.deepEqual(landscapeCategoriesForTerrain('forest', manifest, { includeFree: false }), ['forest']);
+  assert.deepEqual(landscapeCategoriesForTerrain('plains', manifest), ['anywhere', 'landmarks']);
 });

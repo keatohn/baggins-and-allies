@@ -4467,3 +4467,7 @@ body:has(.admin-modal--map-editor) .menu-scroll-overlay:not(.menu-scroll-overlay
 
 .admin-modal--territory-seed { width: min(44rem, 94vw); max-height: 88dvh; overflow-y: auto; }
 .mapbuilder__seed-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+
+.mapov-scale-number { width: 5rem; min-width: 5rem; padding: 0.25rem; color: inherit; background: var(--admin-input-bg, #fff); border: 1px solid #aaa; border-radius: 4px; }
+.mapov-landscape__scale:has(.mapov-scale-number) { gap: 0.3rem; flex-wrap: wrap; }
+.mapov-landscape__scale:has(.mapov-scale-number) input[type=range] { min-width: 4rem; }

@@ -155,3 +155,15 @@ In **Maps → Graph**, **Select** changes the focused territory without changing
 Choose **Land**, **Aerial**, or **Ford** to toggle edges from that focus. Alt-click another
 territory to change focus while retaining the active edge tool. Sidebar selections also
 change focus without editing the graph.
+
+In **Maps → Landscape**, **Free placement** exposes all landscape-art categories regardless
+of the selected territory's terrain and allows placement across boundaries. Named landmark
+art stays on the Landmarks pill. Turn free placement off to restore terrain-filtered art;
+an active brush that is no longer available is cleared. Placement changes decorations only,
+not the territory seed's terrain type.
+
+Landscape artwork supports **Copy selection** / **Paste selection** and Ctrl/Cmd+C/V
+for individual or bulk selections. Copies retain exact size, rotation, and darkness;
+each paste is one undo step. Interior groups receive a small offset when they fit;
+border artwork stays on its border. Scale controls also accept numeric multipliers
+(0.25–4); press Enter or leave the field to apply an exact value.

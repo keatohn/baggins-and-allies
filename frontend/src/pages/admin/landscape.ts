@@ -92,9 +92,13 @@ export function pointInsideTerritory(path: SVGPathElement): { x: number; y: numb
 export function landscapeCategoriesForTerrain(
   terrainType: string | undefined,
   manifest: LandscapeManifest,
-  opts?: { includeFree?: boolean },
+  opts?: { includeFree?: boolean; unrestricted?: boolean },
 ): string[] {
   const t = (terrainType ?? '').toLowerCase();
+  if (opts?.unrestricted) {
+    return Object.keys(manifest).filter(cat => manifest[cat]?.length && (opts.includeFree !== false
+      || (cat !== LANDSCAPE_FREE_CATEGORY && cat !== LANDSCAPE_LANDMARK_CATEGORY))).sort();
+  }
   const cats: string[] = [];
   if (manifest[t]?.length) cats.push(t);
   const includeFree = opts?.includeFree !== false;

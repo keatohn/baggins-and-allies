@@ -310,6 +310,25 @@ def convert_map_builder(payload: Any) -> dict[str, Any]:
     interior = [(area, ring) for area, ring in rings if area > _AREA_EPS]
     interior.sort(key=lambda t: (-t[0], t[1]))  # deterministic: largest first
 
+    # A disconnected component's clockwise outer boundary is a hole in its
+    # enclosing face. Keep that winding so default SVG nonzero fills, clipping,
+    # and point-in-fill tests all exclude the enclosed area. Use the component's
+    # exterior boundary, rather than its individual faces (it may be subdivided).
+    holes: dict[int, list[list[str]]] = {}
+    for area, ring in rings:
+        if area >= -_AREA_EPS:
+            continue
+        x, y = joints[ring[0]]
+        candidates = [
+            (outer_area, idx)
+            for idx, (outer_area, outer_ring) in enumerate(interior)
+            if outer_area > -area + _AREA_EPS
+            and _point_in_ring(x, y, outer_ring, joints)
+        ]
+        if candidates:
+            _, parent = min(candidates)
+            holes.setdefault(parent, []).append(ring)
+
     # Reattach labels to the innermost interior ring containing their anchor.
     ring_owner: dict[int, str] = {}
     assigned: dict[str, int] = {}
@@ -338,6 +357,10 @@ def convert_map_builder(payload: Any) -> dict[str, Any]:
         if d is None:
             warnings.append(f"label {tid!r} region is degenerate and was skipped")
             continue
+        for hole in holes.get(idx, []):
+            hole_d = _ring_to_d(hole, joints)
+            if hole_d:
+                d += " " + hole_d
         territories.append({"id": tid, "label": labels[tid]["display_name"], "d": d})
 
     svg = _build_svg(width, height, territories)

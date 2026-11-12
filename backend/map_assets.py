@@ -180,13 +180,21 @@ def load_map_svg(db: Session | None, map_base: str) -> str | None:
     except MapBuilderError:
         return None
     if is_files_setup_source() or db is None:
+        builder_path = MAPS_DIR / base / "builder.json"
+        if builder_path.is_file():
+            return _svg_for(json.loads(builder_path.read_text(encoding="utf-8")))
         svg_path = MAPS_DIR / base / "map.svg"
         if svg_path.is_file():
             return svg_path.read_text(encoding="utf-8")
         return None
     row = _row(db, base)
+    if row is not None and row.builder_json:
+        return _svg_for(json.loads(row.builder_json))
     if row is not None and isinstance(row.svg_text, str) and row.svg_text.strip():
         return row.svg_text
+    builder_path = MAPS_DIR / base / "builder.json"
+    if builder_path.is_file():
+        return _svg_for(json.loads(builder_path.read_text(encoding="utf-8")))
     svg_path = MAPS_DIR / base / "map.svg"
     if svg_path.is_file():
         return svg_path.read_text(encoding="utf-8")

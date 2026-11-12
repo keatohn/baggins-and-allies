@@ -12,6 +12,7 @@ import type {
   MapSpotKind,
 } from '../../types/game';
 import { normalizeMapOverrides } from '../../types/game';
+import { LandscapeScaleInput } from './LandscapeScaleInput';
 import { MapTextureSlider } from './MapTextureSlider';
 import {
   autoGenerateForTerritory,
@@ -351,6 +352,8 @@ export function MapOverridesPane({
   const [cursorMode, setCursorMode] = useState<CursorMode>('navigate');
   const [band, setBand] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [multiSel, setMultiSel] = useState<Set<string>>(() => new Set());
+  const [selectionClipboard, setSelectionClipboard] = useState<{ map: string; items: CopyPlanItem[] } | null>(null);
+  const pasteSequence = useRef(0);
   const [paintRadius, setPaintRadius] = useState(0);
   const [paintScale, setPaintScale] = useState(1);
   const [mountainDarkness, setMountainDarkness] = useState(0);
@@ -1524,11 +1527,11 @@ export function MapOverridesPane({
   const selectedTerrainType = useMemo(() => (selected ? terrainTypeFor(selected) : ''), [selected, terrainTypeFor]);
 
   const selectedCategories = useMemo(() => {
-    const cats = landscapeCategoriesForTerrain(selectedTerrainType, manifest);
+    const cats = landscapeCategoriesForTerrain(selectedTerrainType, manifest, { unrestricted: freePlacement });
     // Border mountains are allowed on any land territory (decorative), independent of terrain type.
     if (borderMode && manifest.mountains && !cats.includes('mountains')) return [...cats, 'mountains'];
     return cats;
-  }, [selectedTerrainType, manifest, borderMode]);
+  }, [selectedTerrainType, manifest, borderMode, freePlacement]);
 
   const paletteCategories = useMemo(() => {
     if (artMode === 'landmarks') {
@@ -1592,6 +1595,7 @@ export function MapOverridesPane({
         x: Math.round(x * 100) / 100,
         y: Math.round(y * 100) / 100,
         layer: snapBorder ? 'border' : 'interior',
+        s: paintScale,
         ...(placing.cat === 'mountains' && mountainDarkness ? { darkness: mountainDarkness } : {}),
       };
       updateLandscape((prev) => {
@@ -2087,6 +2091,87 @@ export function MapOverridesPane({
     }
     return 1;
   }, [multiSel, current]);
+
+  const copySelection = useCallback(() => {
+    const keys = cursorMode === 'select' && multiSel.size
+      ? [...multiSel].map(parsePlacementKey)
+      : selectedPlacement ? [selectedPlacement] : [];
+    const items: CopyPlanItem[] = [];
+    for (const key of keys) {
+      if (!key) continue;
+      const placement = currentRef.current?.landscape?.territories[key.tid]?.[key.index];
+      if (placement) items.push({ tid: key.tid, placement: { ...placement } });
+    }
+    if (items.length) {
+      setSelectionClipboard({ map: mapBase, items });
+      pasteSequence.current = 0;
+    }
+  }, [cursorMode, multiSel, selectedPlacement, mapBase]);
+
+  const pasteSelection = useCallback(() => {
+    if (!selectionClipboard) return;
+    const sameMap = selectionClipboard.map === mapBase;
+    const offset = 20 * (pasteSequence.current + 1);
+    const items: CopyPlanItem[] = [];
+    for (const item of selectionClipboard.items) {
+      // Keep border artwork on its border. Interior copies move as a group when
+      // every translated point remains inside its original territory.
+      items.push({ tid: item.tid, placement: { ...item.placement } });
+    }
+    const canOffset = sameMap && items.every(({ tid, placement: p }) => {
+      const path = territoryPathEl(tid);
+      return p.layer !== 'border' && path && isPointInTerritoryPath(path, p.x + offset, p.y + offset);
+    });
+    for (const item of items) {
+      if (canOffset) { item.placement.x += offset; item.placement.y += offset; }
+      delete item.placement.auto;
+      if (!sameMap) {
+        const p = item.placement;
+        const hit = targetHitAreas.find((area) => isPointInTerritoryPath(area.el, p.x, p.y));
+        if (!hit || p.layer === 'border') {
+          setSaveError('This selection does not fit this map. Use Copy from… to import artwork from another map.');
+          return;
+        }
+        item.tid = hit.tid;
+      }
+    }
+    const map = { ...(currentRef.current?.landscape?.territories ?? {}) };
+    const selectedKeys = new Set<string>();
+    let total = Object.values(map).reduce((sum, list) => sum + list.length, 0);
+    for (const item of items) {
+      const tid = resolveTid(map, item.tid) ?? item.tid;
+      const list = map[tid] ?? [];
+      if (list.length >= 50 || total >= 2500) {
+        setSaveError('Cannot paste: the selection would exceed 50 pieces per territory or 2,500 per map.');
+        return;
+      }
+      selectedKeys.add(placementKey(tid, list.length));
+      map[tid] = [...list, item.placement];
+      total += 1;
+    }
+    updateLandscape(() => ({ territories: map }));
+    pasteSequence.current += 1;
+    setCursorMode('select');
+    setPlacing(null);
+    setSelectedPlacement(null);
+    setMultiSel(selectedKeys);
+  }, [selectionClipboard, mapBase, targetHitAreas, updateLandscape]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (editorTab !== 'landscape' || saving || copyOpen || clearConfirmOpen || discardOpen) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      if (event.key.toLowerCase() === 'c' && (multiSel.size || selectedPlacement)) {
+        event.preventDefault(); copySelection();
+      } else if (event.key.toLowerCase() === 'v' && selectionClipboard) {
+        event.preventDefault(); pasteSelection();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [editorTab, saving, copyOpen, clearConfirmOpen, discardOpen, multiSel, selectedPlacement, selectionClipboard, copySelection, pasteSelection]);
 
   const bulkRotationValue = useMemo(() => {
     for (const key of multiSel) {
@@ -2585,6 +2670,12 @@ export function MapOverridesPane({
                 >
                   {autoBusy ? 'Generating…' : 'Auto-generate'}
                 </button>
+                <button type="button" className="admin-page__btn"
+                  disabled={!(cursorMode === 'select' && multiSel.size) && !selectedPlacement}
+                  onClick={copySelection} title="Copy selected artwork (Ctrl/Cmd+C)">Copy selection</button>
+                <button type="button" className="admin-page__btn"
+                  disabled={!selectionClipboard} onClick={pasteSelection}
+                  title="Paste artwork with its exact size and rotation (Ctrl/Cmd+V)">Paste selection</button>
                 <button
                   type="button"
                   className="admin-page__btn"
@@ -2713,7 +2804,11 @@ export function MapOverridesPane({
                         onChange={(e) => {
                           setBorderMode(e.target.checked);
                           setSaveError(null);
-                          if (e.target.checked) setFreePlacement(false);
+                          if (e.target.checked) {
+                            setFreePlacement(false);
+                            const allowed = landscapeCategoriesForTerrain(selectedTerrainType, manifest);
+                            if (placing && placing.cat !== 'mountains' && !allowed.includes(placing.cat)) setPlacing(null);
+                          }
                         }}
                       />
                       Border mode (between two territories)
@@ -2727,12 +2822,13 @@ export function MapOverridesPane({
                       onChange={(e) => {
                         setFreePlacement(e.target.checked);
                         if (e.target.checked) setBorderMode(false);
+                        else if (artMode === 'landscape' && placing && !landscapeCategoriesForTerrain(selectedTerrainType, manifest).includes(placing.cat)) setPlacing(null);
                       }}
                     />
                     Free placement
                   </label>
                   {freePlacement ? (
-                    <p className="admin-form__micro">Cross territory boundaries freely. In empty space, new pieces belong to the selected territory.</p>
+                    <p className="admin-form__micro">All landscape types are available. Place across territory boundaries freely; in empty space, select a territory to own the new pieces.</p>
                   ) : null}
                   {placing?.cat === 'mountains' ? (
                     <label className="mapov-brush__scale">
@@ -2976,7 +3072,8 @@ export function MapOverridesPane({
                                   </label>
                                 ) : null}
                                 <label className="mapov-landscape__scale" title="Scale">
-                                  <span className="visually-hidden">Scale</span>
+                                  <LandscapeScaleInput value={p.s ?? 1} label={`Scale for ${p.img} ${index + 1}`}
+                                    onChange={(s) => setPlacementAt(selected, index, { s })} />
                                   <input
                                     type="range"
                                     min={0.25}
@@ -3209,6 +3306,7 @@ export function MapOverridesPane({
                   <span className="mapov-bulk__count">{multiSel.size} selected</span>
                   <label className="mapov-bulk__scale" title="Scale all selected pieces">
                     Scale
+                    <LandscapeScaleInput value={bulkScaleValue} label="Selection scale" onChange={setBulkScale} />
                     <input
                       type="range"
                       min={0.25}
@@ -3309,7 +3407,7 @@ export function MapOverridesPane({
                       onChange={(e) => setPaintScale(Number(e.target.value))}
                     />
                   </label>
-                  <span className="mapov-brush__value">{paintScale.toFixed(2)}×</span>
+                  <LandscapeScaleInput value={paintScale} label="Brush piece scale" onChange={setPaintScale} />
                 </div>
               ) : null}
               {editorTab === 'landscape' ? (

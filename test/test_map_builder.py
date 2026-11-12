@@ -635,3 +635,48 @@ def test_save_map_asset_files_source(tmp_path, monkeypatch):
     map_assets.delete_map_asset(None, "files_map_1.1")
     assert not (tmp_path / "files_map_1.1" / "builder.json").exists()
     assert (tmp_path / "files_map_1.1" / "overrides.json").is_file()  # Generated graph remains map data.
+
+
+@pytest.mark.parametrize("subdivide", [False, True])
+def test_enclosed_regions_are_holes_in_surrounding_svg(subdivide):
+    from backend.map_svg_import import _parse_path_rings
+
+    doc = frame_doc(labels={"water": {"x": 100, "y": 100}, "land": {"x": 450, "y": 400}})
+    doc["joints"].update({"a": {"x": 400, "y": 300}, "b": {"x": 600, "y": 300}, "c": {"x": 600, "y": 500}, "d": {"x": 400, "y": 500}})
+    doc["borders"].update({f"island{i}": {"a": a, "b": b} for i, (a, b) in enumerate(zip("abcd", "bcda"))})
+    if subdivide:
+        doc["borders"]["diagonal"] = {"a": "a", "b": "c"}
+        doc["labels"]["other_land"] = {"x": 550, "y": 400}
+    out = convert_map_builder(doc)
+    paths = {t["id"]: t["d"] for t in out["territories"]}
+    rings, _ = _parse_path_rings(paths["water"])
+    assert len(rings) == 2, "surrounding water must exclude the entire enclosed component"
+
+    def winding(x, y):
+        result = 0
+        for ring in rings:
+            for (ax, ay), (bx, by) in zip(ring, ring[1:] + ring[:1]):
+                cross = (bx - ax) * (y - ay) - (x - ax) * (by - ay)
+                if ay <= y < by and cross > 0:
+                    result += 1
+                elif by <= y < ay and cross < 0:
+                    result -= 1
+        return result
+
+    assert winding(100, 100) != 0
+    assert winding(450, 400) == 0
+    assert winding(550, 400) == 0
+
+
+def test_map_svg_rebuilds_stale_cached_export(tmp_path, monkeypatch):
+    import json
+    import backend.map_assets as map_assets
+
+    monkeypatch.setattr(map_assets, "MAPS_DIR", tmp_path)
+    monkeypatch.setattr(map_assets, "is_files_setup_source", lambda: True)
+    directory = tmp_path / "old_map"
+    directory.mkdir()
+    doc = frame_doc(labels={"water": {"x": 100, "y": 100}})
+    (directory / "builder.json").write_text(json.dumps(doc))
+    (directory / "map.svg").write_text("outdated export")
+    assert map_assets.load_map_svg(None, "old_map") == convert_map_builder(doc)["svg"]
