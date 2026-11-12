@@ -689,3 +689,57 @@ test('Builder assigns existing seeds, creates seeds inline and edits shared terr
     page?.close(); await manager.call('Target.closeTarget', { targetId }); manager.close(); await unlink(path).catch(() => {});
   }
 });
+
+test('Manual marker overrides bypass edge buffers; calculated markers retain them', { skip: !browser, timeout: 20000 }, async () => {
+  const metadata = await (await fetch(`${browser}/json/version`)).json();
+  const manager = await connect(metadata.webSocketDebuggerUrl);
+  const { targetId } = await manager.call('Target.createTarget', { url: 'about:blank' });
+  const markerFixture = new URL('../frontend/__marker_override_test.html', import.meta.url);
+  let page;
+  try {
+    const tabs = await (await fetch(`${browser}/json`)).json();
+    page = await connect(tabs.find(tab => tab.id === targetId).webSocketDebuggerUrl);
+    const evaluate = async expression => {
+      const result = await page.call('Runtime.evaluate', { expression, returnByValue: true });
+      assert.ok(!result.exceptionDetails, JSON.stringify(result.exceptionDetails));
+      return result.result.value;
+    };
+    await writeFile(markerFixture, `<html><body><div id="root"></div><script type="module">
+      import React from 'react';import {createRoot} from 'react-dom/client';
+      import GameMap from '/src/components/GameMap.tsx';
+      window.fetch=async input=>String(input).includes('.svg')
+        ?new Response('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"><path id="land" d="M0 0H150V50H0Z"/><path id="sea_zone_1" d="M160 0H300V50H160Z"/></svg>')
+        :new Response('{}',{headers:{'Content-Type':'application/json'}});
+      const noop=()=>{};
+      const props={gameState:{turn_number:1,current_faction:'',phase:'purchase',territories:{},faction_resources:{},pending_purchases:{},pending_moves:[],pending_mobilizations:[],pending_camp_placements:[],map_asset:'test_map'},
+        selectedTerritory:null,selectedUnit:null,territoryData:{land:{name:'Land',terrain:'plains',stronghold:false,produces:2},sea_zone_1:{name:'Sea',terrain:'sea',stronghold:false,produces:0}},
+        territoryUnits:{},rings:[],unitDefs:{},unitStats:{},factionData:{},onTerritorySelect:noop,onUnitSelect:noop,onUnitMove:noop,canAct:false,isMovementPhase:false,isCombatMove:false,isMobilizePhase:false,hasMobilizationSelected:false,pendingMoveConfirm:null,onSetPendingMove:noop,pendingMoves:[]};
+      const root=createRoot(document.getElementById('root'));
+      window.showMarkers=(overrides)=>root.render(React.createElement(GameMap,{...props,mapOverrides:overrides}));
+      window.showMarkers({territories:{LAND:{focus:'override',positions:{marker:{x:10,y:5}}},sea_zone_1:{focus:'override',positions:{number:{x:200,y:5}}}}});
+    </script></body></html>`);
+    await page.call('Page.navigate', { url: `${vite}/__marker_override_test.html` });
+    for (let i = 0; i < 80; i++) {
+      if (await evaluate("document.querySelectorAll('.territory-markers').length>=2")) break;
+      await delay(100);
+    }
+    const positions = () => evaluate(`(()=>{
+      const land=document.querySelector('.territory-power-badge').closest('.territory-markers');
+      const sea=document.querySelector('.sea-zone-number').closest('.territory-markers');
+      return {land:{x:parseFloat(land.style.left),y:parseFloat(land.style.top)},sea:{x:parseFloat(sea.style.left),y:parseFloat(sea.style.top)}};
+    })()`);
+    let points = await positions();
+    assert.ok(points.land.y < 80, JSON.stringify(points));
+    assert.equal(points.land.y, points.sea.y, 'land and sea manual anchors at the same y match');
+    assert.ok(Math.abs(points.land.x / points.land.y - 2) < 0.01, 'manual x/y preserve exact SVG coordinates');
+    await evaluate("window.showMarkers({territories:{land:{focus:'calculated',positions:{marker:{x:10,y:5}}}}})");
+    await delay(500);
+    points = await positions();
+    assert.ok(points.land.y >= 80, 'calculated anchors retain the edge buffer');
+  } finally {
+    if (page) page.close();
+    await manager.call('Target.closeTarget', { targetId }).catch(() => {});
+    manager.close();
+    await unlink(markerFixture).catch(() => {});
+  }
+});

@@ -1618,6 +1618,12 @@ function GameMap({
     return out;
   }, [svgHintAnchors, normalizedMapOverrides]);
 
+  const explicitMarkerTerritories = useMemo(() => new Set(
+    Object.entries(normalizedMapOverrides?.territories ?? {})
+      .filter(([, entry]) => entry.focus === 'override' && entry.positions?.marker)
+      .map(([tid]) => tid.toLowerCase()),
+  ), [normalizedMapOverrides]);
+
   // Use two spots (marker + unit) when territory is large enough in any dimension: by area (big blobs) or by
   // width/height (long thin territories). Kept high so circular capitals stay single-spot.
   const TERRITORY_TWO_SPOT_AREA_THRESHOLD = 100000;
@@ -5025,7 +5031,10 @@ function GameMap({
                         // Inline row when we have power and any of camp/port/home/terrain (no stronghold) — keeps power beside markers, no overlap
                         const powerAndMarkersInline = showPower && (showCamp || hasPort || hasHome || showTerrainIcon) && !showStronghold;
                         if (!showCamp && !showStronghold && !showPower && !hasPort && !hasHome && !(isSeaZone && seaZoneNum) && !showTerrainIcon) return null;
-                        const clampedMarkerPos = clampToMap(screenPos);
+                        // Manual marker anchors must match the editor, including at map edges.
+                        const clampedMarkerPos = explicitMarkerTerritories.has(territoryId.toLowerCase())
+                          ? screenPos
+                          : clampToMap(screenPos);
                         const h = effectiveHintAnchors[territoryId];
                         const useSvgHintAnchors = !!(h?.number || h?.icons || h?.logo);
                         const hintScr = (p: { x: number; y: number }) => svgHintPointToOverlay(p);
