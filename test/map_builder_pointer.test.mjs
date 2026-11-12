@@ -264,7 +264,7 @@ test('Seeds uses matching admin styles and a top-right Close on every tab', { sk
   }
 });
 
-test('Landscape border mode fills and paints only the clicked shared border', { skip: !browser, timeout: 20000 }, async () => {
+test('Landscape paints the clicked shared border and Graph has independent selection and edge tools', { skip: !browser, timeout: 20000 }, async () => {
   const metadata = await (await fetch(`${browser}/json/version`)).json();
   const manager = await connect(metadata.webSocketDebuggerUrl);
   const { targetId } = await manager.call('Target.createTarget', { url: 'about:blank' });
@@ -332,6 +332,32 @@ test('Landscape border mode fills and paints only the clicked shared border', { 
     await delay(100);
     const pieces = await evaluate("Object.values(window.saved.landscape.territories).flat()");
     assert.ok(pieces.every((p) => Math.abs(p.x - 140) < 0.1 && p.y >= 20 && p.y <= 180), JSON.stringify(pieces));
+    const toolbarButton = name => `[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(name)})`;
+    const choose = async name => { await evaluate(`${toolbarButton(name)}.click()`); await delay(80); };
+    const focus = () => evaluate("document.querySelector('.admin-graph__list-item[aria-selected=true]')?.textContent.trim()");
+    await choose('Graph');
+    assert.equal(await evaluate(`document.querySelector('[aria-label="Graph tool"] button').getAttribute('aria-pressed')`), 'true');
+    await click(await point(80, 100)); assert.equal(await focus(), 'a');
+    await click(await point(200, 100)); assert.equal(await focus(), 'b');
+    assert.equal(await evaluate(`${toolbarButton('Undo')}.disabled`), true, 'selecting territories creates no graph edits');
+    await click(await point(80, 100));
+    await choose('Land');
+    await click(await point(200, 100)); assert.equal(await focus(), 'a');
+    assert.ok(await evaluate("document.querySelector('path[data-tid=b]').classList.contains('admin-graph__path--neighbor-land')"));
+    await choose('Select'); await click(await point(320, 100)); assert.equal(await focus(), 'c');
+    await choose('Land');
+    const target = await point(80, 100);
+    await page.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...target, button: 'left', buttons: 1, clickCount: 1, modifiers: 1 });
+    await page.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...target, button: 'left', buttons: 0, clickCount: 1, modifiers: 1 });
+    await delay(80); assert.equal(await focus(), 'a');
+    await choose('Save');
+    const graph = await evaluate('window.saved.graph');
+    assert.deepEqual(graph.adjacent.a, ['b']); assert.deepEqual(graph.adjacent.b, ['a']);
+    assert.ok(!graph.adjacent.c?.length, 'Select and Alt-click do not toggle unwanted connections');
+    await choose('Icon'); await choose('Graph');
+    assert.equal(await evaluate("document.querySelector('.admin-graph__type--select').getAttribute('aria-pressed')"), 'true');
+
+
   } finally {
     page?.close();
     await manager.call('Target.closeTarget', { targetId });
@@ -522,8 +548,10 @@ test('Builder assigns existing seeds, creates seeds inline and edits shared terr
     };
     const picker = `document.querySelector('select[aria-label="Territory seed"]')`;
     await clickButton('Label'); await clickRegion(250, 400);
+    assert.equal(await evaluate(`${picker}.querySelector('option[value="shire"]').textContent`), 'Shared Shire');
+    assert.ok(await evaluate(`${button('Create new territory seed')} && !${button('Create new territory seed')}.disabled`));
     await change(picker, 'shire'); await clickButton('Assign territory');
-    assert.match(await evaluate("document.querySelector('[data-label-id=shire] text').textContent"), /Shared Shire.*shire/);
+    assert.equal(await evaluate("document.querySelector('[data-label-id=shire] text').textContent"), 'Shared Shire');
     await delay(450);
     let labels = await evaluate("JSON.parse(localStorage.getItem('admin_map_builder_drafts_v1')).drafts[0].doc.labels");
     assert.deepEqual(Object.keys(labels.shire).sort(), ['x', 'y']);
@@ -533,10 +561,10 @@ test('Builder assigns existing seeds, creates seeds inline and edits shared terr
     await clickButton('Save seed and assign');
     assert.equal(await evaluate('window.lastUpdatedSeed.id'), 'shire');
     assert.equal(await evaluate('window.lastUpdatedSeed.terrain_type'), 'forest');
-    assert.match(await evaluate("document.querySelector('[data-label-id=shire] text').textContent"), /Lush Shire.*shire/);
+    assert.equal(await evaluate("document.querySelector('[data-label-id=shire] text').textContent"), 'Lush Shire');
     await clickRegion(750, 400);
     assert.equal(await evaluate(`${picker}.querySelector('option[value="shire"]').disabled`), true);
-    await change(picker, '__create__');
+    await clickButton('Create new territory seed');
     await change(control('Display name', 'input'), 'Mountain Pass', 'input');
     assert.equal(await evaluate("document.querySelector('input[aria-label=\"New territory ID\"]').value"), 'mountain_pass');
     await change(control('Terrain type', 'select'), 'mountains');
@@ -546,7 +574,7 @@ test('Builder assigns existing seeds, creates seeds inline and edits shared terr
     await clickButton('Create and assign');
     const created = await evaluate('window.lastCreatedSeed');
     assert.equal(created.id, 'mountain_pass'); assert.equal(created.terrain_type, 'mountains'); assert.deepEqual(created.produces, { power: 6 });
-    assert.match(await evaluate("document.querySelector('[data-label-id=mountain_pass] text').textContent"), /Mountain Pass.*mountain_pass/);
+    assert.equal(await evaluate("document.querySelector('[data-label-id=mountain_pass] text').textContent"), 'Mountain Pass');
     await delay(450);
     labels = await evaluate("JSON.parse(localStorage.getItem('admin_map_builder_drafts_v1')).drafts[0].doc.labels");
     assert.deepEqual(Object.keys(labels).sort(), ['mountain_pass', 'shire']);

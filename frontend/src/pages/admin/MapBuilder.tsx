@@ -815,7 +815,7 @@ export function MapBuilder() {
     for (const [tid, lab] of Object.entries(d.labels)) {
       if (findRingIndex(rings, d.joints, lab.x, lab.y) === idx) {
         setSelection({ kind: 'label', id: tid });
-        setStatus(`${String(territorySeeds[tid]?.display_name ?? tid)} (${tid})`);
+        setStatus(String(territorySeeds[tid]?.display_name ?? tid));
         return;
       }
     }
@@ -957,7 +957,7 @@ export function MapBuilder() {
       const labelId = labelAtPoint(docRef.current.labels, w, HIT_PX / viewRef.current.scale);
       if (labelId) {
         setSelection({ kind: 'label', id: labelId });
-        setStatus(`${String(territorySeeds[labelId]?.display_name ?? labelId)} (${labelId})`);
+        setStatus(String(territorySeeds[labelId]?.display_name ?? labelId));
         downRef.current = null;
         return;
       }
@@ -1404,11 +1404,13 @@ export function MapBuilder() {
     if (tid !== labelDialog.existing && tid in docRef.current.labels) { setLabelDialog({ ...labelDialog, error: `Territory ${tid} is already assigned on this map.` }); return; }
     if (labelDialog.mode === 'existing' && !territorySeeds[tid]) { setLabelDialog({ ...labelDialog, error: 'Select an existing territory seed.' }); return; }
     if (labelDialog.existing && tid !== labelDialog.existing && !window.confirm(`Assign this region to ${tid}? Saving the map will replace ${labelDialog.existing} in affected setups and remove its old ownership and starting units. The new territory starts unowned and empty.`)) return;
+    let assignedName = String(territorySeeds[tid]?.display_name ?? labelDialog.draft.display_name ?? tid);
     setLabelBusy(true);
     try {
       if (labelDialog.mode === 'create' || labelDialog.edit) {
         const record = { ...labelDialog.draft, id: tid };
         const result = labelDialog.mode === 'create' ? await api.adminCreateTerritorySeed(record) : await api.adminUpdateTerritorySeed(tid, record);
+        assignedName = String(result.seed.display_name ?? tid);
         setTerritorySeeds(current => ({ ...current, [tid]: result.seed }));
         window.dispatchEvent(new Event('admin-territory-seeds-changed'));
       }
@@ -1418,7 +1420,7 @@ export function MapBuilder() {
         d.labels[tid] = { x: labelDialog.x, y: labelDialog.y };
       });
       pushHistory(snapshot); setSelection({ kind: 'label', id: tid }); setLabelDialog(null);
-      setStatus(`Territory assigned: ${tid} · Name, terrain and properties come from its shared seed`);
+      setStatus(`Territory assigned: ${assignedName}`);
     } catch (error) { setLabelDialog(current => current ? { ...current, error: error instanceof Error ? error.message : String(error) } : current); }
     finally { setLabelBusy(false); }
   };
@@ -2209,7 +2211,7 @@ export function MapBuilder() {
                         fontSize={11 * k}
                         strokeWidth={1.1 * k}
                       >
-                        {String(territorySeeds[tid]?.display_name ?? tid)} ({tid})
+                        {String(territorySeeds[tid]?.display_name ?? tid)}
                       </text>
                     ) : null}
                   </g>
@@ -2269,7 +2271,7 @@ export function MapBuilder() {
           <span className="mapbuilder__hint">{status ?? TOOL_HINTS[tool]}</span>
           {selection ? (
             <span className="mapbuilder__sel">
-              {selection.kind === 'joints' ? `${selection.ids.length} nodes selected` : `${selection.kind}: ${selection.id}`} · Delete to remove
+              {selection.kind === 'joints' ? `${selection.ids.length} nodes selected` : selection.kind === 'label' ? String(territorySeeds[selection.id]?.display_name ?? selection.id) : `${selection.kind}: ${selection.id}`} · Delete to remove
               {selection.kind === 'label' && <button type="button" className="admin-page__btn" onClick={() => { const label = docRef.current.labels[selection.id]; if (label) selectRegionNodes(label); }}>Select region nodes</button>}
             </span>
           ) : null}
@@ -2314,22 +2316,24 @@ export function MapBuilder() {
             {seedError && <p className="admin-page__error" role="alert">Could not load territory seeds: {seedError} <button type="button" className="admin-page__btn" onClick={() => window.dispatchEvent(new Event('admin-territory-seeds-changed'))}>Retry</button></p>}
             <fieldset disabled={labelBusy || seedLoading} className="mapbuilder__seed-fields">
               <label className="mapbuilder__field admin-form__label">Territory seed
-                <select autoFocus className="admin-form__input" aria-label="Territory seed" value={labelDialog.mode === 'create' ? '__create__' : labelDialog.tid} onChange={e => {
+                <select autoFocus className="admin-form__input" aria-label="Territory seed" value={labelDialog.mode === 'create' ? '' : labelDialog.tid} onChange={e => {
                   const tid = e.target.value;
-                  if (tid === '__create__') setLabelDialog({ ...labelDialog, mode: 'create', tid: '', edit: false, tidTouched: false, error: null,
-                    draft: { display_name: '', terrain_type: terrainTypes.includes('plains') ? 'plains' : terrainTypes[0] ?? '', produces: { power: 0 }, ownable: true, is_stronghold: false } });
-                  else setLabelDialog({ ...labelDialog, mode: 'existing', tid, edit: false, draft: structuredClone(territorySeeds[tid] ?? {}), error: null });
+                  setLabelDialog({ ...labelDialog, mode: 'existing', tid, edit: false, draft: structuredClone(territorySeeds[tid] ?? {}), error: null });
                 }}>
                   <option value="">{seedLoading ? 'Loading seeds…' : 'Select a territory…'}</option>
-                  {Object.entries(territorySeeds).sort(([a, left], [b, right]) => String(left.display_name ?? a).localeCompare(String(right.display_name ?? b))).map(([tid, seed]) => <option key={tid} value={tid} disabled={tid !== labelDialog.existing && tid in doc.labels}>{String(seed.display_name ?? tid)} ({tid}){tid !== labelDialog.existing && tid in doc.labels ? ' — already assigned' : ''}</option>)}
-                  <option value="__create__">Create new territory…</option>
+                  {Object.entries(territorySeeds).sort(([a, left], [b, right]) => String(left.display_name ?? a).localeCompare(String(right.display_name ?? b))).map(([tid, seed]) => <option key={tid} value={tid} disabled={tid !== labelDialog.existing && tid in doc.labels}>{String(seed.display_name ?? tid)}{tid !== labelDialog.existing && tid in doc.labels ? ' — already assigned' : ''}</option>)}
                 </select>
               </label>
+              <button type="button" className="admin-page__btn" aria-pressed={labelDialog.mode === 'create'} onClick={() => {
+                if (labelDialog.mode === 'create') return;
+                setLabelDialog({ ...labelDialog, mode: 'create', tid: '', edit: false, tidTouched: false, error: null,
+                  draft: { display_name: '', terrain_type: terrainTypes.includes('plains') ? 'plains' : terrainTypes[0] ?? '', produces: { power: 0 }, ownable: true, is_stronghold: false } });
+              }}>Create new territory seed</button>
               {labelDialog.mode === 'create' && <label className="mapbuilder__field admin-form__label">New territory ID
                 <input className="admin-form__input" aria-label="New territory ID" value={labelDialog.tid} onChange={e => setLabelDialog({ ...labelDialog, tid: e.target.value, tidTouched: true, error: null })} />
               </label>}
               {labelDialog.mode === 'existing' && labelDialog.tid && !labelDialog.edit && <>
-                <p className="admin-form__micro">ID: <strong>{labelDialog.tid}</strong> · Terrain: {String(territorySeeds[labelDialog.tid]?.terrain_type ?? 'unset')}. Name and properties are inherited from this seed.</p>
+                <p className="admin-form__micro">Terrain: {String(territorySeeds[labelDialog.tid]?.terrain_type ?? 'unset')}. Name and properties are inherited from this seed.</p>
                 <button type="button" className="admin-page__btn" onClick={() => setLabelDialog({ ...labelDialog, edit: true })}>Edit shared seed</button>
               </>}
               {(labelDialog.mode === 'create' || labelDialog.edit) && <>

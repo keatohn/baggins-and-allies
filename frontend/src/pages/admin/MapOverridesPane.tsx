@@ -339,6 +339,7 @@ export function MapOverridesPane({
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [editorTab, setEditorTab] = useState<'icon' | 'landscape' | 'builder' | 'graph'>('icon');
   const [edgeField, setEdgeField] = useState<TerritoryEdgeField>('adjacent');
+  const [graphMode, setGraphMode] = useState<'select' | 'edge'>('select');
   const [manifest, setManifest] = useState<LandscapeManifest>({});
   const [placing, setPlacing] = useState<{ cat: string; img: string } | null>(null);
   const [borderMode, setBorderMode] = useState(false);
@@ -607,6 +608,7 @@ export function MapOverridesPane({
     setDraft(null);
     clearHistory();
     setSelected(null);
+    setGraphMode('select');
     setPngFailed(false);
     setSearch('');
     setTerrainFilter('');
@@ -1161,8 +1163,8 @@ export function MapOverridesPane({
     const tid = territoryIdFromPoint(e.clientX, e.clientY);
     if (editorTab === 'graph') {
       if (!tid) return;
-      if (selected && !sameTerritoryId(tid, selected)) toggleGraphEdge(selected, tid);
-      else setSelected(tid);
+      if (graphMode === 'select' || e.altKey || !selected || sameTerritoryId(tid, selected)) setSelected(tid);
+      else toggleGraphEdge(selected, tid);
       return;
     }
     if (tid) {
@@ -2404,7 +2406,7 @@ export function MapOverridesPane({
     editorTab === 'builder'
       ? 'Draw border lines once — neighbours share the same line. Set the map size, sketch with Pen/Pencil, then Label each enclosed region; Build SVG converts the graph into closed territory paths (saved work autosaves in this browser).'
       : editorTab === 'graph'
-      ? 'Choose a territory, then click another to toggle that border. Land replaces aerial and ford. Aerial and ford can both stay. Save writes both sides onto this map and every setup that uses it.'
+      ? 'Select changes the focused territory without editing connections. Choose Land, Aerial or Ford to toggle connections from that territory. Alt-click changes focus while an edge tool is active. Land replaces aerial and ford; aerial and ford can both stay.'
       : editorTab === 'landscape'
       ? 'Place terrain art constrained by each territory’s type, or switch to Landmarks for named places. Auto-generate only adds art; existing terrain and landmarks stay. Save applies to every setup using this map.'
       : spots
@@ -2476,6 +2478,7 @@ export function MapOverridesPane({
                   setBand(null);
                   setMultiSel(new Set());
                   setEdgeField('adjacent');
+                  setGraphMode('select');
                 }}
               >
                 Graph
@@ -2523,14 +2526,17 @@ export function MapOverridesPane({
               </>
             )}
             {editorTab === 'graph' ? (
-              <div className="admin-graph__types" role="group" aria-label="Adjacency type">
+              <div className="admin-graph__types" role="group" aria-label="Graph tool">
+                <button type="button" className={`admin-graph__type admin-graph__type--select${graphMode === 'select' ? ' admin-graph__type--active' : ''}`}
+                  aria-pressed={graphMode === 'select'} onClick={() => setGraphMode('select')}
+                  title="Select a territory without changing its connections">Select</button>
                 {EDGE_TYPES.map((type) => (
                   <button
                     key={type.field}
                     type="button"
-                    className={`admin-graph__type admin-graph__type--${type.kind}${edgeField === type.field ? ' admin-graph__type--active' : ''}`}
-                    aria-pressed={edgeField === type.field}
-                    onClick={() => setEdgeField(type.field)}
+                    className={`admin-graph__type admin-graph__type--${type.kind}${graphMode === 'edge' && edgeField === type.field ? ' admin-graph__type--active' : ''}`}
+                    aria-pressed={graphMode === 'edge' && edgeField === type.field}
+                    onClick={() => { setEdgeField(type.field); setGraphMode('edge'); }}
                   >
                     {type.label}
                   </button>

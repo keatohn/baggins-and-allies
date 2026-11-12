@@ -131,10 +131,10 @@ resize gesture is one undo/redo step. Shared nodes still reshape connected neigh
 A map region is assigned to a shared territory seed ID; the Builder document stores only
 `labels: {"seed_id": {"x": ..., "y": ...}}`. Its name, terrain, image, production and stronghold
 properties come from that seed. There is no independent map territory name or second ID.
-The ID is shown beside the inherited name when a territory is selected.
+The inherited display name is shown when a territory is selected; its ID remains an internal reference.
 
 Use **Builder → Label → Assign territory** to pick an existing seed from the dropdown or
-choose **Create new territory**. The popup includes the same metadata fields as Seeds →
+click the **Create new territory seed** button below the dropdown. The popup includes the same metadata fields as Seeds →
 Territories. **Create and assign** creates the seed immediately and assigns its ID in the
 current draft; save the map to publish the assignment. A seed can only be assigned once per
 map. Unassigned regions can remain while drawing. Imported unknown IDs must be assigned to
@@ -150,3 +150,8 @@ The terrain migration chooses a deterministic shared default for legacy IDs and 
 different existing map terrain as explicit setup overrides. Checked-in scenario terrain is
 verified against a baseline from the pre-migration files. Old map-level terrain API payloads
 remain compatible by updating shared seeds; new UI edits use the seed endpoints.
+
+In **Maps → Graph**, **Select** changes the focused territory without changing connections.
+Choose **Land**, **Aerial**, or **Ford** to toggle edges from that focus. Alt-click another
+territory to change focus while retaining the active edge tool. Sidebar selections also
+change focus without editing the graph.

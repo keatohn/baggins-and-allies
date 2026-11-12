@@ -1728,6 +1728,12 @@ body:has(.combat-sim-modal-overlay) {
   cursor: pointer;
 }
 
+.admin-graph__type--active.admin-graph__type--select {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fffef8;
+}
+
 .admin-graph__type--active.admin-graph__type--land {
   background: #2f7a3a;
   border-color: #2f7a3a;
