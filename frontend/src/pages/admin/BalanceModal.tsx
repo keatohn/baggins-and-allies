@@ -67,7 +67,7 @@ export function BalanceModal({
       starting_setup: bundle.starting_setup,
     };
     api
-      .adminBalance(payload, withRings)
+      .adminBalance(payload, withRings, true)
       .then((next) => {
         if (!cancelled) setReport(next);
       })
@@ -82,8 +82,11 @@ export function BalanceModal({
   const alliances = report?.alliances ?? [];
   const good = alliances.find((row) => row.id === 'good');
   const evil = alliances.find((row) => row.id === 'evil');
-  const goodShare = (good?.starting_power_share ?? 0) * 100;
-  const evilShare = (evil?.starting_power_share ?? 0) * 100;
+  const projection = report?.opening_projection;
+  const goodProjectedShare = projection?.alliances.find((row) => row.id === 'good')?.metrics.starting_power_share?.mean;
+  const evilProjectedShare = projection?.alliances.find((row) => row.id === 'evil')?.metrics.starting_power_share?.mean;
+  const goodShare = (goodProjectedShare ?? 0) * 100;
+  const evilShare = (evilProjectedShare ?? 0) * 100;
 
   return (
     <div className="admin-modal-overlay" role="presentation" onClick={onClose}>
@@ -110,29 +113,29 @@ export function BalanceModal({
         </div>
 
         {error ? <p className="admin-page__error">{error}</p> : null}
-        {!report && !error ? <p className="admin-form__micro">Calculating…</p> : null}
+        {!report && !error ? <p className="admin-form__micro">Calculating balance including opening combats…</p> : null}
 
         {report ? (
           <>
-            {good && evil ? (
+            {good && evil && projection ? (
               <div className="balance-share-block">
                 <div className="balance-share-legend">
-                  <span>Good {shareLabel(good)}</span>
-                  <span>Evil {shareLabel(evil)}</span>
+                  <span>Good {shareLabel({ ...good, starting_power_share: goodProjectedShare })}</span>
+                  <span>Evil {shareLabel({ ...evil, starting_power_share: evilProjectedShare })}</span>
                 </div>
                 <div className="balance-share" aria-hidden>
                   <div className="balance-share__good" style={{ width: `${goodShare}%` }} />
                   <div className="balance-share__evil" style={{ width: `${evilShare}%` }} />
                 </div>
                 <p className="admin-form__micro">
-                  Share of modeled starting power. An alliance that already holds enough strongholds takes the whole share.
-                  An alliance whose target is higher than the number of strongholds on the map cannot win and scores 0
-                  while another alliance still can. Otherwise each side keeps less of its units and economy as more
-                  strongholds remain.
+                  Final balance after opening combats, averaged across {projection.runs} seeded runs in faction turn order.
+                  Casualties, positioning, production and stronghold captures affect these percentages.
+                  Purchases, noncombat reinforcement, mobilization and income collection are excluded.
                 </p>
               </div>
             ) : null}
 
+            <h3 className="balance-subtitle">Starting position before opening combats</h3>
             {report.readings.length > 0 ? (
               <ul className="balance-readings">
                 {report.readings.map((line) => (
@@ -242,6 +245,28 @@ export function BalanceModal({
               </p>
             ) : null}
 
+            <h3 className="balance-subtitle">Opening combat projection</h3>
+            <p className="admin-form__micro">
+              Factions attack in turn order using the same AI as Openings. Later factions face the board left by earlier attacks.
+              Purchases, noncombat reinforcement, mobilization and income collection are excluded.
+              Production below is the surviving territory production, not income collected. Scores are estimates, not win probabilities.
+            </p>
+            {projection ? <>
+              <p className="admin-form__micro">Average of {projection.runs} seeded runs. Each cell shows average (minimum–maximum), followed by change from starting balance.</p>
+              <div className="balance-table-scroll"><table className="balance-table">
+                <thead><tr><th>Alliance</th><th>Score</th><th>Share</th><th>Unit power</th><th>Production</th><th>Strongholds</th></tr></thead>
+                <tbody>{projection.alliances.map((row) => <tr key={row.id}>
+                  <th>{row.display_name}</th>
+                  {['starting_power_score', 'starting_power_share', 'unit_power', 'power_production', 'strongholds'].map((key) => {
+                    const metric = row.metrics[key];
+                    const scale = key === 'starting_power_share' ? 100 : 1;
+                    const suffix = scale === 100 ? '%' : '';
+                    const format = (value: number) => `${(value * scale).toFixed(1)}${suffix}`;
+                    return <td key={key}>{metric ? <>{format(metric.mean)} ({format(metric.min)}–{format(metric.max)})<br />Δ {metric.change > 0 ? '+' : ''}{format(metric.change)}</> : '—'}</td>;
+                  })}
+                </tr>)}</tbody>
+              </table></div>
+            </> : null}
             <h3 className="balance-subtitle">Largest position discounts</h3>
             {report.largest_discounts.length === 0 ? (
               <p className="admin-form__micro">No starting stack is discounted for position.</p>

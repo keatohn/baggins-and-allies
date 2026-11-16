@@ -1024,7 +1024,13 @@ export interface BalanceDiscount {
   power_discounted: number;
 }
 
+export interface OpeningProjection {
+  runs: number;
+  alliances: { id: string; display_name: string; metrics: Record<string, { mean: number; min: number; max: number; change: number } | null> }[];
+}
+
 export interface StartingStrengthReport {
+  opening_projection?: OpeningProjection;
   parameters: {
     horizon_rounds: number;
     discount: number;
@@ -1699,8 +1705,8 @@ export const api = {
     setMenuMusicFiles(r.menu_music);
     return r;
   },
-  adminBalance: (body: AdminSetupSavePayload, rings = true) =>
-    fetchJson<StartingStrengthReport>(`/admin/balance?rings=${rings}`, {
+  adminBalance: (body: AdminSetupSavePayload, rings = true, opening = false) =>
+    fetchJson<StartingStrengthReport>(`/admin/balance?rings=${rings}&opening=${opening}`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

@@ -326,6 +326,7 @@ def _compute_opening_attacks(
         "n_trials": n_trials,
         "mcts_iterations": budget.max_iterations,
         "mcts_seconds": budget.max_time_seconds,
+        "final_board": _board_snapshot(state),
         "factions": factions_out,
     }
 

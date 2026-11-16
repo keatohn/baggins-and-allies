@@ -2783,10 +2783,16 @@ class AdminCreateSetupBody(BaseModel):
 def admin_balance(
     body: AdminSetupPayload,
     rings: bool | None = None,
+    opening: bool = False,
     _admin: Player = Depends(get_current_admin),
 ):
     """Starting-strength report for the setup currently open in the admin editor."""
-    return compute_starting_strength(body.model_dump(), rings=rings)
+    bundle = body.model_dump()
+    report = compute_starting_strength(bundle, rings=rings)
+    if opening:
+        from backend.balance.opening_projection import compute_opening_projection
+        report["opening_projection"] = compute_opening_projection(bundle, rings=rings)
+    return report
 
 
 class AdminEndGameBody(BaseModel):
