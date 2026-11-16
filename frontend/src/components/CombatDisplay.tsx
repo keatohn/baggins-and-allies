@@ -7,7 +7,15 @@ import {
 } from '../audio/gameAudio';
 import { ringCornerClass } from '../ringsDisplay';
 import { computeBadgeHits } from '../utils/combatBadgeHits';
-import { phaseAfterFailedRoll, prospectiveCumulativeCasualties } from '../utils/combatRoundFlow';
+import {
+  phaseAfterFailedRoll,
+  prospectiveCumulativeCasualties,
+  fullyEliminatedStacks,
+  attackerStackStat,
+  defenderStackStat,
+  type EliminatedStack,
+} from '../utils/combatRoundFlow';
+import { unionUnitsAtStartFromCombatLog } from '../utils/combatLogSnapshot';
 import './CombatDisplay.css';
 
 const CombatRingContext = createContext<Record<string, { id: string; name: string }[]>>({});
@@ -227,31 +235,27 @@ interface CombatUnit {
   passengerCount?: number;
 }
 
-/** Cumulative eliminated stack (all units in this group died in a prior round). Shown with red X, no rolls. */
-interface EliminatedStack {
-  unitType: string;
-  unitKey?: string;
-  name: string;
-  icon: string;
-  health: number;
-  statValue: number;
-  count: number;
-  factionColor?: string;
-  factionId?: string;
-  hasTerror?: boolean;
-  terrainMountain?: boolean;
-  terrainForest?: boolean;
-  hasCaptainBonus?: boolean;
-  hasKingBonus?: boolean;
-  hasAntiCavalry?: boolean;
-  hasSeaRaider?: boolean;
-  hasArcher?: boolean;
-  hasStealth?: boolean;
-  hasBombikazi?: boolean;
-  hasFearless?: boolean;
-  hasHope?: boolean;
-  hasLight?: boolean;
-  hasRam?: boolean;
+/** Roster + casualties needed to derive cumulative eliminated stacks (subset of CombatRound). */
+interface RosterWithCasualties {
+  attackerUnitsAtStart: CombatUnit[];
+  defenderUnitsAtStart: CombatUnit[];
+  attackerCasualties: string[];
+  defenderCasualties: string[];
+}
+
+/**
+ * Fully eliminated stacks per side from a roster and its casualty list: the current round's
+ * result (interactive path, appended when dice finish revealing) or the battle-open roster
+ * plus log-cumulative casualties (spectator path, which never runs animateDiceReveals).
+ */
+function eliminatedStacksFromRoster(roster: RosterWithCasualties): {
+  attacker: EliminatedStack[];
+  defender: EliminatedStack[];
+} {
+  return {
+    attacker: fullyEliminatedStacks(roster.attackerUnitsAtStart, roster.attackerCasualties, attackerStackStat),
+    defender: fullyEliminatedStacks(roster.defenderUnitsAtStart, roster.defenderCasualties, defenderStackStat),
+  };
 }
 
 export interface DiceRoll {
@@ -1773,6 +1777,26 @@ function CombatDisplay({
     }
   }, [isOpen, attacker.units, defender.units, battleStartAttackerSnapshot?.length, battleStartDefenderSnapshot?.length]);
 
+  // Spectator: live props at modal open already dropped units killed before the spectator
+  // arrived. Rebuild the battle-open roster from the log's round-start snapshots (plus any
+  // live unit the log never listed) so shelves show correct stack totals and augment can
+  // append earlier casualties as red-X ghosts.
+  useEffect(() => {
+    if (!isOpen || !readOnly) return;
+    const union = unionUnitsAtStartFromCombatLog<BackendRoundUnit>(combatLog);
+    const build = (payload: BackendRoundUnit[], live: CombatUnit[]): CombatUnit[] | null => {
+      const converted = applyRoundStartUnitsAtStart(payload, live, null);
+      if (!converted?.length) return null;
+      const have = new Set(converted.map(u => u.id));
+      const extras = live.filter(u => !have.has(u.id));
+      return extras.length ? [...converted, ...extras] : converted;
+    };
+    const attackerFromLog = build(union.attacker, attacker.units);
+    const defenderFromLog = build(union.defender, defender.units);
+    if (attackerFromLog) setBattleStartAttackerSnapshot(attackerFromLog);
+    if (defenderFromLog) setBattleStartDefenderSnapshot(defenderFromLog);
+  }, [isOpen, readOnly, combatLog, attacker.units, defender.units]);
+
   useEffect(() => {
     if (!isOpen) {
       stopSiegeworksRoundCommenceSound();
@@ -1842,6 +1866,20 @@ function CombatDisplay({
       const e = combatLog[i] as { attacker_casualties?: string[]; defender_casualties?: string[] };
       prevA = prevA.concat(e.attacker_casualties ?? []);
       prevD = prevD.concat(e.defender_casualties ?? []);
+    }
+    // Cumulative eliminated stacks (red-X ghosts). Interactive players accumulate these in
+    // animateDiceReveals, which spectators never run — derive them from the battle-open roster
+    // plus log-cumulative casualties instead. Groups that died in the current round are already
+    // in the round roster (buildUnitRowGroupList skips the duplicate by unitKey).
+    if (battleStartAttackerSnapshot?.length || battleStartDefenderSnapshot?.length) {
+      const spectatorEliminated = eliminatedStacksFromRoster({
+        attackerUnitsAtStart: battleStartAttackerSnapshot ?? [],
+        defenderUnitsAtStart: battleStartDefenderSnapshot ?? [],
+        attackerCasualties: [...prevA, ...(last.attacker_casualties ?? [])],
+        defenderCasualties: [...prevD, ...(last.defender_casualties ?? [])],
+      });
+      setPreviousEliminatedAttackerStacks(spectatorEliminated.attacker);
+      setPreviousEliminatedDefenderStacks(spectatorEliminated.defender);
     }
     // Round-start roster + effective stats from the log snapshot (same source as the combat modal);
     // fall back to reconstructing from live units for legacy entries without the snapshot.
@@ -2252,64 +2290,6 @@ function CombatDisplay({
     revealNextRow();
   }, [getRowOrder, attackerUnitsThisRound, defenderUnitsThisRound]);
 
-  // Compute fully eliminated stacks from a round (whole group died) for cumulative display
-  const computeEliminatedStacksFromRound = useCallback((round: CombatRound): { attacker: EliminatedStack[]; defender: EliminatedStack[] } => {
-    const casualtySetA = new Set(round.attackerCasualties);
-    const casualtySetD = new Set(round.defenderCasualties);
-    const groupByKey = (units: CombatUnit[], getStat: (u: CombatUnit) => number) => {
-      const map = new Map<string, CombatUnit[]>();
-      units.forEach(u => {
-        const stat = getStat(u);
-        const key = `${stat}_${u.unitType}_${u.factionId ?? u.factionColor ?? ''}`;
-        if (!map.has(key)) map.set(key, []);
-        map.get(key)!.push(u);
-      });
-      return map;
-    };
-    const getAttackerStat = (u: CombatUnit) => u.effectiveAttack ?? u.attack;
-    const getDefenderStat = (u: CombatUnit) => u.effectiveDefense ?? u.defense;
-    const toEliminated = (units: CombatUnit[], casualtySet: Set<string>, getStat: (u: CombatUnit) => number): EliminatedStack[] => {
-      const groups = groupByKey(units, getStat);
-      const out: EliminatedStack[] = [];
-      groups.forEach((group) => {
-        const dead = group.filter(u => casualtySet.has(u.id));
-        if (dead.length === group.length && dead.length > 0) {
-          const u = group[0];
-          out.push({
-            unitType: u.unitType,
-            unitKey: `${u.unitType}::${u.factionId ?? u.factionColor ?? ''}::${u.health}`,
-            name: u.name,
-            icon: u.icon,
-            health: u.health,
-            statValue: getStat(u),
-            count: group.length,
-            factionColor: u.factionColor,
-            factionId: u.factionId,
-            hasTerror: u.hasTerror,
-            terrainMountain: u.terrainMountain,
-            terrainForest: u.terrainForest,
-            hasCaptainBonus: u.hasCaptainBonus,
-            hasKingBonus: u.hasKingBonus,
-            hasAntiCavalry: u.hasAntiCavalry,
-            hasSeaRaider: u.hasSeaRaider,
-            hasArcher: u.hasArcher,
-            hasStealth: u.hasStealth,
-            hasBombikazi: u.hasBombikazi,
-            hasFearless: u.hasFearless,
-            hasHope: u.hasHope,
-            hasLight: u.hasLight,
-            hasRam: u.hasRam,
-          });
-        }
-      });
-      return out;
-    };
-    return {
-      attacker: toEliminated(round.attackerUnitsAtStart, casualtySetA, getAttackerStat),
-      defender: toEliminated(round.defenderUnitsAtStart, casualtySetD, getDefenderStat),
-    };
-  }, []);
-
   // Start battle (round 1) or continue to next round - call backend then animate
   const handleRoll = useCallback(async (
     overridePrevAttacker?: string[],
@@ -2343,7 +2323,7 @@ function CombatDisplay({
     setRoundNumber(newRoundNumber);
 
     // Fully eliminated stacks: appended when dice reveal finishes (see animateDiceReveals appendEliminatedStacksForRound)
-    const { attacker: newElimA, defender: newElimD } = computeEliminatedStacksFromRound(result.round);
+    const { attacker: newElimA, defender: newElimD } = eliminatedStacksFromRoster(result.round);
 
     const prevA = overridePrevAttacker ?? previousAttackerCasualties;
     const prevD = overridePrevDefender ?? previousDefenderCasualties;
@@ -2401,7 +2381,7 @@ function CombatDisplay({
       undefined,
       { attacker: newElimA, defender: newElimD }
     );
-  }, [onStartRound, casualtyPriorityPill, mustConquerPill, fuseBombPill, animateDiceReveals, previousAttackerCasualties, previousDefenderCasualties, currentRound, groupedToDefenderRolls, computeEliminatedStacksFromRound]);
+  }, [onStartRound, casualtyPriorityPill, mustConquerPill, fuseBombPill, animateDiceReveals, previousAttackerCasualties, previousDefenderCasualties, currentRound, groupedToDefenderRolls]);
 
   // Continue = start next round. The fold into previous* casualties happens in handleRoll only
   // after the request succeeds, so a failed continue keeps the last resolved round on screen.
