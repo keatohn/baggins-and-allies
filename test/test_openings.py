@@ -150,6 +150,8 @@ def test_openings_take_empty_land_and_prefer_strongholds_without_illegal_moves()
         assumed_pairs = {(attack["from_territory"], attack["to_territory"]) for attack in faction["assumed"]}
         assert assumed_pairs <= pairs
 
+    assert result["final_board"]["owners"]["wild"] == "isengard"
+    assert "units" in result["final_board"]
     nxt = result["factions"][1]["board"]
     assert nxt["owners"]["fort"] == "isengard"
     assert nxt["owners"]["wild"] == "isengard"
