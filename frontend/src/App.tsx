@@ -4510,6 +4510,8 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
       casualtyPriorityDefender: territoryDefenderOrder,
       mustConquer: acForRetreat?.must_conquer ?? false,
       combatLog,
+      /** Live active_combat log only — what an interactive player restores from mid-battle (never the persisted post-battle snapshot). */
+      liveCombatLog,
       combatEndResult,
       cumulativeHitsReceivedByAttacker,
       cumulativeHitsReceivedByDefender,
@@ -5119,7 +5121,7 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
           onCancel={handleCombatCancel}
           onHighlightTerritories={setHighlightedTerritories}
           specials={definitions?.specials}
-          combatLog={!canAct ? combatDisplayProps.combatLog : undefined}
+          combatLog={canAct ? combatDisplayProps.liveCombatLog : combatDisplayProps.combatLog}
           combatEndResult={!canAct ? combatDisplayProps.combatEndResult : undefined}
           cumulativeHitsReceivedByAttacker={combatDisplayProps.cumulativeHitsReceivedByAttacker}
           cumulativeHitsReceivedByDefender={combatDisplayProps.cumulativeHitsReceivedByDefender}
