@@ -1,8 +1,8 @@
-"""Opening moves for each faction on turn 1.
+"""Complete opening turns for each faction on turn 1.
 
 Each faction's combat moves are chosen by the MCTS combat-move search, the
-same decision the AI uses. Battles are then fought with the MCTS combat
-policy, so the next faction sees the board that search actually left behind.
+same decision the AI uses. Cheap legal purchases, noncombat movement and
+mobilization complete each turn before the next faction sees its board.
 The pill on each arrow is a combat-sim chance for that move. It is not what
 picks the move.
 
@@ -22,6 +22,8 @@ from dataclasses import asdict, is_dataclass
 from typing import Any
 
 from backend.ai.context import AIContext
+from backend.ai.mcts.non_combat_move import decide_non_combat_move_mcts
+from backend.engine.opening_turn import purchase_cheapest, place_purchases, mobilization_threat_power
 from backend.ai.mcts.budget import SearchBudget, budget_catalog_scope, get_phase_budget
 from backend.ai.combat import decide_mcts_combat_policy
 from backend.ai.mcts.combat_move import apply_bundled_moves, decide_combat_move_mcts
@@ -34,6 +36,7 @@ from backend.engine.definitions import (
     FactionDefinition,
     TerritoryDefinition,
     UnitDefinition,
+    PortDefinition,
     faction_acts_as,
     controlling_faction_id,
 )
@@ -42,7 +45,7 @@ from backend.engine.movement import (
     _is_water_craft,
     _is_water_zone,
 )
-from backend.engine.queries import participates_in_sea_hex_naval_combat
+from backend.engine.queries import participates_in_sea_hex_naval_combat, validate_action
 from backend.engine.reducer import apply_action
 from backend.engine.rings import combat_boosts
 from backend.engine.special_rules import select_special_rules
@@ -52,6 +55,8 @@ from backend.engine.utils import (
     initialize_game_state,
     is_aerial_unit,
 )
+
+OPENING_SIMULATION_VERSION = 3
 
 _OPENING_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
 _OPENING_CACHE_MAX = 4
@@ -175,8 +180,11 @@ def _opening_cache_key(
     trials: int,
     seed: int,
     budget: SearchBudget,
+    port_defs=None,
 ) -> str:
     payload = {
+        "version": OPENING_SIMULATION_VERSION,
+        "ports": _freeze(port_defs or {}),
         "units": _freeze(unit_defs),
         "territories": _freeze(territory_defs),
         "factions": _freeze(faction_defs),
@@ -204,6 +212,7 @@ def compute_opening_attacks(
     seed: int = 8,
     mcts_iterations: int | None = None,
     mcts_seconds: float | None = None,
+    port_defs: dict[str, PortDefinition] | None = None,
 ) -> dict[str, Any]:
     """Search each turn-order faction's opening, then leave that board for the next one."""
     manifest = manifest or {}
@@ -225,6 +234,7 @@ def compute_opening_attacks(
         trials,
         seed,
         budget,
+        port_defs,
     )
     cached = _OPENING_CACHE.get(key)
     if cached is not None:
@@ -241,6 +251,7 @@ def compute_opening_attacks(
         n_trials=trials,
         seed=seed,
         budget=budget,
+        port_defs=port_defs,
     )
     _OPENING_CACHE[key] = result
     _OPENING_CACHE.move_to_end(key)
@@ -260,6 +271,7 @@ def _compute_opening_attacks(
     n_trials: int,
     seed: int,
     budget: SearchBudget,
+    port_defs=None,
 ) -> dict[str, Any]:
     rules, rings_on = select_special_rules(manifest.get("special_rules"))
     heroes_raw = manifest.get("heroes_enabled")
@@ -295,12 +307,17 @@ def _compute_opening_attacks(
     factions_out: list[dict[str, Any]] = []
     with budget_catalog_scope(levels):
         for faction_index, faction_id in enumerate(order):
-            state.current_faction = faction_id
-            state.phase = "combat_move"
-            _refresh_movement(state, faction_id, unit_defs, faction_defs)
+            if state.winner:
+                break
+            if state.current_faction != faction_id:
+                continue  # The reducer skipped an eliminated faction.
+            board = _board_snapshot(state)
+            purchase = purchase_cheapest(state, unit_defs, territory_defs, faction_defs, camp_defs or {}, port_defs or {})
+            if purchase is not None:
+                state, _ = apply_action(state, purchase, unit_defs, territory_defs, faction_defs, camp_defs or {}, port_defs or {})
+            state, _ = apply_action(state, end_phase(faction_id), unit_defs, territory_defs, faction_defs, camp_defs or {}, port_defs or {})
             rng = random.Random(seed + faction_index * 1009)
             faction_def = faction_defs.get(faction_id)
-            board = _board_snapshot(state)
             attacks, assumed = _play_faction(
                 state,
                 faction_id,
@@ -311,7 +328,9 @@ def _compute_opening_attacks(
                 rng,
                 n_trials=n_trials,
                 seed=seed + faction_index * 1009,
+                port_defs=port_defs,
             )
+            state = _finish_turn(state, faction_id, unit_defs, territory_defs, faction_defs, camp_defs or {}, port_defs or {}, rng)
             factions_out.append(
                 {
                     "faction_id": faction_id,
@@ -331,13 +350,6 @@ def _compute_opening_attacks(
     }
 
 
-def _refresh_movement(state, faction_id: str, unit_defs, faction_defs) -> None:
-    for territory in state.territories.values():
-        for unit in territory.units:
-            if faction_acts_as(faction_defs, get_unit_faction(unit, unit_defs), faction_id):
-                unit.remaining_movement = unit.base_movement
-
-
 def _play_faction(
     state,
     faction_id: str,
@@ -349,10 +361,11 @@ def _play_faction(
     *,
     n_trials: int,
     seed: int,
+    port_defs=None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Search this faction's combat moves, fight the battles, and keep the caller's state current."""
     original = state
-    ports: dict = {}
+    ports: dict = port_defs or {}
     camps = camp_defs or {}
     ctx = AIContext(
         state=state,
@@ -405,6 +418,28 @@ def _play_faction(
     return attacks, assumed
 
 
+
+def _finish_turn(state, faction_id, ud, td, fd, camps, ports, rng):
+    ctx = AIContext(state, ud, td, fd, camps, ports, {})
+    threats = None
+    placements = sum(stack.count for stack in state.faction_purchased_units.get(faction_id, []))
+    for _step in range(200 + placements):
+        if state.winner or state.current_faction != faction_id or state.phase == "purchase":
+            return state
+        if state.phase == "non_combat_move":
+            ctx.state = state
+            ctx.available_actions = {"can_end_phase": validate_action(state, end_phase(faction_id), ud, td, fd, camps, ports).valid}
+            action = decide_non_combat_move_mcts(ctx, rng) or end_phase(faction_id)
+        elif state.phase == "mobilization":
+            if threats is None:
+                threats = mobilization_threat_power(state, ud, td, fd)
+            action = place_purchases(state, ud, td, fd, camps, ports, threat_power=threats)
+        else:
+            raise ValueError(f"Opening {faction_id} did not finish {state.phase}")
+        state, _ = apply_action(state, action, ud, td, fd, camps, ports)
+    raise ValueError(f"Opening {faction_id} exceeded the turn action limit")
+
+
 def _adopt(target, source) -> None:
     """Point the caller's state at the played board when apply_action copied it."""
     if target is source:
@@ -447,9 +482,9 @@ def _resolve_combat(state, faction_id, unit_defs, territory_defs, faction_defs, 
             )
         try:
             state, _events = apply_action(state, action, unit_defs, territory_defs, faction_defs, camps, ports)
-        except ValueError:
-            return state
-    return state
+        except ValueError as exc:
+            raise ValueError(f"Opening {faction_id} failed {action.type}: {exc}") from exc
+    raise ValueError(f"Opening {faction_id} exceeded the combat action limit")
 
 
 def _move_legs(action) -> list[dict[str, Any]]:

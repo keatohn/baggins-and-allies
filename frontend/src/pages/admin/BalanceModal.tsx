@@ -113,7 +113,7 @@ export function BalanceModal({
         </div>
 
         {error ? <p className="admin-page__error">{error}</p> : null}
-        {!report && !error ? <p className="admin-form__micro">Calculating balance including opening combats…</p> : null}
+        {!report && !error ? <p className="admin-form__micro">Calculating balance including opening turns…</p> : null}
 
         {report ? (
           <>
@@ -128,14 +128,15 @@ export function BalanceModal({
                   <div className="balance-share__evil" style={{ width: `${evilShare}%` }} />
                 </div>
                 <p className="admin-form__micro">
-                  Final balance after opening combats, averaged across {projection.runs} seeded runs in faction turn order.
+                  Final balance after opening turns, averaged across {projection.runs} seeded runs in faction turn order.
                   Casualties, positioning, production and stronghold captures affect these percentages.
-                  Purchases, noncombat reinforcement, mobilization and income collection are excluded.
+                  Each turn includes combat, noncombat reinforcement, mobilization and income collection.
+                  Purchases use the maximum legal quantity of the cheapest affordable unit.
                 </p>
               </div>
             ) : null}
 
-            <h3 className="balance-subtitle">Starting position before opening combats</h3>
+            <h3 className="balance-subtitle">Starting position before opening turns</h3>
             {report.readings.length > 0 ? (
               <ul className="balance-readings">
                 {report.readings.map((line) => (
@@ -245,10 +246,12 @@ export function BalanceModal({
               </p>
             ) : null}
 
-            <h3 className="balance-subtitle">Opening combat projection</h3>
+            <h3 className="balance-subtitle">Opening turn projection</h3>
             <p className="admin-form__micro">
               Factions attack in turn order using the same AI as Openings. Later factions face the board left by earlier attacks.
-              Purchases, noncombat reinforcement, mobilization and income collection are excluded.
+              Each faction completes its turn before the next acts. Purchases buy the maximum legal quantity of the cheapest
+              affordable unit. Deployment weighs reachable enemy unit power against existing and queued defenses,
+              weighted by territory value.
               Production below is the surviving territory production, not income collected. Scores are estimates, not win probabilities.
             </p>
             {projection ? <>

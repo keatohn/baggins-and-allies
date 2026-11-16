@@ -82,7 +82,8 @@ function openingStatus(
   const prior = factions.slice(0, Math.max(index, 0)).flatMap((faction) =>
     faction.assumed.map((attack) => `${faction.factionName} took ${territoryLabel(attack.to, territories[attack.to])}`),
   );
-  return prior.length ? `${head} Assumes ${prior.join(', ')}.` : head;
+  const turns = index > 0 ? ' Earlier factions have completed purchases, reinforcement and deployment.' : '';
+  return (prior.length ? `${head} Assumes ${prior.join(', ')}.` : head) + turns;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -400,6 +401,7 @@ export function MapViewPane({
   const openingRequest = useMemo(
     () => ({
       key: stableJson({
+        simulation_version: 3,
         manifest,
         units,
         factions,

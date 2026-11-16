@@ -234,7 +234,7 @@ class NonCombatMoveProblem(Problem):
 
         origin_ids = {from_tid for from_tid, _to_tid in from_to_units}
         threat_map = count_enemies_that_can_reach_territories(
-            origin_ids, state, faction_id, fd, td, ud
+            origin_ids, slot_state, faction_id, fd, td, ud
         )
 
         candidates: list[tuple[float, tuple[str, str, list[str]]]] = []
@@ -255,6 +255,7 @@ class NonCombatMoveProblem(Problem):
                 threat_from_count=threat_from,
                 threat_relief_attack=False,
                 effective_reach_count=threat_from,
+                projected_state=slot_state,
             )
             if not pruned:
                 continue

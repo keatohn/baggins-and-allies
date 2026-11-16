@@ -90,6 +90,7 @@ def prune_move_unit_ids_for_garrison_floor(
     threat_from_count: int,
     threat_relief_attack: bool = False,
     effective_reach_count: int | None = None,
+    projected_state=None,
 ) -> list[str]:
     """
     Drop land movers from unit_ids so at least required_remain friendly land units stay on
@@ -100,9 +101,15 @@ def prune_move_unit_ids_for_garrison_floor(
     batched count_enemies_that_can_reach_territories map) so the full-board reach scan
     is not repeated per candidate; when None, computed as before.
     """
-    if not is_frontline(from_tid, state, faction_id, fd, td) and threat_from_count <= 0:
-        return list(unit_ids)
-    terr = state.territories.get(from_tid)
+    # Pending declarations leave units physically at the origin until phase end.
+    # Count the replayed board so consecutive moves cannot reuse those defenders.
+    if projected_state is None and any(getattr(pm, "phase", None) == state.phase for pm in state.pending_moves or []):
+        from backend.engine.reducer import get_state_after_pending_moves
+        projected_state = get_state_after_pending_moves(state, state.phase, ud, td, fd)
+    board = projected_state if projected_state is not None else state
+    if not is_frontline(from_tid, board, faction_id, fd, td) and threat_from_count <= 0:
+        return _objective_safe_movers(board, from_tid, list(unit_ids), faction_id, ud, td, fd, threat_relief_attack)
+    terr = board.territories.get(from_tid)
     if not terr:
         return list(unit_ids)
     land_ids = []
@@ -132,7 +139,7 @@ def prune_move_unit_ids_for_garrison_floor(
     moving_land = [i for i in unit_ids if i in land_ids]
     staying = n_land - len(moving_land)
     if staying >= required_remain:
-        return list(unit_ids)
+        return _objective_safe_movers(board, from_tid, list(unit_ids), faction_id, ud, td, fd, threat_relief_attack)
     shortfall = required_remain - staying
     if shortfall <= 0:
         return list(unit_ids)
@@ -142,4 +149,38 @@ def prune_move_unit_ids_for_garrison_floor(
         reverse=True,
     )[:shortfall]
     cancel_set = set(movers_to_cancel)
-    return [i for i in unit_ids if i not in cancel_set]
+    return _objective_safe_movers(board, from_tid, [i for i in unit_ids if i not in cancel_set], faction_id, ud, td, fd, threat_relief_attack)
+
+
+def _objective_safe_movers(board, origin, moving, faction_id, ud, td, fd, threat_relief):
+    """Preserve stronghold/capital hold odds unless counterattacking the threat.
+
+    If the territory is already below its defensive target, do not weaken it
+    further. Actual post-combat threats are re-evaluated during noncombat moves.
+    """
+    important = getattr(td.get(origin), "is_stronghold", False) or any(getattr(f, "capital", None) == origin for f in fd.values())
+    if not important or threat_relief:
+        return moving
+    from backend.ai.defense_sim import (
+        defender_hold_probability_after_hypothetical_departure,
+        defense_hold_saturation_threshold,
+    )
+    by_faction = {}
+    def hold(ids):
+        return defender_hold_probability_after_hypothetical_departure(
+            board, origin, ids, faction_id, fd, td, ud, by_faction_cache=by_faction, n_trials=64)
+    baseline = hold([])
+    if baseline is None:
+        return []  # Cannot establish that an objective departure is safe.
+    target = min(baseline, defense_hold_saturation_threshold(origin, td, fd))
+    units = {u.instance_id: u for u in board.territories[origin].units}
+    result = list(moving)
+    defenders_to_keep = sorted((iid for iid in moving if iid in units and not _is_water_boat(ud.get(units[iid].unit_id))),
+                               key=lambda iid: (getattr(ud.get(units[iid].unit_id), "defense", 0),
+                                                get_unit_power_cost(ud.get(units[iid].unit_id)) or 0), reverse=True)
+    for iid in defenders_to_keep:
+        probability = hold(result)
+        if probability is not None and probability >= target:
+            return result
+        result.remove(iid)
+    return result

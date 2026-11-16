@@ -570,7 +570,7 @@ def _mcts_continue_or_retreat(ctx: AIContext, rng: random.Random | None):
         casualty_order="best_attack" if is_stronghold else None,
         must_conquer=True if is_stronghold else None,
     )
-    if not destinations:
+    if not destinations or not getattr(combat, "attackers_have_rolled", True):
         return fight
 
     choice = softmax_pick(

@@ -384,7 +384,7 @@ class CombatMoveProblem(Problem):
 
         origin_ids = {from_tid for from_tid, _to_tid in from_to_units}
         threat_map = count_enemies_that_can_reach_territories(
-            origin_ids, state, faction_id, fd, td, ud
+            origin_ids, state_after, faction_id, fd, td, ud
         )
 
         reachable: dict[tuple[str, bool], list[tuple[str, list[str]]]] = {}
@@ -408,6 +408,7 @@ class CombatMoveProblem(Problem):
                 threat_from_count=threat_from,
                 threat_relief_attack=threat_relief,
                 effective_reach_count=threat_from,
+                projected_state=state_after,
             )
             if not pruned:
                 continue

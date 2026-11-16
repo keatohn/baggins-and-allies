@@ -555,3 +555,16 @@ def test_decide_combat_mcts_flag_off_keeps_heuristic_path(monkeypatch):
     ctx = _combat_ctx(state, ud, td, fd, cd, port_d)
     decide(ctx)
     assert called["mcts"] == 0
+
+
+def test_mcts_combat_policy_continues_before_retreat_is_legal(monkeypatch):
+    from backend.ai import combat
+    state, ud, td, fd, cd, port_d = _load_wotr_setup()
+    _plant_active_combat(state, ud, td)
+    ctx = _combat_ctx(state, ud, td, fd, cd, port_d)
+    state.active_combat.attackers_have_rolled = False
+    # Make the retreat preference unconditional; the prefire gate must override it.
+    monkeypatch.setattr(combat, 'softmax_pick', lambda *args, **kwargs: 'retreat')
+    action = combat.decide_mcts_combat_policy(ctx, random.Random(0))
+    assert action.type == 'continue_combat'
+    assert validate_action(state, action, ud, td, fd, cd, port_d).valid

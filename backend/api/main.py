@@ -66,7 +66,7 @@ from backend.avatar import (
     stored_avatar_image,
 )
 
-from backend.balance.starting_strength import compute_starting_strength
+from backend.balance.report import compute_balance_report
 from backend.progression import (
     ProgressionError,
     accumulate_xp_stats,
@@ -2489,7 +2489,7 @@ def admin_opening_attacks(
     if not isinstance(body.starting_setup, dict):
         raise HTTPException(status_code=400, detail="starting_setup is required")
     try:
-        unit_defs, territory_defs, faction_defs, camp_defs, _ports = definitions_from_snapshot(snapshot)
+        unit_defs, territory_defs, faction_defs, camp_defs, ports = definitions_from_snapshot(snapshot)
         return compute_opening_attacks(
             unit_defs,
             territory_defs,
@@ -2498,6 +2498,7 @@ def admin_opening_attacks(
             body.starting_setup,
             manifest=body.manifest or {},
             n_trials=body.n_trials,
+            port_defs=ports,
         )
     except HTTPException:
         raise
@@ -2787,12 +2788,7 @@ def admin_balance(
     _admin: Player = Depends(get_current_admin),
 ):
     """Starting-strength report for the setup currently open in the admin editor."""
-    bundle = body.model_dump()
-    report = compute_starting_strength(bundle, rings=rings)
-    if opening:
-        from backend.balance.opening_projection import compute_opening_projection
-        report["opening_projection"] = compute_opening_projection(bundle, rings=rings)
-    return report
+    return compute_balance_report(body.model_dump(), rings=rings, opening=opening)
 
 
 class AdminEndGameBody(BaseModel):

@@ -26,13 +26,13 @@ def compute_opening_projection(bundle: dict, *, rings: bool | None = None) -> di
         name: {key: {**row, "id": row.get("id", key)} for key, row in working.get(name, {}).items()}
         for name in ("units", "territories", "factions", "camps", "ports")
     }
-    units, territories, factions, camps, _ports = definitions_from_snapshot(snapshot)
+    units, territories, factions, camps, ports = definitions_from_snapshot(snapshot)
     baseline = compute_starting_strength(bundle, rings=rings)
     runs = []
     for seed in SEEDS:
         result = compute_opening_attacks(
             units, territories, factions, camps, working["starting_setup"],
-            manifest=working["manifest"], seed=seed, n_trials=2000,
+            manifest=working["manifest"], seed=seed, n_trials=2000, port_defs=ports,
         )
         projected = deepcopy(working)
         projected["starting_setup"]["territory_owners"] = result["final_board"]["owners"]
