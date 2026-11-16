@@ -1920,6 +1920,7 @@ export const api = {
           from_territory: string;
           to_territory: string;
           attacker_stacks: { unit_id: string; count: number }[];
+          combined_attacker_stacks: { unit_id: string; count: number }[];
           defender_stacks: { unit_id: string; count: number }[];
           p_attacker_win: number;
           p_conquer: number;

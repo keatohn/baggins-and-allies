@@ -65,24 +65,24 @@ MAX_COMBAT_MOVE_BRANCHES = BRANCH_LIMITS["combat_move"][0]
 
 
 def attack_stack_variants(groups: list[tuple[str, list[str], float]]) -> list[list[str]]:
-    """Mixes that add unit types from weakest attack to strongest.
+    """Weakest types first, with bounded partial stacks available for splitting.
 
-    `groups` is (unit type, instance ids, attack stat). The first mix is the
-    weakest type. The strongest type is only added once every weaker type is
-    already in the mix, and it is never offered on its own when a weaker type
-    can come along.
+    Offer one, half, all-but-one and all instances of each next type. Unsent
+    instances remain available for another destination on the next search step.
     """
     ordered = sorted(groups, key=lambda group: (group[2], group[0]))
     seen: set[tuple[str, ...]] = set()
     mixes: list[list[str]] = []
     running: list[str] = []
     for _unit_id, ids, _attack in ordered:
+        for count in sorted({1, max(1, len(ids) // 2), max(1, len(ids) - 1), len(ids)}):
+            mix = [*running, *ids[:count]]
+            key = tuple(sorted(mix))
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            mixes.append(mix)
         running = [*running, *ids]
-        key = tuple(sorted(running))
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        mixes.append(list(running))
     return mixes
 
 

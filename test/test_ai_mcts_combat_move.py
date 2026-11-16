@@ -123,9 +123,22 @@ def test_attack_stack_variants_add_weakest_types_before_the_strongest():
     ])
     assert [sorted(mix) for mix in mixes] == [
         ["a1"],
+        ["a1", "i1"],
         ["a1", "i1", "i2"],
         ["a1", "c1", "i1", "i2"],
     ]
+
+
+def test_homogeneous_attack_stack_can_split_between_destinations():
+    ids = [f"orc_{i}" for i in range(10)]
+    mixes = attack_stack_variants([("orc", ids, 2.0)])
+    assert {len(mix) for mix in mixes} == {1, 5, 9, 10}
+    half = next(mix for mix in mixes if len(mix) == 5)
+    remaining = [iid for iid in ids if iid not in half]
+    second_attack = attack_stack_variants([("orc", remaining, 2.0)])[-1]
+    assert len(second_attack) == 5
+    assert set(half).isdisjoint(second_attack)
+    assert set(half + second_attack) == set(ids)
 
 
 # ---------------------------------------------------------------------------

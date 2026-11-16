@@ -226,3 +226,39 @@ def test_starting_faction_openings_are_legal_moves():
             arrived = nxt["units"].get(attack["to_territory"]) or []
             assert arrived, f"{attack['to_territory']} should hold the units that took it"
             assert nxt["owners"].get(attack["to_territory"])
+
+
+def test_arrow_odds_combine_origins_but_keep_destinations_separate(monkeypatch):
+    from backend.engine import openings
+    from backend.engine.utils import initialize_game_state
+
+    units, territories, factions, starting = _small_setup()
+    state = initialize_game_state(faction_defs=factions, territory_defs=territories,
+                                  unit_defs=units, starting_setup=starting)
+    camp = state.territories['camp'].units
+    hold = state.territories['hold'].units
+    # Split the same origin across two destinations, join another origin at fort.
+    legs = [
+        {'from': 'camp', 'to': 'fort', 'ids': [camp[0].instance_id]},
+        {'from': 'hold', 'to': 'fort', 'ids': [hold[0].instance_id]},
+        {'from': 'camp', 'to': 'shore', 'ids': [camp[1].instance_id]},
+        {'from': 'camp', 'to': 'fort', 'ids': [camp[0].instance_id]},
+    ]
+    calls = []
+
+    def chance(state, origin, dest, attackers, defenders, *args, **kwargs):
+        calls.append((dest, {u.instance_id for u in attackers}))
+        return (0.9, 0.8) if len(attackers) == 2 else (0.4, 0.3)
+
+    monkeypatch.setattr(openings, '_sim_chance', chance)
+    arrows = openings._arrows_for_legs(state, 'isengard', legs, units, territories, factions,
+                                        n_trials=20, seed=8)
+    assert len(calls) == 2
+    assert dict(calls)['fort'] == {camp[0].instance_id, hold[0].instance_id}
+    assert dict(calls)['shore'] == {camp[1].instance_id}
+    fort_arrows = [arrow for arrow in arrows if arrow['to_territory'] == 'fort']
+    assert len(fort_arrows) == 2
+    assert all(arrow['p_attacker_win'] == 0.9 and arrow['p_conquer'] == 0.8 for arrow in fort_arrows)
+    assert all(arrow['attacker_stacks'] == [{'unit_id': 'orc', 'count': 1}] for arrow in fort_arrows)
+    assert all(arrow['combined_attacker_stacks'] == [{'unit_id': 'orc', 'count': 2}] for arrow in fort_arrows)
+    assert next(arrow for arrow in arrows if arrow['to_territory'] == 'shore')['p_attacker_win'] == 0.4

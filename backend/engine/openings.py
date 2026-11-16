@@ -377,11 +377,11 @@ def _play_faction(
             except ValueError:
                 break
             continue
-        legs.extend(_move_legs(action))
         try:
             state, _events = apply_bundled_moves(state, action, unit_defs, territory_defs, faction_defs, camps, ports)
         except ValueError:
             break
+        legs.extend(_move_legs(action))
     attacks = _arrows_for_legs(
         state,
         faction_id,
@@ -497,81 +497,70 @@ def _arrows_for_legs(
             if instance_id not in bucket:
                 bucket.append(instance_id)
     by_id = _units_by_id(state)
-    arrows: list[dict[str, Any]] = []
+    # Land/naval battles combine origins. A sea raid is a separate battle tied
+    # to its staging water zone, as in the engine's sea_zone_id combat actions.
+    battles: dict[tuple[str, str | None], dict[str, list]] = {}
     for (origin, dest), instance_ids in grouped.items():
         origin_def = territory_defs.get(origin)
         dest_def = territory_defs.get(dest)
-        dest_state = state.territories.get(dest)
-        if dest_def is None or dest_state is None:
+        if dest_def is None or dest not in state.territories:
             continue
-        fighters = []
-        for instance_id in instance_ids:
-            unit = by_id.get(instance_id)
-            if unit is None:
-                continue
-            if _fight_role(unit, origin_def, dest_def, unit_defs) is None:
-                continue
-            fighters.append(unit)
+        fighters = [by_id[iid] for iid in instance_ids if iid in by_id
+                    and _fight_role(by_id[iid], origin_def, dest_def, unit_defs) is not None]
         if not fighters:
             continue
-        hostile = [
-            unit
-            for unit in dest_state.units
-            if _is_hostile(get_unit_faction(unit, unit_defs), faction_id, faction_defs)
-        ]
+        sea_raid = bool(origin_def is not None and _is_water_zone(origin_def) and not _is_water_zone(dest_def))
+        battle = battles.setdefault((dest, origin if sea_raid else None), {})
+        battle[origin] = fighters
+
+    arrows: list[dict[str, Any]] = []
+    for (dest, raid_origin), contributions in battles.items():
+        dest_def = territory_defs[dest]
+        dest_state = state.territories[dest]
+        fighters_by_id = {unit.instance_id: unit for units in contributions.values() for unit in units}
+        fighters = list(fighters_by_id.values())
+        hostile = [unit for unit in dest_state.units
+                   if _is_hostile(get_unit_faction(unit, unit_defs), faction_id, faction_defs)]
         water = _is_water_zone(dest_def)
         if water:
-            defenders = [
-                unit
-                for unit in hostile
-                if participates_in_sea_hex_naval_combat(unit, unit_defs.get(unit.unit_id))
-            ]
+            defenders = [unit for unit in hostile
+                         if participates_in_sea_hex_naval_combat(unit, unit_defs.get(unit.unit_id))]
             empty = False
             if not defenders:
                 continue
         elif hostile:
             defenders = hostile
             empty = False
-        elif (
-            not dest_state.units
-            and getattr(dest_def, "ownable", True)
-            and not water
-            and _owner_is_enemy(dest_state.owner, faction_id, faction_defs)
-            and any(can_conquer_territory_as_attacker(unit_defs.get(unit.unit_id)) for unit in fighters)
-        ):
+        elif (not dest_state.units and getattr(dest_def, "ownable", True)
+              and _owner_is_enemy(dest_state.owner, faction_id, faction_defs)
+              and any(can_conquer_territory_as_attacker(unit_defs.get(unit.unit_id)) for unit in fighters)):
             defenders = []
             empty = True
         else:
             continue
-        sea_raid = bool(origin_def is not None and _is_water_zone(origin_def) and not water)
+        sea_raid = raid_origin is not None
         if empty:
-            p_win = 1.0
-            p_conquer = 1.0
+            p_win = p_conquer = 1.0
         else:
+            origin = next(iter(contributions))
             p_win, p_conquer = _sim_chance(
-                state,
-                origin,
-                dest,
-                fighters,
-                defenders,
-                unit_defs,
-                territory_defs,
-                sea_raid=sea_raid,
-                n_trials=n_trials,
-                seed=seed + (zlib.adler32(f"{origin}|{dest}".encode()) % 100_000),
+                state, origin, dest, fighters, defenders, unit_defs, territory_defs,
+                sea_raid=sea_raid, n_trials=n_trials,
+                seed=seed + (zlib.adler32(f"{raid_origin or ''}|{dest}".encode()) % 100_000),
+                attacker_origins={unit.instance_id: source for source, units in contributions.items() for unit in units},
             )
-        arrows.append(
-            {
+        for origin, leg_fighters in contributions.items():
+            arrows.append({
                 "from_territory": origin,
                 "to_territory": dest,
-                "attacker_stacks": _stacks(fighters),
+                "attacker_stacks": _stacks(leg_fighters),
+                "combined_attacker_stacks": _stacks(fighters),
                 "defender_stacks": _stacks(defenders),
                 "p_attacker_win": round(p_win, 4),
                 "p_conquer": round(p_conquer, 4),
                 "is_sea_raid": sea_raid,
                 "empty": empty,
-            }
-        )
+            })
     return arrows
 
 
@@ -587,6 +576,7 @@ def _sim_chance(
     sea_raid: bool,
     n_trials: int,
     seed: int,
+    attacker_origins: dict[str, str] | None = None,
 ) -> tuple[float, float]:
     dest_def = territory_defs.get(dest)
     dest_state = state.territories.get(dest)
@@ -603,11 +593,15 @@ def _sim_chance(
             base_hp = int(getattr(dest_def, "stronghold_base_health", 0) or 0)
             if base_hp > 0:
                 stronghold_hp = base_hp
-    boosts = _boost_rows(
-        combat_boosts(state, attackers, unit_defs, origin, {unit.instance_id for unit in attackers}),
-        attackers,
-        side="attacker",
-    ) + _boost_rows(combat_boosts(state, defenders, unit_defs, dest), defenders, side="defender")
+    attacker_boosts = {}
+    origin_groups: dict[str, list] = {}
+    for unit in attackers:
+        source = (attacker_origins or {}).get(unit.instance_id, origin)
+        origin_groups.setdefault(source, []).append(unit)
+    for source, units in origin_groups.items():
+        attacker_boosts.update(combat_boosts(state, units, unit_defs, source, {unit.instance_id for unit in units}))
+    boosts = _boost_rows(attacker_boosts, attackers, side="attacker") + _boost_rows(
+        combat_boosts(state, defenders, unit_defs, dest), defenders, side="defender")
     result = run_simulation(
         _stacks(attackers),
         _stacks(defenders),

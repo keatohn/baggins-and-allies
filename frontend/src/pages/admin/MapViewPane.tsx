@@ -468,9 +468,10 @@ export function MapViewPane({
                 ]
                   .filter(Boolean)
                   .join(', ');
+                const contribution = `From ${from}: ${stacksOf(attack.attacker_stacks)}. Combined attack: ${stacksOf(attack.combined_attacker_stacks)}.`;
                 const detail = attack.empty
-                  ? `Takes the empty territory (${worth}). ${stacksOf(attack.attacker_stacks)}`
-                  : `Attack wins ${Math.round(attack.p_attacker_win * 100)}%. Conquers ${Math.round(attack.p_conquer * 100)}%. ${worth}. ${stacksOf(attack.attacker_stacks)} vs ${stacksOf(attack.defender_stacks)}`;
+                  ? `Takes the empty territory (${worth}). ${contribution}`
+                  : `Attack wins ${Math.round(attack.p_attacker_win * 100)}%. Conquers ${Math.round(attack.p_conquer * 100)}%. ${worth}. ${contribution} Defenders: ${stacksOf(attack.defender_stacks)}`;
                 return {
                   from: attack.from_territory,
                   to: attack.to_territory,
