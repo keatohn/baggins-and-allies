@@ -85,8 +85,8 @@ export function ScenarioLibraryPanel({ onClose, onSaved }: { onClose: () => void
         {error && <p role="alert" className="admin-page__error">{error}</p>}
         {!library && !error && <p className="admin-form__micro">Loading seeds…</p>}
         {library && <fieldset disabled={busy} className="scenario-library__body" role="tabpanel" aria-label={`${LABELS[tab]} seeds`}>
-          {tab === 'units' ? <UnitsPanel units={library.units} factionIds={Object.keys(library.factions)} archetypes={archetypes} setupId="" setups={[]} onChange={(units) => change({ ...library, units })} />
-            : tab === 'factions' ? <FactionsPanel factions={library.factions} onChange={(factions) => change({ ...library, factions })} />
+          {tab === 'units' ? <UnitsPanel seedMode units={library.units} factionIds={Object.keys(library.factions)} archetypes={archetypes} setupId="" setups={[]} onChange={(units) => change({ ...library, units })} />
+            : tab === 'factions' ? <FactionsPanel seedMode factions={library.factions} onChange={(factions) => change({ ...library, factions })} />
             : <TerritoriesPanel seedMode territories={library.territories} terrainTypes={terrainTypes} onChange={(territories) => change({ ...library, territories })} />}
         </fieldset>}
         {impact && <div className="scenario-library__review" role="status">

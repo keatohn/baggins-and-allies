@@ -1452,19 +1452,76 @@ export function ManifestPanel({
   );
 }
 
+function AddSeedDialog({ title, data, onClose, onCreate }: {
+  title: string;
+  data: Record<string, Record<string, unknown>>;
+  onClose: () => void;
+  onCreate: (id: string, value: Record<string, unknown>) => void;
+}) {
+  const [mode, setMode] = useState<'empty' | 'copy'>('empty');
+  const [sourceId, setSourceId] = useState('');
+  const [newId, setNewId] = useState('');
+  const [error, setError] = useState('');
+  const ids = Object.keys(data).sort();
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    const id = newId.trim();
+    if (!id) { setError(`Enter a ${title} id.`); return; }
+    if (Object.hasOwn(data, id)) { setError('That id already exists.'); return; }
+    if (mode === 'copy' && !data[sourceId]) { setError(`Choose a ${title} seed to copy.`); return; }
+    const value = mode === 'copy' ? structuredClone(data[sourceId]) : title === 'unit' ? { cost: { power: 0 } } : {};
+    onCreate(id, { ...value, id });
+  };
+  return (
+    <div className="admin-modal-overlay" role="presentation" onClick={onClose} onKeyDown={(event) => {
+      if (event.key === 'Escape') { event.stopPropagation(); onClose(); }
+    }}>
+      <form className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="admin-add-seed-title" onClick={(event) => event.stopPropagation()} onSubmit={submit}>
+        <h2 id="admin-add-seed-title" className="admin-modal__title">Add {title}</h2>
+        <div className="admin-form__row admin-form__row--radio-row">
+          <span className="admin-form__label">Source</span>
+          <div className="admin-form__radio-group">
+            <label className="admin-form__radio-label"><input type="radio" name="admin-add-seed-mode" checked={mode === 'empty'} onChange={() => setMode('empty')} />Empty</label>
+            <label className="admin-form__radio-label" title={ids.length ? undefined : 'No seeds to copy yet'}><input type="radio" name="admin-add-seed-mode" checked={mode === 'copy'} disabled={!ids.length} onChange={() => setMode('copy')} />Copy</label>
+          </div>
+        </div>
+        {mode === 'copy' && <div className="admin-form__row">
+          <label className="admin-form__label" htmlFor="admin-copy-seed">Copy from seed</label>
+          <select id="admin-copy-seed" className="admin-page__select admin-page__select--full" value={sourceId} onChange={(event) => { setSourceId(event.target.value); setError(''); }}>
+            <option value="">Select a {title}…</option>
+            {ids.map((id) => <option key={id} value={id}>{typeof data[id].display_name === 'string' && data[id].display_name !== id ? `${data[id].display_name} (${id})` : id}</option>)}
+          </select>
+        </div>}
+        <div className="admin-form__row">
+          <label className="admin-form__label" htmlFor="admin-new-seed-id">{title[0].toUpperCase() + title.slice(1)} id</label>
+          <input autoFocus id="admin-new-seed-id" className="admin-form__input" autoComplete="off" value={newId} onChange={(event) => { setNewId(event.target.value); setError(''); }} />
+        </div>
+        {error && <div role="alert" className="admin-page__error">{error}</div>}
+        <div className="admin-modal__actions">
+          <button type="button" className="admin-page__btn" onClick={onClose}>Cancel</button>
+          <button type="submit" className="admin-page__btn admin-page__btn--primary">Add</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function EntityDictPanel({
   title,
   data,
   onChange,
   renderEditor,
   onAdd,
+  seedMode = false,
 }: {
   title: string;
   data: Record<string, Record<string, unknown>>;
   onChange: (next: Record<string, Record<string, unknown>>) => void;
   renderEditor: (id: string, obj: Record<string, unknown>, patch: (p: Record<string, unknown>) => void) => React.ReactNode;
+  seedMode?: boolean;
   onAdd?: (select: (id: string) => void) => void;
 }) {
+  const [addOpen, setAddOpen] = useState(false);
   const keys = useMemo(() => Object.keys(data).sort(), [data]);
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
@@ -1485,6 +1542,7 @@ function EntityDictPanel({
   };
 
   const addId = () => {
+    if (seedMode) { setAddOpen(true); return; }
     if (onAdd) {
       onAdd(setSelected);
       return;
@@ -1513,6 +1571,12 @@ function EntityDictPanel({
 
   return (
     <div className="admin-entity">
+      {addOpen && <AddSeedDialog title={title} data={data} onClose={() => setAddOpen(false)} onCreate={(id, value) => {
+        onChange({ ...data, [id]: value });
+        setFilter('');
+        setSelected(id);
+        setAddOpen(false);
+      }} />}
       <div className="admin-entity__sidebar">
         <div className="admin-entity__toolbar">
           <input type="search" className="admin-form__input" placeholder="Filter…" value={filter} onChange={(e) => setFilter(e.target.value)} />
@@ -1763,6 +1827,7 @@ export function UnitsPanel({
   units,
   factionIds,
   archetypes,
+  seedMode = false,
   setupId,
   setups,
   onChange,
@@ -1770,6 +1835,7 @@ export function UnitsPanel({
   units: Record<string, Record<string, unknown>>;
   factionIds: string[];
   archetypes: string[];
+  seedMode?: boolean;
   setupId: string;
   setups: AdminSetupListItem[];
   onChange: (next: Record<string, Record<string, unknown>>) => void;
@@ -1790,6 +1856,7 @@ export function UnitsPanel({
     <>
     <EntityDictPanel
       title="unit"
+      seedMode={seedMode}
       data={units}
       onChange={onChange}
       onAdd={(select) => {
@@ -1977,6 +2044,7 @@ export function TerritoriesPanel({
   return (
       <EntityDictPanel
         title="territory"
+        seedMode={seedMode}
         data={territories}
         onChange={onChange}
         renderEditor={(id, t, patch) => <TerritorySeedFields id={id} t={t} patch={patch} terrainTypes={terrainTypes} seedMode={seedMode} />}
@@ -2144,14 +2212,17 @@ function SubfactionsField({
 
 export function FactionsPanel({
   factions,
+  seedMode = false,
   onChange,
 }: {
+  seedMode?: boolean;
   factions: Record<string, Record<string, unknown>>;
   onChange: (next: Record<string, Record<string, unknown>>) => void;
 }) {
   return (
     <EntityDictPanel
       title="faction"
+      seedMode={seedMode}
       data={factions}
       onChange={onChange}
       renderEditor={(id, f, patch) => (
