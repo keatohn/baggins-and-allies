@@ -1924,6 +1924,8 @@ export const api = {
       factions: {
         faction_id: string;
         faction_name: string;
+        purchases?: Record<string, number>;
+        deployments?: { destination: string; units: { unit_id: string; count: number }[] }[];
         board: {
           owners: Record<string, string | null>;
           units: Record<string, { unit_id: string; count: number }[]>;

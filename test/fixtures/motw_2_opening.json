@@ -1,0 +1,811 @@
+{
+  "manifest": {
+    "id": "motw_2.0",
+    "display_name": "Men of the West",
+    "is_active": "admin",
+    "map_asset": "motw_map_2.0",
+    "context": {
+      "year": "TA 3019",
+      "map": "Southern Kingdoms",
+      "faction_count": 5,
+      "factions": [
+        "Isengard",
+        "Rohan",
+        "Mordor",
+        "Gondor",
+        "Harad"
+      ]
+    },
+    "victory_criteria": {
+      "strongholds": {
+        "good": 8,
+        "evil": 8
+      }
+    },
+    "camp_cost": 10,
+    "stronghold_repair_cost": 2,
+    "prefire_penalty": false,
+    "menu_order": 5,
+    "lobby_music": [
+      "fellowship.m4a"
+    ],
+    "timeline_image": "wotr.png"
+  },
+  "units": {
+    "battering_ram": {
+      "archetype": "siegework",
+      "attack": 5,
+      "cost": {
+        "power": 7
+      },
+      "defense": 0,
+      "dice": 4,
+      "display_name": "Battering Ram",
+      "faction": "isengard",
+      "health": 1,
+      "icon": "battering_ram.png",
+      "id": "battering_ram",
+      "movement": 1,
+      "purchasable": true,
+      "specials": [
+        "ram"
+      ],
+      "tags": [
+        "land"
+      ],
+      "transport_capacity": 0
+    },
+    "berserker": {
+      "archetype": "infantry",
+      "attack": 5,
+      "cost": {
+        "power": 5
+      },
+      "defense": 3,
+      "dice": 1,
+      "display_name": "Berserker",
+      "faction": "isengard",
+      "health": 1,
+      "icon": "berserker.png",
+      "id": "berserker",
+      "movement": 1,
+      "purchasable": true,
+      "specials": [
+        "bombikazi"
+      ],
+      "tags": [
+        "land",
+        "transportable",
+        "climbs_ladder"
+      ],
+      "transport_capacity": 0
+    },
+    "bomb": {
+      "archetype": "siegework",
+      "attack": 7,
+      "cost": {
+        "power": 10
+      },
+      "defense": 0,
+      "dice": 6,
+      "display_name": "Bomb",
+      "faction": "isengard",
+      "health": 1,
+      "icon": "bomb.png",
+      "id": "bomb",
+      "movement": 1,
+      "purchasable": true,
+      "specials": [],
+      "tags": [
+        "land",
+        "bomb",
+        "self_destruct"
+      ],
+      "transport_capacity": 0
+    },
+    "dunland_wildman": {
+      "archetype": "infantry",
+      "attack": 2,
+      "cost": {
+        "power": 3
+      },
+      "defense": 1,
+      "dice": 1,
+      "display_name": "Dunland Wildman",
+      "faction": "isengard",
+      "health": 1,
+      "home_territory_ids": [
+        "south_dunland"
+      ],
+      "icon": "dunland_wildman.png",
+      "id": "dunland_wildman",
+      "movement": 1,
+      "purchasable": true,
+      "specials": [
+        "home"
+      ],
+      "tags": [
+        "land",
+        "transportable"
+      ],
+      "transport_capacity": 0
+    },
+    "ent": {
+      "archetype": "monster",
+      "attack": 6,
+      "cost": {
+        "power": 14
+      },
+      "defense": 6,
+      "dice": 1,
+      "display_name": "Ent",
+      "faction": "rohan",
+      "health": 2,
+      "home_territory_ids": [
+        "fangorn"
+      ],
+      "icon": "ent.png",
+      "id": "ent",
+      "movement": 1,
+      "purchasable": true,
+      "specials": [
+        "fearless",
+        "forest",
+        "home",
+        "ram"
+      ],
+      "tags": [
+        "land"
+      ],
+      "transport_capacity": 0
+    },
+    "isengard_warg_rider": {
+      "archetype": "cavalry",
+      "attack": 6,
+      "cost": {
+        "power": 6
+      },
+      "defense": 3,
+      "dice": 1,
+      "display_name": "Isengard Warg Rider",
+      "faction": "isengard",
+      "health": 1,
+      "icon": "isengard_warg_rider.png",
+      "id": "isengard_warg_rider",
+      "movement": 2,
+      "purchasable": true,
+      "specials": [
+        "charging"
+      ],
+      "tags": [
+        "land"
+      ],
+      "transport_capacity": 0
+    },
+    "marshal_of_the_riddermark": {
+      "archetype": "cavalry",
+      "attack": 6,
+      "cost": {
+        "power": 8
+      },
+      "defense": 5,
+      "dice": 1,
+      "display_name": "Marshal of the Riddermark",
+      "faction": "rohan",
+      "health": 1,
+      "icon": "marshal_of_the_riddermark.png",
+      "id": "marshal_of_the_riddermark",
+      "movement": 2,
+      "purchasable": true,
+      "specials": [
+        "captain",
+        "charging",
+        "fearless"
+      ],
+      "tags": [
+        "land"
+      ],
+      "transport_capacity": 0
+    },
+    "rider_of_rohan": {
+      "archetype": "cavalry",
+      "attack": 4,
+      "cost": {
+        "power": 5
+      },
+      "defense": 4,
+      "dice": 1,
+      "display_name": "Rider of Rohan",
+      "faction": "rohan",
+      "health": 1,
+      "icon": "rider_of_rohan.png",
+      "id": "rider_of_rohan",
+      "movement": 2,
+      "purchasable": true,
+      "specials": [
+        "charging"
+      ],
+      "tags": [
+        "land"
+      ],
+      "transport_capacity": 0
+    },
+    "rohan_peasant": {
+      "archetype": "infantry",
+      "attack": 1,
+      "cost": {
+        "power": 2
+      },
+      "defense": 1,
+      "dice": 1,
+      "display_name": "Rohan Peasant",
+      "faction": "rohan",
+      "health": 1,
+      "home_territory_ids": [
+        "eastfold",
+        "westfold"
+      ],
+      "icon": "rohan_peasant.png",
+      "id": "rohan_peasant",
+      "movement": 1,
+      "purchasable": true,
+      "specials": [
+        "home"
+      ],
+      "tags": [
+        "land",
+        "transportable"
+      ],
+      "transport_capacity": 0
+    },
+    "rohirrim_archer": {
+      "archetype": "archer",
+      "attack": 1,
+      "cost": {
+        "power": 3
+      },
+      "defense": 2,
+      "dice": 1,
+      "display_name": "Rohirrim Archer",
+      "faction": "rohan",
+      "health": 1,
+      "icon": "rohirrim_archer.png",
+      "id": "rohirrim_archer",
+      "movement": 1,
+      "purchasable": true,
+      "specials": [
+        "archer"
+      ],
+      "tags": [
+        "land",
+        "transportable"
+      ],
+      "transport_capacity": 0
+    },
+    "rohirrim_archer_rider": {
+      "archetype": "cavalry",
+      "attack": 3,
+      "cost": {
+        "power": 5
+      },
+      "defense": 3,
+      "dice": 1,
+      "display_name": "Rohirrim Archer Rider",
+      "faction": "rohan",
+      "health": 1,
+      "icon": "rohirrim_archer_rider.png",
+      "id": "rohirrim_archer_rider",
+      "movement": 2,
+      "purchasable": true,
+      "specials": [
+        "archer",
+        "charging"
+      ],
+      "tags": [
+        "land"
+      ],
+      "transport_capacity": 0
+    },
+    "rohirrim_soldier": {
+      "archetype": "infantry",
+      "attack": 2,
+      "cost": {
+        "power": 3
+      },
+      "defense": 2,
+      "dice": 1,
+      "display_name": "Rohirrim Soldier",
+      "faction": "rohan",
+      "health": 1,
+      "icon": "rohirrim_soldier.png",
+      "id": "rohirrim_soldier",
+      "movement": 1,
+      "purchasable": true,
+      "specials": [],
+      "tags": [
+        "land",
+        "transportable"
+      ],
+      "transport_capacity": 0
+    },
+    "royal_guard": {
+      "archetype": "infantry",
+      "attack": 2,
+      "cost": {
+        "power": 4
+      },
+      "defense": 4,
+      "dice": 1,
+      "display_name": "Royal Guard",
+      "faction": "rohan",
+      "health": 1,
+      "icon": "royal_guard.png",
+      "id": "royal_guard",
+      "movement": 1,
+      "purchasable": true,
+      "specials": [
+        "anti_cavalry"
+      ],
+      "tags": [
+        "land",
+        "transportable"
+      ],
+      "transport_capacity": 0
+    },
+    "siege_ladder": {
+      "archetype": "siegework",
+      "attack": 0,
+      "cost": {
+        "power": 5
+      },
+      "defense": 0,
+      "dice": 0,
+      "display_name": "Siege Ladder",
+      "faction": "isengard",
+      "health": 1,
+      "icon": "siege_ladder.png",
+      "id": "siege_ladder",
+      "movement": 1,
+      "purchasable": true,
+      "specials": [
+        "ladder"
+      ],
+      "tags": [
+        "land"
+      ],
+      "transport_capacity": 2
+    },
+    "uruk_crossbowman": {
+      "archetype": "archer",
+      "attack": 2,
+      "cost": {
+        "power": 3
+      },
+      "defense": 2,
+      "dice": 1,
+      "display_name": "Uruk Crossbowman",
+      "faction": "isengard",
+      "health": 1,
+      "icon": "uruk_crossbowman.png",
+      "id": "uruk_crossbowman",
+      "movement": 1,
+      "purchasable": true,
+      "specials": [
+        "archer"
+      ],
+      "tags": [
+        "land",
+        "transportable"
+      ],
+      "transport_capacity": 0
+    },
+    "uruk_pikeman": {
+      "archetype": "infantry",
+      "attack": 2,
+      "cost": {
+        "power": 4
+      },
+      "defense": 4,
+      "dice": 1,
+      "display_name": "Uruk Pikeman",
+      "faction": "isengard",
+      "health": 1,
+      "icon": "uruk_pikeman.png",
+      "id": "uruk_pikeman",
+      "movement": 1,
+      "purchasable": true,
+      "specials": [
+        "anti_cavalry"
+      ],
+      "tags": [
+        "land",
+        "transportable",
+        "climbs_ladder"
+      ],
+      "transport_capacity": 0
+    },
+    "urukhai_warrior": {
+      "archetype": "infantry",
+      "attack": 3,
+      "cost": {
+        "power": 3
+      },
+      "defense": 2,
+      "dice": 1,
+      "display_name": "Uruk-hai Warrior",
+      "faction": "isengard",
+      "health": 1,
+      "icon": "urukhai_warrior.png",
+      "id": "urukhai_warrior",
+      "movement": 1,
+      "purchasable": true,
+      "specials": [],
+      "tags": [
+        "land",
+        "transportable",
+        "climbs_ladder"
+      ],
+      "transport_capacity": 0
+    }
+  },
+  "territories": {
+    "edoras": {
+      "adjacent": [
+        "westemnet"
+      ],
+      "aerial_adjacent": [],
+      "display_name": "Edoras",
+      "ford_adjacent": [],
+      "id": "edoras",
+      "image": "edoras.png",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 6
+      },
+      "stronghold_base_health": 1,
+      "terrain_type": "city"
+    },
+    "fangorn": {
+      "adjacent": [
+        "gap_of_rohan",
+        "isen_east",
+        "isengard",
+        "misty_mountains",
+        "westemnet"
+      ],
+      "aerial_adjacent": [
+        "north_dunland",
+        "south_dunland"
+      ],
+      "display_name": "Fangorn",
+      "ford_adjacent": [],
+      "id": "fangorn",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 3
+      },
+      "terrain_type": "forest"
+    },
+    "fords_of_isen": {
+      "adjacent": [
+        "gap_of_rohan",
+        "isen_east",
+        "isengard",
+        "south_dunland"
+      ],
+      "aerial_adjacent": [],
+      "display_name": "Fords of Isen",
+      "ford_adjacent": [],
+      "id": "fords_of_isen",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      },
+      "terrain_type": "valley"
+    },
+    "gap_of_rohan": {
+      "adjacent": [
+        "fangorn",
+        "fords_of_isen",
+        "helms_deep",
+        "isen_east",
+        "westemnet"
+      ],
+      "aerial_adjacent": [
+        "isengard"
+      ],
+      "display_name": "Gap of Rohan",
+      "ford_adjacent": [],
+      "id": "gap_of_rohan",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      },
+      "terrain_type": "plains"
+    },
+    "helms_deep": {
+      "adjacent": [
+        "gap_of_rohan"
+      ],
+      "aerial_adjacent": [],
+      "display_name": "Helm's Deep",
+      "ford_adjacent": [],
+      "id": "helms_deep",
+      "image": "helms_deep.png",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 3
+      },
+      "stronghold_base_health": 3,
+      "terrain_type": "fortress"
+    },
+    "isen_east": {
+      "adjacent": [
+        "fangorn",
+        "fords_of_isen",
+        "gap_of_rohan",
+        "isengard"
+      ],
+      "aerial_adjacent": [],
+      "display_name": "Isen East",
+      "ford_adjacent": [],
+      "id": "isen_east",
+      "is_stronghold": false,
+      "ownable": false,
+      "produces": {
+        "power": 0
+      },
+      "terrain_type": "river"
+    },
+    "isengard": {
+      "adjacent": [
+        "fangorn",
+        "fords_of_isen",
+        "isen_east",
+        "south_dunland"
+      ],
+      "aerial_adjacent": [
+        "gap_of_rohan"
+      ],
+      "display_name": "Isengard",
+      "ford_adjacent": [],
+      "id": "isengard",
+      "image": "isengard.png",
+      "is_stronghold": true,
+      "ownable": true,
+      "produces": {
+        "power": 10
+      },
+      "stronghold_base_health": 3,
+      "terrain_type": "fortress"
+    },
+    "misty_mountains": {
+      "adjacent": [
+        "fangorn"
+      ],
+      "aerial_adjacent": [
+        "north_dunland"
+      ],
+      "display_name": "Misty Mountains",
+      "ford_adjacent": [],
+      "id": "misty_mountains",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      },
+      "terrain_type": "mountains"
+    },
+    "north_dunland": {
+      "adjacent": [
+        "south_dunland"
+      ],
+      "aerial_adjacent": [
+        "fangorn",
+        "misty_mountains"
+      ],
+      "display_name": "North Dunland",
+      "ford_adjacent": [],
+      "id": "north_dunland",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      },
+      "terrain_type": "hills"
+    },
+    "south_dunland": {
+      "adjacent": [
+        "fords_of_isen",
+        "isengard",
+        "north_dunland"
+      ],
+      "aerial_adjacent": [
+        "fangorn"
+      ],
+      "display_name": "South Dunland",
+      "ford_adjacent": [],
+      "id": "south_dunland",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 2
+      },
+      "terrain_type": "hills"
+    },
+    "westemnet": {
+      "adjacent": [
+        "edoras",
+        "fangorn",
+        "gap_of_rohan"
+      ],
+      "aerial_adjacent": [],
+      "display_name": "Westemnet",
+      "ford_adjacent": [],
+      "id": "westemnet",
+      "is_stronghold": false,
+      "ownable": true,
+      "produces": {
+        "power": 1
+      },
+      "terrain_type": "plains"
+    }
+  },
+  "factions": {
+    "isengard": {
+      "alliance": "evil",
+      "banner": "isengard_banner.png",
+      "capital": "isengard",
+      "color": "#2a2a2a",
+      "display_name": "Isengard",
+      "icon": "isengard.png",
+      "id": "isengard",
+      "music": [
+        "isengard.m4a"
+      ]
+    },
+    "rohan": {
+      "alliance": "good",
+      "banner": "rohan_banner.png",
+      "capital": "edoras",
+      "color": "#c9a227",
+      "display_name": "Rohan",
+      "icon": "rohan.png",
+      "id": "rohan",
+      "music": [
+        "rohan.m4a",
+        "rohirrim.m4a"
+      ]
+    }
+  },
+  "camps": {
+    "isengard_camp": {
+      "id": "isengard_camp",
+      "territory_id": "isengard"
+    },
+    "edoras_camp": {
+      "id": "edoras_camp",
+      "territory_id": "edoras"
+    }
+  },
+  "ports": {},
+  "starting_setup": {
+    "turn_order": [
+      "isengard",
+      "rohan"
+    ],
+    "territory_owners": {
+      "fangorn": "rohan",
+      "isengard": "isengard",
+      "south_dunland": "isengard",
+      "gap_of_rohan": "rohan",
+      "westemnet": "rohan",
+      "edoras": "rohan",
+      "helms_deep": "rohan",
+      "fords_of_isen": "rohan",
+      "misty_mountains": "isengard",
+      "north_dunland": "isengard"
+    },
+    "starting_units": {
+      "fangorn": [
+        {
+          "unit_id": "ent",
+          "count": 2
+        }
+      ],
+      "isengard": [
+        {
+          "unit_id": "uruk_crossbowman",
+          "count": 2
+        },
+        {
+          "unit_id": "uruk_pikeman",
+          "count": 3
+        },
+        {
+          "unit_id": "urukhai_warrior",
+          "count": 5
+        },
+        {
+          "unit_id": "berserker",
+          "count": 1
+        },
+        {
+          "unit_id": "isengard_warg_rider",
+          "count": 3
+        },
+        {
+          "unit_id": "dunland_wildman",
+          "count": 1
+        },
+        {
+          "unit_id": "bomb",
+          "count": 1
+        },
+        {
+          "unit_id": "siege_ladder",
+          "count": 1
+        }
+      ],
+      "westemnet": [
+        {
+          "unit_id": "rohan_peasant",
+          "count": 1
+        }
+      ],
+      "edoras": [
+        {
+          "unit_id": "royal_guard",
+          "count": 1
+        },
+        {
+          "unit_id": "rohirrim_soldier",
+          "count": 2
+        }
+      ],
+      "helms_deep": [
+        {
+          "unit_id": "rohirrim_archer",
+          "count": 3
+        },
+        {
+          "unit_id": "rohirrim_soldier",
+          "count": 1
+        }
+      ],
+      "misty_mountains": [
+        {
+          "unit_id": "urukhai_warrior",
+          "count": 2
+        }
+      ],
+      "north_dunland": [
+        {
+          "unit_id": "dunland_wildman",
+          "count": 1
+        }
+      ],
+      "south_dunland": [
+        {
+          "unit_id": "dunland_wildman",
+          "count": 3
+        }
+      ],
+      "fords_of_isen": [
+        {
+          "unit_id": "rider_of_rohan",
+          "count": 3
+        },
+        {
+          "unit_id": "marshal_of_the_riddermark",
+          "count": 1
+        }
+      ]
+    }
+  }
+}

@@ -40,6 +40,7 @@ type OpeningView = {
   factions: {
     factionId: string;
     factionName: string;
+    turnSummary: string;
     arrows: { from: string; to: string; pAttackerWin: number; title: string; label?: string }[];
     assumed: { from: string; to: string; pConquer: number }[];
     board: {
@@ -50,27 +51,13 @@ type OpeningView = {
   }[];
 };
 
-/** Survives closing the map view, so the same setup does not simulate again. */
-const openingCache = new Map<string, OpeningView>();
-const OPENING_CACHE_MAX = 6;
-
-function rememberOpenings(result: OpeningView) {
-  openingCache.delete(result.key);
-  openingCache.set(result.key, result);
-  while (openingCache.size > OPENING_CACHE_MAX) {
-    const oldest = openingCache.keys().next().value;
-    if (oldest === undefined) break;
-    openingCache.delete(oldest);
-  }
-}
-
 function territoryLabel(id: string, def: Record<string, unknown> | undefined): string {
   const name = def && typeof def.display_name === 'string' ? def.display_name.trim() : '';
   return name || id;
 }
 
 function openingStatus(
-  selected: { factionId: string; factionName: string; arrows: unknown[] },
+  selected: { factionId: string; factionName: string; turnSummary: string; arrows: unknown[] },
   factions: { factionId: string; factionName: string; assumed: { to: string }[] }[],
   territories: Dict,
 ): string {
@@ -82,8 +69,8 @@ function openingStatus(
   const prior = factions.slice(0, Math.max(index, 0)).flatMap((faction) =>
     faction.assumed.map((attack) => `${faction.factionName} took ${territoryLabel(attack.to, territories[attack.to])}`),
   );
-  const turns = index > 0 ? ' Earlier factions have completed purchases, reinforcement and deployment.' : '';
-  return (prior.length ? `${head} Assumes ${prior.join(', ')}.` : head) + turns;
+  const turns = index > 0 ? ' Earlier factions completed their turns using median simulated battle outcomes.' : ' Battle outcomes project the simulation median.';
+  return (prior.length ? `${head} Assumes ${prior.join(', ')}.` : head) + turns + ` ${selected.turnSummary}`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -181,6 +168,7 @@ export function MapViewPane({
 }) {
   const mapBase = toMapBase(mapAsset);
   const [view, setView] = useState<'setup' | 'openings'>('setup');
+  const [openingRefresh, setOpeningRefresh] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [mapOverrides, setMapOverrides] = useState<MapOverridesData | null>(null);
   const [editing, setEditing] = useState(startEditing);
@@ -401,7 +389,7 @@ export function MapViewPane({
   const openingRequest = useMemo(
     () => ({
       key: stableJson({
-        simulation_version: 3,
+        simulation_version: 5,
         manifest,
         units,
         factions,
@@ -425,16 +413,9 @@ export function MapViewPane({
 
   useEffect(() => {
     if (view !== 'openings') return;
-    if (openings?.key === openingRequest.key) return;
-    const cached = openingCache.get(openingRequest.key);
-    if (cached) {
-      setOpenings(cached);
-      setOpeningLoading(false);
-      setOpeningError(null);
-      return;
-    }
     let cancelled = false;
     setOpeningLoading(true);
+    setOpenings(null);
     setOpeningError(null);
     const timer = window.setTimeout(() => {
       const body = openingRequest.body;
@@ -450,6 +431,10 @@ export function MapViewPane({
             factions: res.factions.map((faction) => ({
               factionId: faction.faction_id,
               factionName: faction.faction_name || faction.faction_id,
+              turnSummary: [
+                ...(faction.purchases ? [`Buys: ${stacksOf(Object.entries(faction.purchases).map(([unit_id, count]) => ({ unit_id, count }))) || 'no units'}.`] : []),
+                ...(faction.deployments ?? []).map((deployment) => `Deploys ${stacksOf(deployment.units)} at ${nameOf(cur.territories, deployment.destination)}.`),
+              ].join(' '),
               assumed: faction.assumed.map((attack) => ({
                 from: attack.from_territory,
                 to: attack.to_territory,
@@ -484,7 +469,6 @@ export function MapViewPane({
               }),
             })),
           };
-          rememberOpenings(next);
           setOpenings(next);
           setOpeningLoading(false);
         })
@@ -498,7 +482,7 @@ export function MapViewPane({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [view, openingRequest, openings, units, cur.territories]);
+  }, [view, openingRequest, openingRefresh, units, cur.territories]);
 
   const requestClose = () => {
     if (saving) return;
@@ -1011,6 +995,9 @@ export function MapViewPane({
               </div>
             ) : null}
               <div className="admin-mapview__game">
+                {view === 'openings' ? <button type="button" className="admin-page__btn" disabled={openingLoading} onClick={() => setOpeningRefresh((value) => value + 1)}>
+                  {openingLoading ? 'Loading openings…' : 'Reload openings'}
+                </button> : null}
                 {view === 'openings' && openings && openings.key === openingRequest.key && openings.factions.length ? (
                   <div className="admin-openings__factions" role="tablist" aria-label="Opening faction">
                     {openings.factions.map((faction) => {

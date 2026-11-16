@@ -248,7 +248,7 @@ export function BalanceModal({
 
             <h3 className="balance-subtitle">Opening turn projection</h3>
             <p className="admin-form__micro">
-              Factions attack in turn order using the same AI as Openings. Later factions face the board left by earlier attacks.
+              Factions attack in turn order using the highest configured MCTS difficulty. Battles use representative median simulated outcomes, which later factions face.
               Each faction completes its turn before the next acts. Purchases buy the maximum legal quantity of the cheapest
               affordable unit. Deployment weighs reachable enemy unit power against existing and queued defenses,
               weighted by territory value.

@@ -2593,9 +2593,11 @@ def _rows_with_ids(table: dict[str, Any] | None) -> dict[str, Any]:
 def admin_opening_attacks(
     body: OpeningAttacksRequest,
     _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
 ):
     """Opening moves for each faction, after earlier factions take their chosen attacks and empty territories."""
     from backend.engine.openings import compute_opening_attacks
+    from backend.ai.settings import load_ai_defaults
 
     snapshot = {
         "units": _rows_with_ids(body.units),
@@ -2619,6 +2621,7 @@ def admin_opening_attacks(
             manifest=body.manifest or {},
             n_trials=body.n_trials,
             port_defs=ports,
+            ai_levels=load_ai_defaults(db)["levels"],
         )
     except HTTPException:
         raise
@@ -2906,9 +2909,11 @@ def admin_balance(
     rings: bool | None = None,
     opening: bool = False,
     _admin: Player = Depends(get_current_admin),
+    db: Session = Depends(get_db),
 ):
     """Starting-strength report for the setup currently open in the admin editor."""
-    return compute_balance_report(body.model_dump(), rings=rings, opening=opening)
+    from backend.ai.settings import load_ai_defaults
+    return compute_balance_report(body.model_dump(), rings=rings, opening=opening, ai_levels=load_ai_defaults(db)["levels"])
 
 
 class AdminEndGameBody(BaseModel):

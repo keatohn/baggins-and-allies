@@ -1003,7 +1003,7 @@ export default function Admin() {
         </div>
       </div>
 
-      {queryOpen ? null : formulasOpen ? (
+      {queryOpen || aiOpen ? null : formulasOpen ? (
         <div className="admin-page__toolbar admin-page__toolbar--wrap">
           <label className="admin-page__checkbox-label">
             <input

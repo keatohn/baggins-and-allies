@@ -10,7 +10,7 @@ SEEDS = (8, 29, 71)
 METRICS = ("starting_power_score", "starting_power_share", "unit_power", "power_production", "strongholds")
 
 
-def compute_opening_projection(bundle: dict, *, rings: bool | None = None) -> dict:
+def compute_opening_projection(bundle: dict, *, rings: bool | None = None, ai_levels: list[dict] | None = None) -> dict:
     working = deepcopy(bundle)
     # Match the balance toggle without disabling required rules.
     if rings is False:
@@ -32,7 +32,7 @@ def compute_opening_projection(bundle: dict, *, rings: bool | None = None) -> di
     for seed in SEEDS:
         result = compute_opening_attacks(
             units, territories, factions, camps, working["starting_setup"],
-            manifest=working["manifest"], seed=seed, n_trials=2000, port_defs=ports,
+            manifest=working["manifest"], seed=seed, n_trials=2000, port_defs=ports, ai_levels=ai_levels,
         )
         projected = deepcopy(working)
         projected["starting_setup"]["territory_owners"] = result["final_board"]["owners"]

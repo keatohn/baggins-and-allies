@@ -39,7 +39,7 @@ from backend.ai.formulas import (
     expected_net_gain,
     get_unit_power_cost,
 )
-from backend.ai.habits import COMBAT_SIM_TRIALS
+from backend.ai.habits import COMBAT_SIM_TRIALS, COMBAT_MOVE_CONFIDENT_WIN_RATE
 from backend.ai.style import attack_spread_adjustment, scale_combat_gain
 from backend.ai.combat_move import (
     _committed_attacker_stacks,
@@ -464,6 +464,14 @@ class CombatMoveProblem(Problem):
         charge_routes_per_unit: dict,
     ) -> list[tuple[float, list[tuple[str, str, list[str], list[str]]]]]:
         """One battle per mix. Every origin that can reach `to_tid` is in the mix."""
+        committed = _committed_attacker_stacks(board, to_tid, self.faction_id, self.ud, self.fd)
+        defenders = _defender_stacks(board, to_tid, self.faction_id, self.fd, self.ud)
+        if committed:
+            # A queued confident attack already earns its target's prize. Do not
+            # spend more units earning the same prize again.
+            chance = self._sim_battle(board, committed, defenders, to_tid, sea_raid=sea_raid)[0] if defenders else 1.0
+            if chance >= COMBAT_MOVE_CONFIDENT_WIN_RATE:
+                return []
         by_instance: dict[str, str] = {}
         origin_of: dict[str, str] = {}
         for from_tid, unit_ids in legs:
@@ -482,7 +490,7 @@ class CombatMoveProblem(Problem):
             udef = self.ud.get(uid)
             attack = float(getattr(udef, "attack", 0) or 0)
             typed.append((uid, ids, attack))
-        bundles: list[tuple[float, list[tuple[str, str, list[str], list[str]]]]] = []
+        options = []
         for mix in attack_stack_variants(typed):
             by_origin: dict[str, list[str]] = {}
             for iid in mix:
@@ -515,8 +523,17 @@ class CombatMoveProblem(Problem):
             elif not moves:
                 continue
             net = self._joined_battle_net(board, stacks, to_tid, sea_raid)
-            bundles.append((net + attack_spread_adjustment(state, to_tid), moves))
-        return bundles
+            attackers = _merge_stacks(committed, stacks)
+            chance = self._sim_battle(board, attackers, defenders, to_tid, sea_raid=sea_raid)[0] if defenders else 1.0
+            power = sum(get_unit_power_cost(self.ud.get(row['unit_id'])) * row['count'] for row in stacks)
+            options.append((net + attack_spread_adjustment(state, to_tid), moves, chance, power))
+        confident = [option for option in options if option[2] >= COMBAT_MOVE_CONFIDENT_WIN_RATE and option[0] > 0]
+        smallest = min((option[3] for option in confident), default=None)
+        # Preserve risky positive-EV alternatives for MCTS, but a bigger force
+        # is redundant once a cheaper candidate already meets the AI's existing
+        # confidence target. Otherwise all top-K slots become the same attack.
+        return [(score, moves) for score, moves, chance, power in options
+                if smallest is None or chance < COMBAT_MOVE_CONFIDENT_WIN_RATE or power <= smallest]
 
     def _one_unit_omissions(
         self,
@@ -627,6 +644,10 @@ class CombatMoveProblem(Problem):
                 1.0, to_tid, self.td, self.fd, 0.0, 0.0, self.cd, self.port_d, self.ud
             )
         _win, net = self._sim_battle(board, attackers, defenders, to_tid, sea_raid=sea_raid)
+        if committed and move_stacks:
+            # Reinforcements get their incremental value, not the entire battle
+            # value (which is already present in the pending-attack evaluator).
+            net -= self._sim_battle(board, committed, defenders, to_tid, sea_raid=sea_raid)[1]
         return net
 
     def _is_boat(self, unit_id: str) -> bool:

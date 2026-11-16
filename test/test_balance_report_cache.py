@@ -114,3 +114,11 @@ def test_simulation_version_invalidates_complete_report(monkeypatch, counters):
     monkeypatch.setattr(report, 'OPENING_SIMULATION_VERSION', report.OPENING_SIMULATION_VERSION + 1)
     report.compute_balance_report({}, opening=True)
     assert counters == {'baseline': 2, 'opening': 2}
+
+
+def test_highest_ai_level_changes_invalidate_opening_report(counters):
+    levels = [{'id': 'top', 'iterations': 10, 'seconds': 0.1}]
+    report.compute_balance_report({}, opening=True, ai_levels=levels)
+    levels[0]['iterations'] = 20
+    report.compute_balance_report({}, opening=True, ai_levels=levels)
+    assert counters == {'baseline': 2, 'opening': 2}

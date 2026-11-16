@@ -22,14 +22,15 @@ from dataclasses import asdict, is_dataclass
 from typing import Any
 
 from backend.ai.context import AIContext
+from backend.ai.style import style_scope
 from backend.ai.mcts.non_combat_move import decide_non_combat_move_mcts
 from backend.engine.opening_turn import purchase_cheapest, place_purchases, mobilization_threat_power
 from backend.ai.mcts.budget import SearchBudget, budget_catalog_scope, get_phase_budget
 from backend.ai.combat import decide_mcts_combat_policy
 from backend.ai.mcts.combat_move import apply_bundled_moves, decide_combat_move_mcts
-from backend.ai.mcts.dice import sample_dice_for_continue, sample_dice_for_initiate
+from backend.ai.mcts.dice import sample_dice_for_continue, sample_dice_for_initiate, _get_initiate_rosters
 from backend.ai.mcts import tree_cache
-from backend.engine.actions import end_phase
+from backend.engine.actions import end_phase, continue_combat
 from backend.engine.combat_sim import SimOptions, run_simulation
 from backend.engine.definitions import (
     CampDefinition,
@@ -56,7 +57,7 @@ from backend.engine.utils import (
     is_aerial_unit,
 )
 
-OPENING_SIMULATION_VERSION = 3
+OPENING_SIMULATION_VERSION = 5
 
 _OPENING_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
 _OPENING_CACHE_MAX = 4
@@ -181,9 +182,11 @@ def _opening_cache_key(
     seed: int,
     budget: SearchBudget,
     port_defs=None,
+    level=None,
 ) -> str:
     payload = {
         "version": OPENING_SIMULATION_VERSION,
+        "level": level,
         "ports": _freeze(port_defs or {}),
         "units": _freeze(unit_defs),
         "territories": _freeze(territory_defs),
@@ -200,6 +203,11 @@ def _opening_cache_key(
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+def opening_search_level(ai_levels=None):
+    from backend.ai.settings import default_levels
+    return copy.deepcopy((ai_levels or default_levels())[-1])
+
+
 def compute_opening_attacks(
     unit_defs: dict[str, UnitDefinition],
     territory_defs: dict[str, TerritoryDefinition],
@@ -213,17 +221,20 @@ def compute_opening_attacks(
     mcts_iterations: int | None = None,
     mcts_seconds: float | None = None,
     port_defs: dict[str, PortDefinition] | None = None,
+    ai_levels: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Search each turn-order faction's opening, then leave that board for the next one."""
     manifest = manifest or {}
     trials = max(1, min(int(n_trials), 20_000))
+    level = opening_search_level(ai_levels)
     if mcts_iterations is None and mcts_seconds is None:
-        budget = get_phase_budget("combat_move", "normal")
+        budget = SearchBudget(level["iterations"], level["seconds"])
     else:
         budget = SearchBudget(
             max(1, int(mcts_iterations or 1)),
             max(0.05, float(mcts_seconds or 0.4)),
         )
+    level.update(iterations=budget.max_iterations, seconds=budget.max_time_seconds)
     key = _opening_cache_key(
         unit_defs,
         territory_defs,
@@ -235,6 +246,7 @@ def compute_opening_attacks(
         seed,
         budget,
         port_defs,
+        level,
     )
     cached = _OPENING_CACHE.get(key)
     if cached is not None:
@@ -252,6 +264,7 @@ def compute_opening_attacks(
         seed=seed,
         budget=budget,
         port_defs=port_defs,
+        level=level,
     )
     _OPENING_CACHE[key] = result
     _OPENING_CACHE.move_to_end(key)
@@ -272,6 +285,7 @@ def _compute_opening_attacks(
     seed: int,
     budget: SearchBudget,
     port_defs=None,
+    level=None,
 ) -> dict[str, Any]:
     rules, rings_on = select_special_rules(manifest.get("special_rules"))
     heroes_raw = manifest.get("heroes_enabled")
@@ -293,19 +307,16 @@ def _compute_opening_attacks(
         rings_of_power=rings_on,
     )
     state.ai_algorithm = "mcts"
-    state.ai_difficulty = "normal"
+    level = level or opening_search_level()
+    state.ai_difficulty = level["id"]
     order = [fid for fid in state.turn_order if fid in faction_defs]
     if not order and state.current_faction:
         order = [state.current_faction]
 
-    levels = [{
-        "id": "normal",
-        "iterations": budget.max_iterations,
-        "seconds": budget.max_time_seconds,
-    }]
+    levels = [level]
     tree_cache.clear()
     factions_out: list[dict[str, Any]] = []
-    with budget_catalog_scope(levels):
+    with budget_catalog_scope(levels), style_scope(level):
         for faction_index, faction_id in enumerate(order):
             if state.winner:
                 break
@@ -330,12 +341,15 @@ def _compute_opening_attacks(
                 seed=seed + faction_index * 1009,
                 port_defs=port_defs,
             )
-            state = _finish_turn(state, faction_id, unit_defs, territory_defs, faction_defs, camp_defs or {}, port_defs or {}, rng)
+            deployments = []
+            state = _finish_turn(state, faction_id, unit_defs, territory_defs, faction_defs, camp_defs or {}, port_defs or {}, rng, deployments=deployments)
             factions_out.append(
                 {
                     "faction_id": faction_id,
                     "faction_name": getattr(faction_def, "display_name", None) or faction_id,
                     "board": board,
+                    "purchases": purchase.payload["purchases"] if purchase is not None else {},
+                    "deployments": deployments,
                     "attacks": attacks,
                     "assumed": assumed,
                 }
@@ -345,6 +359,8 @@ def _compute_opening_attacks(
         "n_trials": n_trials,
         "mcts_iterations": budget.max_iterations,
         "mcts_seconds": budget.max_time_seconds,
+        "difficulty": level["id"],
+        "outcome_model": "median",
         "final_board": _board_snapshot(state),
         "factions": factions_out,
     }
@@ -412,14 +428,14 @@ def _play_faction(
             )
         except ValueError:
             pass
-    state = _resolve_combat(state, faction_id, unit_defs, territory_defs, faction_defs, camps, ports, rng)
+    state = _resolve_combat(state, faction_id, unit_defs, territory_defs, faction_defs, camps, ports, rng, attacks=attacks, n_trials=n_trials)
     _adopt(original, state)
     assumed = _taken(original, faction_id, faction_defs, attacks)
     return attacks, assumed
 
 
 
-def _finish_turn(state, faction_id, ud, td, fd, camps, ports, rng):
+def _finish_turn(state, faction_id, ud, td, fd, camps, ports, rng, *, deployments=None):
     ctx = AIContext(state, ud, td, fd, camps, ports, {})
     threats = None
     placements = sum(stack.count for stack in state.faction_purchased_units.get(faction_id, []))
@@ -437,6 +453,8 @@ def _finish_turn(state, faction_id, ud, td, fd, camps, ports, rng):
         else:
             raise ValueError(f"Opening {faction_id} did not finish {state.phase}")
         state, _ = apply_action(state, action, ud, td, fd, camps, ports)
+        if action.type == "mobilize_units" and deployments is not None:
+            deployments.append(copy.deepcopy(action.payload))
     raise ValueError(f"Opening {faction_id} exceeded the turn action limit")
 
 
@@ -447,44 +465,88 @@ def _adopt(target, source) -> None:
     target.__dict__.update(source.__dict__)
 
 
-def _resolve_combat(state, faction_id, unit_defs, territory_defs, faction_defs, camps, ports, rng):
-    ctx = AIContext(
-        state=state,
-        unit_defs=unit_defs,
-        territory_defs=territory_defs,
-        faction_defs=faction_defs,
-        camp_defs=camps,
-        port_defs=ports,
-        available_actions={},
-    )
+def _resolve_combat(state, faction_id, ud, td, fd, camps, ports, rng, *, attacks=(), n_trials=2000):
+    """Project the simulator's median, using real reducer outcomes for all state changes."""
+    ctx = AIContext(state, ud, td, fd, camps, ports, {})
     for _step in range(_MAX_COMBAT_ACTIONS):
         if state.phase != "combat" or state.winner:
             return state
         ctx.state = state
         action = decide_mcts_combat_policy(ctx, rng)
         if action is None:
-            return state
-        if action.type == "initiate_combat":
-            payload = action.payload
-            payload["dice_rolls"] = sample_dice_for_initiate(
-                state,
-                payload.get("territory_id"),
-                payload.get("sea_zone_id"),
-                faction_id,
-                unit_defs,
-                territory_defs,
-                faction_defs,
-                rng=rng,
-            )
-        elif action.type == "continue_combat":
-            action.payload["dice_rolls"] = sample_dice_for_continue(
-                state, unit_defs, territory_defs, faction_defs, rng=rng
-            )
-        try:
-            state, _events = apply_action(state, action, unit_defs, territory_defs, faction_defs, camps, ports)
-        except ValueError as exc:
-            raise ValueError(f"Opening {faction_id} failed {action.type}: {exc}") from exc
+            raise ValueError(f"Opening {faction_id} cannot finish combat")
+        if action.type == "end_phase":
+            state, _ = apply_action(state, action, ud, td, fd, camps, ports)
+            continue
+        if action.type != "initiate_combat":
+            raise ValueError("Opening median projection requires a new battle")
+        dest = action.payload["territory_id"]
+        sea = action.payload.get("sea_zone_id")
+        attackers, defenders = _get_initiate_rosters(state, dest, sea, faction_id, ud, td, fd)
+        hint = next((row for row in attacks if row["to_territory"] == dest
+                     and row["is_sea_raid"] == bool(sea)
+                     and (not sea or row["from_territory"] == sea)
+                     and row["combined_attacker_stacks"] == _stacks(attackers)
+                     and row["defender_stacks"] == _stacks(defenders)), None)
+        median = dict(hint.get("median_outcome") or {}) if hint else {}
+        if not median:
+            _sim_chance(state, dest, dest, attackers, defenders, ud, td,
+                        sea_raid=bool(sea), n_trials=n_trials, seed=rng.randrange(2**31), median_outcome=median)
+        state = _representative_battle(state, action, attackers, defenders, median, ud, td, fd, camps, ports, rng)
     raise ValueError(f"Opening {faction_id} exceeded the combat action limit")
+
+
+def _representative_battle(state, opening_action, attackers, defenders, median, ud, td, fd, camps, ports, rng):
+    """Keep an engine-valid outcome closest to the simulator's 50th percentile.
+
+    This preserves captures, liberation, rings, transport casualties, walls and
+    unit damage through the reducer, rather than editing aggregate survivor counts.
+    The projected winner/capture must match the median; a lucky or unlucky single
+    trial cannot reverse the preview's expected outcome.
+    """
+    roster = {u.instance_id: u.unit_id for u in attackers + defenders}
+    attacker_ids = {u.instance_id for u in attackers}
+    defender_ids = {u.instance_id for u in defenders}
+    best, best_distance = None, float('inf')
+    for trial in range(64):
+        trial_rng = random.Random(rng.randrange(2**31))
+        candidate = state
+        action = copy.deepcopy(opening_action)
+        action.payload.update(casualty_order='best_attack' if median.get('conquered') and td[action.payload['territory_id']].is_stronghold else 'best_unit',
+                              must_conquer=bool(td[action.payload['territory_id']].is_stronghold))
+        outcome = None
+        for _round in range(_MAX_COMBAT_ACTIONS):
+            if action.type == 'initiate_combat':
+                action.payload['dice_rolls'] = sample_dice_for_initiate(candidate, action.payload['territory_id'], action.payload.get('sea_zone_id'),
+                                                                      action.faction, ud, td, fd, rng=trial_rng)
+            else:
+                action.payload['dice_rolls'] = sample_dice_for_continue(candidate, ud, td, fd, rng=trial_rng)
+            candidate, events = apply_action(candidate, action, ud, td, fd, camps, ports)
+            outcome = next((event.payload for event in events if event.type == 'combat_ended'), None)
+            if candidate.active_combat is None:
+                break
+            action = continue_combat(opening_action.faction, dice_rolls={"attacker": [], "defender": []})
+        if outcome is None:
+            continue
+        won = outcome['winner'] == 'attacker'
+        conquered = outcome.get('outcome') == 'conquer'
+        if won != (median['winner'] == 'attacker') or conquered != median['conquered']:
+            continue
+        alive = _units_by_id(candidate)
+        distance = 0
+        for ids, key in ((attacker_ids, 'attacker_casualties'), (defender_ids, 'defender_casualties')):
+            casualties = Counter(roster[iid] for iid in ids if iid not in alive)
+            target = median[key]
+            distance += sum(abs(casualties[uid] - target.get(uid, 0)) * max(1, int(ud[uid].cost.get('power', 0)))
+                            for uid in set(casualties) | set(target))
+        if distance < best_distance:
+            best, best_distance = candidate, distance
+        if best_distance == 0 or (trial >= 15 and best is not None):
+            break
+    if best is None:
+        raise ValueError('Could not project the median battle outcome through the engine')
+    return best
+
 
 
 def _move_legs(action) -> list[dict[str, Any]]:
@@ -574,6 +636,7 @@ def _arrows_for_legs(
         else:
             continue
         sea_raid = raid_origin is not None
+        median = {}
         if empty:
             p_win = p_conquer = 1.0
         else:
@@ -583,6 +646,7 @@ def _arrows_for_legs(
                 sea_raid=sea_raid, n_trials=n_trials,
                 seed=seed + (zlib.adler32(f"{raid_origin or ''}|{dest}".encode()) % 100_000),
                 attacker_origins={unit.instance_id: source for source, units in contributions.items() for unit in units},
+                median_outcome=median,
             )
         for origin, leg_fighters in contributions.items():
             arrows.append({
@@ -590,6 +654,7 @@ def _arrows_for_legs(
                 "to_territory": dest,
                 "attacker_stacks": _stacks(leg_fighters),
                 "combined_attacker_stacks": _stacks(fighters),
+                "median_outcome": median or None,
                 "defender_stacks": _stacks(defenders),
                 "p_attacker_win": round(p_win, 4),
                 "p_conquer": round(p_conquer, 4),
@@ -612,6 +677,7 @@ def _sim_chance(
     n_trials: int,
     seed: int,
     attacker_origins: dict[str, str] | None = None,
+    median_outcome: dict | None = None,
 ) -> tuple[float, float]:
     dest_def = territory_defs.get(dest)
     dest_state = state.territories.get(dest)
@@ -655,6 +721,8 @@ def _sim_chance(
         ),
         seed=seed,
     )
+    if median_outcome is not None:
+        median_outcome.update(asdict(next(row for row in result.percentile_outcomes if row.percentile == 50)))
     return float(result.p_attacker_win), float(result.p_conquer)
 
 

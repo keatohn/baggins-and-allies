@@ -15,12 +15,30 @@ from __future__ import annotations
 
 import math
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from backend.ai.habits import PURCHASE_BATCH_DIVERSITY_PENALTY
 
 
+_STYLE_CONTEXT: ContextVar[dict | None] = ContextVar('ai_style_context', default=None)
+
+
+@contextmanager
+def style_scope(level: dict):
+    """Use an opening's selected level without changing other requests' environment."""
+    from backend.ai.settings import normalize_style
+    values = normalize_style(level)
+    token = _STYLE_CONTEXT.set({f'AI_{key.upper()}': value for key, value in values.items()})
+    try:
+        yield
+    finally:
+        _STYLE_CONTEXT.reset(token)
+
+
 def _unit(name: str, default: float) -> float:
-    raw = os.environ.get(name)
+    context = _STYLE_CONTEXT.get()
+    raw = context.get(name) if context is not None and name in context else os.environ.get(name)
     if raw is None or not str(raw).strip():
         return default
     try:
