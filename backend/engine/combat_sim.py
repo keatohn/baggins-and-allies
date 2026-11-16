@@ -963,7 +963,11 @@ def run_simulation(
     Run n_trials battles and aggregate outcomes.
 
     Each trial uses a different RNG state (or seed + trial index if seed is set).
+
+    n_trials is clamped to >= 1: zero trials would crash the percentile aggregation
+    (empty trial list) and matches the API's own max(1, ...) clamp.
     """
+    n_trials = max(1, int(n_trials))
     opts = options or SimOptions()
     attacker_wins = defender_wins = attacker_survives = defender_survives = retreats = conquers = 0
     rounds_list: list[int] = []
