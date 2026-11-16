@@ -259,6 +259,50 @@ def _ensure_player_xp_column():
             conn.execute(text("ALTER TABLE players ADD COLUMN IF NOT EXISTS xp INTEGER NOT NULL DEFAULT 0"))
 
 
+def _backfill_game_end_seen(db=None):
+    """One-time: mark all roster players as having seen pre-existing finished games.
+
+    Avoids a flood of friends-modal badges for historical games. Gated per-game by
+    the presence of game_end_seen_player_ids (or an explicit backfill marker).
+    """
+    import json as _json
+
+    from .models import Game
+
+    owns_session = db is None
+    if owns_session:
+        db = SessionLocal()
+    try:
+        rows = db.query(Game).filter(Game.status == "finished").all()
+        for row in rows:
+            try:
+                config = _json.loads(row.config) if isinstance(row.config, str) else (row.config or {})
+            except (TypeError, _json.JSONDecodeError):
+                config = {}
+            if not isinstance(config, dict):
+                config = {}
+            if "game_end_seen_player_ids" in config or config.get("game_end_seen_backfilled"):
+                continue
+            try:
+                roster = _json.loads(row.players) if isinstance(row.players, str) else row.players
+            except (TypeError, _json.JSONDecodeError):
+                roster = []
+            ids = []
+            if isinstance(roster, list):
+                for seat in roster:
+                    if isinstance(seat, dict):
+                        pid = str(seat.get("player_id") or "")
+                        if pid and pid != "__computer__":
+                            ids.append(pid)
+            config["game_end_seen_player_ids"] = ids
+            config["game_end_seen_backfilled"] = True
+            row.config = _json.dumps(config)
+            db.commit()
+    finally:
+        if owns_session:
+            db.close()
+
+
 def init_db():
     """Create all tables and apply additive schema patches.
 
@@ -290,6 +334,7 @@ def init_db():
     _ensure_player_xp_column()
     _ensure_game_result_stat_columns()
     _sync_admin_column_and_flags()
+    _backfill_game_end_seen()
     db = SessionLocal()
     try:
         from backend.audio_gains import seed_audio_gains_if_empty

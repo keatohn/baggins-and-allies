@@ -740,6 +740,12 @@ export interface MyTurnGame {
   name: string;
 }
 
+/** Finished multiplayer game whose victory message the viewer has not seen yet. */
+export interface GameEndGame {
+  id: string;
+  name: string;
+}
+
 export interface GameInvitation {
   id: string;
   game_id: string;
@@ -1433,6 +1439,7 @@ export const api = {
   /** Accepted friends list. */
   listFriends: () => fetchJson<{ friends: FriendUser[] }>('/friends'),
   getMyTurnGames: () => fetchJson<{ games: MyTurnGame[] }>('/friends/my-turn', { cache: 'no-store' }),
+  getGameEnds: () => fetchJson<{ games: GameEndGame[] }>('/friends/game-ends', { cache: 'no-store' }),
   /** Lobby invitations still waiting on this player. */
   listGameInvites: () =>
     fetchJson<{ invitations: GameInvitation[] }>('/games/invites'),
@@ -1839,6 +1846,10 @@ export const api = {
     }),
   dismissStartingMessage: (gameId: string) =>
     fetchJson<{ ok: boolean }>(`/games/${gameId}/dismiss-starting-message`, {
+      method: 'POST',
+    }),
+  dismissGameEnd: (gameId: string) =>
+    fetchJson<{ ok: boolean }>(`/games/${gameId}/dismiss-game-end`, {
       method: 'POST',
     }),
   /** Per-faction reassignment when leaving (each value: "computer" or another player id). */

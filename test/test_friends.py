@@ -433,3 +433,203 @@ def test_my_turn_feed_requires_login(make_client, players):
     client = make_client(user)
     del app.dependency_overrides[get_current_player]
     assert client.get("/friends/my-turn").status_code == 401
+
+
+def _add_finished_game(db_session, *, name, user, buddy, multiplayer=True, winner="good",
+                       config=None, roster=None, forfeited=None):
+    cfg = dict(config or {})
+    if forfeited:
+        cfg["forfeited_player_ids"] = list(forfeited)
+    game = Game(
+        id=str(uuid.uuid4()),
+        name=name,
+        game_code=uuid.uuid4().hex[:8] if multiplayer else None,
+        status="finished",
+        game_state=json.dumps({"winner": winner, "current_faction": "gondor"}),
+        players=json.dumps(roster if roster is not None else [
+            {"player_id": user.id, "faction_id": "gondor"},
+            {"player_id": buddy.id, "faction_id": "mordor"},
+        ]),
+        config=json.dumps(cfg) if cfg else None,
+    )
+    db_session.add(game)
+    db_session.commit()
+    return game
+
+
+def test_game_ends_feed_unseen_finished_multiplayer(make_client, players, db_session):
+    _admin, user, buddy = players
+    unseen = _add_finished_game(db_session, name="Need badge", user=user, buddy=buddy)
+    _add_finished_game(
+        db_session, name="Already seen", user=user, buddy=buddy,
+        config={"game_end_seen_player_ids": [user.id]},
+    )
+    _add_finished_game(
+        db_session, name="Buddy seen only", user=user, buddy=buddy,
+        config={"game_end_seen_player_ids": [buddy.id]},
+    )
+    _add_finished_game(db_session, name="Single player", user=user, buddy=buddy, multiplayer=False)
+    _add_finished_game(
+        db_session, name="No winner", user=user, buddy=buddy, winner=None,
+    )
+    _add_finished_game(
+        db_session, name="I forfeited", user=user, buddy=buddy,
+        forfeited=[user.id],
+    )
+    _add_finished_game(
+        db_session, name="Not seated", user=user, buddy=buddy,
+        roster=[{"player_id": buddy.id, "faction_id": "gondor"}],
+    )
+    lobby = Game(
+        id=str(uuid.uuid4()), name="Lobby", game_code=uuid.uuid4().hex[:8],
+        status="lobby", game_state=json.dumps({}),
+        players=json.dumps([{"player_id": user.id, "faction_id": "gondor"}]),
+    )
+    active = Game(
+        id=str(uuid.uuid4()), name="Active", game_code=uuid.uuid4().hex[:8],
+        status="active", game_state=json.dumps({"winner": None}),
+        players=json.dumps([{"player_id": user.id, "faction_id": "gondor"}]),
+    )
+    db_session.add_all([lobby, active])
+    db_session.commit()
+
+    client = make_client(user)
+    r = client.get("/friends/game-ends")
+    assert r.status_code == 200
+    games = r.json()["games"]
+    # User has not seen "Need badge" or "Buddy seen only" (only buddy was marked on the latter).
+    assert {g["name"] for g in games} == {"Need badge", "Buddy seen only"}
+    assert all(set(g) == {"id", "name"} for g in games)
+    assert unseen.id in {g["id"] for g in games}
+
+    # Buddy has not seen "Need badge"; "Already seen" only marked user; only user forfeited;
+    # buddy is seated in "Not seated".
+    r = make_client(buddy).get("/friends/game-ends")
+    assert {g["name"] for g in r.json()["games"]} == {
+        "Need badge", "Already seen", "I forfeited", "Not seated",
+    }
+
+
+def test_game_ends_feed_requires_login(make_client, players):
+    _admin, user, _buddy = players
+    client = make_client(user)
+    del app.dependency_overrides[get_current_player]
+    assert client.get("/friends/game-ends").status_code == 401
+
+
+def test_dismiss_game_end_marks_seen_idempotent(make_client, players, db_session):
+    _admin, user, buddy = players
+    game = _add_finished_game(db_session, name="Dismiss me", user=user, buddy=buddy)
+    client = make_client(user)
+    assert client.get("/friends/game-ends").json()["games"]
+
+    r = client.post(f"/games/{game.id}/dismiss-game-end")
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+    assert client.get("/friends/game-ends").json()["games"] == []
+
+    # Idempotent second dismiss.
+    assert client.post(f"/games/{game.id}/dismiss-game-end").status_code == 200
+
+    # Buddy still sees it until they dismiss.
+    buddy_client = make_client(buddy)
+    assert [g["name"] for g in buddy_client.get("/friends/game-ends").json()["games"]] == ["Dismiss me"]
+    assert buddy_client.post(f"/games/{game.id}/dismiss-game-end").status_code == 200
+    assert buddy_client.get("/friends/game-ends").json()["games"] == []
+
+
+def test_dismiss_game_end_guards(make_client, players, db_session):
+    admin, user, buddy = players
+    game = _add_finished_game(db_session, name="Guarded", user=user, buddy=buddy)
+    stranger_roster = _add_finished_game(
+        db_session, name="Stranger only", user=user, buddy=buddy,
+        roster=[{"player_id": admin.id, "faction_id": "gondor"}],
+    )
+    active = Game(
+        id=str(uuid.uuid4()), name="Still going", game_code=uuid.uuid4().hex[:8],
+        status="active", game_state=json.dumps({}),
+        players=json.dumps([{"player_id": user.id, "faction_id": "gondor"}]),
+    )
+    db_session.add(active)
+    db_session.commit()
+
+    client = make_client(user)
+    assert client.post("/games/nope/dismiss-game-end").status_code == 404
+    assert client.post(f"/games/{stranger_roster.id}/dismiss-game-end").status_code == 403
+    assert client.post(f"/games/{active.id}/dismiss-game-end").status_code == 400
+
+
+def test_get_finished_game_marks_viewer_seen(make_client, players, db_session):
+    _admin, user, buddy = players
+    game = _add_finished_game(db_session, name="Open to clear", user=user, buddy=buddy)
+    # get_game_state uses the optional-auth dependency — point it at the viewer.
+    app.dependency_overrides[get_current_player_optional] = lambda: user
+    client = make_client(user)
+    assert [g["name"] for g in client.get("/friends/game-ends").json()["games"]] == ["Open to clear"]
+
+    # Opening the finished game (victory message) marks seen immediately.
+    r = client.get(f"/games/{game.id}")
+    assert r.status_code == 200
+    assert client.get("/friends/game-ends").json()["games"] == []
+
+    # Buddy has not opened it yet — still badgeed.
+    app.dependency_overrides[get_current_player_optional] = lambda: buddy
+    assert make_client(buddy).get("/friends/game-ends").json()["games"]
+    app.dependency_overrides.pop(get_current_player_optional, None)
+
+
+def test_save_game_marks_last_turn_finisher_seen(db_session, players):
+    from backend.api.main import save_game
+    from backend.engine.state import GameState
+
+    _admin, user, buddy = players
+    state = GameState.from_dict({})
+    state.winner = "good"
+    state.turn_number = 8
+    game = Game(
+        id=str(uuid.uuid4()),
+        name="Finisher",
+        game_code=uuid.uuid4().hex[:8],
+        status="active",
+        game_state=json.dumps(state.to_dict()),
+        players=json.dumps([
+            {"player_id": user.id, "faction_id": "gondor"},
+            {"player_id": buddy.id, "faction_id": "mordor"},
+        ]),
+    )
+    db_session.add(game)
+    db_session.commit()
+
+    events = [
+        {"type": "turn_ended", "payload": {"turn_number": 8, "faction": "mordor"}},
+        {"type": "victory", "payload": {"winner": "good"}},
+    ]
+    save_game(game.id, state, db_session, events=events)
+    db_session.refresh(game)
+    assert game.status == "finished"
+    config = json.loads(game.config)
+    # Buddy played the last turn (mordor) — never badge them; user still can see it.
+    assert config["game_end_seen_player_ids"] == [buddy.id]
+
+
+def test_backfill_hides_historical_finished_games(make_client, db_session, players):
+    from backend.api import database as dbmod
+
+    _admin, user, buddy = players
+    historical = _add_finished_game(db_session, name="Old game", user=user, buddy=buddy)
+    assert "game_end_seen_player_ids" not in (json.loads(historical.config) if historical.config else {})
+
+    dbmod._backfill_game_end_seen(db_session)
+    db_session.refresh(historical)
+    config = json.loads(historical.config)
+    assert config["game_end_seen_backfilled"] is True
+    assert set(config["game_end_seen_player_ids"]) == {user.id, buddy.id}
+
+    client = make_client(user)
+    assert client.get("/friends/game-ends").json()["games"] == []
+
+    # Second run is a no-op (marker present).
+    dbmod._backfill_game_end_seen(db_session)
+    db_session.refresh(historical)
+    assert json.loads(historical.config)["game_end_seen_backfilled"] is True
+
