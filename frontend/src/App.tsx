@@ -4614,6 +4614,16 @@ function App({ gameId: gameIdProp, initialState: initialStateProp }: AppProps) {
     return { label, frame } as const;
   }, [gameOverWinner]);
 
+  // Seeing the victory banner means this player has seen the game-end message —
+  // clear the friends-modal badge immediately (same as opening the finished game).
+  const gameEndDismissedRef = useMemo(() => ({ current: false }), []);
+  useEffect(() => {
+    if (!gameOverWinner || !GAME_ID || !currentPlayerId) return;
+    if (gameEndDismissedRef.current) return;
+    gameEndDismissedRef.current = true;
+    api.dismissGameEnd(GAME_ID).catch(() => {});
+  }, [gameOverWinner, GAME_ID, currentPlayerId, gameEndDismissedRef]);
+
   const dismissForfeitToast = useCallback(() => {
     setForfeitToastDismissed(true);
     try {

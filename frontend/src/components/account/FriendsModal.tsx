@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../services/api';
-import type { AuthPlayer, FriendRequestItem, FriendUser, GameInvitation, MyTurnGame, PlayerAvatarSettings, PlayerProfileCard, ProgressionTier } from '../../services/api';
+import type { AuthPlayer, FriendRequestItem, FriendUser, GameEndGame, GameInvitation, MyTurnGame, PlayerAvatarSettings, PlayerProfileCard, ProgressionTier } from '../../services/api';
 import { useMenuScroll } from '../MenuScrollContext';
 import ModalShell from './ModalShell';
 import ProfileModal from './ProfileModal';
@@ -94,18 +94,26 @@ export default function FriendsModal({ onClose, onRequestsChanged, myTurnGames =
   const [viewing, setViewing] = useState<AuthPlayer | null>(null);
   const [viewError, setViewError] = useState<string | null>(null);
   const [invitations, setInvitations] = useState<GameInvitation[]>([]);
+  const [gameEnds, setGameEnds] = useState<GameEndGame[]>([]);
 
   const loadLists = useCallback(async () => {
     try {
-      const [reqs, friendRows, inviteRows] = await Promise.all([
+      const [reqs, friendRows, inviteRows, endRows] = await Promise.all([
         api.listFriendRequests(),
         api.listFriends(),
         api.listGameInvites(),
+        api.getGameEnds(),
       ]);
       setIncoming(reqs.incoming ?? []);
       setOutgoing(reqs.outgoing ?? []);
       setFriends(friendRows.friends ?? []);
       setInvitations(inviteRows.invitations ?? []);
+      const ends = endRows.games ?? [];
+      setGameEnds(ends);
+      // Viewing the badge in this modal dismisses it for next time.
+      for (const g of ends) {
+        void api.dismissGameEnd(g.id).catch(() => {});
+      }
       setListError(null);
     } catch (err) {
       setListError(err instanceof Error ? err.message : 'Could not load friends');
@@ -356,6 +364,25 @@ export default function FriendsModal({ onClose, onRequestsChanged, myTurnGames =
           </ul>
         )}
       </section>
+
+      {gameEnds.length > 0 && (
+        <section className="account-section" aria-label="Game ended">
+          <ul className="friends-list" aria-label="Finished multiplayer games">
+            {gameEnds.map((game) => (
+              <li key={game.id} className="friends-list__row friends-list__row--invite">
+                <span className="friends-list__invite-copy">
+                  <span className="friends-list__name" title={game.name}>{game.name}</span>
+                  <span className="friends-list__tag">Alliance wins!</span>
+                </span>
+                <button type="button" className="account-btn account-btn--small" aria-label={`Open ${game.name}`} onClick={() => {
+                  onClose();
+                  navigateWithScroll(`/game/${encodeURIComponent(game.id)}`, undefined, { force: true });
+                }}>Open</button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {(myTurnGames.length > 0 || myTurnError) && (
         <section className="account-section" aria-label="My Turn">

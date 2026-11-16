@@ -1077,6 +1077,8 @@ def save_game(
         if just_finished:
             row.status = "finished"
             row.completed_at = datetime.utcnow()
+            # Last-turn finisher has already seen the victory message — never badge them.
+            _mark_game_end_seen(db, row, _finisher_player_ids_from_events(row, events))
             wrote_results = 0
             try:
                 from .game_results import ensure_game_results_for_row
@@ -1968,6 +1970,122 @@ def friends_decline_request(
     db.delete(row)
     db.commit()
     return {"ok": True}
+
+
+def _get_game_end_seen_player_ids(row) -> set[str]:
+    """Players who already saw this finished game's victory message (config key)."""
+    if not getattr(row, "config", None):
+        return set()
+    try:
+        config = json.loads(row.config) if isinstance(row.config, str) else row.config
+        ids = config.get("game_end_seen_player_ids")
+        if isinstance(ids, list):
+            return {str(x) for x in ids}
+    except (TypeError, json.JSONDecodeError):
+        pass
+    return set()
+
+
+def _mark_game_end_seen(db: Session, row: GameModel, player_ids) -> None:
+    """Idempotently record that these players have seen the game-end victory message."""
+    try:
+        config = json.loads(row.config) if isinstance(row.config, str) else (row.config or {})
+    except (TypeError, json.JSONDecodeError):
+        config = {}
+    if not isinstance(config, dict):
+        config = {}
+    seen = config.get("game_end_seen_player_ids")
+    if not isinstance(seen, list):
+        seen = []
+    known = {str(x) for x in seen}
+    changed = False
+    for pid in player_ids:
+        pid_str = str(pid)
+        if pid_str and pid_str not in known:
+            seen.append(pid_str)
+            known.add(pid_str)
+            changed = True
+    if changed or "game_end_seen_player_ids" not in config:
+        config["game_end_seen_player_ids"] = seen
+        row.config = json.dumps(config)
+        db.commit()
+
+
+def _roster_player_ids_for_faction(row, faction: str | None) -> list[str]:
+    """Map a faction id to the roster seat's player id (excludes computer seats)."""
+    if not faction:
+        return []
+    try:
+        roster = json.loads(row.players) if isinstance(row.players, str) else row.players
+    except (TypeError, json.JSONDecodeError):
+        return []
+    if not isinstance(roster, list):
+        return []
+    out = []
+    for seat in roster:
+        if not isinstance(seat, dict):
+            continue
+        if seat.get("faction_id") != faction:
+            continue
+        pid = str(seat.get("player_id") or "")
+        if pid and pid != LOBBY_COMPUTER_PLAYER_ID:
+            out.append(pid)
+    return out
+
+
+def _finisher_player_ids_from_events(row, events: list | None) -> list[str]:
+    """Player who played the last turn before victory (last turn_ended event faction)."""
+    if not events:
+        return []
+    from backend.engine.events import GameEvent, TURN_ENDED
+
+    last_faction: str | None = None
+    for e in events:
+        if isinstance(e, GameEvent):
+            etype, payload = e.type, e.payload
+        elif isinstance(e, dict):
+            etype, payload = e.get("type"), e.get("payload") or {}
+        else:
+            continue
+        if etype == TURN_ENDED and isinstance(payload, dict):
+            faction = payload.get("faction")
+            if faction:
+                last_faction = str(faction)
+    return _roster_player_ids_for_faction(row, last_faction)
+
+
+@app.get("/friends/game-ends")
+def friends_game_ends(
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Finished multiplayer games whose victory message this player has not seen yet."""
+    rows = (db.query(GameModel)
+        .filter(GameModel.status == "finished", GameModel.game_code.isnot(None),
+                GameModel.players.contains(str(player.id)))
+        .order_by(GameModel.completed_at.desc().nullslast(), GameModel.created_at.desc()).all())
+    player_id_str = str(player.id)
+    games = []
+    for row in rows:
+        if player_id_str in _get_forfeited_player_ids(row):
+            continue
+        if player_id_str in _get_game_end_seen_player_ids(row):
+            continue
+        try:
+            roster = json.loads(row.players)
+            state = json.loads(row.game_state)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(roster, list) or not isinstance(state, dict):
+            continue
+        if not any(isinstance(seat, dict) and str(seat.get("player_id")) == player_id_str
+                   for seat in roster):
+            continue
+        # Void finishes (admin end with no winner) have no victory message to show.
+        if not state.get("winner"):
+            continue
+        games.append({"id": str(row.id), "name": row.name})
+    return {"games": games}
 
 
 @app.get("/friends/my-turn")
@@ -3128,6 +3246,7 @@ def admin_end_game(
         row.game_state = json.dumps(state.to_dict())
         row.status = "finished"
         row.completed_at = datetime.utcnow()
+        _mark_game_end_seen(db, row, [])
         db.commit()
     else:
         _, td, fd, _, _ = get_game_definitions(game_id, db)
@@ -4660,6 +4779,22 @@ def get_game_state(
         except (TypeError, json.JSONDecodeError):
             pass
     _note_last_opened_game(db, player, game_id, row)
+    # Opening a finished game shows the victory message — mark seen immediately.
+    if row is not None and player is not None and row.status == "finished":
+        try:
+            _state_raw = json.loads(row.game_state) if isinstance(row.game_state, str) else row.game_state
+        except (TypeError, json.JSONDecodeError):
+            _state_raw = None
+        if isinstance(_state_raw, dict) and _state_raw.get("winner"):
+            try:
+                _roster = json.loads(row.players) if isinstance(row.players, str) else row.players
+            except (TypeError, json.JSONDecodeError):
+                _roster = []
+            if isinstance(_roster, list) and any(
+                isinstance(seat, dict) and str(seat.get("player_id")) == str(player.id)
+                for seat in _roster
+            ):
+                _mark_game_end_seen(db, row, [str(player.id)])
     return {
         "game_id": game_id,
         "state": state_dict,
@@ -5343,6 +5478,24 @@ def dismiss_starting_message(
     return {"ok": True}
 
 
+@app.post("/games/{game_id}/dismiss-game-end")
+def dismiss_game_end(
+    game_id: str,
+    player: Player = Depends(get_current_player),
+    db: Session = Depends(get_db),
+):
+    """Remember that this player saw the finished game's victory message (friends-modal badge)."""
+    row = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Game not found")
+    if row.status != "finished":
+        raise HTTPException(status_code=400, detail="Game has not finished")
+    if not _player_in_game(game_id, str(player.id), db):
+        raise HTTPException(status_code=403, detail="Not in this game")
+    _mark_game_end_seen(db, row, [str(player.id)])
+    return {"ok": True}
+
+
 def _normalize_forfeit_assign_target(raw: str) -> str:
     s = (raw or "").strip()
     if s.lower() == FORFEIT_ASSIGN_COMPUTER:
@@ -5539,6 +5692,8 @@ def forfeit_game(
             )
             forfeit_winner = "evil" if forfeit_alliance == "good" else "good"
             state.winner = forfeit_winner
+            # Ensure the seen-key exists on forfeit-ended games (forfeiter already filtered out).
+            _mark_game_end_seen(db, row, [])
             stronghold_counts: dict[str, int] = {}
             controlled: list[str] = []
             for territory_id, territory_state in state.territories.items():
