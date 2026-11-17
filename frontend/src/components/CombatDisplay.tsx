@@ -16,6 +16,12 @@ import {
   type EliminatedStack,
 } from '../utils/combatRoundFlow';
 import { unionUnitsAtStartFromCombatLog } from '../utils/combatLogSnapshot';
+import {
+  applyRoundStartUnitsAtStart,
+  buildBattleOpenRoster,
+  type BackendRoundUnit,
+  type CombatUnit,
+} from '../utils/combatBattleRoster';
 import './CombatDisplay.css';
 
 const CombatRingContext = createContext<Record<string, { id: string; name: string }[]>>({});
@@ -79,160 +85,6 @@ function augmentRoundStartWithPriorEliminated(
     }
   }
   return extra.length ? [...roundUnits, ...extra] : roundUnits;
-}
-
-/** One unit from a combat_log / combat_round_resolved `*_units_at_start` snapshot. */
-interface BackendRoundUnit {
-  instance_id: string;
-  unit_id: string;
-  display_name?: string;
-  attack?: number;
-  defense?: number;
-  effective_attack?: number | null;
-  effective_defense?: number | null;
-  health?: number;
-  remaining_health?: number;
-  is_archer?: boolean;
-  siegework_archetype?: boolean;
-  faction?: string;
-  passenger_count?: number;
-  terror?: boolean;
-  terrain_mountain?: boolean;
-  terrain_forest?: boolean;
-  captain_bonus?: boolean;
-  king_bonus?: boolean;
-  anti_cavalry?: boolean;
-  sea_raider?: boolean;
-  archer?: boolean;
-  stealth?: boolean;
-  bombikazi?: boolean;
-  fearless?: boolean;
-  hope?: boolean;
-  light?: boolean;
-  ram?: boolean;
-}
-
-/** Payload specials flags → CombatUnit badge flags (same contract as the combat modal). */
-const ROUND_UNIT_BADGE_FLAGS: Array<[keyof BackendRoundUnit, keyof CombatUnit]> = [
-  ['terror', 'hasTerror'],
-  ['terrain_mountain', 'terrainMountain'],
-  ['terrain_forest', 'terrainForest'],
-  ['captain_bonus', 'hasCaptainBonus'],
-  ['king_bonus', 'hasKingBonus'],
-  ['anti_cavalry', 'hasAntiCavalry'],
-  ['sea_raider', 'hasSeaRaider'],
-  ['archer', 'hasArcher'],
-  ['stealth', 'hasStealth'],
-  ['bombikazi', 'hasBombikazi'],
-  ['fearless', 'hasFearless'],
-  ['hope', 'hasHope'],
-  ['light', 'hasLight'],
-  ['ram', 'hasRam'],
-];
-
-function roundUnitBadgeFlags(bu: BackendRoundUnit): Partial<CombatUnit> {
-  const out: Partial<CombatUnit> = {};
-  for (const [payloadKey, unitKey] of ROUND_UNIT_BADGE_FLAGS) {
-    const v = bu[payloadKey];
-    if (typeof v === 'boolean') (out as Record<string, boolean>)[unitKey] = v;
-  }
-  return out;
-}
-
-/**
- * Apply a backend round-start snapshot to spectator shelves. Display fields (icon, faction color)
- * come from the live/battle-open unit, but effective stats, archer membership, and specials badges
- * always come from the snapshot so unit rows line up with that round's dice buckets exactly like
- * the combat modal does. Returns null when the snapshot is missing (legacy combat_log entries)
- * so callers can fall back to reconstructing from live state.
- */
-function applyRoundStartUnitsAtStart(
-  payload: BackendRoundUnit[] | undefined,
-  liveUnits: CombatUnit[],
-  snapshot: CombatUnit[] | null,
-): CombatUnit[] | null {
-  if (!Array.isArray(payload) || payload.length === 0) return null;
-  const liveMap = new Map(liveUnits.map(u => [u.id, u]));
-  const snapMap = new Map((snapshot ?? []).map(u => [u.id, u]));
-  return payload.map(bu => {
-    const base = liveMap.get(bu.instance_id) ?? snapMap.get(bu.instance_id);
-    const fromPayload: Partial<CombatUnit> = {
-      ...roundUnitBadgeFlags(bu),
-      ...(typeof bu.effective_attack === 'number' ? { effectiveAttack: bu.effective_attack } : {}),
-      ...(typeof bu.effective_defense === 'number' ? { effectiveDefense: bu.effective_defense } : {}),
-      ...(typeof bu.is_archer === 'boolean' ? { isArcher: bu.is_archer } : {}),
-      ...(typeof bu.siegework_archetype === 'boolean' ? { siegeworkArchetype: bu.siegework_archetype } : {}),
-      ...(typeof bu.passenger_count === 'number' && bu.passenger_count > 0
-        ? { passengerCount: bu.passenger_count }
-        : {}),
-    };
-    if (base) return { ...base, ...fromPayload };
-    return {
-      id: bu.instance_id,
-      unitType: bu.unit_id,
-      name: bu.display_name || bu.unit_id,
-      icon: `/assets/units/${bu.unit_id}.png`,
-      attack: bu.attack ?? 0,
-      defense: bu.defense ?? 0,
-      health: bu.health ?? 1,
-      remainingHealth: bu.remaining_health ?? 0,
-      ...(bu.faction && { factionId: bu.faction }),
-      ...fromPayload,
-    };
-  });
-}
-
-interface CombatUnit {
-  id: string;
-  unitType: string;
-  name: string;
-  icon: string;
-  attack: number;
-  defense: number;
-  /** When set (e.g. terrain bonus), used for shelf grouping so unit and rolls stay on same row. */
-  effectiveAttack?: number;
-  /** When set (e.g. terrain bonus), used for shelf grouping so unit and rolls stay on same row. */
-  effectiveDefense?: number;
-  /** True if unit has archer special (tag or specials list); used to show only archers during prefire. */
-  isArcher?: boolean;
-  health: number;
-  remainingHealth: number;
-  /** Defender units only: border color for this unit's faction (not territory owner). */
-  factionColor?: string;
-  /** Unit's owning faction id (from definitions); used for result-banner plurality tinting. */
-  factionId?: string;
-  /** Attack only: unit has Terror. */
-  hasTerror?: boolean;
-  /** Unit is receiving mountain terrain bonus. */
-  terrainMountain?: boolean;
-  /** Unit is receiving forest terrain bonus. */
-  terrainForest?: boolean;
-  /** Unit is receiving captain +1 (not the captain himself). */
-  hasCaptainBonus?: boolean;
-  /** Unit is receiving king +1 (not the king himself). */
-  hasKingBonus?: boolean;
-  /** Unit is receiving anti-cavalry (pikes) +1. */
-  hasAntiCavalry?: boolean;
-  /** Attacker only: unit has Sea Raider and is in a sea raid (+1 attack). */
-  hasSeaRaider?: boolean;
-  /** Defender only: unit is archer (prefire). */
-  hasArcher?: boolean;
-  /** Attacker only: unit has Stealth (prefire when all attackers have it). */
-  hasStealth?: boolean;
-  /** Attacker only: unit has Bombikazi (self-destruct with bomb). */
-  hasBombikazi?: boolean;
-  /** Defender only: unit has Fearless (immune to terror), when attackers have terror. */
-  hasFearless?: boolean;
-  /** Defender only: unit has Hope (cancels 1 terror), when attackers have terror. */
-  hasHope?: boolean;
-  /** Unit has Light and the other side has terror, so that terror is fully cancelled. */
-  hasLight?: boolean;
-  /** Attacker only: unit has ram special (from backend round snapshot / combat_specials). */
-  hasRam?: boolean;
-  /** Siegework archetype (from backend); used to shelf non-rolling engines in standard combat. */
-  siegeworkArchetype?: boolean;
-  /** Embarked units on this naval unit (map/modal parity). */
-  passengerCount?: number;
 }
 
 /** Roster + casualties needed to derive cumulative eliminated stacks (subset of CombatRound). */
@@ -1784,15 +1636,8 @@ function CombatDisplay({
   useEffect(() => {
     if (!isOpen || !readOnly) return;
     const union = unionUnitsAtStartFromCombatLog<BackendRoundUnit>(combatLog);
-    const build = (payload: BackendRoundUnit[], live: CombatUnit[]): CombatUnit[] | null => {
-      const converted = applyRoundStartUnitsAtStart(payload, live, null);
-      if (!converted?.length) return null;
-      const have = new Set(converted.map(u => u.id));
-      const extras = live.filter(u => !have.has(u.id));
-      return extras.length ? [...converted, ...extras] : converted;
-    };
-    const attackerFromLog = build(union.attacker, attacker.units);
-    const defenderFromLog = build(union.defender, defender.units);
+    const attackerFromLog = buildBattleOpenRoster(union.attacker, attacker.units);
+    const defenderFromLog = buildBattleOpenRoster(union.defender, defender.units);
     if (attackerFromLog) setBattleStartAttackerSnapshot(attackerFromLog);
     if (defenderFromLog) setBattleStartDefenderSnapshot(defenderFromLog);
   }, [isOpen, readOnly, combatLog, attacker.units, defender.units]);
@@ -1818,9 +1663,37 @@ function CombatDisplay({
     }
   }, [combatPhase, onHighlightTerritories]);
 
-  // Spectator: sync round state from backend combat_log when it updates (e.g. from polling)
+  // Spectator: sync round state from backend combat_log when it updates (e.g. from polling).
+  // Interactive: the same reconstruction runs exactly once when this modal mounts over an
+  // in-progress battle (page reload, or close/reopen mid-fight) — after a remount the local
+  // round state is empty, so without the restore the player lands on round 0 with a Start
+  // button that misrepresents the already-resolved rounds of the backend's active_combat.
+  /** Interactive one-shot restore has consumed the log for this modal session. */
+  const interactiveRestoredRef = useRef(false);
+  /**
+   * Original sync triggers (log + units + snapshots) recorded per run. combatPhase/currentRound
+   * are deps for the interactive restore gate; for spectators they must not re-fire the body
+   * (e.g. combatEndResult flipping the phase to 'complete' would be clobbered back to
+   * 'awaiting_decision'), so a phase-only re-run is skipped here.
+   */
+  const spectatorSyncKeyRef = useRef<unknown[] | null>(null);
   useEffect(() => {
-    if (!isOpen || !readOnly || !combatLog?.length || !attacker.units.length || !defender.units.length) return;
+    if (!isOpen) {
+      interactiveRestoredRef.current = false;
+      spectatorSyncKeyRef.current = null;
+      return;
+    }
+    const syncKey: unknown[] = [combatLog, attacker.units, defender.units, battleStartAttackerSnapshot, battleStartDefenderSnapshot];
+    if (readOnly) {
+      const prev = spectatorSyncKeyRef.current;
+      if (prev && prev.every((v, i) => v === syncKey[i])) return;
+      spectatorSyncKeyRef.current = syncKey;
+    } else {
+      // One-shot, and only from a fresh 'ready' mount — never clobber an in-flight roll.
+      if (interactiveRestoredRef.current || combatPhase !== 'ready' || currentRound !== null) return;
+    }
+    if (!combatLog?.length || !attacker.units.length || !defender.units.length) return;
+    if (!readOnly) interactiveRestoredRef.current = true;
     const last = combatLog[combatLog.length - 1] as {
       round_number?: number;
       attacker_rolls?: number[];
@@ -1867,27 +1740,46 @@ function CombatDisplay({
       prevA = prevA.concat(e.attacker_casualties ?? []);
       prevD = prevD.concat(e.defender_casualties ?? []);
     }
+    // Interactive restore: rebuild the battle-open roster from the log union — after a reload
+    // live props only carry survivors, so the mount snapshot (live-derived) would miss every
+    // unit that died earlier. Spectators get this roster from the union effect above.
+    let rosterAttacker = battleStartAttackerSnapshot;
+    let rosterDefender = battleStartDefenderSnapshot;
+    if (!readOnly) {
+      const union = unionUnitsAtStartFromCombatLog<BackendRoundUnit>(combatLog);
+      const builtAttacker = buildBattleOpenRoster(union.attacker, attacker.units);
+      const builtDefender = buildBattleOpenRoster(union.defender, defender.units);
+      if (builtAttacker) {
+        rosterAttacker = builtAttacker;
+        setBattleStartAttackerSnapshot(builtAttacker);
+      }
+      if (builtDefender) {
+        rosterDefender = builtDefender;
+        setBattleStartDefenderSnapshot(builtDefender);
+      }
+    }
     // Cumulative eliminated stacks (red-X ghosts). Interactive players accumulate these in
-    // animateDiceReveals, which spectators never run — derive them from the battle-open roster
-    // plus log-cumulative casualties instead. Groups that died in the current round are already
-    // in the round roster (buildUnitRowGroupList skips the duplicate by unitKey).
-    if (battleStartAttackerSnapshot?.length || battleStartDefenderSnapshot?.length) {
-      const spectatorEliminated = eliminatedStacksFromRoster({
-        attackerUnitsAtStart: battleStartAttackerSnapshot ?? [],
-        defenderUnitsAtStart: battleStartDefenderSnapshot ?? [],
+    // animateDiceReveals, which neither a spectator nor a restored session has run — derive
+    // them from the battle-open roster plus log-cumulative casualties instead. Groups that
+    // died in the current round are already in the round roster (buildUnitRowGroupList
+    // skips the duplicate by unitKey).
+    if (rosterAttacker?.length || rosterDefender?.length) {
+      const restoredEliminated = eliminatedStacksFromRoster({
+        attackerUnitsAtStart: rosterAttacker ?? [],
+        defenderUnitsAtStart: rosterDefender ?? [],
         attackerCasualties: [...prevA, ...(last.attacker_casualties ?? [])],
         defenderCasualties: [...prevD, ...(last.defender_casualties ?? [])],
       });
-      setPreviousEliminatedAttackerStacks(spectatorEliminated.attacker);
-      setPreviousEliminatedDefenderStacks(spectatorEliminated.defender);
+      setPreviousEliminatedAttackerStacks(restoredEliminated.attacker);
+      setPreviousEliminatedDefenderStacks(restoredEliminated.defender);
     }
     // Round-start roster + effective stats from the log snapshot (same source as the combat modal);
     // fall back to reconstructing from live units for legacy entries without the snapshot.
     const aAtStart =
-      applyRoundStartUnitsAtStart(last.attacker_units_at_start, attacker.units, battleStartAttackerSnapshot)
+      applyRoundStartUnitsAtStart(last.attacker_units_at_start, attacker.units, rosterAttacker)
       ?? attacker.units.filter(u => !prevA.includes(u.id));
     const dAtStart =
-      applyRoundStartUnitsAtStart(last.defender_units_at_start, defender.units, battleStartDefenderSnapshot)
+      applyRoundStartUnitsAtStart(last.defender_units_at_start, defender.units, rosterDefender)
       ?? defender.units.filter(u => !prevD.includes(u.id));
     const round: CombatRound = {
       roundNumber: rn,
@@ -1917,7 +1809,7 @@ function CombatDisplay({
     setCurrentRound(round);
     setShowHits(true);
     setShowCasualtyBadges(true);
-    // Live players reveal rows via animateDiceReveals; spectators never run that — must mark all shelves revealed or dice stay blank.
+    // Live players reveal rows via animateDiceReveals; spectators and restored sessions never run that — must mark all shelves revealed or dice stay blank.
     setRevealedRows(new Set(combatRowRevealKeysFromRound(round)));
     setCurrentRowKey(null);
     setIsLanding(false);
@@ -1926,7 +1818,7 @@ function CombatDisplay({
     setTerrorFinalRound(null);
     setShowTerrorRerollX(false);
     setCombatPhase('awaiting_decision'); // Show round + hits; result banner only when combatEndResult is set
-  }, [isOpen, readOnly, combatLog, attacker.units, defender.units, battleStartAttackerSnapshot, battleStartDefenderSnapshot]);
+  }, [isOpen, readOnly, combatLog, attacker.units, defender.units, battleStartAttackerSnapshot, battleStartDefenderSnapshot, combatPhase, currentRound]);
 
   // Spectator: when combat ended, show result banner then auto-close after 3s
   useEffect(() => {
