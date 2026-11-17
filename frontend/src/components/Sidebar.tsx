@@ -1649,7 +1649,7 @@ function Sidebar({
       )}
 
       {/* Territory Panel */}
-      <div className={`panel territory-panel${territory ? ' has-territory' : ''}`}>
+      <div className={`panel territory-panel${territory ? ' has-territory' : ''}${territory?.image ? ' has-image' : ''}`}>
         {territory?.image ? (
           <img
             src={`/assets/territories/${territory.image}`}
