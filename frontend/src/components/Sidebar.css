@@ -933,6 +933,11 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
   overflow: hidden;
 }
 
+/* Image present: opaque fill so the map backdrop doesn't bleed through the panel */
+.territory-panel.has-image {
+  background: var(--parchment);
+}
+
 .territory-panel .territory-panel-bg-image {
   position: absolute;
   inset: 0;
@@ -940,7 +945,7 @@ button.territory-signal-pill.territory-signal-pill--active:hover:not(:disabled) 
   height: 100%;
   object-fit: cover;
   object-position: center;
-  opacity: 0.22;
+  opacity: 0.35;
   pointer-events: none;
   z-index: 0;
 }
