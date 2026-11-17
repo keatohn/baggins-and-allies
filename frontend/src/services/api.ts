@@ -600,6 +600,10 @@ export interface SimulateCombatResponse {
     /** Present when server returns per-trial outcomes; required for accurate chunked merge. */
     attacker_survived?: boolean;
     defender_survived?: boolean;
+    attacker_prefire_hits?: number;
+    defender_prefire_hits?: number;
+    attacker_prefire_applicable?: boolean;
+    defender_prefire_applicable?: boolean;
     attacker_siegework_hits?: number;
     defender_siegework_hits?: number;
     siegework_round_applicable?: boolean;
