@@ -155,7 +155,7 @@ export interface LandscapePlacement {
   darkness?: number;
   /** Clockwise rotation in degrees (omitted when 0). */
   r?: number;
-  /** Placed by Auto-generate. Later generation preserves these placements. */
+  /** Placed by Auto-generate. Re-running replaces auto terrain art only; manual art and landmarks stay. */
   auto?: boolean;
 }
 

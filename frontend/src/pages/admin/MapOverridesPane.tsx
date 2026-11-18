@@ -23,6 +23,7 @@ import {
   LANDSCAPE_LANDMARK_CATEGORY,
   pointInsideTerritory,
   landscapeCategoriesForTerrain,
+  landscapeImageCategory,
   landscapeRotation,
   landscapeFilter,
   landscapeSrc,
@@ -30,6 +31,7 @@ import {
   nearestPointOnOutline,
   territoryPathEl,
   type LandscapeManifest,
+  type LandscapeObstacle,
 } from './landscape';
 import {
   adjacencyEdges,
@@ -59,6 +61,12 @@ const PAINT_STAMP_SPACING = 36;
 
 /** Minimum viewBox-space distance between painted pieces (dedupe vs existing stamps). */
 const PAINT_MIN_DIST = 36;
+
+/** Obstacle radius for landmark art that terrain auto-generation must yield to. */
+const LANDSCAPE_OBSTACLE_R_LANDMARK = 30;
+
+/** Obstacle radius for the four Icon-tab dots that terrain auto-generation must yield to. */
+const LANDSCAPE_OBSTACLE_R_SPOT = 40;
 
 /** Axis-aligned region in some map's viewBox space (used by the copy dialog). */
 type RegionRect = { x1: number; y1: number; x2: number; y2: number };
@@ -1289,6 +1297,24 @@ export function MapOverridesPane({
     [setPlacementAt],
   );
 
+  /** Swap the territory's terrain-art icon: retargets every placement in the chosen image's category. */
+  const setTerritoryImage = useCallback(
+    (img: string) => {
+      if (!selected) return;
+      const cat = landscapeImageCategory(manifest, img);
+      if (!cat || cat === LANDSCAPE_LANDMARK_CATEGORY) return;
+      updateLandscape((prev) => {
+        const map = { ...(prev?.territories ?? {}) };
+        const key = resolveTid(map, selected) ?? selected;
+        const list = map[key];
+        if (!list?.some((p) => p.cat === cat && p.img !== img)) return prev;
+        map[key] = list.map((p) => (p.cat === cat && p.img !== img ? { ...p, img } : p));
+        return { territories: map };
+      });
+    },
+    [selected, manifest, updateLandscape],
+  );
+
   const setBulkRotation = useCallback(
     (deg: number) => {
       if (!multiSel.size) return;
@@ -1438,7 +1464,8 @@ export function MapOverridesPane({
     try {
       updateLandscape((prev) => {
         const map: Record<string, LandscapePlacement[]> = { ...(prev?.territories ?? {}) };
-        // Generation is additive: never remove or replace existing art, including auto placements.
+        // Terrain generation replaces prior auto terrain art for each territory;
+        // manual placements and landmarks are preserved.
         const seed = (Date.now() % 2147483647) || 1;
         let seedAcc = seed;
         const nextSeed = () => {
@@ -1447,6 +1474,7 @@ export function MapOverridesPane({
         };
         let totalPlaced = Object.values(map).reduce((n, list) => n + list.length, 0);
         if (!landmarksOnly) {
+          const landmarks = manifest[LANDSCAPE_LANDMARK_CATEGORY] ?? [];
           for (const tid of paths.keys()) {
             const defKey = resolveTid(terrainBackedDefs, tid) ?? tid;
             const def = terrainBackedDefs[defKey];
@@ -1456,27 +1484,50 @@ export function MapOverridesPane({
                 : def && typeof def.terrain === 'string'
                   ? def.terrain
                   : '';
-            const cats = landscapeCategoriesForTerrain(terrain, manifest, { includeFree: false });
+            const cats = landscapeCategoriesForTerrain(terrain, manifest, { includeFree: false })
+              .filter((cat) => (manifest[cat]?.length ?? 0) > 0);
             if (!cats.length) continue;
             const pathEl = territoryPathEl(tid);
             if (!pathEl) continue;
+            const key = resolveTid(map, tid) ?? tid;
+            const existing = map[key] ?? [];
+            // Landscape art always yields to landmarks (placed or prospective) and
+            // the four Icon-tab dots, so run order of the two generate modes never matters.
+            const obstacles: LandscapeObstacle[] = [];
+            for (const p of existing) {
+              if (p.cat === LANDSCAPE_LANDMARK_CATEGORY) {
+                obstacles.push({ x: p.x, y: p.y, r: LANDSCAPE_OBSTACLE_R_LANDMARK });
+              }
+            }
+            if (landmarkFileForTerritory(tid, landmarks)) {
+              const pt = pointInsideTerritory(pathEl);
+              if (pt) obstacles.push({ x: pt.x, y: pt.y, r: LANDSCAPE_OBSTACLE_R_LANDMARK });
+            }
+            for (const { kind } of SPOT_KINDS) {
+              const spot = effectiveFor(tid, kind);
+              if (spot) obstacles.push({ x: spot.pt.x, y: spot.pt.y, r: LANDSCAPE_OBSTACLE_R_SPOT });
+            }
+            // Replace, not append: drop prior auto terrain art before regenerating.
+            const retained = existing.filter((p) => !(p.auto && p.cat !== LANDSCAPE_LANDMARK_CATEGORY));
+            totalPlaced -= existing.length - retained.length;
+            if (retained.length) map[key] = retained;
+            else delete map[key];
             for (const cat of cats) {
               const images = manifest[cat] ?? [];
-              if (!images.length) continue;
-              const key = resolveTid(map, tid) ?? tid;
-              const existing = map[key] ?? [];
-              const room = Math.min(50 - existing.length, 2500 - totalPlaced);
+              const current = map[key] ?? [];
+              const room = Math.min(50 - current.length, 2500 - totalPlaced);
               if (room <= 0) continue;
-              const generated = autoGenerateForTerritory(pathEl, cat, images, nextSeed())
-                .filter((candidate) => !existing.some((p) =>
+              const generated = autoGenerateForTerritory(pathEl, cat, images, nextSeed(), obstacles)
+                .filter((candidate) => !current.some((p) =>
                   (p.x - candidate.x) ** 2 + (p.y - candidate.y) ** 2 < PAINT_MIN_DIST ** 2))
                 .slice(0, room);
               if (generated.length) {
-                map[key] = [...existing, ...generated];
+                map[key] = [...current, ...generated];
                 totalPlaced += generated.length;
               }
-              if (totalPlaced >= 2500) return Object.keys(map).length ? { territories: map } : undefined;
+              if (totalPlaced >= 2500) break;
             }
+            if (totalPlaced >= 2500) break;
           }
           return Object.keys(map).length ? { territories: map } : undefined;
         }
@@ -1510,7 +1561,7 @@ export function MapOverridesPane({
     } finally {
       setAutoBusy(false);
     }
-  }, [artMode, paths, terrainBackedDefs, manifest, updateLandscape]);
+  }, [artMode, paths, terrainBackedDefs, manifest, updateLandscape, effectiveFor]);
 
   const terrainTypeFor = useCallback(
     (tid: string): string => {
@@ -1546,6 +1597,12 @@ export function MapOverridesPane({
     () => (selected ? landscapeFor(selected) : []),
     [selected, landscapeFor],
   );
+
+  /** The territory's current terrain-art icon: its auto placement's image, else the first non-landmark one. */
+  const territoryAutoImage = useMemo(() => {
+    const terrain = selectedPlacements.filter((p) => p.cat !== LANDSCAPE_LANDMARK_CATEGORY);
+    return (terrain.find((p) => p.auto) ?? terrain[0])?.img ?? null;
+  }, [selectedPlacements]);
 
   const borderAt = useCallback((tid: string, point: Pt) => {
     try {
@@ -2667,7 +2724,7 @@ export function MapOverridesPane({
                   title={
                     artMode === 'landmarks'
                       ? 'Add missing landmarks on their territories. Existing landmarks and terrain art stay.'
-                      : 'Add terrain art in available space. All existing art stays.'
+                      : 'Pack dense terrain art at paint spacing, yielding to landmarks and map icons. Prior auto terrain art is replaced; manual art and landmarks stay.'
                   }
                 >
                   {autoBusy ? 'Generating…' : 'Auto-generate'}
@@ -3004,7 +3061,38 @@ export function MapOverridesPane({
                       ).join(', ') || 'none'}
                     </p>
                   ) : editorTab === 'landscape' ? (
-                        <ul className="mapov-kinds">
+                        <>
+                          {territoryAutoImage ? (
+                            <label
+                              className="mapov-landscape__icon"
+                              title="Landscape icon used across this territory's terrain art"
+                            >
+                              Icon
+                              <select
+                                className="mapov-landscape__icon-select"
+                                value={territoryAutoImage}
+                                onChange={(e) => setTerritoryImage(e.target.value)}
+                              >
+                                {landscapeImageCategory(manifest, territoryAutoImage) ? null : (
+                                  <option value={territoryAutoImage}>
+                                    {territoryAutoImage.replace(/\.png$/i, '')}
+                                  </option>
+                                )}
+                                {Object.entries(manifest)
+                                  .filter(([cat, files]) => files.length > 0 && cat !== LANDSCAPE_LANDMARK_CATEGORY)
+                                  .map(([cat, files]) => (
+                                    <optgroup key={cat} label={cat}>
+                                      {files.map((file) => (
+                                        <option key={file} value={file}>
+                                          {file.replace(/\.png$/i, '')}
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  ))}
+                              </select>
+                            </label>
+                          ) : null}
+                          <ul className="mapov-kinds">
                           {selectedPlacements.map((p, index) => {
                             const isActive = selectedPlacement?.tid === selected && selectedPlacement?.index === index;
                             return (
@@ -3109,7 +3197,8 @@ export function MapOverridesPane({
                               <span className="mapov-kind__label">No landscape art placed yet</span>
                             </li>
                           )}
-                        </ul>
+                          </ul>
+                        </>
                   ) : selectedFocus === 'override' ? (
                     <ul className="mapov-kinds">
                       {SPOT_KINDS.map(({ kind, hint }) => {
