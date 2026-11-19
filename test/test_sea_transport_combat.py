@@ -10,7 +10,7 @@ See test_sail_to_offload_land_payload_contract_regression.
 import pytest
 from copy import deepcopy
 
-from backend.engine.state import Unit, PendingMove, ActiveCombat
+from backend.engine.state import Unit, PendingMove, ActiveCombat, Ring
 from backend.engine.definitions import UnitDefinition, load_static_definitions, load_starting_setup
 from backend.engine.actions import (
     move_units,
@@ -1380,6 +1380,72 @@ def test_pending_offload_apply_expands_boat_only_instance_ids(wotr_defs):
     on_har = [u for u in after.territories["harondor"].units if u.instance_id == land.instance_id]
     assert len(on_har) == 1
     assert after.territory_sea_raid_from.get("harondor") == "sea_zone_11"
+
+
+def test_pending_offload_apply_expands_boat_only_ids_before_apply_carried_ring():
+    """
+    Defense-in-depth for the boat-only + ring payload (issue #50, PR #183 part 2):
+    apply expands boat-only pending ids into a local list for movement, but
+    apply_carried_ring reads pending_move.unit_instance_ids directly. Without writing
+    the expanded list back first, a hand-built boat-only pending with ring_ids moves
+    the hero ashore yet drops the carry credit (carried_in_by stays None).
+    """
+    unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(
+        setup_id="woteas_1.0"
+    )
+    setup = load_starting_setup(setup_id="woteas_1.0")
+    state = initialize_game_state(
+        faction_defs, territory_defs, unit_defs,
+        starting_setup=setup,
+        camp_defs=camp_defs,
+    )
+    sea = state.territories["sea_zone_3"]
+    land = state.territories["harlindon"]
+    sea.units.clear()
+    ship = _make_unit(state, "noldor", "lindon_ship", unit_defs)
+    hero = _make_unit(state, "noldor", "gil_galad", unit_defs)
+    hero.loaded_onto = ship.instance_id
+    sea.units.extend([ship, hero])
+    land.units.clear()
+    land.owner = "noldor"
+    state.rings_of_power = True
+    state.rings = [
+        Ring(
+            id="narya",
+            name="Narya",
+            power=3,
+            territory_id="sea_zone_3",
+            bearer_instance_id=hero.instance_id,
+        )
+    ]
+
+    state.pending_moves = [
+        PendingMove(
+            from_territory="sea_zone_3",
+            to_territory="harlindon",
+            unit_instance_ids=[ship.instance_id],
+            phase="combat_move",
+            move_type="offload",
+            ring_ids=["narya"],
+        )
+    ]
+    state.current_faction = "noldor"
+    state.phase = "combat_move"
+
+    after = get_state_after_pending_moves(
+        state, "combat_move", unit_defs, territory_defs, faction_defs
+    )
+    # Movement itself never depended on the stored list (apply expands locally).
+    on_land = [u for u in after.territories["harlindon"].units if u.instance_id == hero.instance_id]
+    assert len(on_land) == 1, "hero passenger must offload with the boat-only pending"
+    ring = after.rings[0]
+    assert ring.territory_id == "harlindon"
+    # apply_carried_ring reads pending_move.unit_instance_ids — an unexpanded stored
+    # list (boat only) cannot see the hero bearer and loses the carry credit.
+    assert ring.carried_in_by == hero.instance_id, (
+        "expanded unit ids must be written back to the pending before apply_carried_ring"
+    )
+    assert ring.bearer_instance_id is None
 
 
 def test_pending_sail_apply_expands_boat_only_instance_ids(wotr_defs):
