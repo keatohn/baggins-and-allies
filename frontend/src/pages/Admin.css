@@ -2248,6 +2248,28 @@ body:has(.combat-sim-modal-overlay) {
   margin: 0;
 }
 
+.mapov-landscape__icon {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+
+.mapov-landscape__icon-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--ink-faded);
+  border-radius: 6px;
+  background: #fffef8;
+  font-family: var(--font-parchment);
+  font-size: 0.85rem;
+  color: var(--ink);
+}
+
 .admin-graph__viewport--placing {
   cursor: crosshair;
 }

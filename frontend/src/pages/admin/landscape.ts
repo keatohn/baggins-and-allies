@@ -174,20 +174,21 @@ export function nearestPointOnOutline(path: SVGPathElement, x: number, y: number
 }
 
 /**
- * Per-category auto-generate density. Pieces scale with *estimated polygon area*
- * (not bbox), so L-shaped territories get fewer pieces than their bounding box
- * would suggest. Adding a new manifest category is just another table row.
+ * Per-category auto-generate profile. Packing density is fixed (paint-brush
+ * spacing up to the global per-territory cap); scale/scaleJitter still drive
+ * display size. perArea/maxCount/spacing are retained for reference but no
+ * longer affect placement. Adding a new manifest category is just another table row.
  */
 export type LandscapeDensityProfile = {
-  /** Pieces per 100k viewBox² of estimated fill area. */
+  /** Pieces per 100k viewBox² of estimated fill area (legacy; no longer drives count). */
   perArea: number;
-  /** Hard cap for this category (global caps are 50/territory, 2500/map). */
+  /** Hard cap for this category (legacy; global caps are 50/territory, 2500/map). */
   maxCount: number;
   /** Base display scale before jitter. */
   scale: number;
   /** ± fraction of base scale for variety (0.2 → s in [0.8×scale, 1.2×scale]). */
   scaleJitter: number;
-  /** Min spacing as a fraction of √(area/count); denser categories pack tighter. */
+  /** Min spacing as a fraction of √(area/count) (legacy; spacing is now fixed). */
   spacing: number;
 };
 
@@ -206,28 +207,30 @@ const DEFAULT_DENSITY_PROFILE: LandscapeDensityProfile = {
   spacing: 1,
 };
 
-/** Sample-based fill area (bbox area × fraction of grid points inside the path). */
-function estimatePolygonArea(path: SVGPathElement, bbox: DOMRect, samples = 16): number {
-  let inside = 0;
-  for (let i = 0; i < samples; i++) {
-    for (let j = 0; j < samples; j++) {
-      const x = bbox.x + ((i + 0.5) / samples) * bbox.width;
-      const y = bbox.y + ((j + 0.5) / samples) * bbox.height;
-      if (isPointInTerritoryPath(path, x, y)) inside += 1;
-    }
-  }
-  // Degenerate path (no sample landed inside): fall back to the full bbox so we
-  // still try — rejection sampling will drop points that miss the fill.
-  if (inside === 0) return bbox.width * bbox.height;
-  return bbox.width * bbox.height * (inside / (samples * samples));
-}
+/** Minimum viewBox-space distance between auto-generated pieces (matches the paint brush). */
+export const LANDSCAPE_AUTO_MIN_DIST = 36;
 
-/** Interior auto-placement for one territory: density-profiled points, random image, size jitter. */
+/** Global per-territory cap on landscape placements (matches MAX_LANDSCAPE_PER_TERRITORY). */
+export const LANDSCAPE_AUTO_MAX_PER_TERRITORY = 50;
+
+/** Something landscape art must yield to: a disc of radius `r` around (x, y). */
+export type LandscapeObstacle = { x: number; y: number; r: number };
+
+/** Half-extent of a scale-1 landscape icon in viewBox units (40-unit art box). */
+const LANDSCAPE_ICON_HALF = 20;
+
+/**
+ * Interior auto-placement for one territory: greedy fill at paint-brush spacing,
+ * a single image shared by every piece, size jitter from the density profile, and
+ * obstacle clearance (a candidate is dropped when its center is within
+ * `obstacle.r + 20·s` of an obstacle). Stops at the global per-territory cap.
+ */
 export function autoGenerateForTerritory(
   path: SVGPathElement,
   category: string,
   images: string[],
   seedInput?: number,
+  obstacles?: readonly LandscapeObstacle[],
 ): LandscapePlacement[] {
   if (!images.length) return [];
   let seed = (seedInput ?? Date.now()) % 2147483647;
@@ -244,30 +247,30 @@ export function autoGenerateForTerritory(
       return [];
     }
     const profile = LANDSCAPE_DENSITY_PROFILES[category] ?? DEFAULT_DENSITY_PROFILE;
-    const area = estimatePolygonArea(path, bbox);
-    const count = Math.max(1, Math.min(profile.maxCount, Math.round((area / 100000) * profile.perArea)));
-    const ideal = Math.sqrt(area / count);
-    const minDist = Math.max(24, ideal * profile.spacing);
-    const minDist2 = minDist * minDist;
+    // One icon for the whole territory: pick once, reuse for every piece in this run.
+    const img = images[Math.floor(rand() * images.length)] ?? images[0]!;
+    const minDist2 = LANDSCAPE_AUTO_MIN_DIST * LANDSCAPE_AUTO_MIN_DIST;
+    const count = LANDSCAPE_AUTO_MAX_PER_TERRITORY;
+    const attempts = count * 60;
     const placed: { x: number; y: number }[] = [];
     const out: LandscapePlacement[] = [];
-    const attempts = Math.min(900, count * 60);
     for (let attempt = 0; attempt < attempts && out.length < count; attempt++) {
       const x = bbox.x + rand() * bbox.width;
       const y = bbox.y + rand() * bbox.height;
       if (!isPointInTerritoryPath(path, x, y)) continue;
       if (placed.some((q) => (q.x - x) ** 2 + (q.y - y) ** 2 < minDist2)) continue;
+      const sRounded = Math.round(profile.scale * (1 + (rand() * 2 - 1) * profile.scaleJitter) * 100) / 100;
+      const clearance = (o: LandscapeObstacle) => (o.x - x) ** 2 + (o.y - y) ** 2 < (o.r + LANDSCAPE_ICON_HALF * sRounded) ** 2;
+      if (obstacles?.some(clearance)) continue;
       placed.push({ x, y });
-      const s = profile.scale * (1 + (rand() * 2 - 1) * profile.scaleJitter);
       const placement: LandscapePlacement = {
         cat: category,
-        img: images[Math.floor(rand() * images.length)] ?? images[0]!,
+        img,
         x: Math.round(x * 100) / 100,
         y: Math.round(y * 100) / 100,
         layer: 'interior',
         auto: true,
       };
-      const sRounded = Math.round(s * 100) / 100;
       if (sRounded !== 1) placement.s = sRounded;
       out.push(placement);
     }
@@ -275,6 +278,14 @@ export function autoGenerateForTerritory(
   } catch {
     return [];
   }
+}
+
+/** Manifest category that owns `img`, or null when no category lists it. */
+export function landscapeImageCategory(manifest: LandscapeManifest, img: string): string | null {
+  for (const [cat, files] of Object.entries(manifest)) {
+    if (files.includes(img)) return cat;
+  }
+  return null;
 }
 
 /** Tint mountain art without affecting its transparent background. */
