@@ -990,6 +990,10 @@ def run_simulation(
     def_cost_sum = 0.0
     att_cost_by_trial: list[float] = []
     def_cost_by_trial: list[float] = []
+    att_prefire_hits_by_trial: list[int] = []
+    def_prefire_hits_by_trial: list[int] = []
+    att_prefire_applicable_by_trial: list[bool] = []
+    def_prefire_applicable_by_trial: list[bool] = []
     att_siegework_hits_by_trial: list[int] = []
     def_siegework_hits_by_trial: list[int] = []
     siegework_applicable_by_trial: list[bool] = []
@@ -1044,6 +1048,10 @@ def run_simulation(
         def_cost_sum += def_c
         att_cost_by_trial.append(att_c)
         def_cost_by_trial.append(def_c)
+        att_prefire_hits_by_trial.append(outcome.attacker_prefire_hits)
+        def_prefire_hits_by_trial.append(outcome.defender_prefire_hits)
+        att_prefire_applicable_by_trial.append(outcome.attacker_prefire_applicable)
+        def_prefire_applicable_by_trial.append(outcome.defender_prefire_applicable)
         att_siegework_hits_by_trial.append(outcome.attacker_siegework_hits)
         def_siegework_hits_by_trial.append(outcome.defender_siegework_hits)
         siegework_applicable_by_trial.append(outcome.siegework_round_applicable)
@@ -1139,6 +1147,10 @@ def run_simulation(
                 "defender_casualties": dict(def_casualties_by_trial[i]),
                 "attacker_survived": attacker_survived_by_trial[i],
                 "defender_survived": defender_survived_by_trial[i],
+                "attacker_prefire_hits": att_prefire_hits_by_trial[i],
+                "defender_prefire_hits": def_prefire_hits_by_trial[i],
+                "attacker_prefire_applicable": att_prefire_applicable_by_trial[i],
+                "defender_prefire_applicable": def_prefire_applicable_by_trial[i],
                 "attacker_siegework_hits": att_siegework_hits_by_trial[i],
                 "defender_siegework_hits": def_siegework_hits_by_trial[i],
                 "siegework_round_applicable": siegework_applicable_by_trial[i],

@@ -403,3 +403,51 @@ def test_max_rounds_cap_stops_degenerate_battles(defs):
     )
     assert out_default.winner == "defender"
     assert out_default.rounds == DEFAULT_MAX_ROUNDS
+
+
+def test_run_simulation_outcomes_include_prefire_fields(defs):
+    """L7: per-trial outcomes carry prefire hits/applicable so the client can merge means across chunks."""
+    unit_defs, territory_defs = defs
+    if "gondor_archer" not in unit_defs:
+        pytest.skip("wotr_exp_1.0 has no gondor_archer")
+    att = [{"unit_id": "gondor_soldier", "count": 4}]
+    def_stacks = [{"unit_id": "gondor_archer", "count": 2}]
+    res = run_simulation(
+        att, def_stacks, "pelennor", unit_defs, territory_defs,
+        n_trials=20, seed=99, return_outcomes=True,
+    )
+    assert res.outcomes and len(res.outcomes) == 20
+    for o in res.outcomes:
+        assert "attacker_prefire_hits" in o
+        assert "defender_prefire_hits" in o
+        assert "attacker_prefire_applicable" in o
+        assert "defender_prefire_applicable" in o
+        assert isinstance(o["attacker_prefire_hits"], int)
+        assert isinstance(o["defender_prefire_hits"], int)
+        assert isinstance(o["attacker_prefire_applicable"], bool)
+        assert isinstance(o["defender_prefire_applicable"], bool)
+    # Archer defenders: at least one trial should have defender prefire applicable
+    assert any(o["defender_prefire_applicable"] for o in res.outcomes)
+    # Aggregate mean must equal mean over applicable trials only (backend contract the client mirrors)
+    applicable = [o for o in res.outcomes if o["defender_prefire_applicable"]]
+    expected = sum(o["defender_prefire_hits"] for o in applicable) / len(applicable)
+    assert res.defender_prefire_hits_mean == pytest.approx(expected)
+
+
+def test_run_simulation_outcomes_prefire_fields_without_archers(defs):
+    """No archers: applicable flags are false and means stay None; fields still present for merge."""
+    unit_defs, territory_defs = defs
+    att = [{"unit_id": "gondor_soldier", "count": 1}]
+    def_stacks = [{"unit_id": "morannon_orc", "count": 1}]
+    res = run_simulation(
+        att, def_stacks, "pelennor", unit_defs, territory_defs,
+        n_trials=5, seed=3, return_outcomes=True,
+    )
+    assert res.outcomes and len(res.outcomes) == 5
+    for o in res.outcomes:
+        assert o["attacker_prefire_applicable"] is False
+        assert o["defender_prefire_applicable"] is False
+        assert o["attacker_prefire_hits"] == 0
+        assert o["defender_prefire_hits"] == 0
+    assert res.attacker_prefire_hits_mean is None
+    assert res.defender_prefire_hits_mean is None
