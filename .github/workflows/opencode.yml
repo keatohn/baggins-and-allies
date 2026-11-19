@@ -29,11 +29,18 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Install OpenCode
+        run: |
+          curl --fail --location --silent --show-error --retry 3 \
+            -o "$RUNNER_TEMP/opencode.tar.gz" \
+            https://github.com/anomalyco/opencode/releases/download/v1.19.5/opencode-linux-x64-baseline.tar.gz
+          echo "17c200fd4b2289954cc01552559f9b6d03ec157b2ddfb5eb54144f491656333d  $RUNNER_TEMP/opencode.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/opencode.tar.gz" -C "$RUNNER_TEMP"
+
       - name: Run OpenCode
-        uses: anomalyco/opencode/github@latest
+        run: '"$RUNNER_TEMP/opencode" github run'
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          model: opencode/mimo-v2.6-flash-free
-          use_github_token: true
+          MODEL: opencode/mimo-v2.6-flash-free
+          USE_GITHUB_TOKEN: "true"
