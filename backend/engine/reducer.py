@@ -1483,12 +1483,11 @@ def _handle_move_units(
     move_type = action.payload.get("move_type")
     from_def_mt = territory_defs.get(from_id)
     to_def_mt = territory_defs.get(to_id)
+    # Domain from terrain_type only — never infer water from the territory id (audit L10 related):
+    # a name-based "sea_zone" fallback disagrees with validation/pathfinding (which are terrain-based)
+    # and mislabels ground moves into water as load/offload when name and terrain disagree.
     from_domain_mt = _water_domain(from_def_mt)
     to_domain_mt = _water_domain(to_def_mt)
-    if from_domain_mt is None and isinstance(from_id, str) and "sea_zone" in from_id.lower():
-        from_domain_mt = "sea"
-    if to_domain_mt is None and isinstance(to_id, str) and "sea_zone" in to_id.lower():
-        to_domain_mt = "sea"
     from_sea_mt = from_domain_mt is not None
     to_sea_mt = to_domain_mt is not None
     all_aerial_movers = bool(units_to_move) and all(

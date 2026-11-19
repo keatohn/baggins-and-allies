@@ -379,6 +379,50 @@ def test_land_move_without_payload_move_type_across_water_shortest_path_is_not_s
     assert not sail_events, f"ground move must not log a sail event: {sail_events}"
 
 
+def test_move_type_domain_follows_terrain_not_territory_name():
+    """Issue #50 L10 related: move-type domain inference comes from terrain_type only.
+
+    A land hex whose id contains 'sea_zone' must not be treated as water because of its
+    name: the name-based fallback inferred load/offload for plain ground moves (capacity
+    errors at phase end, wrong pricing, embark events for a land move)."""
+    from backend.engine.reducer import get_state_after_pending_moves
+
+    state, unit_defs, territory_defs, faction_defs, camp_defs, port_defs = _board(
+        "gondor", "non_combat_move"
+    )
+
+    # Land terrain under a sea_zone name: only the id says "sea".
+    territory_defs["sea_zone_12"].terrain_type = "plains"
+
+    origin, dest = "west_osgiliath", "sea_zone_12"
+    u = next(x for x in state.territories[origin].units if x.unit_id == "gondor_soldier")
+    u.remaining_movement = 4
+
+    action = move_units("gondor", origin, dest, [u.instance_id])  # no move_type in payload
+    v = validate_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert v.valid, v.error
+    state, _ = apply_action(state, action, unit_defs, territory_defs, faction_defs, camp_defs, port_defs)
+    assert len(state.pending_moves) == 1
+    assert state.pending_moves[0].move_type == "land", (
+        "domain must come from terrain_type, not the territory id: "
+        f"got {state.pending_moves[0].move_type!r}"
+    )
+
+    # Charge runs at pending apply; leaving NCM resets movement, so check the sim first.
+    sim = get_state_after_pending_moves(state, "non_combat_move", unit_defs, territory_defs, faction_defs)
+    moved_sim = next(x for x in sim.territories[dest].units if x.instance_id == u.instance_id)
+    assert moved_sim.remaining_movement == 3, (
+        f"adjacent land move charges 1 (remaining 3), got remaining={moved_sim.remaining_movement}"
+    )
+
+    state, _ = apply_action(
+        state, end_phase("gondor"), unit_defs, territory_defs, faction_defs, camp_defs, port_defs
+    )
+    assert any(
+        x.instance_id == u.instance_id for x in state.territories[dest].units
+    ), "ground move must apply to the land-terrained destination"
+
+
 def _board(faction: str, phase: str):
     unit_defs, territory_defs, faction_defs, camp_defs, port_defs = load_static_definitions(setup_id="wotr_1.1")
     starting = load_starting_setup(setup_id="wotr_1.1")
