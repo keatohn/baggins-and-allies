@@ -1981,11 +1981,11 @@ export function UnitsPanel({
             'Tags (comma-separated)',
             <CommaListField key={`${id}:tags`} value={u.tags} onApply={(tags) => patch({ tags })} />,
           )}
-          {seedMode && unitClasses && fieldRow('Unit class', <CatalogSelect value={u.unit_class} options={Object.keys(unitClasses).sort()} placeholder="Own stats" onChange={(unit_class) => {
+          {seedMode && unitClasses && fieldRow('Unit class', <CatalogSelect value={u.unit_class} options={Object.keys(unitClasses).sort()} placeholder="---" onChange={(unit_class) => {
             const previous = typeof u.unit_class === 'string' ? unitClasses[u.unit_class] : undefined;
             patch({ ...pickUnitStats(previous ?? u), unit_class: unit_class || undefined });
           }} />)}
-          {typeof u.unit_class === 'string' && u.unit_class && unitClasses && <p className="admin-form__micro">Stats inherited from {u.unit_class}. Choose Own stats to edit independently.</p>}
+          {typeof u.unit_class === 'string' && u.unit_class && unitClasses && <p className="admin-form__micro">Stats inherited from {u.unit_class}. Choose --- to edit independently.</p>}
           <fieldset className="admin-unit-stats" disabled={!!(unitClasses && u.unit_class)}>
             <UnitStatsFields u={unitClasses && typeof u.unit_class === 'string' ? unitClasses[u.unit_class] ?? u : u} patch={patch} />
           </fieldset>
