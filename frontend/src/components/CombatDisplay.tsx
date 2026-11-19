@@ -16,6 +16,7 @@ import {
   type EliminatedStack,
 } from '../utils/combatRoundFlow';
 import { unionUnitsAtStartFromCombatLog } from '../utils/combatLogSnapshot';
+import { combatHeaderIndicators } from '../utils/combatHeaderIndicators';
 import {
   applyRoundStartUnitsAtStart,
   buildBattleOpenRoster,
@@ -2375,18 +2376,14 @@ function CombatDisplay({
         <header className="modal-header">
           <h2>Battle for {territoryName}</h2>
           <div className="combat-header-indicators">
-            {(currentRound?.isArcherPrefire || (roundNumber === 0 && archerPrefirePending)) && (
-              <span className="round-indicator">Archers</span>
-            )}
-            {currentRound?.isStealthPrefire && (
-              <span className="round-indicator">Stealth</span>
-            )}
-            {(currentRound?.isSiegeworksRound || (roundNumber === 0 && siegeworksPending)) && (
-              <span className="round-indicator">Siegeworks</span>
-            )}
-            {roundNumber > 0 && !currentRound?.isArcherPrefire && !currentRound?.isStealthPrefire && !currentRound?.isSiegeworksRound && (
-              <span className="round-indicator">Round {roundNumber}</span>
-            )}
+            {combatHeaderIndicators({
+              currentRound,
+              roundNumber,
+              archerPrefirePending,
+              siegeworksPending,
+            }).map(label => (
+              <span key={label} className="round-indicator">{label}</span>
+            ))}
           </div>
           {readOnly && (
             <button
