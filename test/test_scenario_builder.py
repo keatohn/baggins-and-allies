@@ -490,3 +490,60 @@ def test_legacy_saved_drawing_without_a_setup_acquires_matching_seeds_once(db):
     assert set(state['library']['maps']['unused_legacy_map']) == {'legacy_region'}
     assert not any(setup['manifest'].get('map_asset') == 'unused_legacy_map' for setup in state['setups'].values())
     assert load_state(db) == state
+
+
+def test_unit_classes_resolve_only_stats_and_preserve_overrides():
+    from backend.scenario_builder import resolve_unit_seed
+    bundle = example()
+    library = extract_library({'alpha': bundle})
+    library['unit_classes'] = {'infantry': {'attack': 8, 'defense': 4, 'movement': 2,
+        'health': 2, 'dice': 2, 'cost': {'power': 9}, 'faction': 'evil', 'specials': ['archer']}}
+    library['units']['guard']['unit_class'] = 'infantry'
+    setup = setup_from_bundle(bundle, library)
+    setup['units']['guard'] = {'seed': 'guard', 'overrides': {'defense': 6}}
+    result = compile_setup(setup, library)['units']['guard']
+    assert result['attack'] == 8
+    assert result['defense'] == 6
+    assert result['cost'] == {'power': 9}
+    assert result['faction'] == 'good'
+    assert result['specials'] == []
+    assert 'unit_class' not in result
+    assert setup_from_bundle(compile_setup(setup, library), library, setup) == setup
+    library['unit_classes']['infantry']['attack'] = 10
+    assert compile_setup(setup, library)['units']['guard']['attack'] == 10
+    del library['units']['guard']['unit_class']
+    assert resolve_unit_seed(library['units']['guard'], library)['attack'] == 5
+
+
+def test_missing_unit_class_is_rejected():
+    from backend.scenario_builder import resolve_unit_seed
+    with pytest.raises(ValueError, match='Unknown unit class'):
+        resolve_unit_seed({'unit_class': 'missing'}, {'unit_classes': {}})
+
+
+def test_unit_classes_round_trip_files(tmp_path):
+    from backend.scenario_builder import write_library
+    library = extract_library({'alpha': example()})
+    library['unit_classes'] = {'infantry': {'attack': 2, 'defense': 3, 'movement': 1,
+        'health': 1, 'dice': 1, 'cost': {'power': 4}}}
+    write_library(tmp_path, library)
+    assert load_library(tmp_path)['unit_classes'] == library['unit_classes']
+
+
+def test_unit_classes_save_rebuild_and_reject_deletion_while_referenced(db):
+    initialize(db)
+    library = deepcopy(load_state(db)['library'])
+    library['unit_classes'] = {'infantry': {'attack': 8, 'defense': 4, 'movement': 2,
+        'health': 1, 'dice': 1, 'cost': {'power': 7}}}
+    library['units']['guard']['unit_class'] = 'infantry'
+    preview = update_library(db, deepcopy(library))
+    result = update_library(db, library, apply=True)
+    assert preview == result
+    assert not result['skipped_setups']
+    assert json.loads(db.get(Setup, 'beta').units_json)['guard']['attack'] == 8
+    saved = load_state(db)['library']
+    assert saved['unit_classes'] == library['unit_classes']
+    saved['unit_classes'] = {}
+    with pytest.raises(ValueError, match='Unknown unit class'):
+        update_library(db, saved, apply=True)
+    assert load_state(db)['library']['unit_classes'] == library['unit_classes']

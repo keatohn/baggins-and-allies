@@ -928,7 +928,7 @@ export interface AdminSetupBundle {
 }
 
 export type EntityRecords = Record<string, Record<string, unknown>>;
-export interface ScenarioLibrary { units: EntityRecords; factions: EntityRecords; territories: EntityRecords; maps: Record<string, EntityRecords> }
+export interface ScenarioLibrary { unit_classes?: EntityRecords; units: EntityRecords; factions: EntityRecords; territories: EntityRecords; maps: Record<string, EntityRecords> }
 export interface SeedEntry { seed?: string; overrides?: Record<string, unknown> }
 export interface SetupDefinition {
   manifest: Record<string, unknown>;
