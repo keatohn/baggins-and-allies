@@ -83,3 +83,19 @@ test('map graph changes are inherited without changing the compact setup', () =>
   assert.deepEqual(resolveSetup(setup, updated).territories.shire.adjacent, ['removed']);
   assert.deepEqual(setup, before);
 });
+
+test('unit class stats resolve before scenario overrides without leaking metadata', () => {
+  const shared = structuredClone(library);
+  shared.units.guard.unit_class = 'infantry';
+  shared.unit_classes = { infantry: { attack: 9, defense: 4, movement: 2, health: 1, dice: 2, cost: { power: 8 }, specials: ['archer'] } };
+  const setup = example();
+  const bundle = resolveSetup(setup, shared);
+  assert.equal(bundle.units.guard.attack, 5);
+  assert.equal(bundle.units.guard.defense, 4);
+  assert.deepEqual(bundle.units.guard.cost, { power: 8 });
+  assert.deepEqual(bundle.units.guard.specials, ['heal']);
+  assert.equal('unit_class' in bundle.units.guard, false);
+  assert.deepEqual(setupForRecords(bundle, shared), setup);
+  shared.unit_classes.infantry.defense = 7;
+  assert.equal(resolveSetup(setup, shared).units.guard.defense, 7);
+});

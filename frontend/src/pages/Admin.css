@@ -4473,3 +4473,10 @@ body:has(.admin-modal--map-editor) .menu-scroll-overlay:not(.menu-scroll-overlay
 .mapov-landscape__scale:has(.mapov-scale-number) input[type=range] { min-width: 4rem; }
 
 .admin-graph__viewport, .mapbuilder__viewport { overscroll-behavior: contain; }
+
+.admin-unit-stats {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}

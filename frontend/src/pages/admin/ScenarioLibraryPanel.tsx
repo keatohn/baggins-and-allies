@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../services/api';
 import type { ScenarioImpact, ScenarioLibrary } from '../../services/api';
-import { FactionsPanel, TerritoriesPanel, UnitsPanel } from './SetupEditorPanels';
+import { FactionsPanel, TerritoriesPanel, UnitClassesPanel, UnitsPanel } from './SetupEditorPanels';
 
 const TABS = ['units', 'factions', 'territories'] as const;
 const LABELS = { units: 'Units', factions: 'Factions', territories: 'Territories' };
@@ -11,6 +11,7 @@ export function ScenarioLibraryPanel({ onClose, onSaved }: { onClose: () => void
   const [library, setLibrary] = useState<ScenarioLibrary | null>(null);
   const [original, setOriginal] = useState('');
   const [tab, setTab] = useState<(typeof TABS)[number]>('units');
+  const [unitTab, setUnitTab] = useState<'seeds' | 'classes'>('seeds');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [impact, setImpact] = useState<ScenarioImpact | null>(null);
@@ -85,7 +86,12 @@ export function ScenarioLibraryPanel({ onClose, onSaved }: { onClose: () => void
         {error && <p role="alert" className="admin-page__error">{error}</p>}
         {!library && !error && <p className="admin-form__micro">Loading seeds…</p>}
         {library && <fieldset disabled={busy} className="scenario-library__body" role="tabpanel" aria-label={`${LABELS[tab]} seeds`}>
-          {tab === 'units' ? <UnitsPanel seedMode units={library.units} factionIds={Object.keys(library.factions)} archetypes={archetypes} setupId="" setups={[]} onChange={(units) => change({ ...library, units })} />
+          {tab === 'units' ? <>
+            <div className="admin-page__subtabs" role="tablist" aria-label="Unit options">
+              {(['seeds', 'classes'] as const).map((key) => <button key={key} type="button" role="tab" aria-selected={unitTab === key} className={`admin-page__tab${unitTab === key ? ' admin-page__tab--active' : ''}`} onClick={() => setUnitTab(key)}>{key === 'seeds' ? 'Unit Seeds' : 'Unit Classes'}</button>)}
+            </div>
+            {unitTab === 'classes' && <p className="admin-form__micro">Classes share attack, defense, movement, health, dice and cost. Assign a class on a unit seed to inherit these stats.</p>}
+            {unitTab === 'classes' ? <UnitClassesPanel classes={library.unit_classes ?? {}} onChange={(unit_classes) => change({ ...library, unit_classes })} /> : <UnitsPanel seedMode unitClasses={library.unit_classes ?? {}} units={library.units} factionIds={Object.keys(library.factions)} archetypes={archetypes} setupId="" setups={[]} onChange={(units) => change({ ...library, units })} />}</>
             : tab === 'factions' ? <FactionsPanel seedMode factions={library.factions} onChange={(factions) => change({ ...library, factions })} />
             : <TerritoriesPanel seedMode territories={library.territories} terrainTypes={terrainTypes} onChange={(territories) => change({ ...library, territories })} />}
         </fieldset>}

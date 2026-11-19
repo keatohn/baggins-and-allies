@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from backend.api.models import AppSetting, Setup
 from backend.scenario_builder import (
     BUNDLE_KEYS, MAP_TERRITORY_FIELDS, canonical_setup, compile_setup, delta,
-    extract_library, load_library, migrate_legacy_setups, prepare_territory_seeds,
+    extract_library, resolve_unit_seed, UNIT_CLASS_STATS, load_library, migrate_legacy_setups, prepare_territory_seeds,
     read_setup_bundle, scenario_map_id, setup_from_bundle, write_library, write_setup, migrate_seed_terrain,
 )
 from backend.setup_validation import validate_setup_payload
@@ -274,6 +274,20 @@ def update_library(db: Session, library: dict, *, apply: bool = False) -> dict:
             raise ValueError(f"library.{section} must be an object")
         if any(not isinstance(key, str) or not isinstance(record, dict) for key, record in library[section].items()):
             raise ValueError(f"library.{section} entries must be objects with string ids")
+    classes = library.get("unit_classes", {})
+    if not isinstance(classes, dict):
+        raise ValueError("library.unit_classes must be an object")
+    for key, record in classes.items():
+        if not isinstance(record, dict) or record.keys() - set(UNIT_CLASS_STATS) - {"id"}:
+            raise ValueError(f"Unit class {key}: only attack, defense, movement, health, dice and cost are allowed")
+        for field in UNIT_CLASS_STATS[:-1]:
+            value = record.get(field)
+            if isinstance(value, bool) or not isinstance(value, int) or value < (1 if field in ("health", "dice") else 0):
+                raise ValueError(f"Unit class {key}: invalid {field}")
+        cost = record.get("cost")
+        if not isinstance(cost, dict) or any(isinstance(v, bool) or not isinstance(v, int) or v < 0 for v in cost.values()):
+            raise ValueError(f"Unit class {key}: invalid cost")
+    resolved_units = {key: resolve_unit_seed(record, library) for key, record in library["units"].items()}
     state = load_state(db)
     for tid, record in library["territories"].items():
         if record.get("id") != tid or record.keys() & MAP_TERRITORY_FIELDS:
@@ -296,7 +310,7 @@ def update_library(db: Session, library: dict, *, apply: bool = False) -> dict:
     after = compile_all(state)
     catalog = load_catalog(db)
     territories = library["territories"]
-    seed_errors = validate_setup_payload({"manifest": {"id": "seed_catalog"}, "units": library["units"], "factions": library["factions"],
+    seed_errors = validate_setup_payload({"manifest": {"id": "seed_catalog"}, "units": resolved_units, "factions": library["factions"],
         "territories": territories, "camps": {}, "ports": {}, "starting_setup": {}}, catalog)
     warnings = {"seeds": seed_errors} if seed_errors else {}
     changed, skipped = [], []

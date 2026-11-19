@@ -134,7 +134,7 @@ def load_library(root: Path, *, prepare: bool = True) -> dict:
 
 def write_library(root: Path, library: dict) -> None:
     root.mkdir(parents=True, exist_ok=True)
-    (root / "scenario_library.json").write_text(json.dumps({key: library[key] for key in ("units", "factions", "territories") if key in library}, indent=2, ensure_ascii=False) + "\n")
+    (root / "scenario_library.json").write_text(json.dumps({key: library[key] for key in ("units", "unit_classes", "factions", "territories") if key in library}, indent=2, ensure_ascii=False) + "\n")
     for map_id, records in library["maps"].items():
         from backend.map_overrides import validate_map_base
         validate_map_base(map_id)
@@ -170,6 +170,26 @@ def canonical_setup(setup: dict) -> dict:
     return out
 
 
+UNIT_CLASS_STATS = ("attack", "defense", "movement", "health", "dice", "cost")
+
+
+def resolve_unit_seed(record: dict, library: dict) -> dict:
+    """Classes supply only numeric gameplay stats; metadata stays on the seed."""
+    result = deepcopy(record)
+    class_id = result.pop("unit_class", None)
+    if class_id:
+        classes = library.get("unit_classes", {})
+        if not isinstance(class_id, str) or class_id not in classes:
+            raise ValueError(f"Unknown unit class: {class_id}")
+        stats = classes[class_id]
+        for field in UNIT_CLASS_STATS:
+            if field in stats:
+                result[field] = deepcopy(stats[field])
+            else:
+                result.pop(field, None)
+    return result
+
+
 def compile_setup(setup: dict, library: dict) -> dict:
     setup = canonical_setup(setup)
     map_id = scenario_map_id(setup["manifest"], setup["manifest"].get("id", ""))
@@ -188,6 +208,8 @@ def compile_setup(setup: dict, library: dict) -> dict:
                 if seed is not None and seed not in library[section]:
                     raise ValueError(f"Unknown {section} seed: {seed}")
                 base = library[section].get(seed, {})
+            if section == "units":
+                base = resolve_unit_seed(base, library)
             record = merge(base, entry.get("overrides", {}))
             if "id" in record and "id" not in entry.get("overrides", {}):
                 record["id"] = key
@@ -205,6 +227,8 @@ def setup_from_bundle(bundle: dict, library: dict, previous: dict | None = None)
             entry = (previous or {}).get(section, {}).get(key)
             seed = entry.get("seed") if entry is not None else (key if section == "territories" or key in library[section] else None)
             base = library["maps"].get(map_id, {}).get(key, {}) if section == "territories" else deepcopy(library[section].get(seed, {}))
+            if section == "units":
+                base = resolve_unit_seed(base, library)
             if section != "territories" and "id" in base:
                 base["id"] = key
             patch = delta(base, record)

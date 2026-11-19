@@ -1469,7 +1469,7 @@ function AddSeedDialog({ title, data, onClose, onCreate }: {
     if (!id) { setError(`Enter a ${title} id.`); return; }
     if (Object.hasOwn(data, id)) { setError('That id already exists.'); return; }
     if (mode === 'copy' && !data[sourceId]) { setError(`Choose a ${title} seed to copy.`); return; }
-    const value = mode === 'copy' ? structuredClone(data[sourceId]) : title === 'unit' ? { cost: { power: 0 } } : {};
+    const value = mode === 'copy' ? structuredClone(data[sourceId]) : title === 'unit class' ? { attack: 0, defense: 0, movement: 0, health: 1, dice: 1, cost: { power: 0 } } : title === 'unit' ? { cost: { power: 0 } } : {};
     onCreate(id, { ...value, id });
   };
   return (
@@ -1823,10 +1823,83 @@ function AddUnitDialog({
   );
 }
 
+const UNIT_CLASS_STATS = ['attack', 'defense', 'movement', 'health', 'dice', 'cost'] as const;
+function pickUnitStats(value: Record<string, unknown>) {
+  return Object.fromEntries(UNIT_CLASS_STATS.map((key) => [key, value[key]]));
+}
+function UnitStatsFields({ u, patch }: { u: Record<string, unknown>; patch: (value: Record<string, unknown>) => void }) {
+  return <>
+          {fieldRow(
+            'Attack',
+            <NumberField className="admin-form__input admin-form__input--narrow" value={u.attack != null ? String(u.attack) : ''} onChange={(e) => {
+              const raw = e.target.value.trim();
+              if (raw === '' || raw === '-') return;
+              const n = Number(raw);
+              if (Number.isFinite(n)) patch({ attack: n });
+            }} />,
+          )}
+          {fieldRow(
+            'Defense',
+            <NumberField className="admin-form__input admin-form__input--narrow" value={u.defense != null ? String(u.defense) : ''} onChange={(e) => {
+              const raw = e.target.value.trim();
+              if (raw === '' || raw === '-') return;
+              const n = Number(raw);
+              if (Number.isFinite(n)) patch({ defense: n });
+            }} />,
+          )}
+          {fieldRow(
+            'Movement',
+            <NumberField className="admin-form__input admin-form__input--narrow" value={u.movement != null ? String(u.movement) : ''} onChange={(e) => {
+              const raw = e.target.value.trim();
+              if (raw === '' || raw === '-') return;
+              const n = Number(raw);
+              if (Number.isFinite(n)) patch({ movement: n });
+            }} />,
+          )}
+          {fieldRow(
+            'Health',
+            <NumberField className="admin-form__input admin-form__input--narrow" value={u.health != null ? String(u.health) : ''} onChange={(e) => {
+              const raw = e.target.value.trim();
+              if (raw === '' || raw === '-') return;
+              const n = Number(raw);
+              if (Number.isFinite(n)) patch({ health: n });
+            }} />,
+          )}
+          {fieldRow(
+            'Dice',
+            <NumberField
+              min={1}
+              className="admin-form__input admin-form__input--narrow"
+              value={u.dice != null ? String(u.dice) : ''}
+              onChange={(e) => {
+                const raw = e.target.value;
+                patch({ dice: raw === '' ? undefined : Number(raw) });
+              }}
+              onBlur={(e) => {
+                const n = Number(e.target.value);
+                if (!Number.isFinite(n) || n < 1) patch({ dice: 1 });
+              }}
+            />,
+          )}
+          {fieldRow(
+            'Cost (JSON)',
+            <JsonObjectField value={u.cost ?? { power: 0 }} onApply={(o) => patch({ cost: o })} />,
+          )}
+  </>;
+}
+
+export function UnitClassesPanel({ classes, onChange }: { classes: Record<string, Record<string, unknown>>; onChange: (value: Record<string, Record<string, unknown>>) => void }) {
+  return <EntityDictPanel title="unit class" seedMode data={classes} onChange={onChange} renderEditor={(id, value, patch) => <div className="admin-form">
+    {fieldRow('Class id', <input className="admin-form__input admin-form__input--readonly" readOnly value={id} />)}
+    <UnitStatsFields u={value} patch={patch} />
+  </div>} />;
+}
+
 export function UnitsPanel({
   units,
   factionIds,
   archetypes,
+  unitClasses,
   seedMode = false,
   setupId,
   setups,
@@ -1835,6 +1908,7 @@ export function UnitsPanel({
   units: Record<string, Record<string, unknown>>;
   factionIds: string[];
   archetypes: string[];
+  unitClasses?: Record<string, Record<string, unknown>>;
   seedMode?: boolean;
   setupId: string;
   setups: AdminSetupListItem[];
@@ -1907,62 +1981,14 @@ export function UnitsPanel({
             'Tags (comma-separated)',
             <CommaListField key={`${id}:tags`} value={u.tags} onApply={(tags) => patch({ tags })} />,
           )}
-          {fieldRow(
-            'Attack',
-            <NumberField className="admin-form__input admin-form__input--narrow" value={u.attack != null ? String(u.attack) : ''} onChange={(e) => {
-              const raw = e.target.value.trim();
-              if (raw === '' || raw === '-') return;
-              const n = Number(raw);
-              if (Number.isFinite(n)) patch({ attack: n });
-            }} />,
-          )}
-          {fieldRow(
-            'Defense',
-            <NumberField className="admin-form__input admin-form__input--narrow" value={u.defense != null ? String(u.defense) : ''} onChange={(e) => {
-              const raw = e.target.value.trim();
-              if (raw === '' || raw === '-') return;
-              const n = Number(raw);
-              if (Number.isFinite(n)) patch({ defense: n });
-            }} />,
-          )}
-          {fieldRow(
-            'Movement',
-            <NumberField className="admin-form__input admin-form__input--narrow" value={u.movement != null ? String(u.movement) : ''} onChange={(e) => {
-              const raw = e.target.value.trim();
-              if (raw === '' || raw === '-') return;
-              const n = Number(raw);
-              if (Number.isFinite(n)) patch({ movement: n });
-            }} />,
-          )}
-          {fieldRow(
-            'Health',
-            <NumberField className="admin-form__input admin-form__input--narrow" value={u.health != null ? String(u.health) : ''} onChange={(e) => {
-              const raw = e.target.value.trim();
-              if (raw === '' || raw === '-') return;
-              const n = Number(raw);
-              if (Number.isFinite(n)) patch({ health: n });
-            }} />,
-          )}
-          {fieldRow(
-            'Dice',
-            <NumberField
-              min={1}
-              className="admin-form__input admin-form__input--narrow"
-              value={u.dice != null ? String(u.dice) : ''}
-              onChange={(e) => {
-                const raw = e.target.value;
-                patch({ dice: raw === '' ? undefined : Number(raw) });
-              }}
-              onBlur={(e) => {
-                const n = Number(e.target.value);
-                if (!Number.isFinite(n) || n < 1) patch({ dice: 1 });
-              }}
-            />,
-          )}
-          {fieldRow(
-            'Cost (JSON)',
-            <JsonObjectField value={u.cost ?? { power: 0 }} onApply={(o) => patch({ cost: o })} />,
-          )}
+          {seedMode && unitClasses && fieldRow('Unit class', <CatalogSelect value={u.unit_class} options={Object.keys(unitClasses).sort()} placeholder="Own stats" onChange={(unit_class) => {
+            const previous = typeof u.unit_class === 'string' ? unitClasses[u.unit_class] : undefined;
+            patch({ ...pickUnitStats(previous ?? u), unit_class: unit_class || undefined });
+          }} />)}
+          {typeof u.unit_class === 'string' && u.unit_class && unitClasses && <p className="admin-form__micro">Stats inherited from {u.unit_class}. Choose Own stats to edit independently.</p>}
+          <fieldset className="admin-unit-stats" disabled={!!(unitClasses && u.unit_class)}>
+            <UnitStatsFields u={unitClasses && typeof u.unit_class === 'string' ? unitClasses[u.unit_class] ?? u : u} patch={patch} />
+          </fieldset>
           {fieldRow(
             'Purchasable',
             <input type="checkbox" checked={u.purchasable !== false} onChange={(e) => patch({ purchasable: e.target.checked })} />,

@@ -14,6 +14,22 @@ export function resolve(base: Dict, overrides: Dict): Dict {
   return out;
 }
 
+export function unitSeedDefaults(library: ScenarioLibrary): Record<string, Dict> {
+  return Object.fromEntries(Object.entries(library.units).map(([id, seed]) => {
+    const result = { ...seed };
+    delete result.unit_class;
+    if (typeof seed.unit_class === 'string' && seed.unit_class) {
+      const stats = library.unit_classes?.[seed.unit_class];
+      if (!stats) throw new Error(`Unknown unit class: ${seed.unit_class}`);
+      for (const key of ['attack', 'defense', 'movement', 'health', 'dice', 'cost']) {
+        if (Object.hasOwn(stats, key)) result[key] = structuredClone(stats[key]);
+        else delete result[key];
+      }
+    }
+    return [id, result];
+  }));
+}
+
 function reconcile(defaults: Dict, overrides: Dict, value: Dict): Dict {
   const previous = resolve(defaults, overrides);
   const next: Dict = {};
@@ -29,12 +45,13 @@ function reconcile(defaults: Dict, overrides: Dict, value: Dict): Dict {
 
 
 export function resolveSetup(setup: SetupDefinition, library: ScenarioLibrary): AdminSetupBundle {
+  const unitDefaults = unitSeedDefaults(library);
   const out: AdminSetupBundle = { id: String(setup.manifest.id), ...setup, setup };
   for (const section of ['units', 'factions', 'territories'] as const) {
     if (!setup[section] || Array.isArray(setup[section]) || typeof setup[section] !== 'object') throw new Error(`${section} must be an object of seed references and optional overrides.`);
     out[section] = Object.fromEntries(Object.entries(setup[section]).map(([id, entry]) => {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry) || Object.keys(entry).some(key => !['seed', 'overrides'].includes(key))) throw new Error(`${section}.${id}: use a seed reference and optional overrides.`);
-      const base = section === 'territories' ? library.maps[mapId(setup)]?.[id] : library[section][entry.seed ?? ''];
+      const base = section === 'territories' ? library.maps[mapId(setup)]?.[id] : (section === 'units' ? unitDefaults : library[section])[entry.seed ?? ''];
       if (!base && (entry.seed || section === 'territories')) throw new Error(`Unknown ${section} seed or map region: ${id}`);
       const fields = section === 'territories' ? Object.fromEntries(Object.entries(entry.overrides ?? {}).filter(([key]) => !geometry.has(key))) : entry.overrides ?? {};
       const record = resolve(base ?? {}, fields);
@@ -47,12 +64,13 @@ export function resolveSetup(setup: SetupDefinition, library: ScenarioLibrary): 
 
 /** Adapt legacy placement/map form controls into the same canonical JSON state. */
 export function setupForRecords(bundle: AdminSetupBundle, library: ScenarioLibrary): SetupDefinition {
+  const unitDefaults = unitSeedDefaults(library);
   const setup: SetupDefinition = { manifest: bundle.manifest, camps: bundle.camps, ports: bundle.ports,
     starting_setup: bundle.starting_setup, units: {}, factions: {}, territories: {} };
   for (const section of ['units', 'factions', 'territories'] as const) {
     setup[section] = Object.fromEntries(Object.entries(bundle[section]).map(([id, raw]) => {
       const entry = bundle.setup?.[section][id] ?? { ...(section === 'territories' || id in library[section] ? { seed: id } : {}) };
-      const base = { ...(section === 'territories' ? library.maps[mapId(setup)]?.[id] : library[section][entry.seed ?? '']) };
+      const base = { ...(section === 'territories' ? library.maps[mapId(setup)]?.[id] : (section === 'units' ? unitDefaults : library[section])[entry.seed ?? '']) };
       if ('id' in base) base.id = id;
       let overrides = reconcile(base, entry.overrides ?? {}, object(raw));
       if (section === 'territories') overrides = Object.fromEntries(Object.entries(overrides).filter(([key]) => !geometry.has(key)));
@@ -81,7 +99,7 @@ export function withScenarioMap(bundle: AdminSetupBundle, library: ScenarioLibra
 export type ScenarioSection = 'units' | 'factions' | 'territories';
 export type SelectionOption = { id: string; seed?: string; name: string };
 export function scenarioSelectionOptions(setup: SetupDefinition, library: ScenarioLibrary, section: ScenarioSection): SelectionOption[] {
-  const defaults = section === 'territories' ? library.maps[mapId(setup)] ?? {} : library[section];
+  const defaults = section === 'territories' ? library.maps[mapId(setup)] ?? {} : section === 'units' ? unitSeedDefaults(library) : library[section];
   const options = Object.entries(setup[section]).map(([id, entry]) => ({ id, seed: entry.seed,
     name: String(resolve(defaults[entry.seed ?? id] ?? {}, entry.overrides ?? {}).display_name ?? id) }));
   for (const [id, seed] of Object.entries(defaults)) {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { EntityRecords, ScenarioLibrary, SetupDefinition } from '../../services/api';
-import { deleted, object, resolve, scenarioSelectionOptions, withScenarioSelection, type SelectionOption, type Dict } from './scenarioOverridesModel';
+import { unitSeedDefaults, deleted, object, resolve, scenarioSelectionOptions, withScenarioSelection, type SelectionOption, type Dict } from './scenarioOverridesModel';
 
 function ValueInput({ value, onChange, label }: { value: unknown; onChange: (v: unknown) => void; label: string }) {
   const [raw, setRaw] = useState(JSON.stringify(value ?? null));
@@ -105,7 +105,7 @@ export function ScenarioOverrides({ section, source, library, onChange }: {
   const [updatingList, setUpdatingList] = useState(false);
   const singular = { units: 'Unit', territories: 'Territory', factions: 'Faction' }[section];
   const territory = section === 'territories';
-  const defaults = territory ? library.maps[String(source.manifest.map_asset || source.manifest.id)] ?? {} : library[section];
+  const defaults = territory ? library.maps[String(source.manifest.map_asset || source.manifest.id)] ?? {} : section === 'units' ? unitSeedDefaults(library) : library[section];
   const ids = Object.keys(source[section]);
   const id = ids.includes(selected) ? selected : ids[0] ?? '';
   const entry = source[section][id];
