@@ -2395,6 +2395,11 @@ def _apply_pending_moves(
         event_faction = state.current_faction or faction_id or ""
         ids_for_log = ids_to_move if ids_to_move else list(unit_instance_ids)
         if not defer_sea_raid_offload:
+            # Write the expanded id list back: apply_carried_ring (and validate_ring_carry's
+            # "already carrying" check on stored pendings) read pending_move.unit_instance_ids,
+            # not apply's local expansion — a boat-only stored list drops the hero bearer
+            # (carried_in_by) even though the passenger moved ashore above.
+            pending_move.unit_instance_ids = list(unit_instance_ids)
             apply_carried_ring(state, pending_move, to_id)
         sync_ring_movement(state, unit_defs)
         events.append(
