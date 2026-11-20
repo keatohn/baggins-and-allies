@@ -25,6 +25,7 @@ standard rounds.
 
 import math
 import random
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional
@@ -39,6 +40,12 @@ MEAN_EPSILON = 0.5  # below this mean we use stdev-only rule
 # Hard cap on rounds per battle so degenerate matchups (e.g. both sides attack 0)
 # cannot loop forever. A battle hitting the cap is scored as a defender hold.
 DEFAULT_MAX_ROUNDS = 500
+
+# Wall-clock budget for a single /simulate-combat request (audit Sim M4): the
+# endpoint is unauthenticated and n_trials can be large, so a worker must not
+# block forever on one request. Exceeded budgets return partial (but valid)
+# aggregates with n_trials = trials actually completed.
+DEFAULT_SIM_TIME_BUDGET_SECONDS = 10.0
 
 
 def _casualty_cost_variance_category(costs: list[float]) -> CasualtyCostVarianceCategory:
@@ -958,6 +965,7 @@ def run_simulation(
     options: SimOptions | None = None,
     seed: int | None = None,
     return_outcomes: bool = False,
+    time_budget_seconds: float | None = None,
 ) -> SimResult:
     """
     Run n_trials battles and aggregate outcomes.
@@ -966,9 +974,17 @@ def run_simulation(
 
     n_trials is clamped to >= 1: zero trials would crash the percentile aggregation
     (empty trial list) and matches the API's own max(1, ...) clamp.
+
+    time_budget_seconds: optional wall-clock deadline for the whole trial loop.
+    When set and exceeded mid-run, remaining trials are skipped and the returned
+    SimResult.n_trials is the number actually completed (means stay correct).
+    None (default for AI/library callers) means no budget — only the API applies one.
     """
     n_trials = max(1, int(n_trials))
     opts = options or SimOptions()
+    deadline: float | None = None
+    if time_budget_seconds is not None:
+        deadline = time.monotonic() + max(0.0, float(time_budget_seconds))
     attacker_wins = defender_wins = attacker_survives = defender_survives = retreats = conquers = 0
     rounds_list: list[int] = []
     att_casualties_by_trial: list[dict[str, int]] = []
@@ -1011,7 +1027,11 @@ def run_simulation(
                 total += count * cost.get("power", 0)
         return total
 
+    completed_trials = 0
     for i in range(n_trials):
+        # Always finish trial 0 so a zero/negative budget still yields one sample.
+        if deadline is not None and i > 0 and time.monotonic() >= deadline:
+            break
         trial_seed = (seed + i) if seed is not None else None
         outcome = run_one_battle(
             attacker_stacks,
@@ -1022,6 +1042,7 @@ def run_simulation(
             options=opts,
             seed=trial_seed,
         )
+        completed_trials += 1
         if outcome.winner == "attacker":
             attacker_wins += 1
         else:
@@ -1070,6 +1091,8 @@ def run_simulation(
             def_sw_sum += outcome.defender_siegework_hits
             def_sw_count += 1
 
+    # Report trials actually completed (may be < requested when a time budget hit).
+    n_trials = completed_trials if completed_trials else 1
     rounds_by_trial = list(rounds_list)
     rounds_list.sort()
     n = len(rounds_list)

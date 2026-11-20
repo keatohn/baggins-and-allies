@@ -259,7 +259,12 @@ from backend.engine.movement import (
     water_transport_relation,
 )
 from backend.engine.queries import _is_water_boat, get_valid_offload_sea_zones, participates_in_sea_hex_naval_combat
-from backend.engine.combat_sim import ring_instance_boosts, run_simulation, SimOptions
+from backend.engine.combat_sim import (
+    ring_instance_boosts,
+    run_simulation,
+    SimOptions,
+    DEFAULT_SIM_TIME_BUDGET_SECONDS,
+)
 from backend.engine.rings import merge_ring_stat_mods
 from backend.engine.combat_specials import (
     compute_battle_specials_and_modifiers,
@@ -4544,6 +4549,16 @@ def get_definitions(db: Session = Depends(get_db)):
         }
 
 
+# Sim M4: bound unauthenticated /simulate-combat so one request (or a flood of
+# them) cannot pin every worker. Wall-clock budget per request; at most
+# SIM_MAX_CONCURRENT sims run at once — extras get 429 and can retry.
+SIM_TIME_BUDGET_SECONDS = float(
+    os.environ.get("SIM_TIME_BUDGET_SECONDS", str(DEFAULT_SIM_TIME_BUDGET_SECONDS))
+)
+SIM_MAX_CONCURRENT = max(1, int(os.environ.get("SIM_MAX_CONCURRENT", "4")))
+_sim_slots = threading.Semaphore(SIM_MAX_CONCURRENT)
+
+
 @app.post("/simulate-combat", response_model=SimulateCombatResponse)
 def simulate_combat(request: SimulateCombatRequest, db: Session = Depends(get_db)):
     """
@@ -4552,7 +4567,21 @@ def simulate_combat(request: SimulateCombatRequest, db: Session = Depends(get_db
     are tracked separately from normal combat rounds and returned as means across all trials.
     When game_id is provided, uses that game's definition snapshot (same as actual combat) so
     unit_defs match and archer/stealth prefire is recognized correctly.
+    Bounded by SIM_TIME_BUDGET_SECONDS (partial n_trials if exceeded) and
+    SIM_MAX_CONCURRENT in-flight requests (429 when full).
     """
+    if not _sim_slots.acquire(blocking=False):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many combat simulations in progress; try again shortly.",
+        )
+    try:
+        return _run_simulate_combat(request, db)
+    finally:
+        _sim_slots.release()
+
+
+def _run_simulate_combat(request: SimulateCombatRequest, db: Session) -> SimulateCombatResponse:
     if request.game_id:
         try:
             ud, td, *_ = get_game_definitions(request.game_id, db)
@@ -4689,6 +4718,7 @@ def simulate_combat(request: SimulateCombatRequest, db: Session = Depends(get_db
         options=opts,
         seed=request.seed,
         return_outcomes=request.include_outcomes,
+        time_budget_seconds=SIM_TIME_BUDGET_SECONDS,
     )
     total_att_cas = sum(res.attacker_casualties_mean.values())
     total_def_cas = sum(res.defender_casualties_mean.values())
